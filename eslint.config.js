@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint';
 const PURE_DIRS = ['src/core/**', 'src/data/**', 'src/sim/**', 'src/meta/**', 'src/save/**'];
 
 export default tseslint.config(
-  { ignores: ['dist', 'out', 'coverage', 'node_modules'] },
+  { ignores: ['dist', 'out', 'coverage', 'node_modules', '.claude'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

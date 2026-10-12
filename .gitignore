@@ -8,3 +8,4 @@ coverage/
 .vite/
 .env
 .env.local
+.claude/worktrees/
