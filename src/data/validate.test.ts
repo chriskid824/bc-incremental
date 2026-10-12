@@ -142,10 +142,10 @@ describe('validateGameData: talents', () => {
     expect(issues).toEqual(["talent 'vitality': only repeatable nodes may have 'repeat'"]);
   });
 
-  it('rejects rules outside keystones and keystones without rules', () => {
+  it('rejects rules outside keystones and notables and keystones without rules', () => {
     expect(
       issuesAfter((d) => talent(d, 'vitality').rules.push({ id: 'glassCannon', damageMore: 1 })),
-    ).toEqual(["talent 'vitality': only keystones may have rules"]);
+    ).toEqual(["talent 'vitality': only keystones and notables may have rules"]);
     expect(
       issuesAfter((d) => {
         talent(d, 'glassCannon').rules = [];

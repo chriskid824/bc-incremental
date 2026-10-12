@@ -26,14 +26,16 @@ export const isCovered = (target: Targetable, estimate: Num): boolean =>
 
 /**
  * Alive target closest to (x, y) that is not covered; when every alive target is covered,
- * the closest alive one. Earlier entries win ties, so arrays ordered by id prefer the lower
- * id. Null when no target is alive. Allocation-free.
+ * the closest alive one. Targets for which `avoid` returns true count as covered (used to
+ * spread one volley over different enemies). Earlier entries win ties, so arrays ordered by
+ * id prefer the lower id. Null when no target is alive. Allocation-free.
  */
 export function pickTarget<T extends Targetable>(
   targets: readonly T[],
   x: number,
   y: number,
   estimate: Num,
+  avoid?: (target: T) => boolean,
 ): T | null {
   let uncovered: T | null = null;
   let uncoveredDistSq = Infinity;
@@ -49,7 +51,11 @@ export function pickTarget<T extends Targetable>(
       closest = target;
       closestDistSq = distSq;
     }
-    if (distSq < uncoveredDistSq && !isCovered(target, estimate)) {
+    if (
+      distSq < uncoveredDistSq &&
+      !isCovered(target, estimate) &&
+      (avoid === undefined || !avoid(target))
+    ) {
       uncovered = target;
       uncoveredDistSq = distSq;
     }

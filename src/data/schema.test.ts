@@ -31,6 +31,9 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   eternalFlame: { id: 'eternalFlame', durationMore: -0.5 },
   overload: { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.15 },
   glassCannon: { id: 'glassCannon', damageMore: 1 },
+  critIgniteChance: { id: 'critIgniteChance', chance: 0.3 },
+  chainIgniteChance: { id: 'chainIgniteChance', chance: 0.25 },
+  chainCritChance: { id: 'chainCritChance', perJump: 0.1 },
 };
 
 describe('ModifierSchema', () => {

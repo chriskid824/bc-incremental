@@ -7,7 +7,7 @@
 import { assertFinite, num, toNumber } from '../../src/core/num';
 import { deriveSeed } from '../../src/core/rng';
 import { DAMAGE_TAG_BIT, loadGameData, stdHp } from '../../src/data';
-import type { GameData, StatBlock } from '../../src/data';
+import type { GameData, RuleSpec, StatBlock } from '../../src/data';
 import {
   allowedStartWave,
   collectRules,
@@ -16,7 +16,7 @@ import {
   statBlockFor,
 } from '../../src/meta';
 import type { EconomyConfig, MetaState } from '../../src/meta';
-import { createSimulation, NO_INPUT, TICK_RATE } from '../../src/sim';
+import { compileRules, createSimulation, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { EndReason, RunConfig } from '../../src/sim';
 import { spend } from './strategies';
 import type { StrategyId } from './strategies';
@@ -88,22 +88,26 @@ const BURN = DAMAGE_TAG_BIT.burn;
 /**
  * Effective damage per attack `D` against one target (docs/GDD.md §7.2): the expected primary
  * hit including crits, plus the total burn that hit is expected to cause. Mirrors the
- * simulation: crits use damageMult[hit|crit], and a crit's burn is computed from the crit hit
- * with damageMult[burn|crit]. Ignores burn stack caps and hits that kill before burning.
+ * simulation: crits use damageMult[hit|crit], a crit's burn is computed from the crit hit
+ * with damageMult[burn|crit], and rules apply as compiled by src/sim/rules.ts. Ignores burn
+ * stack caps, pandemic spread and hits that kill before burning.
  */
-export function effectiveHit(stats: StatBlock): number {
+export function effectiveHit(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
   const { values, damageMult } = stats;
+  const fx = compileRules(rules);
   const mult = (mask: number): number => damageMult[mask] as number;
-  const critChance = clamp01(values.critChance);
-  const critFactor = critChance * values.critMultiplier;
-  const hit = (1 - critChance) * mult(HIT) + critFactor * mult(HIT | CRIT);
-  const burnPerDamage = (1 - critChance) * mult(BURN) + critFactor * mult(BURN | CRIT);
+  const critChance = fx.steadyAimEvery > 0 ? 1 / fx.steadyAimEvery : clamp01(values.critChance);
+  const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
+  const critFactor = critChance * critMultiplier;
+  const hit =
+    fx.hitMult * ((1 - critChance) * mult(HIT) * fx.nonCritHitMult + critFactor * mult(HIT | CRIT));
+  const ignite = clamp01(values.igniteChance);
+  const critIgnite = fx.critsAlwaysIgnite ? 1 : clamp01(ignite + fx.critIgniteChance);
+  const burnPerDamage =
+    (1 - critChance) * ignite * mult(BURN) + critFactor * critIgnite * mult(BURN | CRIT);
   const burn =
-    clamp01(values.igniteChance) *
-    values.burnDamage *
-    Math.max(0, values.burnDuration) *
-    burnPerDamage;
-  return values.damage * (hit + burn);
+    values.burnDamage * Math.max(0, values.burnDuration * fx.burnDurationMult) * burnPerDamage;
+  return values.damage * fx.allDamageMult * (hit + burn);
 }
 
 /** One row of runs.csv. Damage and currency columns are plain numbers taken from Num. */
@@ -206,7 +210,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
         if (kind === 'keystone') firstKeystoneMinutes ??= minutes;
       }
 
-      const d = toNumber(assertFinite(num(effectiveHit(stats)), 'effective hit'));
+      const d = toNumber(assertFinite(num(effectiveHit(stats, runConfig.rules)), 'effective hit'));
       const frontierHp = stdHp(result.highestWaveReached);
       let repeatableRanks = 0;
       for (const rank of meta.ranks.values()) repeatableRanks += rank;

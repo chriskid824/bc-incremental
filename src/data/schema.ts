@@ -105,6 +105,9 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       })
       .readonly(),
     z.strictObject({ id: z.literal('glassCannon'), damageMore: finite }).readonly(),
+    z.strictObject({ id: z.literal('critIgniteChance'), chance: finite }).readonly(),
+    z.strictObject({ id: z.literal('chainIgniteChance'), chance: finite }).readonly(),
+    z.strictObject({ id: z.literal('chainCritChance'), perJump: finite }).readonly(),
   ]),
 );
 

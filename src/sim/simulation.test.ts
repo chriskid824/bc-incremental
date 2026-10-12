@@ -155,9 +155,9 @@ function trackProjectiles(config: RunConfig, data: GameData = PLENTIFUL_DATA): P
 describe('createSimulation', () => {
   const data = makeTestData();
 
-  it('rejects control modes that arrive in M1', () => {
-    expect(() => createSimulation(makeConfig({ mode: 'cursorZone' }), data)).toThrow(/M1/);
-    expect(() => createSimulation(makeConfig({ mode: 'activeSkill' }), data)).toThrow(/M1/);
+  it('rejects control modes other than auto', () => {
+    const config = { ...makeConfig(), mode: 'cursorZone' } as unknown as RunConfig;
+    expect(() => createSimulation(config, data)).toThrow(/only 'auto'/);
   });
 
   it('validates the run config', () => {

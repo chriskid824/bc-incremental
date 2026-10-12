@@ -8,6 +8,8 @@ export const STAT_IDS = [
   'damage',
   /** Attacks per second. */
   'attackSpeed',
+  /** Projectiles per attack, each at its own target. Fractional part is a chance for one more. */
+  'projectileCount',
   /** Probability in [0, 1]; the simulation clamps it. */
   'critChance',
   /** Damage multiplier on crit, e.g. 1.5 = 150%. */
@@ -42,6 +44,7 @@ export type StatId = (typeof STAT_IDS)[number];
 export const BASE_STATS: Readonly<Record<StatId, number>> = {
   damage: 10,
   attackSpeed: 1.5,
+  projectileCount: 1,
   critChance: 0.05,
   critMultiplier: 1.5,
   igniteChance: 0,

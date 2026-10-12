@@ -23,12 +23,12 @@ export const PLAYER_RADIUS = 30;
 /** Hard cap on run length (docs/GDD.md §2.1). */
 export const MAX_RUN_SECONDS = 180;
 
-export type ControlMode = 'auto' | 'cursorZone' | 'activeSkill';
+/** Full auto is the only mode (docs/GDD.md §2.3); InputFrame is kept for future input. */
+export type ControlMode = 'auto';
 
-/** Player input for one tick, in arena coordinates. Bots produce the same shape. */
+/** Player input for one tick, in arena coordinates. The simulation does not read it yet. */
 export interface InputFrame {
   readonly cursor: Vec2 | null;
-  /** True on the tick the player triggers the active skill (mode C). */
   readonly activate: boolean;
 }
 
@@ -78,6 +78,8 @@ export interface ProjectileState {
    * position; it fizzles only when no enemy is alive.
    */
   targetId: number;
+  /** A steadyAim shot: every hit of it crits. */
+  readonly steady: boolean;
   alive: boolean;
 }
 
@@ -132,6 +134,15 @@ export type SimEvent =
       readonly fromY: number | null;
     }
   | { readonly type: 'ignite'; readonly targetId: number; readonly stacks: number }
+  /** pandemic: a burning enemy died and passed its stacks to `targets` enemies nearby. */
+  | {
+      readonly type: 'burnSpread';
+      readonly enemyId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly radius: number;
+      readonly targets: number;
+    }
   | {
       readonly type: 'burnTick';
       readonly targetId: number;

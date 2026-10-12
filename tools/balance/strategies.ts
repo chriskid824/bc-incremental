@@ -51,9 +51,8 @@ function cheapestAllocatable(
   let bestPrice: ReturnType<typeof nodePrice> | null = null;
   for (const node of data.talents) {
     if (node.kind === 'start' || !accept(node)) continue;
-    // The M0 simulation ignores keystone rules, so buying one only raises later prices.
-    // Drop this once src/sim implements RuleSpec (M1).
-    if (node.kind === 'keystone') continue;
+    // Generic keystones (glassCannon: life becomes 1) are gambles no bot should take blind.
+    if (node.kind === 'keystone' && node.archetype === 'none') continue;
     if (!canAllocate(meta, node.id, data, economy).ok) continue;
     const price = nodePrice(meta, node, economy);
     if (
