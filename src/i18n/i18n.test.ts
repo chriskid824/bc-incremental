@@ -19,7 +19,10 @@ describe('messages', () => {
   });
 
   it('names every talent', () => {
-    for (const node of TALENTS) expect(isMessageKey(node.nameKey), node.nameKey).toBe(true);
+    for (const node of TALENTS) {
+      expect(isMessageKey(node.nameKey), node.nameKey).toBe(true);
+      if (node.descKey !== undefined) expect(isMessageKey(node.descKey), node.descKey).toBe(true);
+    }
     expect(isMessageKey('talent.missing.name')).toBe(false);
     expect(isMessageKey('toString')).toBe(false);
   });

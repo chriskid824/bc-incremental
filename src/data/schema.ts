@@ -169,7 +169,7 @@ export const TalentNodeSchema = exact<TalentNode>()(
       rules: z.array(RuleSpecSchema).readonly(),
       archetype: z.enum(TALENT_ARCHETYPES),
       nameKey: z.string(),
-      descKey: z.string(),
+      descKey: z.string().exactOptional(),
     })
     .readonly(),
 );

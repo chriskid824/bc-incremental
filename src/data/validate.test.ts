@@ -13,7 +13,7 @@ type Mutable<T> = T extends readonly (infer U)[]
     : T;
 
 const content = (): Mutable<GameData> =>
-  structuredClone({ enemies: ENEMIES, waves: WAVES, talents: TALENTS });
+  structuredClone({ enemies: ENEMIES, waves: WAVES, talents: TALENTS }) as Mutable<GameData>;
 
 function talent(data: Mutable<GameData>, id: string): Mutable<TalentNode> {
   const node = data.talents.find((n) => n.id === id);
@@ -31,7 +31,6 @@ function smallNode(id: string, links: string[]): Mutable<TalentNode> {
     rules: [],
     archetype: 'none',
     nameKey: `talent.${id}.name`,
-    descKey: `talent.${id}.desc`,
   };
 }
 
@@ -49,18 +48,33 @@ describe('real content', () => {
     expect(loadGameData()).toBe(data);
   });
 
-  it('has the M0 placeholder web shape', () => {
+  it('has the M1 web v1 shape (docs/MILESTONES.md M1)', () => {
     const { talents } = loadGameData();
+    expect(talents.length).toBeGreaterThanOrEqual(38);
+    expect(talents.length).toBeLessThanOrEqual(46);
     const start = talents.filter((node) => node.kind === 'start');
     expect(start.map((node) => node.id)).toEqual(['start']);
     const repeatable = talents.find((node) => node.kind === 'repeatable');
     expect(repeatable?.links).toContain('start');
     for (const archetype of ['crit', 'dot', 'chain'] as const) {
       const nodes = talents.filter((node) => node.archetype === archetype);
-      expect(nodes.filter((node) => node.kind === 'small')).toHaveLength(3);
-      expect(nodes.filter((node) => node.kind === 'notable')).toHaveLength(1);
+      expect(nodes.filter((node) => node.kind === 'notable')).toHaveLength(2);
+      expect(nodes.filter((node) => node.kind === 'keystone')).toHaveLength(1);
     }
-    expect(talents.filter((node) => node.kind === 'keystone')).toHaveLength(1);
+    // One notable per bridge group.
+    const bridges = talents.filter((node) => node.archetype === 'hybrid');
+    expect(bridges.filter((node) => node.kind === 'notable')).toHaveLength(3);
+  });
+
+  it('keeps nodes far enough apart to click', () => {
+    const { talents } = loadGameData();
+    for (const a of talents) {
+      for (const b of talents) {
+        if (a === b) continue;
+        const dist = Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y);
+        expect(dist, `${a.id}–${b.id}`).toBeGreaterThanOrEqual(90);
+      }
+    }
   });
 
   it('uses distinct enemy colors', () => {
@@ -75,8 +89,8 @@ describe('validateGameData: talents', () => {
   });
 
   it('rejects an asymmetric link', () => {
-    expect(issuesAfter((d) => talent(d, 'vitality').links.push('critChance1'))).toEqual([
-      "talent 'vitality': links to 'critChance1' but 'critChance1' does not link back",
+    expect(issuesAfter((d) => talent(d, 'vitality').links.push('keenEye'))).toEqual([
+      "talent 'vitality': links to 'keenEye' but 'keenEye' does not link back",
     ]);
   });
 
@@ -145,10 +159,15 @@ describe('validateGameData: talents', () => {
   it('rejects rules outside keystones and notables and keystones without rules', () => {
     expect(
       issuesAfter((d) => talent(d, 'vitality').rules.push({ id: 'glassCannon', damageMore: 1 })),
-    ).toEqual(["talent 'vitality': only keystones and notables may have rules"]);
+    ).toEqual([
+      "talent 'vitality': only keystones and notables may have rules",
+      "talent 'vitality': a node with rules needs a descKey",
+    ]);
     expect(
       issuesAfter((d) => {
-        talent(d, 'glassCannon').rules = [];
+        const node = talent(d, 'glassCannon');
+        node.rules = [];
+        delete node.descKey;
       }),
     ).toEqual(["talent 'glassCannon': keystone needs at least one rule"]);
   });
@@ -156,13 +175,15 @@ describe('validateGameData: talents', () => {
   it(`rejects more than ${MAX_KEYSTONES} keystones`, () => {
     const issues = issuesAfter((d) => {
       const hub = talent(d, 'vitality');
-      for (let i = 0; i < MAX_KEYSTONES; i++) {
+      const existing = d.talents.filter((node) => node.kind === 'keystone').length;
+      for (let i = existing; i <= MAX_KEYSTONES; i++) {
         const id = `extraKeystone${i}`;
         hub.links.push(id);
         d.talents.push({
           ...smallNode(id, [hub.id]),
           kind: 'keystone',
           rules: [{ id: 'glassCannon', damageMore: 1 }],
+          descKey: `talent.${id}.desc`,
         });
       }
     });
@@ -172,11 +193,32 @@ describe('validateGameData: talents', () => {
   it('rejects empty i18n keys', () => {
     const issues = issuesAfter((d) => {
       talent(d, 'vitality').nameKey = '';
-      talent(d, 'vitality').descKey = '';
+      talent(d, 'glassCannon').descKey = '';
     });
     expect(issues).toEqual([
+      "talent 'glassCannon': empty descKey",
       "talent 'vitality': empty nameKey",
-      "talent 'vitality': empty descKey",
+    ]);
+  });
+
+  it('requires a descKey exactly on nodes with rules', () => {
+    const issues = issuesAfter((d) => {
+      delete talent(d, 'glassCannon').descKey;
+      talent(d, 'vitality').descKey = 'talent.vitality.desc';
+    });
+    expect(issues).toEqual([
+      "talent 'glassCannon': a node with rules needs a descKey",
+      "talent 'vitality': descKey describes rules; this node has none",
+    ]);
+  });
+
+  it('rejects rule parameters out of range', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'steadyAim').rules = [{ id: 'steadyAim', everyNth: 0, critMultiplierMore: -2 }];
+    });
+    expect(issues).toEqual([
+      "talent 'steadyAim': rule 'steadyAim' everyNth must be a positive integer (got 0)",
+      "talent 'steadyAim': rule 'steadyAim' critMultiplierMore must be > -1 (got -2)",
     ]);
   });
 
@@ -306,13 +348,13 @@ describe('validateGameData: waves', () => {
 describe('parseGameData', () => {
   it('throws one error listing every issue', () => {
     const data = content();
-    talent(data, 'vitality').links.push('critChance1');
+    talent(data, 'vitality').links.push('keenEye');
     data.waves.eliteEvery = 0;
     expect(() => parseGameData(data)).toThrow(
       [
         'Invalid game data (2 issues):',
         '- waves: eliteEvery must be a positive integer (got 0)',
-        "- talent 'vitality': links to 'critChance1' but 'critChance1' does not link back",
+        "- talent 'vitality': links to 'keenEye' but 'keenEye' does not link back",
       ].join('\n'),
     );
   });

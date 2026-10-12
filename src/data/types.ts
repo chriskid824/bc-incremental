@@ -78,7 +78,8 @@ export interface TalentNode {
   /** Archetype for UI color and balance reporting. */
   readonly archetype: 'none' | 'crit' | 'dot' | 'chain' | 'hybrid';
   readonly nameKey: string;
-  readonly descKey: string;
+  /** Text for what the node's rules do; required exactly when the node has rules. */
+  readonly descKey?: string;
 }
 
 export interface GameData {

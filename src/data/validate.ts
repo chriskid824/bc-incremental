@@ -192,6 +192,12 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     }
     if (node.nameKey === '') issues.push(`${at}: empty nameKey`);
     if (node.descKey === '') issues.push(`${at}: empty descKey`);
+    if (node.rules.length > 0 && node.descKey === undefined) {
+      issues.push(`${at}: a node with rules needs a descKey`);
+    }
+    if (node.rules.length === 0 && node.descKey !== undefined) {
+      issues.push(`${at}: descKey describes rules; this node has none`);
+    }
   }
 
   // Reachability over the links as listed; asymmetric links are reported above.

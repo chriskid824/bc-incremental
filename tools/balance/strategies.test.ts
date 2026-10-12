@@ -20,7 +20,8 @@ function richMeta(shards = 1e6, cores = 20): MetaState {
 
 describe('nodeClass', () => {
   it('maps archetypes and treats the repeatable node as generic', () => {
-    expect(classOf('critChance1')).toBe('crit');
+    expect(classOf('keenEye')).toBe('crit');
+    expect(classOf('flashpoint')).toBe('hybrid');
     expect(classOf('inferno')).toBe('dot');
     expect(classOf('arcStorm')).toBe('chain');
     expect(classOf('swiftness')).toBe('generic');
@@ -57,18 +58,19 @@ describe('spend', () => {
       expect(firstGeneric).toBe(own.length);
       expect(new Set(bought.slice(0, firstGeneric))).toEqual(new Set(own));
       expect(classes.every((cls) => cls === archetype || cls === 'generic')).toBe(true);
+      expect(bought).not.toContain('glassCannon');
     },
   );
 
   it('skips archetype nodes that need cores it does not have', () => {
     const bought = spend('crit-greedy', richMeta(1e6, 0), data, DEFAULT_ECONOMY);
     expect(bought).not.toContain('precision');
-    expect(bought.slice(0, 3)).toEqual(['critChance1', 'critMulti1', 'critChance2']);
+    expect(bought.slice(0, 3)).toEqual(['keenEye', 'sharpen', 'quickDraw']);
   });
 
   it('falls back to generic nodes when its archetype has nothing affordable', () => {
     const meta = richMeta(10, 0);
-    for (const id of ['critChance1', 'critMulti1', 'critChance2']) meta.allocated.add(id);
+    for (const id of ['keenEye', 'sharpen', 'quickDraw']) meta.allocated.add(id);
     // precision needs a core; small nodes cost 5 × 1.22³ ≈ 9.08, the repeatable node 10.
     expect(nextPurchase('crit-greedy', meta, data, DEFAULT_ECONOMY)?.id).toBe('swiftness');
     meta.allocated.add('swiftness');
@@ -84,12 +86,12 @@ describe('spend', () => {
   it('balanced rotates crit, dot, chain while all are affordable', () => {
     const bought = spend('balanced', richMeta(), data, DEFAULT_ECONOMY);
     expect(bought.slice(0, 6)).toEqual([
-      'critChance1',
-      'ignite1',
-      'chainCount1',
-      'critMulti1',
-      'burnDamage1',
-      'chainRetention1',
+      'keenEye',
+      'kindling',
+      'spark',
+      'sharpen',
+      'fuel',
+      'conductor',
     ]);
   });
 });

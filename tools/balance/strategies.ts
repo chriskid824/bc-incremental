@@ -26,15 +26,16 @@ export const isStrategyId = (value: string): value is StrategyId =>
 const FOCUS_ARCHETYPES = ['crit', 'dot', 'chain'] as const;
 type FocusArchetype = (typeof FOCUS_ARCHETYPES)[number];
 
-/** Buying class of a node: its archetype, or 'generic' for none/hybrid and repeatable nodes. */
-export type NodeClass = FocusArchetype | 'generic';
+/**
+ * Buying class of a node: its archetype, 'hybrid' for bridge nodes, or 'generic' for
+ * archetype-less and repeatable nodes.
+ */
+export type NodeClass = FocusArchetype | 'hybrid' | 'generic';
 
 export function nodeClass(node: TalentNode): NodeClass {
   if (node.kind === 'repeatable') return 'generic';
   const archetype = node.archetype;
-  return archetype === 'crit' || archetype === 'dot' || archetype === 'chain'
-    ? archetype
-    : 'generic';
+  return archetype === 'none' ? 'generic' : archetype;
 }
 
 /**
@@ -86,11 +87,11 @@ function allocatedCount(meta: Readonly<MetaState>, data: GameData, cls: NodeClas
 /**
  * The node the strategy buys next, or null when it is done for now.
  * - `<archetype>-greedy`: cheapest node of that archetype, else cheapest generic node; nodes
- *   of the other archetypes are never bought (pure builds).
+ *   of the other archetypes and bridge (hybrid) nodes are never bought (pure builds).
  * - `cheapest`: cheapest node of any class.
  * - `balanced`: round-robin over the archetypes, implemented statelessly as "the archetype
  *   with the fewest allocated nodes first" (ties in crit, dot, chain order); falls back to
- *   the next archetype when one has nothing affordable, then to generic nodes.
+ *   the next archetype when one has nothing affordable, then to generic, then hybrid nodes.
  */
 export function nextPurchase(
   strategy: StrategyId,
@@ -119,7 +120,7 @@ export function nextPurchase(
         const node = pick(cls);
         if (node) return node;
       }
-      return pick('generic');
+      return pick('generic') ?? pick('hybrid');
     }
   }
 }

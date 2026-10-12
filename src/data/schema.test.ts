@@ -15,7 +15,7 @@ type Mutable<T> = T extends readonly (infer U)[]
     : T;
 
 const content = (): Mutable<GameData> =>
-  structuredClone({ enemies: ENEMIES, waves: WAVES, talents: TALENTS });
+  structuredClone({ enemies: ENEMIES, waves: WAVES, talents: TALENTS }) as Mutable<GameData>;
 
 function talentAt(data: Mutable<GameData>, id: string): [number, Mutable<TalentNode>] {
   const index = data.talents.findIndex((node) => node.id === id);
@@ -124,7 +124,7 @@ describe('GameDataSchema', () => {
 describe('parseGameData schema errors', () => {
   it('rejects a tag on a non-damage stat, naming the path', () => {
     const data = content();
-    const [i, node] = talentAt(data, 'critChance1');
+    const [i, node] = talentAt(data, 'keenEye');
     node.modifiers.push({ stat: 'critChance', kind: 'more', value: 0.1, tags: ['crit'] });
     expect(() => parseGameData(data)).toThrow(
       `talents.${i}.modifiers.1.tags: tags are only allowed on increased/more damage modifiers`,
@@ -133,7 +133,7 @@ describe('parseGameData schema errors', () => {
 
   it('rejects a tag on a flat damage modifier', () => {
     const data = content();
-    const [i, node] = talentAt(data, 'critChance1');
+    const [i, node] = talentAt(data, 'keenEye');
     node.modifiers.push({ stat: 'damage', kind: 'flat', value: 2, tags: ['hit'] });
     expect(() => parseGameData(data)).toThrow(`talents.${i}.modifiers.1.tags: tags are only`);
   });
