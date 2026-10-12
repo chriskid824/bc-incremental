@@ -77,4 +77,12 @@
 
 ## 指令
 
-M0 完成鷹架後補上（`npm run dev`、`npm test`、`npm run balance` 等）。
+| 指令 | 用途 |
+| --- | --- |
+| `npm run dev` | 開發伺服器（瀏覽器版） |
+| `npm run check` | 格式、lint、三份 tsconfig 型別檢查、全部測試（提交前必跑） |
+| `npm test` | 只跑 Vitest |
+| `npm run build` | 型別檢查＋網頁版 build（輸出到 `dist/`） |
+| `npm run balance -- --strategy all --sessions 8 --minutes 60` | 平衡模擬器，CSV 輸出到 `out/balance/`（參數見 `tools/balance/cli.ts`） |
+| `npm run bench` | 模擬核心效能量測 |
+| `npm run format` | Prettier 自動排版 |

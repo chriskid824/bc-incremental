@@ -107,7 +107,7 @@ type ControlMode = 'auto' | 'cursorZone' | 'activeSkill';
 ## 5. 大數字
 
 - 設計天花板 ≤ 1e300，所以 `Num` 是加上品牌的 `number`：`type Num = number & { readonly __num: unique symbol }`。
-- 所有大數的建立、運算、比較、序列化、格式化都走 `src/core/num.ts`。換成 break_eternity.js 時只改這個模組與用到原生運算子的地方。這是有意識的取捨：換實作會需要重構，但 1e300 的上限讓這件事大概不會發生。
+- 所有大數的建立、運算、比較、序列化都走 `src/core/num.ts`，格式化在 `src/core/format.ts`（只透過 `toNumber()` 讀值）。換成 break_eternity.js 時只改這個模組與用到原生運算子的地方。這是有意識的取捨：換實作會需要重構，但 1e300 的上限讓這件事大概不會發生。
 - 開發 build 與平衡模擬器會檢查 `Infinity`／`NaN`，一出現就報錯並印出當下 build。
 - 格式化可設定：
   - `short`：1.23K、4.56M、7.89B，1e15 以上改科學記號
