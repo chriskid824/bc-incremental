@@ -1,9 +1,11 @@
 /** Player-facing text for talent modifiers and build stats. */
 
+import type { RuleSpec } from '../data/rules';
 import type { DamageTag, Modifier, StatBlock, StatId } from '../data/stats';
 import { DAMAGE_TAG_BIT } from '../data/stats';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
+import { compileRules } from '../sim/rules';
 
 /** Flat values of these stats are fractions shown as percentages (0.05 → 5%). */
 const PERCENT_STATS: ReadonlySet<StatId> = new Set([
@@ -57,18 +59,35 @@ export interface BuildLine {
 
 const pct = (value: number): string => `${trim(value * 100)}%`;
 
-/** The few stats that tell builds apart, for the talent screen's summary. */
-export function describeBuild(stats: StatBlock): BuildLine[] {
+/**
+ * The few stats that tell builds apart, for the talent screen's summary. Values are what the
+ * simulation plays with once keystone rules apply (src/sim/rules.ts): hit damage is a non-crit
+ * primary hit, steadyAim replaces the crit chance with its every-Nth-shot rhythm, and so on.
+ */
+export function describeBuild(stats: StatBlock, rules: readonly RuleSpec[] = []): BuildLine[] {
   const { values, damageMult } = stats;
-  const hit = values.damage * (damageMult[DAMAGE_TAG_BIT.hit] as number);
+  const fx = compileRules(rules);
+  const hit =
+    values.damage *
+    (damageMult[DAMAGE_TAG_BIT.hit] as number) *
+    fx.hitMult *
+    fx.nonCritHitMult *
+    fx.allDamageMult;
+  const crit =
+    fx.steadyAimEvery > 0
+      ? t('build.critEveryNth', { n: fx.steadyAimEvery })
+      : pct(Math.min(1, values.critChance));
   return [
     { label: t('stat.damage.hit'), value: trim(hit) },
     { label: t('stat.attackSpeed'), value: `${trim(values.attackSpeed)}/s` },
     { label: t('stat.projectileCount'), value: trim(values.projectileCount) },
-    { label: t('stat.critChance'), value: pct(Math.min(1, values.critChance)) },
-    { label: t('stat.critMultiplier'), value: pct(values.critMultiplier) },
+    { label: t('stat.critChance'), value: crit },
+    { label: t('stat.critMultiplier'), value: pct(values.critMultiplier * fx.critMultiplierMult) },
     { label: t('stat.igniteChance'), value: pct(Math.min(1, values.igniteChance)) },
-    { label: t('stat.chainCount'), value: trim(values.chainCount) },
-    { label: t('stat.maxLife'), value: trim(values.maxLife) },
+    {
+      label: t('stat.chainCount'),
+      value: trim(Math.max(0, values.chainCount * fx.chainCountMult)),
+    },
+    { label: t('stat.maxLife'), value: trim(fx.maxLife ?? values.maxLife) },
   ];
 }

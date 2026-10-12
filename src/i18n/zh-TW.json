@@ -126,5 +126,18 @@
   "stat.maxLife": "生命",
   "stat.projectileSpeed": "投射物速度",
   "stat.shardGain": "碎片獲得量",
-  "stat.coreGain": "核心獲得量"
+  "stat.coreGain": "核心獲得量",
+  "hud.shardsRun": "本局碎片",
+  "hud.coresRun": "本局核心",
+  "hud.timeLeft": "時間上限倒數 {time}",
+  "hud.hintAuto": "戰鬥是自動的，你的選擇在局與局之間。",
+  "toast.talentsQueued": "這局結束後會開啟天賦網",
+  "intro.title": "玩法",
+  "intro.auto": "角色會自動戰鬥。",
+  "intro.goal": "撐過一波波敵人，收集碎片。",
+  "intro.talents": "局與局之間，用碎片點天賦網，組出暴擊、燃燒或連鎖流派。",
+  "intro.start": "開始 · Space",
+  "build.critEveryNth": "每 {n} 發一次",
+  "talents.priceGrowth": "每點一個天賦，下一個的價格就變貴（×{growth}）。",
+  "talents.startWaveWarning": "目前配置預估能推到第 {frontier} 波。起始波次高於第 {wave} 波時，可能清不掉起始波，這局會賺很少。"
 }
