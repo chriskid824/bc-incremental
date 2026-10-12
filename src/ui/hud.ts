@@ -5,7 +5,8 @@
 
 import { formatNum } from '../core/format';
 import type { Num } from '../core/num';
-import { STRINGS, fill, formatClock } from './strings';
+import { t } from '../i18n';
+import { formatClock } from './strings';
 import { el } from './style';
 
 export interface HudInfo {
@@ -38,19 +39,18 @@ export class Hud<S extends number> {
   private speed: number | null = null;
 
   constructor(doc: Document, speeds: readonly S[], onSpeed: (speed: S) => void) {
-    const t = STRINGS.hud;
     this.root = el(doc, 'div', 'bc-ui bc-hud');
 
     const waveBox = el(doc, 'div', 'bc-hud-wave');
     this.wave = el(doc, 'div', 'bc-hud-wave-number');
     this.runLine = el(doc, 'div', 'bc-hud-sub');
     this.time = el(doc, 'div', 'bc-hud-sub');
-    waveBox.append(el(doc, 'div', 'bc-label', t.wave), this.wave, this.runLine, this.time);
+    waveBox.append(el(doc, 'div', 'bc-label', t('hud.wave')), this.wave, this.runLine, this.time);
 
     const lifeBox = el(doc, 'div', 'bc-hud-life');
     const lifeRow = el(doc, 'div', 'bc-hud-life-row');
     this.lifeValue = el(doc, 'span', 'bc-hud-life-value');
-    lifeRow.append(el(doc, 'span', 'bc-label', t.life), this.lifeValue);
+    lifeRow.append(el(doc, 'span', 'bc-label', t('hud.life')), this.lifeValue);
     const bar = el(doc, 'div', 'bc-bar');
     this.lifeFill = el(doc, 'div', 'bc-bar-fill');
     bar.append(this.lifeFill);
@@ -60,38 +60,37 @@ export class Hud<S extends number> {
     this.shards = el(doc, 'span', 'bc-hud-currency-value');
     this.cores = el(doc, 'span', 'bc-hud-currency-value');
     currency.append(
-      el(doc, 'span', 'bc-label', t.shards),
+      el(doc, 'span', 'bc-label', t('hud.shards')),
       this.shards,
-      el(doc, 'span', 'bc-label', t.cores),
+      el(doc, 'span', 'bc-label', t('hud.cores')),
       this.cores,
     );
 
     const speedBox = el(doc, 'div', 'bc-hud-speed');
     const buttons = el(doc, 'div', 'bc-speed-buttons');
     for (const speed of speeds) {
-      const button = el(doc, 'button', 'bc-speed-button', fill(t.speedOption, { speed }));
+      const button = el(doc, 'button', 'bc-speed-button', t('hud.speedOption', { speed }));
       button.type = 'button';
       button.setAttribute('aria-pressed', 'false');
       button.addEventListener('click', () => onSpeed(speed));
       this.speedButtons.set(speed, button);
       buttons.append(button);
     }
-    speedBox.append(el(doc, 'span', 'bc-label', t.speed), buttons);
+    speedBox.append(el(doc, 'span', 'bc-label', t('hud.speed')), buttons);
 
     this.root.append(waveBox, lifeBox, currency, speedBox);
   }
 
   update(info: HudInfo): void {
-    const t = STRINGS.hud;
     this.set(this.wave, String(info.wave));
-    this.set(this.runLine, fill(t.run, { run: info.runNumber, startWave: info.startWave }));
+    this.set(this.runLine, t('hud.run', { run: info.runNumber, startWave: info.startWave }));
     this.set(
       this.time,
-      fill(t.time, { elapsed: formatClock(info.elapsedSec), limit: formatClock(info.limitSec) }),
+      t('hud.time', { elapsed: formatClock(info.elapsedSec), limit: formatClock(info.limitSec) }),
     );
     this.set(
       this.lifeValue,
-      fill(t.lifeValue, { life: Math.ceil(info.life), maxLife: Math.ceil(info.maxLife) }),
+      t('hud.lifeValue', { life: Math.ceil(info.life), maxLife: Math.ceil(info.maxLife) }),
     );
     const ratio = info.maxLife > 0 ? Math.min(1, Math.max(0, info.life / info.maxLife)) : 0;
     if (ratio !== this.lifeRatio) {

@@ -2,8 +2,11 @@
 
 import { formatNum } from '../core/format';
 import type { Num } from '../core/num';
+import type { TalentNode } from '../data/types';
+import { t } from '../i18n';
+import type { MessageKey } from '../i18n';
 import type { EndReason } from '../sim/types';
-import { STRINGS, fill, talentName } from './strings';
+import { talentName } from './strings';
 import { el } from './style';
 
 export interface ResultInfo {
@@ -18,10 +21,19 @@ export interface ResultInfo {
   readonly clearedStartWave: boolean;
   readonly skipShards: Num;
   readonly skipCores: number;
-  readonly purchases: readonly { readonly id: string; readonly count: number }[];
+  readonly purchases: readonly {
+    readonly talent: Pick<TalentNode, 'id' | 'nameKey'>;
+    readonly count: number;
+  }[];
 }
 
 const FORMAT = { format: 'short' } as const;
+
+const TITLES: Readonly<Record<EndReason, MessageKey>> = {
+  death: 'result.title.death',
+  timeout: 'result.title.timeout',
+  waveCap: 'result.title.waveCap',
+};
 
 export class ResultPanel {
   readonly root: HTMLElement;
@@ -42,41 +54,42 @@ export class ResultPanel {
   }
 
   show(info: ResultInfo): void {
-    const t = STRINGS.result;
     const doc = this.doc;
-    const run = el(doc, 'div', 'bc-label', fill(t.run, { run: info.runNumber }));
-    const title = el(doc, 'div', 'bc-result-title', t.title[info.endReason]);
+    const run = el(doc, 'div', 'bc-label', t('result.run', { run: info.runNumber }));
+    const title = el(doc, 'div', 'bc-result-title', t(TITLES[info.endReason]));
     title.dataset['reason'] = info.endReason;
 
     const rows = el(doc, 'dl', 'bc-result-rows');
     const row = (label: string, value: string): void => {
       rows.append(el(doc, 'dt', '', label), el(doc, 'dd', '', value));
     };
-    row(t.highestWave, String(info.highestWave));
-    row(t.startWave, String(info.startWave));
-    row(t.kills, String(info.kills));
-    row(t.shardsFromRun, formatNum(info.shardsFromRun, FORMAT));
-    row(t.coresFromRun, String(info.coresFromRun));
+    row(t('result.highestWave'), String(info.highestWave));
+    row(t('result.startWave'), String(info.startWave));
+    row(t('result.kills'), String(info.kills));
+    row(t('result.shardsFromRun'), formatNum(info.shardsFromRun, FORMAT));
+    row(t('result.coresFromRun'), String(info.coresFromRun));
     let skip: string;
-    if (info.startWave <= 1) skip = t.skipNone;
-    else if (!info.clearedStartWave) skip = t.skipNotCleared;
+    if (info.startWave <= 1) skip = t('result.skipNone');
+    else if (!info.clearedStartWave) skip = t('result.skipNotCleared');
     else {
-      skip = fill(t.skipValue, {
+      skip = t('result.skipValue', {
         shards: formatNum(info.skipShards, FORMAT),
         cores: info.skipCores,
       });
     }
-    row(t.skipCompensation, skip);
+    row(t('result.skipCompensation'), skip);
 
     const talents = el(doc, 'div', 'bc-result-talents');
     const bought = info.purchases.map((p) =>
       p.count > 1
-        ? fill(t.talentRank, { name: talentName(p.id), count: p.count })
-        : talentName(p.id),
+        ? t('result.talentRank', { name: talentName(p.talent), count: p.count })
+        : talentName(p.talent),
     );
     talents.append(
-      el(doc, 'span', 'bc-label', t.talents),
-      doc.createTextNode(bought.length > 0 ? bought.join(', ') : t.talentsNone),
+      el(doc, 'span', 'bc-label', t('result.talents')),
+      doc.createTextNode(
+        bought.length > 0 ? bought.join(t('result.talentSeparator')) : t('result.talentsNone'),
+      ),
     );
 
     this.shownSeconds = '';
@@ -93,7 +106,7 @@ export class ResultPanel {
     const seconds = (Math.max(0, ms) / 1000).toFixed(1);
     if (seconds === this.shownSeconds) return;
     this.shownSeconds = seconds;
-    this.next.textContent = fill(STRINGS.result.next, { seconds });
+    this.next.textContent = t('result.next', { seconds });
   }
 
   hide(): void {

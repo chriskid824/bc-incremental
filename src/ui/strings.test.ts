@@ -1,18 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { STRINGS, fill, formatClock, talentName } from './strings';
-
-describe('fill', () => {
-  it('replaces placeholders and leaves unknown ones', () => {
-    expect(fill('Run {run} · from wave {startWave}', { run: 3, startWave: 12 })).toBe(
-      'Run 3 · from wave 12',
-    );
-    expect(fill('{a} {b}', { a: 'x' })).toBe('x {b}');
-  });
-
-  it('covers every placeholder used by the HUD run line', () => {
-    expect(fill(STRINGS.hud.run, { run: 1, startWave: 1 })).not.toContain('{');
-  });
-});
+import { afterEach, describe, expect, it } from 'vitest';
+import { setLocale } from '../i18n';
+import { formatClock, talentName } from './strings';
 
 describe('formatClock', () => {
   it('formats m:ss rounding down', () => {
@@ -25,9 +13,16 @@ describe('formatClock', () => {
 });
 
 describe('talentName', () => {
-  it('splits camelCase ids and trailing digits', () => {
-    expect(talentName('critChance1')).toBe('Crit Chance 1');
-    expect(talentName('glassCannon')).toBe('Glass Cannon');
-    expect(talentName('might')).toBe('Might');
+  afterEach(() => setLocale('en'));
+
+  it('translates the nameKey in the current locale', () => {
+    const node = { id: 'critChance1', nameKey: 'talent.critChance1.name' };
+    expect(talentName(node)).toBe('Crit Chance 1');
+    setLocale('zh-TW');
+    expect(talentName(node)).toBe('暴擊率 1');
+  });
+
+  it('falls back to the id for an unknown nameKey', () => {
+    expect(talentName({ id: 'mystery', nameKey: 'talent.mystery.name' })).toBe('mystery');
   });
 });

@@ -5,6 +5,9 @@
 
 import { Application } from 'pixi.js';
 import { loadGameData } from '../data';
+import type { GameData } from '../data';
+import { LOCALES, pickLocale, setLocale, t } from '../i18n';
+import type { Locale } from '../i18n';
 import { createMetaState } from '../meta';
 import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
 import { Renderer } from '../render';
@@ -12,7 +15,6 @@ import { Hud } from '../ui/hud';
 import type { HudInfo } from '../ui/hud';
 import { ResultPanel } from '../ui/result';
 import type { ResultInfo } from '../ui/result';
-import { STRINGS, fill } from '../ui/strings';
 import { injectStyle } from '../ui/style';
 import { bindSpeedKeys } from './input';
 import { GameLoop, SPEEDS } from './loop';
@@ -54,7 +56,7 @@ async function main(root: HTMLElement): Promise<void> {
       loop.resetClock();
     },
     runFinished(report) {
-      results.show(toResultInfo(report));
+      results.show(toResultInfo(report, data));
       results.setTimeLeft(session.resultTimeLeftMs);
     },
   });
@@ -92,8 +94,9 @@ function toHudInfo(run: ActiveRun, speed: number): HudInfo {
   };
 }
 
-function toResultInfo(report: RunReport): ResultInfo {
+function toResultInfo(report: RunReport, data: GameData): ResultInfo {
   const { result, settlement } = report;
+  const talents = new Map(data.talents.map((node) => [node.id, node]));
   return {
     runNumber: report.run.number,
     endReason: result.endReason,
@@ -105,7 +108,10 @@ function toResultInfo(report: RunReport): ResultInfo {
     clearedStartWave: result.clearedStartWave,
     skipShards: settlement.skipShards,
     skipCores: settlement.skipCores,
-    purchases: report.purchases,
+    purchases: report.purchases.map((purchase) => ({
+      talent: talents.get(purchase.id) ?? { id: purchase.id, nameKey: '' },
+      count: purchase.count,
+    })),
   };
 }
 
@@ -114,9 +120,24 @@ function showFatal(root: HTMLElement, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   const box = document.createElement('div');
   box.className = 'bc-error';
-  box.textContent = fill(STRINGS.error.init, { message });
+  box.textContent = t('error.init', { message });
   root.replaceChildren(box);
 }
+
+/** The browser's language, or `?lang=` in the page URL (e.g. `?lang=zh-TW`) to override it. */
+function chooseLocale(): Locale {
+  const requested = new URLSearchParams(window.location.search).get('lang');
+  if (requested !== null && isLocale(requested)) return requested;
+  return pickLocale(navigator.languages.length > 0 ? navigator.languages : [navigator.language]);
+}
+
+function isLocale(tag: string): tag is Locale {
+  return (LOCALES as readonly string[]).includes(tag);
+}
+
+const locale = chooseLocale();
+setLocale(locale);
+document.documentElement.lang = locale;
 
 const root = document.getElementById('app');
 if (root === null) throw new Error('Missing #app element');

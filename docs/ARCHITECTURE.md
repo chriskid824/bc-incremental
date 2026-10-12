@@ -212,6 +212,8 @@ npm run balance -- --strategy crit-greedy --mode auto --runs 2000 --seed 1 --out
 
 - `en.json` 是 key 的來源，`zh-TW.json` 由測試檢查是否缺漏；key 的型別從 `en.json` 產生，打錯 key 會編譯失敗。
 - 插值用 `{name}` 語法，數字一律先經過 `num.ts` 格式化。
+- 語系依瀏覽器語言選擇（繁中標籤 `zh-TW`、`zh-Hant`、`zh-HK`、`zh-MO` 用 `zh-TW`，其他用英文）；網址加 `?lang=zh-TW` 或 `?lang=en` 可以直接切換，方便測試。
+- 天賦名稱走 `nameKey`；`descKey` 目前沒有畫面用到，M1 做天賦網 UI 時再補文字與檢查。
 - 中文字型用 Noto Sans TC（OFL 授權），建置時依實際用到的字做子集化（M3）。
 
 ## 14. CI 與發布
