@@ -8,21 +8,21 @@ const countOf = (entries: readonly WaveEntry[], enemy: EnemyId): number =>
   entries.find((entry) => entry.enemy === enemy)?.count ?? 0;
 
 describe('composeWave', () => {
-  it('spawns only 5 triangles on wave 1', () => {
-    expect(composeWave(1, WAVES)).toEqual([{ enemy: 'triangle', count: 5 }]);
+  it('spawns only 20 triangles on wave 1', () => {
+    expect(composeWave(1, WAVES)).toEqual([{ enemy: 'triangle', count: 20 }]);
   });
 
   it('adds squares from wave 3', () => {
     expect(countOf(composeWave(2, WAVES), 'square')).toBe(0);
     expect(composeWave(3, WAVES)).toEqual([
-      { enemy: 'triangle', count: 5 },
-      { enemy: 'square', count: 2 },
+      { enemy: 'triangle', count: 23 },
+      { enemy: 'square', count: 8 },
     ]);
   });
 
   it('adds pentagons from wave 8', () => {
     expect(countOf(composeWave(7, WAVES), 'pentagon')).toBe(0);
-    expect(countOf(composeWave(8, WAVES), 'pentagon')).toBe(1);
+    expect(countOf(composeWave(8, WAVES), 'pentagon')).toBe(4);
   });
 
   it('adds one hexagon on elite waves', () => {

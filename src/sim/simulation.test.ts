@@ -233,7 +233,13 @@ describe('determinism', () => {
     const spawnsWith = (damage: number): { spawns: Spawn[]; children: number[] } => {
       const spawns: Spawn[] = [];
       const children: number[] = [];
-      const stats = makeStats({ damage, attackSpeed: 3, critChance: 0, maxLife: 1e9 });
+      const stats = makeStats({
+        damage,
+        attackSpeed: 3,
+        projectileCount: 1,
+        critChance: 0,
+        maxLife: 1e9,
+      });
       const run = makeConfig({ seed: 5, startWave: 8, stats, maxTicks: 60 * TICK_RATE });
       runWith(run, data, (sim, events) => {
         for (const event of events) {
@@ -253,9 +259,9 @@ describe('determinism', () => {
       return { spawns, children };
     };
     for (const [weak, strong] of [
-      [60, 90],
-      [200, 260],
-      [1000, 1300],
+      [15, 22.5],
+      [50, 65],
+      [250, 325],
     ] as const) {
       const a = spawnsWith(weak);
       const b = spawnsWith(strong);
@@ -652,7 +658,7 @@ describe('attacks', () => {
         spawnDurationSec: 4,
       }),
     });
-    const stats = makeStats({ damage: 1e6, attackSpeed: 6, maxLife: 1e9 });
+    const stats = makeStats({ damage: 1e6, attackSpeed: 6, projectileCount: 1, maxLife: 1e9 });
     const { ticks } = recordRun(makeConfig({ stats, maxTicks: 135 }), data);
     const firstDeath = eventsOf(ticks, 'enemyKilled')[0]?.tick ?? Infinity;
     expect(firstDeath).toBeLessThan(110);
@@ -870,6 +876,7 @@ describe('burning', () => {
       {
         damage: 10,
         attackSpeed: 0.5,
+        projectileCount: 1,
         critChance: crit ? 1 : 0,
         critMultiplier: 2,
         igniteChance: 1,

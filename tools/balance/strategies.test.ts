@@ -75,15 +75,41 @@ describe('spend', () => {
     expect(bought.slice(0, 3)).toEqual(['keenEye', 'sharpen', 'quickDraw']);
   });
 
-  it('falls back to generic nodes when its archetype has nothing affordable', () => {
+  it('falls back to generic nodes when its archetype has nothing it can buy', () => {
     const meta = richMeta(10, 0);
     for (const id of ['keenEye', 'sharpen', 'quickDraw']) meta.allocated.add(id);
-    // precision needs a core; small nodes cost 5 × 1.22³ ≈ 9.08, the repeatable node 10.
+    // precision needs a core it does not have; small nodes cost 5 × 1.22³ ≈ 9.08.
     expect(nextPurchase('crit-greedy', meta, data, ECONOMY)?.id).toBe('swiftness');
-    meta.allocated.add('swiftness');
-    meta.allocated.add('vitality');
-    // Small nodes now cost 5 × 1.22⁵ ≈ 13.5, so the repeatable node is the cheapest generic.
+    for (const id of ['swiftness', 'swiftness2', 'vitality', 'vitality2']) meta.allocated.add(id);
+    // Only the repeatable node is left among generic nodes (glassCannon is never bought).
+    const might = byId.get('might');
+    expect(might?.repeat).toBeDefined();
+    meta.shards = num(might?.repeat?.baseShards ?? 0);
     expect(nextPurchase('crit-greedy', meta, data, ECONOMY)?.id).toBe('might');
+  });
+
+  it('saves for an archetype node it has the cores for instead of buying fallbacks', () => {
+    // precision (notable: 2 × 5 × 1.22³ ≈ 18.2 shards + 1 core) is short of shards only.
+    const meta = richMeta(15, 1);
+    for (const id of ['keenEye', 'sharpen', 'quickDraw']) meta.allocated.add(id);
+    expect(nextPurchase('crit-greedy', meta, data, ECONOMY)).toBeNull();
+    expect(nextPurchase('balanced', meta, data, ECONOMY)?.id).toBe('kindling');
+    meta.shards = num(19);
+    expect(nextPurchase('crit-greedy', meta, data, ECONOMY)?.id).toBe('precision');
+    // Neither cheapest nor might-only save up.
+    meta.shards = num(15);
+    expect(nextPurchase('cheapest', meta, data, ECONOMY)?.id).toBe('swiftness');
+  });
+
+  it('might-only buys ranks of the repeatable node and nothing else', () => {
+    const meta = richMeta(1e5, 50);
+    const bought = spend('might-only', meta, data, ECONOMY);
+    expect(bought.length).toBeGreaterThan(5);
+    expect(new Set(bought)).toEqual(new Set(['might']));
+    expect(classOf('might')).toBe('generic');
+    expect(meta.ranks.get('might')).toBe(bought.length);
+    expect(meta.allocated).toEqual(new Set(['might']));
+    expect(meta.cores).toBe(50);
   });
 
   it('cheapest takes the lowest price, then data order', () => {

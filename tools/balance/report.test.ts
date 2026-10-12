@@ -5,6 +5,7 @@ import {
   curvePoints,
   milestonesCsv,
   minutesToWave,
+  multiplierTable,
   quantile,
   rowAt,
   RUN_COLUMNS,
@@ -43,6 +44,9 @@ function row(overrides: Partial<RunRow>): RunRow {
     skipCores: 0,
     nodesAllocated: 1,
     repeatableRanks: 0,
+    repeatableMultD: 1,
+    sectorMultD: 1,
+    sectorMultCrowd: 1,
     shardsBank: 0,
     coresBank: 0,
     bought: 'a',
@@ -163,5 +167,25 @@ describe('outputs', () => {
     const summary = summaryTable(results, ['balanced']);
     expect(summary).toMatch(/^strategy\s+wave@10\s+wave@20/);
     expect(summary).toMatch(/\nbalanced\s+15\.5\s+23\.5\s+-\s+-/);
+  });
+
+  it('multiplier table gives medians of the build playing at the given minute', () => {
+    // Runs end at minutes 5, 10, 15, 20; at minute 12 the second run's build is playing.
+    const withMults = results.map((result, i) => ({
+      ...result,
+      rows: result.rows.map((r) => ({
+        ...r,
+        repeatableRanks: r.run * 2,
+        repeatableMultD: r.run + i,
+        sectorMultD: 10 * r.run,
+        sectorMultCrowd: 100 * r.run,
+      })),
+    }));
+    const table = multiplierTable(withMults, ['balanced', 'dot-greedy'], 12);
+    const lines = table.split('\n');
+    expect(lines[0]).toMatch(/^@12m\s+ranks\s+Might× D\s+sector× D\s+sector× crowd$/);
+    // Might× over sessions: 2, 3, 4, 5 → median 3.5. No dot-greedy sessions, so no row.
+    expect(lines[1]).toMatch(/^balanced\s+4\s+3\.5\s+20\s+200$/);
+    expect(lines[2]).toMatch(/^Might× = /);
   });
 });

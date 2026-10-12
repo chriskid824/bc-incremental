@@ -2,11 +2,14 @@
  * Talent-buying strategies for the balance simulator (docs/ARCHITECTURE.md §12).
  *
  * Each strategy repeatedly buys one node until nothing it wants is affordable. Choices depend
- * only on the meta state, data order and prices, so a strategy is deterministic. Strategies
- * never save up: when the preferred class has nothing affordable they move on to the next one.
+ * only on the meta state, data order and prices, so a strategy is deterministic. Archetype
+ * strategies save up: while a reachable node of their archetype is short of shards only (they
+ * have its cores), they keep its price in the bank instead of spending it on fallback classes
+ * such as the repeatable node. `cheapest` and `might-only` never save.
  */
 
-import { eq, lt } from '../../src/core/num';
+import { eq, lt, sub, ZERO } from '../../src/core/num';
+import type { Num } from '../../src/core/num';
 import type { GameData, TalentNode } from '../../src/data';
 import { allocate, canAllocate, nodePrice } from '../../src/meta';
 import type { EconomyConfig, MetaState } from '../../src/meta';
@@ -17,6 +20,7 @@ export const STRATEGY_IDS = [
   'chain-greedy',
   'cheapest',
   'balanced',
+  'might-only',
 ] as const;
 export type StrategyId = (typeof STRATEGY_IDS)[number];
 
@@ -40,13 +44,15 @@ export function nodeClass(node: TalentNode): NodeClass {
 
 /**
  * The affordable, reachable node accepted by `accept` with the lowest shard price, then the
- * lowest core price, then the earliest position in the data file.
+ * lowest core price, then the earliest position in the data file. With a `reserve`, only
+ * nodes that leave at least that many shards in the bank count as affordable.
  */
 function cheapestAllocatable(
   meta: Readonly<MetaState>,
   data: GameData,
   economy: EconomyConfig,
   accept: (node: TalentNode) => boolean,
+  reserve: Num = ZERO,
 ): TalentNode | null {
   let best: TalentNode | null = null;
   let bestPrice: ReturnType<typeof nodePrice> | null = null;
@@ -56,6 +62,7 @@ function cheapestAllocatable(
     if (node.kind === 'keystone' && node.archetype === 'none') continue;
     if (!canAllocate(meta, node.id, data, economy).ok) continue;
     const price = nodePrice(meta, node, economy);
+    if (lt(sub(meta.shards, reserve), price.shards)) continue;
     if (
       bestPrice === null ||
       lt(price.shards, bestPrice.shards) ||
@@ -73,6 +80,30 @@ const ofClass =
   (node: TalentNode): boolean =>
     nodeClass(node) === cls;
 
+/**
+ * Shards an archetype bot keeps for its next sector node: the shard price of the cheapest
+ * reachable node in `classes` it has the cores for but not the shards, or zero. Without it, a
+ * bot whose next notable cost more than one repeatable rank kept buying ranks and stalled
+ * before its keystone (docs/GDD.md §9.1).
+ */
+function savingsFor(
+  meta: Readonly<MetaState>,
+  data: GameData,
+  economy: EconomyConfig,
+  classes: readonly NodeClass[],
+): Num {
+  let reserve: Num | null = null;
+  for (const node of data.talents) {
+    if (node.kind === 'repeatable' || !classes.includes(nodeClass(node))) continue;
+    const check = canAllocate(meta, node.id, data, economy);
+    if (check.ok || check.reason !== 'notEnoughShards') continue;
+    const price = nodePrice(meta, node, economy);
+    if (price.cores > meta.cores) continue;
+    if (reserve === null || lt(price.shards, reserve)) reserve = price.shards;
+  }
+  return reserve ?? ZERO;
+}
+
 /** Allocated non-repeatable nodes of an archetype. */
 function allocatedCount(meta: Readonly<MetaState>, data: GameData, cls: NodeClass): number {
   let count = 0;
@@ -87,11 +118,15 @@ function allocatedCount(meta: Readonly<MetaState>, data: GameData, cls: NodeClas
 /**
  * The node the strategy buys next, or null when it is done for now.
  * - `<archetype>-greedy`: cheapest node of that archetype, else cheapest generic node, else
- *   cheapest bridge (hybrid) node; sector nodes of the other archetypes are never bought.
+ *   cheapest bridge (hybrid) node, the fallbacks only from shards above the savings for the
+ *   archetype (see savingsFor); sector nodes of the other archetypes are never bought.
  * - `cheapest`: cheapest node of any class.
  * - `balanced`: round-robin over the archetypes, implemented statelessly as "the archetype
  *   with the fewest allocated nodes first" (ties in crit, dot, chain order); falls back to
- *   the next archetype when one has nothing affordable, then to generic, then hybrid nodes.
+ *   the next archetype when one has nothing affordable, then to generic, then hybrid nodes,
+ *   saving for all three archetypes like the greedy strategies.
+ * - `might-only`: ranks of the repeatable node (Might) and nothing else, the baseline every
+ *   archetype must beat (docs/GDD.md §9.1).
  */
 export function nextPurchase(
   strategy: StrategyId,
@@ -99,15 +134,21 @@ export function nextPurchase(
   data: GameData,
   economy: EconomyConfig,
 ): TalentNode | null {
-  const pick = (cls: NodeClass): TalentNode | null =>
-    cheapestAllocatable(meta, data, economy, ofClass(cls));
+  const pick = (cls: NodeClass, reserve: Num = ZERO): TalentNode | null =>
+    cheapestAllocatable(meta, data, economy, ofClass(cls), reserve);
+  const greedy = (cls: FocusArchetype): TalentNode | null => {
+    const own = pick(cls);
+    if (own) return own;
+    const reserve = savingsFor(meta, data, economy, [cls]);
+    return pick('generic', reserve) ?? pick('hybrid', reserve);
+  };
   switch (strategy) {
     case 'crit-greedy':
-      return pick('crit') ?? pick('generic') ?? pick('hybrid');
+      return greedy('crit');
     case 'dot-greedy':
-      return pick('dot') ?? pick('generic') ?? pick('hybrid');
+      return greedy('dot');
     case 'chain-greedy':
-      return pick('chain') ?? pick('generic') ?? pick('hybrid');
+      return greedy('chain');
     case 'cheapest':
       return cheapestAllocatable(meta, data, economy, () => true);
     case 'balanced': {
@@ -120,8 +161,11 @@ export function nextPurchase(
         const node = pick(cls);
         if (node) return node;
       }
-      return pick('generic') ?? pick('hybrid');
+      const reserve = savingsFor(meta, data, economy, FOCUS_ARCHETYPES);
+      return pick('generic', reserve) ?? pick('hybrid', reserve);
     }
+    case 'might-only':
+      return cheapestAllocatable(meta, data, economy, (node) => node.kind === 'repeatable');
   }
 }
 

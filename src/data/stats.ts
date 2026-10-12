@@ -43,8 +43,8 @@ export type StatId = (typeof STAT_IDS)[number];
 /** Base values before any modifier (docs/GDD.md §3.1–3.4). */
 export const BASE_STATS: Readonly<Record<StatId, number>> = {
   damage: 10,
-  attackSpeed: 2,
-  projectileCount: 1,
+  attackSpeed: 4,
+  projectileCount: 2,
   critChance: 0.05,
   critMultiplier: 1.5,
   igniteChance: 0.1,
