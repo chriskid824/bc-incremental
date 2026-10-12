@@ -137,6 +137,6 @@
   "intro.talents": "Between runs, spend shards on the talent web to build crit, burn or chain.",
   "intro.start": "Start · Space",
   "build.critEveryNth": "Every {n} shots",
-  "talents.priceGrowth": "Each talent you own raises the price of the next one (×{growth}).",
+  "talents.priceGrowth": "Each talent you own raises the next one's price ×{growth} (repeatable talents don't count).",
   "talents.startWaveWarning": "Your build is estimated to push wave {frontier} — starting higher earns little. Suggested start: wave {wave}."
 }
