@@ -4,3 +4,5 @@ export { collectModifiers, collectRules, computeStatBlock, statBlockFor } from '
 export { allocate, canAllocate, nodePrice, nodeRank, refundAll } from './talents';
 export type { AllocateCheck } from './talents';
 export { allowedStartWave, expectedWaveDrops, settleRun } from './settle';
+export { effectiveDamage, estimateBuild, frontierFor } from './estimate';
+export type { BuildEstimate } from './estimate';
