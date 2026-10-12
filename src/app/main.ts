@@ -11,6 +11,7 @@ import type { Locale } from '../i18n';
 import {
   DEFAULT_ECONOMY,
   canAllocate,
+  collectRules,
   createMetaState,
   nodePrice,
   nodeRank,
@@ -125,8 +126,11 @@ async function main(root: HTMLElement): Promise<void> {
     check: (node) => canAllocate(meta, node.id, data, DEFAULT_ECONOMY),
     price: (node) => nodePrice(meta, node, DEFAULT_ECONOMY),
     stats: statBlockFor(meta, data),
+    rules: collectRules(meta, data),
     startWave: session.startWave,
     maxStartWave: session.maxStartWave,
+    estimate: session.estimate,
+    priceGrowth: DEFAULT_ECONOMY.talentGrowth,
   });
 
   const session = new Session(

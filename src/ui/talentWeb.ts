@@ -7,11 +7,12 @@
 
 import { formatNum } from '../core/format';
 import type { Num } from '../core/num';
+import type { RuleSpec } from '../data/rules';
 import type { StatBlock } from '../data/stats';
 import type { TalentNode } from '../data/types';
 import { isMessageKey, t } from '../i18n';
 import type { MessageKey } from '../i18n';
-import type { AllocateCheck } from '../meta';
+import type { AllocateCheck, BuildEstimate } from '../meta';
 import { describeBuild, describeModifier } from './describe';
 import { talentName } from './strings';
 import { el } from './style';
@@ -28,8 +29,13 @@ export interface TalentWebView {
   readonly check: (node: TalentNode) => AllocateCheck;
   readonly price: (node: TalentNode) => { readonly shards: Num; readonly cores: number };
   readonly stats: StatBlock;
+  readonly rules: readonly RuleSpec[];
   readonly startWave: number;
   readonly maxStartWave: number;
+  /** How far the current talents should get; a start wave past estimate.frontier warns. */
+  readonly estimate: Pick<BuildEstimate, 'frontier' | 'startWave'>;
+  /** Shard price multiplier per allocated node (EconomyConfig.talentGrowth). */
+  readonly priceGrowth: number;
 }
 
 export interface TalentWebActions {
@@ -92,6 +98,7 @@ export class TalentWebPanel {
   private readonly coresValue: HTMLElement;
   private readonly waveInput: HTMLInputElement;
   private readonly waveValue: HTMLElement;
+  private readonly waveWarning: HTMLElement;
   private readonly build: HTMLElement;
   private view: TalentWebView | null = null;
   private hovered: TalentNode | null = null;
@@ -145,10 +152,13 @@ export class TalentWebPanel {
     this.waveInput.addEventListener('input', () => {
       this.actions.setStartWave(Number(this.waveInput.value));
     });
+    this.waveWarning = el(doc, 'div', 'bc-talents-warning');
+    this.waveWarning.hidden = true;
     waveBox.append(
       el(doc, 'div', 'bc-label', t('talents.startWave')),
       this.waveValue,
       this.waveInput,
+      this.waveWarning,
     );
 
     this.build = el(doc, 'dl', 'bc-talents-build');
@@ -218,8 +228,16 @@ export class TalentWebPanel {
       wave: view.startWave,
       max: view.maxStartWave,
     });
+    const tooHigh = view.startWave > view.estimate.frontier;
+    this.waveWarning.hidden = !tooHigh;
+    this.waveWarning.textContent = tooHigh
+      ? t('talents.startWaveWarning', {
+          frontier: view.estimate.frontier,
+          wave: view.estimate.startWave,
+        })
+      : '';
 
-    const lines = describeBuild(view.stats);
+    const lines = describeBuild(view.stats, view.rules);
     this.build.replaceChildren(
       ...lines.flatMap((line) => [
         el(this.doc, 'dt', '', line.label),
@@ -335,6 +353,10 @@ export class TalentWebPanel {
               : t('talents.cost', { shards }),
           ),
         );
+        if (node.kind !== 'repeatable') {
+          const growth = String(Math.round(view.priceGrowth * 100) / 100);
+          foot.append(el(doc, 'div', 'bc-tip-note', t('talents.priceGrowth', { growth })));
+        }
       }
       const status = check.ok
         ? t('talents.status.available')

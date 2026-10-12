@@ -138,5 +138,5 @@
   "intro.start": "Start · Space",
   "build.critEveryNth": "Every {n} shots",
   "talents.priceGrowth": "Each talent you own raises the price of the next one (×{growth}).",
-  "talents.startWaveWarning": "Your build is estimated to push wave {frontier}. Starting above wave {wave}, it may not clear the start wave and earn little."
+  "talents.startWaveWarning": "Your build is estimated to push wave {frontier} — starting higher earns little. Suggested start: wave {wave}."
 }

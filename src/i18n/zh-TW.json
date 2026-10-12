@@ -138,5 +138,5 @@
   "intro.start": "開始 · Space",
   "build.critEveryNth": "每 {n} 發一次",
   "talents.priceGrowth": "每點一個天賦，下一個的價格就變貴（×{growth}）。",
-  "talents.startWaveWarning": "目前配置預估能推到第 {frontier} 波。起始波次高於第 {wave} 波時，可能清不掉起始波，這局會賺很少。"
+  "talents.startWaveWarning": "目前配置預估能推到第 {frontier} 波，從更高的波次開始幾乎賺不到。建議起始波次：第 {wave} 波。"
 }

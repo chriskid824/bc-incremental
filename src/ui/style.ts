@@ -184,6 +184,16 @@ const CSS = `
 .bc-talents-currency { font-size: 24px; font-weight: 800; text-align: right; }
 .bc-talents-wave-value { font-size: 17px; font-weight: 700; margin: 2px 0 4px; }
 .bc-talents-wave-input { width: 100%; pointer-events: auto; accent-color: #9fe8ff; }
+.bc-talents-warning {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 176, 64, 0.1);
+  border: 1px solid rgba(255, 190, 90, 0.4);
+  color: #ffd08a;
+  font-size: 13px;
+  line-height: 1.35;
+}
 .bc-talents-build {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -241,6 +251,7 @@ const CSS = `
 .bc-tip-mod { color: #c9d6ff; }
 .bc-tip-rule { margin-top: 4px; color: #ffe9b0; }
 .bc-tip-foot { margin-top: 8px; font-size: 14px; color: #a3adc6; }
+.bc-tip-note { font-size: 13px; color: #8e98b3; }
 .bc-tip-status[data-ok='true'] { color: #8dffb0; font-weight: 700; }
 .bc-tip-status[data-ok='false'] { color: #ff8fa3; }
 .bc-error {
