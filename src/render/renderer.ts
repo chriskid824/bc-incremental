@@ -17,6 +17,7 @@ import { COLORS } from './palette';
 import { ShardParticles } from './particles';
 import { PlayerView } from './player';
 import { ProjectileLayer } from './projectiles';
+import { RingLayer } from './rings';
 import { ScreenShake } from './shake';
 
 export interface RendererOptions {
@@ -38,6 +39,7 @@ export class Renderer {
   private readonly enemies: EnemyLayer;
   private readonly projectiles = new ProjectileLayer();
   private readonly arcs = new ArcLayer();
+  private readonly rings = new RingLayer();
   private readonly player = new PlayerView();
   private readonly shards: ShardParticles;
   private readonly numbers = new DamageNumbers();
@@ -58,6 +60,7 @@ export class Renderer {
     this.world.addChild(
       createBackdrop(),
       this.enemies.view,
+      this.rings.view,
       this.projectiles.view,
       this.arcs.view,
       this.player.view,
@@ -73,6 +76,7 @@ export class Renderer {
   beginRun(typicalHit: number): void {
     this.enemies.clear();
     this.arcs.clear();
+    this.rings.clear();
     this.shards.clear();
     this.numbers.clear();
     this.player.reset();
@@ -111,6 +115,9 @@ export class Renderer {
           this.shards.burst(event.x, event.y, def.color, count, 0.8 + def.radius / 80);
           break;
         }
+        case 'burnSpread':
+          if (event.targets > 0) this.rings.add(event.x, event.y, event.radius, COLORS.burn);
+          break;
         case 'playerHit':
           this.player.hit();
           break;
@@ -131,6 +138,7 @@ export class Renderer {
     this.enemies.update(state.enemies, alpha, dt);
     this.projectiles.update(state.projectiles, alpha);
     this.arcs.update(dt);
+    this.rings.update(dt);
     this.player.update(state.player, dt);
     const absorbed = this.shards.update(dt, state.player.x, state.player.y, PLAYER_RADIUS * 1.5);
     if (absorbed > 0) this.player.pulse();

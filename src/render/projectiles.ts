@@ -27,8 +27,11 @@ export class ProjectileLayer {
         g.moveTo(x, y).lineTo(x - dx * k, y - dy * k);
         g.stroke({ width: 4, color: COLORS.projectileTrail, alpha: 0.35, cap: 'round' });
       }
-      g.circle(x, y, HEAD_RADIUS * 2).fill({ color: COLORS.projectileTrail, alpha: 0.18 });
-      g.circle(x, y, HEAD_RADIUS).fill({ color: COLORS.projectile, alpha: 1 });
+      // steadyAim shots are guaranteed crits: bigger and in the crit color.
+      const glow = p.steady ? COLORS.damageCrit : COLORS.projectileTrail;
+      const head = p.steady ? HEAD_RADIUS * 1.8 : HEAD_RADIUS;
+      g.circle(x, y, head * 2).fill({ color: glow, alpha: p.steady ? 0.35 : 0.18 });
+      g.circle(x, y, head).fill({ color: p.steady ? COLORS.damageCrit : COLORS.projectile });
       drawn++;
     }
     g.visible = drawn > 0;
