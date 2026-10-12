@@ -66,6 +66,10 @@ const dmg = (value: number, tag?: 'crit' | 'burn' | 'chain'): Modifier =>
   tag === undefined
     ? { stat: 'damage', kind: 'increased', value }
     : { stat: 'damage', kind: 'increased', value, tags: [tag] };
+const moreDmg = (value: number, tag?: 'crit' | 'burn' | 'chain'): Modifier =>
+  tag === undefined
+    ? { stat: 'damage', kind: 'more', value }
+    : { stat: 'damage', kind: 'more', value, tags: [tag] };
 
 const CRIT = -90;
 const DOT = 30;
@@ -87,7 +91,7 @@ export const TALENTS: readonly TalentNode[] = [
     kind: 'repeatable',
     pos: at(DOT_CHAIN, 120),
     links: ['start', 'glassCannon'],
-    repeat: { baseShards: 10, growth: 1.13 },
+    repeat: { baseShards: 3500, growth: 1.1 },
     modifiers: [{ stat: 'damage', kind: 'more', value: 0.1 }],
     archetype: 'none',
   }),
@@ -146,13 +150,13 @@ export const TALENTS: readonly TalentNode[] = [
     ...NOTABLE,
     pos: at(CRIT, 480),
     links: ['quickDraw', 'deadlyAim', 'splitShot'],
-    modifiers: [flat('critChance', 0.05), flat('critMultiplier', 0.5)],
+    modifiers: [flat('critChance', 0.1), flat('critMultiplier', 1)],
     archetype: 'crit',
   }),
   node('deadlyAim', {
     pos: at(CRIT - 10, 600),
     links: ['precision', 'assassin'],
-    modifiers: [flat('critMultiplier', 0.4)],
+    modifiers: [flat('critMultiplier', 0.75)],
     archetype: 'crit',
   }),
   node('splitShot', {
@@ -164,20 +168,21 @@ export const TALENTS: readonly TalentNode[] = [
   node('assassin', {
     pos: at(CRIT - 10, 720),
     links: ['deadlyAim', 'steadyAim'],
-    modifiers: [dmg(0.25, 'crit')],
+    modifiers: [moreDmg(0.6, 'crit')],
     archetype: 'crit',
   }),
   node('volley', {
     ...NOTABLE_2,
     pos: at(CRIT + 10, 720),
     links: ['splitShot', 'steadyAim'],
-    modifiers: [flat('projectileCount', 1), inc('attackSpeed', 0.1)],
+    modifiers: [flat('projectileCount', 5), inc('attackSpeed', 0.2)],
     archetype: 'crit',
   }),
   node('steadyAim', {
     ...KEYSTONE,
     pos: at(CRIT, 840),
     links: ['assassin', 'volley'],
+    modifiers: [moreDmg(2.5, 'crit')],
     rules: [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }],
     archetype: 'crit',
   }),
@@ -186,13 +191,13 @@ export const TALENTS: readonly TalentNode[] = [
   node('kindling', {
     pos: at(DOT, 120),
     links: ['start', 'fuel'],
-    modifiers: [flat('igniteChance', 0.2)],
+    modifiers: [flat('igniteChance', 0.4)],
     archetype: 'dot',
   }),
   node('fuel', {
     pos: at(DOT, 240),
     links: ['kindling', 'slowBurn'],
-    modifiers: [dmg(0.2, 'burn')],
+    modifiers: [dmg(0.6, 'burn')],
     archetype: 'dot',
   }),
   node('slowBurn', {
@@ -205,39 +210,39 @@ export const TALENTS: readonly TalentNode[] = [
     ...NOTABLE,
     pos: at(DOT, 480),
     links: ['slowBurn', 'stoke', 'scorch'],
-    modifiers: [flat('igniteChance', 0.3), dmg(0.4, 'burn')],
+    modifiers: [flat('igniteChance', 0.3), moreDmg(1.2, 'burn')],
     archetype: 'dot',
   }),
   node('stoke', {
     pos: at(DOT - 10, 600),
     links: ['inferno', 'heat'],
-    modifiers: [flat('burnMaxStacks', 2)],
+    modifiers: [flat('burnMaxStacks', 2), inc('attackSpeed', 0.4)],
     archetype: 'dot',
   }),
   node('scorch', {
     pos: at(DOT + 10, 600),
     links: ['inferno', 'wildfire'],
-    modifiers: [flat('burnDamage', 0.1)],
+    modifiers: [flat('burnDamage', 0.15)],
     archetype: 'dot',
   }),
   node('heat', {
     pos: at(DOT - 10, 720),
     links: ['stoke', 'pandemic'],
-    modifiers: [dmg(0.25, 'burn')],
+    modifiers: [dmg(0.3, 'burn')],
     archetype: 'dot',
   }),
   node('wildfire', {
     ...NOTABLE_2,
     pos: at(DOT + 10, 720),
     links: ['scorch', 'pandemic'],
-    modifiers: [flat('igniteChance', 0.25), flat('burnDamage', 0.15)],
+    modifiers: [flat('igniteChance', 0.25), flat('burnDamage', 0.2), moreDmg(0.5, 'burn')],
     archetype: 'dot',
   }),
   node('pandemic', {
     ...KEYSTONE,
     pos: at(DOT, 840),
     links: ['heat', 'wildfire'],
-    rules: [{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.8, hitMore: -0.3 }],
+    rules: [{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.5, hitMore: -0.3 }],
     archetype: 'dot',
   }),
 
@@ -251,20 +256,20 @@ export const TALENTS: readonly TalentNode[] = [
   node('conductor', {
     pos: at(CHAIN, 240),
     links: ['spark', 'charge'],
-    modifiers: [flat('chainRetention', 0.05)],
+    modifiers: [flat('chainRetention', 0.1)],
     archetype: 'chain',
   }),
   node('charge', {
     pos: at(CHAIN, 360),
     links: ['conductor', 'arcStorm', 'staticHeat', 'stormEye'],
-    modifiers: [dmg(0.2, 'chain')],
+    modifiers: [dmg(0.3, 'chain')],
     archetype: 'chain',
   }),
   node('arcStorm', {
     ...NOTABLE,
     pos: at(CHAIN, 480),
     links: ['charge', 'reach', 'fork'],
-    modifiers: [flat('chainCount', 1), flat('chainRetention', 0.1)],
+    modifiers: [flat('chainCount', 1), flat('chainRetention', 0.1), moreDmg(0.5)],
     archetype: 'chain',
   }),
   node('reach', {
@@ -276,20 +281,20 @@ export const TALENTS: readonly TalentNode[] = [
   node('fork', {
     pos: at(CHAIN + 10, 600),
     links: ['arcStorm', 'tempest'],
-    modifiers: [flat('chainCount', 0.5)],
+    modifiers: [flat('chainCount', 1)],
     archetype: 'chain',
   }),
   node('voltage', {
     pos: at(CHAIN - 10, 720),
     links: ['reach', 'overload'],
-    modifiers: [dmg(0.25, 'chain')],
+    modifiers: [dmg(0.3, 'chain')],
     archetype: 'chain',
   }),
   node('tempest', {
     ...NOTABLE_2,
     pos: at(CHAIN + 10, 720),
     links: ['fork', 'overload'],
-    modifiers: [flat('chainCount', 1), dmg(0.3, 'chain')],
+    modifiers: [flat('chainCount', 1), moreDmg(2.2)],
     archetype: 'chain',
   }),
   node('overload', {
