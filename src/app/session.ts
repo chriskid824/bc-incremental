@@ -167,6 +167,7 @@ export class Session {
    */
   resume(): void {
     if (this.phaseValue !== 'idle') throw new Error('Session already started');
+    this.followEstimate(null);
     this.phaseValue = 'talents';
     this.listener.talentsOpened();
   }
@@ -223,7 +224,7 @@ export class Session {
   allocate(nodeId: string): boolean {
     if (this.phaseValue !== 'talents') return false;
     if (!canAllocate(this.meta, nodeId, this.data, this.economy).ok) return false;
-    const before = this.estimate.startWave;
+    const before = this.estimate;
     allocate(this.meta, nodeId, this.data, this.economy);
     this.followEstimate(before);
     this.listener.profileChanged();
@@ -267,18 +268,25 @@ export class Session {
   }
 
   /**
-   * Re-aims the start wave after the allocation changed; `previous` is the estimated start wave
-   * before the change, null after a respec. The start wave drops to the estimate when the
-   * change made the build weaker than its start wave; a start wave the session lowered climbs
-   * back with the estimate when the change made the build stronger.
+   * Re-aims the start wave for the current talents; `previous` is the estimate before an
+   * allocation, null after a respec or on load. A start wave the build is no longer expected to
+   * reach (past the estimated frontier) drops to the estimated start wave; a start wave the
+   * player already picked past the frontier stays, with the talent web's warning. A start wave
+   * the session lowered climbs back with the estimate as the build gets stronger.
    */
-  private followEstimate(previous: number | null): void {
-    const target = this.estimate.startWave;
+  private followEstimate(previous: BuildEstimate | null): void {
+    const estimate = this.estimate;
     const current = this.startWave;
-    const weaker = previous === null || target < previous;
-    if (weaker && target < current) this.setAutoStartWave(target);
-    else if (this.startWaveAuto && previous !== null && target > previous && target > current) {
-      this.setAutoStartWave(target);
+    const fellBehind =
+      current > estimate.frontier && (previous === null || current <= previous.frontier);
+    if (fellBehind) this.setAutoStartWave(estimate.startWave);
+    else if (
+      this.startWaveAuto &&
+      previous !== null &&
+      estimate.startWave > previous.startWave &&
+      estimate.startWave > current
+    ) {
+      this.setAutoStartWave(estimate.startWave);
     }
   }
 
