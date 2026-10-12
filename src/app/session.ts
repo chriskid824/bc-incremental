@@ -272,7 +272,9 @@ export class Session {
    * allocation, null after a respec or on load. A start wave the build is no longer expected to
    * reach (past the estimated frontier) drops to the estimated start wave; a start wave the
    * player already picked past the frontier stays, with the talent web's warning. A start wave
-   * the session lowered climbs back with the estimate as the build gets stronger.
+   * the session lowered climbs toward the estimate as the build gets stronger, by no more than
+   * the estimate gained, so the step down after a failed run is not undone by the next purchase
+   * when the estimate is too kind (burn builds, docs/GDD.md §7.2 ignores stack caps).
    */
   private followEstimate(previous: BuildEstimate | null): void {
     const estimate = this.estimate;
@@ -286,7 +288,8 @@ export class Session {
       estimate.startWave > previous.startWave &&
       estimate.startWave > current
     ) {
-      this.setAutoStartWave(estimate.startWave);
+      const gained = estimate.startWave - previous.startWave;
+      this.setAutoStartWave(Math.min(estimate.startWave, current + gained));
     }
   }
 

@@ -349,4 +349,31 @@ describe('Session start wave', () => {
     expect(climbed).toBeGreaterThan(low);
     expect(session.startWave).toBe(Math.min(session.maxStartWave, climbed));
   });
+
+  it('keeps the step down after a failed run when the estimate stays too kind', () => {
+    const { session, meta } = veteranSession();
+    const strong = meta.ranks.get('might') as number;
+    // The build is far weaker than the estimate says and fails its start wave.
+    giveMight(meta, 0);
+    session.startNextRun();
+    playRun(session);
+    expect((session.report as RunReport).result.clearedStartWave).toBe(false);
+    const lowered = session.startWave;
+    expect(lowered).toBeLessThan(session.maxStartWave);
+
+    // The estimate goes back to calling the highest allowed wave safe, as it does for burn
+    // builds; buying talents only climbs as far as the estimate gains.
+    giveMight(meta, strong);
+    const before = session.estimate;
+    expect(before.startWave).toBeGreaterThanOrEqual(session.maxStartWave);
+    session.openTalents();
+    let guard = 0;
+    while (session.estimate.startWave === before.startWave) {
+      buyMight(session, 1);
+      if (++guard > 100) throw new Error('the estimated start wave never went up');
+    }
+    const gained = session.estimate.startWave - before.startWave;
+    expect(lowered + gained).toBeLessThan(session.maxStartWave);
+    expect(session.startWave).toBe(lowered + gained);
+  });
 });
