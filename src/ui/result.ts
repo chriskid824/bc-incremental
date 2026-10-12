@@ -1,18 +1,21 @@
 /** End-of-run panel: why the run ended, how far it got and what it earned. */
 
 import { formatNum } from '../core/format';
+import { num } from '../core/num';
 import type { Num } from '../core/num';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import type { EndReason } from '../sim/types';
+import { describeRunEnd } from './runEnd';
+import type { EnemySpeeds, RunEndFacts } from './runEnd';
 import { el } from './style';
 
-export interface ResultInfo {
+export interface ResultInfo extends RunEndFacts {
   readonly runNumber: number;
-  readonly endReason: EndReason;
   readonly startWave: number;
-  readonly highestWave: number;
   readonly kills: number;
+  /** Damage dealt per second over the whole run, all sources. */
+  readonly averageDps: Num;
   readonly shardsFromRun: Num;
   readonly coresFromRun: number;
   /** Whether the start wave was cleared, which skip compensation requires. */
@@ -49,6 +52,7 @@ export class ResultPanel {
 
   constructor(
     private readonly doc: Document,
+    private readonly enemies: EnemySpeeds,
     handlers: ResultActions,
   ) {
     this.root = el(doc, 'div', 'bc-ui bc-result');
@@ -76,6 +80,10 @@ export class ResultPanel {
     const run = el(doc, 'div', 'bc-label', t('result.run', { run: info.runNumber }));
     const title = el(doc, 'div', 'bc-result-title', t(TITLES[info.endReason]));
     title.dataset['reason'] = info.endReason;
+    const text = describeRunEnd(info, this.enemies);
+    const cause = el(doc, 'div', 'bc-result-cause');
+    if (text.cause !== null) cause.append(el(doc, 'div', 'bc-result-cause-main', text.cause));
+    cause.append(el(doc, 'div', 'bc-result-cause-leaks', text.leaks));
 
     const rows = el(doc, 'dl', 'bc-result-rows');
     const row = (label: string, value: string): void => {
@@ -84,6 +92,8 @@ export class ResultPanel {
     row(t('result.highestWave'), String(info.highestWave));
     row(t('result.startWave'), String(info.startWave));
     row(t('result.kills'), String(info.kills));
+    row(t('result.averageDps'), formatNum(info.averageDps, FORMAT));
+    row(t('result.damageTaken'), formatNum(num(info.damageTaken), FORMAT));
     row(t('result.shardsFromRun'), formatNum(info.shardsFromRun, FORMAT));
     row(t('result.coresFromRun'), String(info.coresFromRun));
     let skip: string;
@@ -103,7 +113,14 @@ export class ResultPanel {
 
     this.shownSeconds = '';
     this.next.textContent = '';
-    this.card.replaceChildren(run, title, rows, this.actions, info.affordable ? hint : this.next);
+    const parts: HTMLElement[] = [run, title, cause, rows];
+    if (text.tip !== null) {
+      const tip = el(doc, 'div', 'bc-result-tip');
+      tip.append(el(doc, 'span', 'bc-result-tip-label', t('result.tipLabel')), text.tip);
+      parts.push(tip);
+    }
+    parts.push(this.actions, info.affordable ? hint : this.next);
+    this.card.replaceChildren(...parts);
     this.root.hidden = false;
     // Next frame, so the opacity transition runs.
     requestAnimationFrame(() => {

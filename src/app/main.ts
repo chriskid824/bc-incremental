@@ -4,6 +4,7 @@
  */
 
 import { Application } from 'pixi.js';
+import { add, div, ZERO } from '../core/num';
 import { loadGameData } from '../data';
 import type { GameData } from '../data';
 import { LOCALES, pickLocale, setLocale, t } from '../i18n';
@@ -96,7 +97,7 @@ async function main(root: HTMLElement): Promise<void> {
     profile.speed = speed;
   };
   const hud = new Hud(document, SPEEDS, setSpeed);
-  const results = new ResultPanel(document, {
+  const results = new ResultPanel(document, data.enemies, {
     continue: () => session.continueFromResults(),
     openTalents: () => session.openTalents(),
     nextRun: () => session.startNextRun(),
@@ -197,13 +198,23 @@ function toHudInfo(run: ActiveRun, speed: number): HudInfo {
 }
 
 function toResultInfo(report: RunReport): ResultInfo {
-  const { result, settlement } = report;
+  const { run, result, settlement } = report;
+  const { hit, crit, burn, chain } = result.damage;
+  const seconds = result.ticks / TICK_RATE;
   return {
-    runNumber: report.run.number,
+    runNumber: run.number,
     endReason: result.endReason,
     startWave: result.startWave,
     highestWave: result.highestWaveReached,
+    limitSec: (run.config.maxTicks ?? MAX_RUN_SECONDS * TICK_RATE) / TICK_RATE,
+    maxLife: run.sim.state.player.maxLife,
+    glassCannon: run.config.rules.some((rule) => rule.id === 'glassCannon'),
     kills: result.kills,
+    averageDps: seconds > 0 ? div(add(add(hit, crit), add(burn, chain)), seconds) : ZERO,
+    leaks: result.leaks,
+    damageTaken: result.damageTaken,
+    damageTakenBy: result.damageTakenBy,
+    killedBy: result.killedBy,
     shardsFromRun: settlement.shardsFromRun,
     coresFromRun: settlement.coresFromRun,
     clearedStartWave: result.clearedStartWave,
