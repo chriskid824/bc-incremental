@@ -86,6 +86,17 @@ describe('spend', () => {
     expect(nextPurchase('crit-greedy', meta, data, ECONOMY)?.id).toBe('might');
   });
 
+  it('might-only buys ranks of the repeatable node and nothing else', () => {
+    const meta = richMeta(1e4, 50);
+    const bought = spend('might-only', meta, data, ECONOMY);
+    expect(bought.length).toBeGreaterThan(5);
+    expect(new Set(bought)).toEqual(new Set(['might']));
+    expect(classOf('might')).toBe('generic');
+    expect(meta.ranks.get('might')).toBe(bought.length);
+    expect(meta.allocated).toEqual(new Set(['might']));
+    expect(meta.cores).toBe(50);
+  });
+
   it('cheapest takes the lowest price, then data order', () => {
     expect(spend('cheapest', richMeta(5, 0), data, ECONOMY)).toEqual(['swiftness']);
   });

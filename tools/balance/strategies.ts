@@ -17,6 +17,7 @@ export const STRATEGY_IDS = [
   'chain-greedy',
   'cheapest',
   'balanced',
+  'might-only',
 ] as const;
 export type StrategyId = (typeof STRATEGY_IDS)[number];
 
@@ -92,6 +93,8 @@ function allocatedCount(meta: Readonly<MetaState>, data: GameData, cls: NodeClas
  * - `balanced`: round-robin over the archetypes, implemented statelessly as "the archetype
  *   with the fewest allocated nodes first" (ties in crit, dot, chain order); falls back to
  *   the next archetype when one has nothing affordable, then to generic, then hybrid nodes.
+ * - `might-only`: ranks of the repeatable node (Might) and nothing else, the baseline every
+ *   archetype must beat (docs/GDD.md §9.1).
  */
 export function nextPurchase(
   strategy: StrategyId,
@@ -122,6 +125,8 @@ export function nextPurchase(
       }
       return pick('generic') ?? pick('hybrid');
     }
+    case 'might-only':
+      return cheapestAllocatable(meta, data, economy, (node) => node.kind === 'repeatable');
   }
 }
 
