@@ -766,6 +766,18 @@ describe('hits and crits', () => {
     }
     expect(result.damage.crit).toBe(0);
   });
+
+  it('counts overkill from the average hit, crits with their own multiplier', () => {
+    // The wave never clears, so wave 1 stays current for the whole run.
+    const average = 0.5 * byMask(1) + 0.5 * 2 * byMask(1 | 2);
+    const threshold = (stdHp(1) * 10) / average;
+    const overkillSeconds = (damage: number): number => {
+      const stats = makeStats({ damage, critChance: 0.5, critMultiplier: 2 }, byMask);
+      return recordRun(makeConfig({ stats, maxTicks: 120 }), data).result.overkillSeconds;
+    };
+    expect(overkillSeconds(threshold * 1.01)).toBe(2);
+    expect(overkillSeconds(threshold * 0.99)).toBe(0);
+  });
 });
 
 describe('chains', () => {

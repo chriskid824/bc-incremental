@@ -163,8 +163,10 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   const projectileStep = values.projectileSpeed * DT;
   const shardGain = values.shardGain;
   const coreGain = Math.max(0, values.coreGain);
-  /** Average primary hit, for overkill tracking (docs/GDD.md §2.2). */
-  const expectedHit = values.damage * multAt(HIT) * (1 + critChance * (critMultiplier - 1));
+  /** Average primary hit, for overkill tracking (docs/GDD.md §2.2); crits use mult[hit|crit]. */
+  const expectedHit =
+    values.damage *
+    ((1 - critChance) * multAt(HIT) + critChance * critMultiplier * multAt(HIT | CRIT));
   /** Damage a projectile in flight is expected to deal, for targeting: the non-crit primary hit. */
   const projectileEstimate = mul(damage, multAt(HIT));
 
