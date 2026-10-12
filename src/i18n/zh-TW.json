@@ -143,14 +143,15 @@
   "result.cause.timeout": "撐滿了 {limit}",
   "result.cause.waveCap": "清完第 {wave} 波，這是原型的最後一波",
   "result.leaks.none": "沒有敵人碰到你",
-  "result.leaks.one": "1 個敵人碰到你，造成 {damage} 傷害",
-  "result.leaks.many": "{count} 個敵人碰到你，共 {damage} 傷害",
-  "result.leaks.mixed": "{count} 個敵人碰到你，共 {damage} 傷害（{enemies}佔 {mainDamage}）",
+  "result.leaks.one": "1 個敵人碰到你，造成 {damage} 點傷害",
+  "result.leaks.many": "{count} 個敵人碰到你，共 {damage} 點傷害",
+  "result.leaks.mixed": "{count} 個敵人碰到你，共 {damage} 點傷害（{enemies}佔 {mainDamage}）",
+  "result.leaks.mixedOne": "{count} 個敵人碰到你，共 {damage} 點傷害（一個{enemy}就佔 {mainDamage}）",
   "result.averageDps": "平均 DPS",
   "result.damageTaken": "承受傷害",
   "result.tipLabel": "提示",
-  "result.tip.fast": "{enemies}速度快，常在被打死前就撞到你。用傷害和攻擊速度更快清掉它們，或點{vitality}這類生命節點多撐幾下。",
-  "result.tip.heavy": "{enemy}撞一下就是 {damage}，你的生命只有 {life}。用傷害和攻擊速度在它靠近前打死，或點{vitality}這類生命節點撐過這一下。",
-  "result.tip.swarm": "{enemies}一直突破防線。用傷害和攻擊速度清得更快，或點{vitality}這類生命節點撐得更久。",
-  "result.tip.glassCannon": "{glassCannon}讓你的生命變成 1，任何敵人碰到你這局就結束。這時只有傷害和攻擊速度有用。"
+  "result.tip.fast": "{enemies}速度快，常在你打死它們之前就撞上來。用傷害和攻擊速度更快清掉它們，或點「{vitality}」這類生命節點多撐幾下。",
+  "result.tip.heavy": "{enemy}撞一下就扣 {damage} 生命，你的生命上限是 {life}。用傷害和攻擊速度在它靠近前打死它，或點「{vitality}」這類生命節點撐過這一下。",
+  "result.tip.swarm": "{enemies}一直衝到你身邊。用傷害和攻擊速度清得更快，或點「{vitality}」這類生命節點撐得更久。",
+  "result.tip.glassCannon": "「{glassCannon}」讓你的生命變成 1，任何敵人碰到你這局就結束。用傷害和攻擊速度清得更快，或到天賦網免費退回它。"
 }

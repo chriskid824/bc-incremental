@@ -101,12 +101,12 @@ function leaksText(facts: RunEndFacts): string {
   const main = mainThreat(by);
   const types = ENEMY_IDS.filter((id) => by[id].hits > 0).length;
   if (main === null || types < 2) return t('result.leaks.many', { count, damage });
-  return t('result.leaks.mixed', {
-    count,
-    damage,
-    mainDamage: fmt(by[main].damage),
-    enemies: enemyPlural(main),
-  });
+  const mainDamage = fmt(by[main].damage);
+  // "100 from one Boss", not "100 from Bosses", when a single hit is the biggest share.
+  if (by[main].hits === 1) {
+    return t('result.leaks.mixedOne', { count, damage, mainDamage, enemy: enemyName(main) });
+  }
+  return t('result.leaks.mixed', { count, damage, mainDamage, enemies: enemyPlural(main) });
 }
 
 /** Glass Cannon first (Life cannot help), then by the main threat: hits hard, fast, or many. */

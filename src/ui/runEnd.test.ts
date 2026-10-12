@@ -67,6 +67,8 @@ describe('describeRunEnd', () => {
       SPEEDS,
     );
     expect(text.cause).toBe('Killed by a Boss');
+    // One boss is the biggest share: singular, not "from Bosses".
+    expect(text.leaks).toBe('3 enemies reached you for 116 damage (100 from one Boss)');
     expect(text.tip).toMatch(/^One Boss hit takes 100 of your 100 life\./);
   });
 
@@ -84,6 +86,9 @@ describe('describeRunEnd', () => {
     );
     expect(text.leaks).toBe('1 enemy reached you for 8 damage');
     expect(text.tip).toMatch(/^Glass Cannon sets your life to 1/);
+    expect(text.tip).toContain('damage and attack speed');
+    // Respec is free, so dropping the keystone is the other lever.
+    expect(text.tip).toContain('refund it for free');
     expect(text.tip).not.toContain('Vitality');
   });
 
@@ -118,9 +123,14 @@ describe('describeRunEnd', () => {
       SPEEDS,
     );
     expect(text.cause).toBe('被方塊撞死');
-    expect(text.leaks).toBe('11 個敵人碰到你，共 109 傷害（三角佔 64）');
+    expect(text.leaks).toBe('11 個敵人碰到你，共 109 點傷害（三角佔 64）');
     expect(text.tip).toMatch(/^三角速度快/);
-    expect(text.tip).toContain('活力');
+    expect(text.tip).toContain('「活力」');
+    const boss = describeRunEnd(
+      facts({ killedBy: 'boss' }, { triangle: [2, 16], boss: [1, 100] }),
+      SPEEDS,
+    );
+    expect(boss.leaks).toBe('3 個敵人碰到你，共 116 點傷害（一個頭目就佔 100）');
   });
 });
 

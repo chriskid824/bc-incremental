@@ -146,11 +146,12 @@
   "result.leaks.one": "1 enemy reached you for {damage} damage",
   "result.leaks.many": "{count} enemies reached you for {damage} damage",
   "result.leaks.mixed": "{count} enemies reached you for {damage} damage ({mainDamage} from {enemies})",
+  "result.leaks.mixedOne": "{count} enemies reached you for {damage} damage ({mainDamage} from one {enemy})",
   "result.averageDps": "Average DPS",
   "result.damageTaken": "Damage taken",
   "result.tipLabel": "Tip",
   "result.tip.fast": "{enemies} are fast and reach you before they die. Kill them sooner with damage and attack speed, or take more hits with Life nodes like {vitality}.",
   "result.tip.heavy": "One {enemy} hit takes {damage} of your {life} life. Kill it before it arrives with damage and attack speed, or raise your life with nodes like {vitality}.",
   "result.tip.swarm": "{enemies} kept getting through. Kill faster with damage and attack speed, or survive longer with Life nodes like {vitality}.",
-  "result.tip.glassCannon": "{glassCannon} sets your life to 1, so any enemy that reaches you ends the run. Only damage and attack speed help."
+  "result.tip.glassCannon": "{glassCannon} sets your life to 1, so any enemy that reaches you ends the run. Kill faster with damage and attack speed, or refund it for free in the talent web."
 }
