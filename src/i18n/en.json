@@ -1,7 +1,6 @@
 {
   "hud.wave": "Wave",
   "hud.run": "Run {run} · from wave {startWave}",
-  "hud.time": "{elapsed} / {limit}",
   "hud.life": "Life",
   "hud.lifeValue": "{life} / {maxLife}",
   "hud.shards": "Shards",
