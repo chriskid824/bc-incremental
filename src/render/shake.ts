@@ -1,8 +1,13 @@
-/** Trauma-based screen shake: small, quick to decay, disabled under reduced motion. */
+/**
+ * Trauma-based screen shake: quick to decay, disabled under reduced motion. Each kick names a
+ * ceiling it may raise trauma to, so frequent small kicks (crits) top out at a light punch
+ * while rare big ones (boss kills) can shake hard; trauma never sits high for long.
+ */
 
-const MAX_OFFSET = 9;
+/** Largest offset in arena units, at trauma 1. */
+export const SHAKE_MAX_OFFSET = 14;
 /** Trauma lost per second. */
-const DECAY = 4;
+const DECAY = 3.2;
 
 export class ScreenShake {
   private trauma = 0;
@@ -11,10 +16,15 @@ export class ScreenShake {
 
   constructor(private readonly reducedMotion: boolean) {}
 
-  /** Adds trauma in [0, 1]; the offset grows with trauma squared. */
-  add(amount: number): void {
-    if (this.reducedMotion) return;
-    this.trauma = Math.min(1, this.trauma + amount);
+  /** Current trauma in [0, 1]; the offset grows with its square. */
+  get level(): number {
+    return this.trauma;
+  }
+
+  /** Adds trauma, but never past `ceiling` (in [0, 1]); trauma already above it is kept. */
+  add(amount: number, ceiling = 1): void {
+    if (this.reducedMotion || this.trauma >= ceiling) return;
+    this.trauma = Math.min(ceiling, this.trauma + amount);
   }
 
   reset(): void {
@@ -25,7 +35,7 @@ export class ScreenShake {
 
   update(dtMs: number): void {
     this.trauma = Math.max(0, this.trauma - (DECAY * dtMs) / 1000);
-    const magnitude = MAX_OFFSET * this.trauma * this.trauma;
+    const magnitude = SHAKE_MAX_OFFSET * this.trauma * this.trauma;
     this.offsetX = magnitude === 0 ? 0 : (Math.random() * 2 - 1) * magnitude;
     this.offsetY = magnitude === 0 ? 0 : (Math.random() * 2 - 1) * magnitude;
   }
