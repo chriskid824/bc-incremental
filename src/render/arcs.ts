@@ -1,19 +1,46 @@
-/** Chain lightning: jagged cyan lines between chain hits, fading out quickly. */
+/**
+ * Chain lightning: jagged bolts between chain hits, redrawn into one additive Graphics each
+ * frame. A bolt re-rolls its zigzag every few frames while it lives, so it flickers like an
+ * electric arc; it is a wide cyan glow with a white-hot core, thinner on later jumps. Pooled
+ * and capped; when full, the oldest bolt is replaced.
+ */
 
 import { Graphics } from 'pixi.js';
 import { COLORS } from './palette';
+import { ageStep } from './timing';
 
-const ARC_MS = 150;
-const MAX_ARCS = 64;
-const SEGMENTS = 6;
-/** Sideways jitter of the bolt, as a fraction of its length (capped in units). */
-const JITTER = 0.12;
-const MAX_JITTER = 26;
+const ARC_MS = 180;
+/** The zigzag is re-rolled this often. */
+const REJITTER_MS = 42;
+const MAX_ARCS = 80;
+/** Roughly one kink per this many arena units. */
+const SEGMENT_LENGTH = 30;
+const MIN_SEGMENTS = 4;
+const MAX_SEGMENTS = 14;
+/** Sideways jitter of a kink, as a fraction of the bolt length (capped in units). */
+const JITTER = 0.16;
+const MAX_JITTER = 34;
+/** Width factor lost per jump after the first, down to MIN_WIDTH. */
+const WIDTH_PER_JUMP = 0.14;
+const MIN_WIDTH = 0.4;
 
 interface Arc {
-  /** Polyline x0, y0, x1, y1, …; fixed when the arc is created. */
-  readonly points: number[];
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  width: number;
   ageMs: number;
+  /** Time until the next re-roll. */
+  rejitterMs: number;
+  /** Per-roll brightness, for flicker. */
+  flicker: number;
+  /** Added since the last update (see src/render/timing.ts). */
+  fresh: boolean;
+  /** Polyline x0, y0, x1, y1, …, rebuilt in place on every re-roll. */
+  readonly points: number[];
+  /** A short side fork; empty when the bolt has none this roll. */
+  readonly fork: number[];
 }
 
 export class ArcLayer {
@@ -25,26 +52,19 @@ export class ArcLayer {
     this.view.blendMode = 'add';
   }
 
-  add(fromX: number, fromY: number, toX: number, toY: number): void {
+  /** A bolt for the `chainIndex`-th jump (1 = first jump). */
+  add(fromX: number, fromY: number, toX: number, toY: number, chainIndex: number): void {
     let arc: Arc;
     if (this.arcs.length >= MAX_ARCS) arc = this.arcs.shift() as Arc;
-    else arc = this.pool.pop() ?? { points: [], ageMs: 0 };
+    else arc = this.pool.pop() ?? createArc();
+    arc.fromX = fromX;
+    arc.fromY = fromY;
+    arc.toX = toX;
+    arc.toY = toY;
+    arc.width = Math.max(MIN_WIDTH, 1 - WIDTH_PER_JUMP * (chainIndex - 1));
     arc.ageMs = 0;
-    const points = arc.points;
-    points.length = 0;
-    const dx = toX - fromX;
-    const dy = toY - fromY;
-    const len = Math.sqrt(dx * dx + dy * dy) || 1;
-    const nx = -dy / len;
-    const ny = dx / len;
-    const jitter = Math.min(MAX_JITTER, len * JITTER);
-    points.push(fromX, fromY);
-    for (let s = 1; s < SEGMENTS; s++) {
-      const t = s / SEGMENTS;
-      const offset = (Math.random() * 2 - 1) * jitter;
-      points.push(fromX + dx * t + nx * offset, fromY + dy * t + ny * offset);
-    }
-    points.push(toX, toY);
+    arc.fresh = true;
+    reroll(arc);
     this.arcs.push(arc);
   }
 
@@ -60,17 +80,89 @@ export class ArcLayer {
     let kept = 0;
     for (let i = 0; i < this.arcs.length; i++) {
       const arc = this.arcs[i] as Arc;
-      arc.ageMs += dtMs;
+      const stepMs = ageStep(dtMs, arc.fresh);
+      arc.fresh = false;
+      arc.ageMs += stepMs;
       if (arc.ageMs >= ARC_MS) {
         this.pool.push(arc);
         continue;
       }
       this.arcs[kept++] = arc;
-      const fade = 1 - arc.ageMs / ARC_MS;
-      g.poly(arc.points, false).stroke({ width: 9, color: COLORS.chain, alpha: 0.18 * fade });
-      g.poly(arc.points, false).stroke({ width: 3, color: COLORS.chain, alpha: fade });
-      g.poly(arc.points, false).stroke({ width: 1.2, color: 0xffffff, alpha: fade });
+      arc.rejitterMs -= stepMs;
+      if (arc.rejitterMs <= 0) reroll(arc);
+      const t = arc.ageMs / ARC_MS;
+      // Full strength for the first half, then a quick fade.
+      const fade = (t < 0.5 ? 1 : 1 - (t - 0.5) / 0.5) * arc.flicker;
+      const w = arc.width;
+      drawBolt(g, arc.points, w, fade);
+      if (arc.fork.length > 0) drawBolt(g, arc.fork, w * 0.6, fade * 0.8);
     }
     this.arcs.length = kept;
+  }
+}
+
+function createArc(): Arc {
+  return {
+    fromX: 0,
+    fromY: 0,
+    toX: 0,
+    toY: 0,
+    width: 1,
+    ageMs: 0,
+    rejitterMs: 0,
+    flicker: 1,
+    fresh: true,
+    points: [],
+    fork: [],
+  };
+}
+
+function drawBolt(g: Graphics, points: number[], width: number, alpha: number): void {
+  g.poly(points, false).stroke({ width: 30 * width, color: COLORS.chain, alpha: 0.14 * alpha });
+  g.poly(points, false).stroke({ width: 14 * width, color: COLORS.chain, alpha: 0.28 * alpha });
+  g.poly(points, false).stroke({ width: 7 * width, color: COLORS.chain, alpha: 0.9 * alpha });
+  g.poly(points, false).stroke({ width: 3 * width, color: 0xffffff, alpha });
+}
+
+/** Rebuilds the zigzag (and maybe a fork) with fresh random kinks; the ends stay pinned. */
+function reroll(arc: Arc): void {
+  arc.rejitterMs = REJITTER_MS;
+  arc.flicker = 0.7 + 0.3 * Math.random();
+  const { fromX, fromY, toX, toY } = arc;
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const jitter = Math.min(MAX_JITTER, len * JITTER);
+  const segments = Math.min(MAX_SEGMENTS, Math.max(MIN_SEGMENTS, Math.round(len / SEGMENT_LENGTH)));
+  const points = arc.points;
+  points.length = 0;
+  points.push(fromX, fromY);
+  for (let s = 1; s < segments; s++) {
+    const t = s / segments;
+    // Kinks are largest mid-bolt.
+    const envelope = Math.sin(Math.PI * t);
+    const offset = (Math.random() * 2 - 1) * jitter * (0.4 + 0.6 * envelope);
+    points.push(fromX + dx * t + nx * offset, fromY + dy * t + ny * offset);
+  }
+  points.push(toX, toY);
+
+  const fork = arc.fork;
+  fork.length = 0;
+  if (len < 60 || Math.random() < 0.4) return;
+  // Fork off one of the kinks, angled away from the bolt.
+  const at = 1 + Math.floor(Math.random() * (segments - 1));
+  let x = points[at * 2] ?? fromX;
+  let y = points[at * 2 + 1] ?? fromY;
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const angle = Math.atan2(dy, dx) + side * (0.5 + Math.random() * 0.5);
+  const step = len * (0.08 + Math.random() * 0.06);
+  fork.push(x, y);
+  for (let k = 0; k < 3; k++) {
+    const a = angle + (Math.random() * 2 - 1) * 0.6;
+    x += Math.cos(a) * step;
+    y += Math.sin(a) * step;
+    fork.push(x, y);
   }
 }

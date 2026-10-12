@@ -81,7 +81,10 @@ async function main(root: HTMLElement): Promise<void> {
   const storage = openStorage();
   const profile = loadProfile(storage, data);
   const meta = profile.meta;
-  const renderer = new Renderer(app, data, { reducedMotion: REDUCED_MOTION });
+  const renderer = new Renderer(app, data, {
+    reducedMotion: REDUCED_MOTION,
+    hitStop: (ms) => loop.hitStop(ms),
+  });
 
   let lastSaveMs = performance.now();
   const save = (): void => {
@@ -152,20 +155,23 @@ async function main(root: HTMLElement): Promise<void> {
     { waveCap: WAVE_CAP },
   );
 
-  const loop = new GameLoop({
-    isRunning: () => session.phase === 'running',
-    step: () => renderer.handleEvents(session.step()),
-    frame: (alpha, elapsedMs, speed) => {
-      if (document.visibilityState === 'visible') profile.playSeconds += elapsedMs / 1000;
-      session.update(elapsedMs);
-      if (session.phase === 'idle') return;
-      const run = session.run;
-      renderer.render(run.sim.state, alpha, elapsedMs);
-      hud.update(toHudInfo(run, speed));
-      if (session.phase === 'results') results.setTimeLeft(session.resultTimeLeftMs);
-      if (session.phase !== 'running' && performance.now() - lastSaveMs > AUTOSAVE_MS) save();
+  const loop = new GameLoop(
+    {
+      isRunning: () => session.phase === 'running',
+      step: () => renderer.handleEvents(session.step()),
+      frame: (alpha, elapsedMs, speed) => {
+        if (document.visibilityState === 'visible') profile.playSeconds += elapsedMs / 1000;
+        session.update(elapsedMs);
+        if (session.phase === 'idle') return;
+        const run = session.run;
+        renderer.render(run.sim.state, alpha, elapsedMs);
+        hud.update(toHudInfo(run, speed));
+        if (session.phase === 'results') results.setTimeLeft(session.resultTimeLeftMs);
+        if (session.phase !== 'running' && performance.now() - lastSaveMs > AUTOSAVE_MS) save();
+      },
     },
-  });
+    { reducedMotion: REDUCED_MOTION },
+  );
 
   bindSpeedKeys(window, setSpeed);
   bindMenuKeys(window, {
