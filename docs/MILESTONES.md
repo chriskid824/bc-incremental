@@ -7,21 +7,21 @@
 
 交付：repo、工具鏈、模擬核心骨架、平衡模擬器雛形、文件。瀏覽器能看到角色自動打一波波幾何怪物。
 
-- [ ] 文件確認：`CLAUDE.md`、`GDD.md`、`ARCHITECTURE.md`、`MILESTONES.md` **[Hoshi]**
-- [ ] Vite ＋ TypeScript strict ＋ ESLint ＋ Prettier ＋ Vitest 鷹架
-- [ ] `tsconfig.sim.json`（無 DOM）與 import 邊界的 lint 規則
-- [ ] `core`：`Num`、數字格式化（short／scientific／engineering／cjk）、sfc32 RNG 與子 stream，附測試
-- [ ] `data`：敵人、波次、天賦的 zod schema 與驗證測試，先放約 10 個佔位節點
-- [ ] `sim`：固定 timestep、生怪與波次、移動、自動攻擊、投射物、死亡與掉落、局結束，附可決定性測試（同 seed 兩次結果相同）
-- [ ] 屬性修正彙整（flat／increased／more ＋ 標籤），附測試
-- [ ] `render`：PixiJS 畫幾何敵人、投射物、傷害數字
-- [ ] `src/data/curve.ts`：GDD 第 7 節主曲線（血量分段、擊殺次數倍率），附測試
-- [ ] `tools/balance`：跑 N 局、一個貪婪策略、輸出 `runs.csv` 與 `curve_check.csv`
-- [ ] 效能量測：一局 3 分鐘的 headless 模擬耗時
-- [ ] GitHub Actions：lint、typecheck、test、build web artifact
-- [ ] `CLAUDE.md` 補上常用指令
+- [x] 文件確認：`CLAUDE.md`、`GDD.md`、`ARCHITECTURE.md`、`MILESTONES.md` **[Hoshi]**
+- [x] Vite ＋ TypeScript strict ＋ ESLint ＋ Prettier ＋ Vitest 鷹架
+- [x] `tsconfig.sim.json`（無 DOM）與 import 邊界的 lint 規則
+- [x] `core`：`Num`、數字格式化（short／scientific／engineering／cjk）、sfc32 RNG 與子 stream，附測試
+- [x] `data`：敵人、波次、天賦的 zod schema 與驗證測試，先放約 10 個佔位節點
+- [x] `sim`：固定 timestep、生怪與波次、移動、自動攻擊、投射物、死亡與掉落、局結束，附可決定性測試（同 seed 兩次結果相同）
+- [x] 屬性修正彙整（flat／increased／more ＋ 標籤），附測試
+- [x] `render`：PixiJS 畫幾何敵人、投射物、傷害數字
+- [x] `src/data/curve.ts`：GDD 第 7 節主曲線（血量分段、擊殺次數倍率），附測試
+- [x] `tools/balance`：跑 N 局、一個貪婪策略、輸出 `runs.csv` 與 `curve_check.csv`
+- [x] 效能量測：一局 3 分鐘的 headless 模擬耗時
+- [x] GitHub Actions：lint、typecheck、test、build web artifact
+- [x] `CLAUDE.md` 補上常用指令
 
-**閘門**：Hoshi 確認文件。
+**閘門**：Hoshi 確認文件。✅ 2026-10-12 文件合併（PR #1）、M0 程式合併（PR #2）。
 
 ## M1 原型對決（2026-10-21 ～ 11-10）
 
@@ -40,6 +40,8 @@
 - [ ] 操作模式 B（游標範圍）
 - [ ] 操作模式 C（自動＋新星技能）
 - [ ] 平衡模擬器支援三種模式的機器人策略，產出三種模式的曲線比較
+- [ ] 數值驗收（用 `curve_check.csv`）：60 分鐘無轉生到第 40 波 ±15%、每局溢傷時間比例 ≤ 30%、三條純流派「到達第 N 波所需時間」差距 ±20% 內。碎片收入指數（`SHARD_EXPONENT`）與接觸傷害都在這裡用模擬器調
+- [ ] 模擬核心實作 keystone 規則（`RuleSpec`），然後移除平衡策略與 autoBuy 裡「跳過 keystone」的暫時規則
 - [ ] `Analytics` 介面、Firebase 實作、本機匯出、Firestore 安全規則
 - [ ] 每種操作模式的遊玩時間分開記錄（`playtimeByMode`、`timeBeforeFirstSwitch`）
 - [ ] 試玩版發布到 itch.io（限制存取頁面），CI 用 butler 上傳

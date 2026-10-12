@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 dist/
 dist-electron/
 out/
@@ -8,3 +8,4 @@ coverage/
 .vite/
 .env
 .env.local
+.claude/worktrees/

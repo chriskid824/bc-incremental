@@ -1,0 +1,34 @@
+/**
+ * Render colors. Effect colors follow the archetype palette reserved in src/data/enemies.ts:
+ * crit yellow/white, burn orange-red, chain cyan.
+ */
+
+export const COLORS = {
+  background: 0x0b0d12,
+  arena: 0x0d1018,
+  grid: 0x1b2232,
+  arenaEdge: 0x252e44,
+  player: 0x9fe8ff,
+  playerCore: 0xe9fbff,
+  playerHit: 0xff4d5e,
+  projectile: 0xf4fbff,
+  projectileTrail: 0x9fdcff,
+  hitFlash: 0xffffff,
+  burn: 0xff7a2e,
+  chain: 0x5ff4ff,
+  hpBack: 0x05060a,
+  hpFill: 0xff6b81,
+  damageHit: 0xeef2ff,
+  damageCrit: 0xfff1a0,
+  damageBurn: 0xff8f45,
+  damageChain: 0x7ff6ff,
+} as const;
+
+/** Linear blend of two 0xRRGGBB colors; t = 0 gives a, t = 1 gives b. */
+export function mixColor(a: number, b: number, t: number): number {
+  const k = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  const r = ((a >> 16) & 0xff) + (((b >> 16) & 0xff) - ((a >> 16) & 0xff)) * k;
+  const g = ((a >> 8) & 0xff) + (((b >> 8) & 0xff) - ((a >> 8) & 0xff)) * k;
+  const bl = (a & 0xff) + ((b & 0xff) - (a & 0xff)) * k;
+  return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(bl);
+}
