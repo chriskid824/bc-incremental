@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { FixedStepClock, GameLoop, MAX_STEPS_PER_FRAME, TICK_MS } from './loop';
+import {
+  FixedStepClock,
+  GameLoop,
+  HIT_STOP_BUDGET_MS,
+  HIT_STOP_BUDGET_RATE,
+  HIT_STOP_MAX_MS,
+  HIT_STOP_MIN_MS,
+  HIT_STOP_TIME_SCALE,
+  HitStop,
+  MAX_STEPS_PER_FRAME,
+  TICK_MS,
+} from './loop';
 import type { LoopHost, Speed } from './loop';
 
 describe('FixedStepClock', () => {
@@ -32,6 +43,93 @@ describe('FixedStepClock', () => {
     clock.advance(10, 1);
     clock.reset();
     expect(clock.alpha).toBe(0);
+  });
+});
+
+describe('HitStop', () => {
+  const FRAME = 1000 / 60;
+
+  it('passes time through when no stop is running', () => {
+    const stop = new HitStop(true);
+    expect(stop.scale(FRAME)).toBeCloseTo(FRAME);
+    expect(stop.scale(-5)).toBe(0);
+  });
+
+  it('slows simulation time for the length of the stop, then resumes', () => {
+    const stop = new HitStop(true);
+    expect(stop.request(40)).toBe(40);
+    expect(stop.scale(30)).toBeCloseTo(30 * HIT_STOP_TIME_SCALE);
+    // 10 ms of stop left, then normal time.
+    expect(stop.scale(30)).toBeCloseTo(10 * HIT_STOP_TIME_SCALE + 20);
+    expect(stop.remaining).toBe(0);
+    expect(stop.scale(30)).toBeCloseTo(30);
+  });
+
+  it('caps a single stop and merges overlapping requests instead of stacking them', () => {
+    const stop = new HitStop(true);
+    expect(stop.request(500)).toBe(HIT_STOP_MAX_MS);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(0);
+    expect(stop.remaining).toBe(HIT_STOP_MAX_MS);
+    stop.scale(30);
+    // A new big request tops the stop back up to the cap, never past it.
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(30);
+    expect(stop.remaining).toBe(HIT_STOP_MAX_MS);
+  });
+
+  it('ignores requests too short to notice', () => {
+    const stop = new HitStop(true);
+    expect(stop.request(HIT_STOP_MIN_MS / 2)).toBe(0);
+    expect(stop.request(0)).toBe(0);
+    expect(stop.request(Number.NaN)).toBe(0);
+  });
+
+  it('cannot turn into a slideshow however often it is requested', () => {
+    const stop = new HitStop(true);
+    let wall = 0;
+    let sim = 0;
+    let longest = 0;
+    let run = 0;
+    for (let frame = 0; frame < 60 * 60; frame++) {
+      stop.request(HIT_STOP_MAX_MS);
+      run = stop.remaining > 0 ? run + FRAME : 0;
+      longest = Math.max(longest, run);
+      sim += stop.scale(FRAME);
+      wall += FRAME;
+    }
+    // Over a minute of constant requests, stops eat at most the budget rate (plus the bank).
+    const stoppedShare = (wall - sim) / (1 - HIT_STOP_TIME_SCALE) / wall;
+    expect(stoppedShare).toBeLessThanOrEqual(HIT_STOP_BUDGET_RATE + HIT_STOP_BUDGET_MS / wall);
+    expect(sim / wall).toBeGreaterThan(0.9);
+    // The opening bank allows about two full stops back to back (plus what refills meanwhile).
+    expect(longest).toBeLessThanOrEqual(HIT_STOP_BUDGET_MS * 1.25);
+  });
+
+  it('refills its budget over time', () => {
+    const stop = new HitStop(true);
+    stop.request(HIT_STOP_MAX_MS);
+    stop.scale(HIT_STOP_MAX_MS);
+    stop.request(HIT_STOP_MAX_MS);
+    stop.scale(HIT_STOP_MAX_MS);
+    // The bank is spent: a request right away gets only what refilled meanwhile.
+    expect(stop.request(HIT_STOP_MAX_MS)).toBeLessThan(HIT_STOP_MIN_MS);
+    stop.scale(HIT_STOP_MAX_MS / HIT_STOP_BUDGET_RATE);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS);
+  });
+
+  it('does nothing under reduced motion', () => {
+    const stop = new HitStop(false);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(0);
+    expect(stop.scale(FRAME)).toBeCloseTo(FRAME);
+  });
+
+  it('resets to no stop and a full budget', () => {
+    const stop = new HitStop(true);
+    stop.request(HIT_STOP_MAX_MS);
+    stop.scale(HIT_STOP_MAX_MS);
+    stop.request(HIT_STOP_MAX_MS);
+    stop.reset();
+    expect(stop.remaining).toBe(0);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS);
   });
 });
 
@@ -74,5 +172,31 @@ describe('GameLoop', () => {
     loop.tick(TICK_MS * 4);
     expect(host.steps).toBe(2);
     expect(host.frames).toHaveLength(2);
+  });
+
+  it('runs fewer ticks during a hit-stop and catches up to normal speed after it', () => {
+    const host = new FakeHost(Infinity);
+    const loop = new GameLoop(host);
+    expect(loop.hitStop(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS);
+    // 80 ms of wall-clock time at 10% speed is under one tick.
+    loop.tick(HIT_STOP_MAX_MS);
+    expect(host.steps).toBe(0);
+    loop.tick(TICK_MS * 3);
+    expect(host.steps).toBe(3);
+  });
+
+  it('ignores hit-stop under reduced motion and drops it with the clock', () => {
+    const calm = new FakeHost(Infinity);
+    const calmLoop = new GameLoop(calm, { reducedMotion: true });
+    expect(calmLoop.hitStop(HIT_STOP_MAX_MS)).toBe(0);
+    calmLoop.tick(TICK_MS * 2 + 0.01);
+    expect(calm.steps).toBe(2);
+
+    const host = new FakeHost(Infinity);
+    const loop = new GameLoop(host);
+    loop.hitStop(HIT_STOP_MAX_MS);
+    loop.resetClock();
+    loop.tick(TICK_MS * 2 + 0.01);
+    expect(host.steps).toBe(2);
   });
 });
