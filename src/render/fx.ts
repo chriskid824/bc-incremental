@@ -19,7 +19,7 @@ export const FX_FLAME = 3;
 export const FX_EMBER = 4;
 export type FxGroup = 0 | 1 | 2 | 3 | 4;
 
-export const FX_CAPS: readonly number[] = [420, 320, 90, 520, 64];
+export const FX_CAPS: readonly number[] = [420, 360, 110, 520, 64];
 
 /** What happens when a particle expires. */
 export const THEN_NONE = 0;

@@ -4,7 +4,7 @@
  * spawn goes through the capped pools, so these can be called for every event.
  */
 
-import type { FxParticles } from './fx';
+import type { FxGroup, FxParticles } from './fx';
 import { FX_DEBRIS, FX_EMBER, FX_FLAME, FX_FLASH, FX_SPARK, THEN_FLAME_PUFF } from './fx';
 import type { FxTextures } from './fxTextures';
 import { COLORS, mixColor } from './palette';
@@ -73,7 +73,8 @@ export class Bursts {
 
   /** A projectile hit: a puff and a few sparks thrown along (dirX, dirY). */
   hit(x: number, y: number, dirX: number, dirY: number): void {
-    this.glow(FX_FLASH, x, y, 26, COLORS.spark, COLORS.spark, 0.8, 90);
+    // Puffs share the spark budget so a hail of hits never starves kill and crit flashes.
+    this.glow(FX_SPARK, x, y, 26, COLORS.spark, COLORS.spark, 0.8, 90);
     this.sparks(x, y, dirX, dirY, 3, 0xffffff, COLORS.spark, 0.8);
   }
 
@@ -183,7 +184,7 @@ export class Bursts {
   }
 
   private glow(
-    group: typeof FX_FLASH | typeof FX_FLAME,
+    group: FxGroup,
     x: number,
     y: number,
     diameter: number,
