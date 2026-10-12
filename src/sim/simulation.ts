@@ -17,11 +17,13 @@ import { createStreams } from '../core/rng';
 import { composeWave } from '../data/compose';
 import { shardsPerStdEnemy, stdHp } from '../data/curve';
 import { DAMAGE_TAG_BIT, DAMAGE_TAG_MASK_COUNT, STAT_IDS } from '../data/stats';
-import type { EnemyDef, GameData } from '../data/types';
+import { ENEMY_IDS } from '../data/types';
+import type { EnemyDef, EnemyId, GameData } from '../data/types';
 import { compileRules } from './rules';
 import { pickTarget } from './targeting';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, MAX_RUN_SECONDS, PLAYER_RADIUS, TICK_RATE } from './types';
 import type {
+  ContactTally,
   EndReason,
   EnemyState,
   InputFrame,
@@ -249,6 +251,10 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   let damageChain = ZERO;
   let damageBurn = ZERO;
   let maxHit = ZERO;
+  /** Contact hits and damage per enemy type (RunResult.damageTakenBy). */
+  const taken = {} as Record<EnemyId, { hits: number; damage: number }>;
+  for (const id of ENEMY_IDS) taken[id] = { hits: 0, damage: 0 };
+  let killedBy: EnemyId | null = null;
   let runResult: RunResult | null = null;
 
   // ---- Waves and spawning ----
@@ -415,6 +421,10 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       if (enemy.dist <= enemy.contactDist && player.life > 0) {
         const damageTaken = enemy.def.contactDamage;
         player.life = Math.max(0, player.life - damageTaken);
+        const tally = taken[enemy.type];
+        tally.hits++;
+        tally.damage += damageTaken;
+        if (player.life <= 0) killedBy = enemy.type;
         enemy.rec.leaked = true;
         removeEnemy(enemy);
         events.push({
@@ -769,6 +779,15 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   function end(reason: EndReason): void {
     state.finished = true;
     events.push({ type: 'runEnded', reason });
+    const takenBy = {} as Record<EnemyId, ContactTally>;
+    let leaks = 0;
+    let damageTaken = 0;
+    for (const id of ENEMY_IDS) {
+      const tally = taken[id];
+      takenBy[id] = { hits: tally.hits, damage: tally.damage };
+      leaks += tally.hits;
+      damageTaken += tally.damage;
+    }
     runResult = {
       startWave: startWaveNumber,
       highestWaveReached: state.highestWaveReached,
@@ -782,6 +801,10 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       damage: { hit: damageHit, crit: damageCrit, burn: damageBurn, chain: damageChain },
       maxHit,
       overkillSeconds: overkillTicks / TICK_RATE,
+      leaks,
+      damageTaken,
+      damageTakenBy: takenBy,
+      killedBy,
     };
   }
 

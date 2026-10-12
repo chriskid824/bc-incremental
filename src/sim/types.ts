@@ -175,6 +175,12 @@ export interface DamageBreakdown {
   readonly chain: Num;
 }
 
+/** Enemies of one type that reached the player, and their contact damage. */
+export interface ContactTally {
+  readonly hits: number;
+  readonly damage: number;
+}
+
 export interface RunResult {
   readonly startWave: number;
   readonly highestWaveReached: number;
@@ -198,6 +204,17 @@ export interface RunResult {
   readonly maxHit: Num;
   /** Seconds spent in waves where the enemies' standard HP was ≤ 1/10 of the average hit. */
   readonly overkillSeconds: number;
+  /** Enemies that reached the player (one playerHit event each). */
+  readonly leaks: number;
+  /**
+   * Their total contact damage, as in the playerHit events: the hit that brings life to 0
+   * counts in full, so this can exceed max life.
+   */
+  readonly damageTaken: number;
+  /** leaks and damageTaken by enemy type; every type is present, zero if it never got through. */
+  readonly damageTakenBy: Readonly<Record<EnemyId, ContactTally>>;
+  /** Type of the enemy whose contact brought life to 0; null unless endReason is 'death'. */
+  readonly killedBy: EnemyId | null;
 }
 
 export interface Simulation {
