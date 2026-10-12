@@ -1,6 +1,6 @@
 # 架構文件
 
-> 狀態：草稿 v0.1（2026-10-12），等 Hoshi 確認。
+> 狀態：草稿 v0.2（2026-10-12），依 Hoshi 第一輪審查修改。
 
 ## 1. 技術選型
 
@@ -47,7 +47,7 @@ tests/         跨模組測試、存檔 fixture
 ```mermaid
 flowchart LR
   D[data/*.ts<br/>zod 驗證] --> M[meta<br/>天賦配點、資源、轉生]
-  M -->|StatBlock + RuleFlags + seed| S[sim<br/>一局模擬]
+  M -->|StatBlock + RuleFlags + 起始波次 + seed| S[sim<br/>一局模擬]
   I[InputFrame<br/>滑鼠或機器人] --> S
   S -->|SimEvents| R[render<br/>PixiJS]
   S -->|RunResult| M
@@ -56,7 +56,7 @@ flowchart LR
   S -.headless.-> B[tools/balance<br/>CSV]
 ```
 
-- `meta` 把天賦網與昇華編譯成一個 `StatBlock`（所有屬性的最終值）和一組 `RuleFlags`（keystone 開關與參數），交給 `sim` 開一局。
+- `meta` 把天賦網與昇華編譯成一個 `StatBlock`（所有屬性的最終值）和一組 `RuleFlags`（keystone 開關與參數），連同起始波次交給 `sim` 開一局。跳波補償由 `meta` 在結算時依期望掉落計算，`sim` 只回報有沒有清掉起始波次。
 - `sim` 每個 tick 產出 `SimEvents`（擊中、暴擊、點燃、連鎖、死亡、掉落）。`render` 只讀狀態和事件，不改狀態。
 - 一局結束時 `sim` 回傳 `RunResult`（最遠波次、各類傷害統計、掉落），`meta` 結算資源後存檔。
 - 平衡模擬器直接呼叫 `meta` 與 `sim`，不載入 `render`、`ui`、`platform`。
@@ -137,10 +137,12 @@ interface Platform {
 | 平台 | storage | achievements | analytics | ads |
 | --- | --- | --- | --- | --- |
 | web（itch.io、試玩） | localStorage | 本機記錄＋提示 | Firebase＋本機 | no-op |
-| steam（Electron） | 檔案（透過 preload IPC） | steamworks.js | 本機（上市版預設不送雲端） | no-op |
+| steam demo（Electron） | 檔案（透過 preload IPC） | steamworks.js | Firebase＋本機（預設開，可在設定關閉） | no-op |
+| steam 正式版（Electron） | 檔案（透過 preload IPC） | steamworks.js | 本機（送雲端預設關閉，可在設定開啟） | no-op |
 | crazygames／poki | 平台 SDK 存檔 | 本機 | 平台 SDK | 平台 SDK |
 
 - 用 Vite 的 `mode` 在建置時選平台（`vite build --mode steam`），其他平台的實作會被 tree-shake 掉。
+- 另一個建置參數 `VITE_FLAVOR=demo|full` 決定 demo 或正式版：demo 內容上限、analytics 預設值、結束畫面的願望清單按鈕都看它。
 - portal 實作在有需要時才寫（不在 MVP 必做）。
 
 ## 8. 存檔格式
@@ -159,11 +161,22 @@ interface Platform {
 ## 9. 試玩數據
 
 - 匿名安裝 ID（隨機 UUID，存在本機），不收任何個資。
-- 事件：`session_start`、`run_end`（波次、時長、操作模式、各流派投入點數、最高傷害）、`talent_allocate`、`prestige`、`session_end`（最後停留的畫面 = 退出點）。
-- 本機先緩衝，每 5 分鐘、結算畫面和關閉頁面時批次寫入 Firestore（一個 session 一份文件），減少寫入次數。
-- 免費額度是每天 2 萬次寫入。M1 試玩量很小沒問題；Next Fest 可能有每天數千名玩家，M3 前要重新估算，必要時改成抽樣或只在 session 結束寫一次。
+- 事件：`session_start`、`run_end`（起始波次、最遠波次、時長、操作模式、各流派投入點數、最高傷害）、`talent_allocate`、`mode_switch`、`prestige`、`session_end`（最後停留的畫面 = 退出點）。
+- **每種操作模式的遊玩時間分開記錄**：session 文件裡有 `playtimeByMode` 和 `firstAssignedMode`、`timeBeforeFirstSwitch`。M1 閘門用「切換模式前」的遊玩時間比較各模式。
+- 本機先緩衝，再批次寫入 Firestore（一個 session 一份文件），減少寫入次數：
+  - 網頁試玩版：每 5 分鐘、結算畫面、關閉頁面時寫入。
+  - Steam demo：每 10 分鐘與關閉遊戲時寫入（Electron main process 可以在結束前確實送出）。
+- 各 build 的預設值：
+
+| build | 送雲端 | 說明位置 |
+| --- | --- | --- |
+| 網頁試玩版（itch.io） | 預設開，可關閉 | 設定頁、itch.io 頁面 |
+| Steam demo | 預設開，可關閉 | 設定頁、商店頁 demo 說明 |
+| Steam 正式版 | 預設關，可開啟 | 設定頁 |
+
+- 免費額度是每天 2 萬次寫入，超過只會寫入失敗、不會收費。估算公式：`每日寫入 ≈ 每日玩家數 × 每人 session 數 × 每 session 寫入次數`。例：Next Fest 每天 5,000 名玩家 × 1.2 session × 約 4 次 = 2.4 萬，會超過。M3 要依實際 demo 的 session 長度重算，必要時改成抽樣（例如只送一半的安裝 ID）或拉長寫入間隔。這項列在 `MILESTONES.md` M3。
 - Firestore 安全規則：只允許新增、限制文件大小、不允許讀取。
-- 設定頁有「匯出試玩數據」按鈕當備案；隱私說明寫在設定頁與 itch.io 頁面。
+- 設定頁有「匯出試玩數據」按鈕當備案。
 
 ## 10. 渲染與展示模式
 
@@ -184,12 +197,15 @@ interface Platform {
 npm run balance -- --strategy crit-greedy --mode auto --runs 2000 --seed 1 --out out/crit
 ```
 
-- **策略** = 配點策略（依優先順序貪婪購買，例：`crit-greedy`、`dot-greedy`、`chain-greedy`、`hybrid-crit-dot`）＋ 操作機器人（第 4.5 節）＋ 何時轉生。
+- **策略** = 配點策略（依優先順序貪婪購買，例：`crit-greedy`、`dot-greedy`、`chain-greedy`、`hybrid-crit-dot`）＋ 操作機器人（第 4.5 節）＋ 起始波次策略 ＋ 何時轉生。
+- 起始波次策略（`--start-wave`）：`max`（預設，每局選允許的最高波次）、`ratio:<x>`（選最遠波次的 x 倍）、`1`（永遠從頭打，用來和跳波比較收入）。`startWaveRatio`、`skipRewardRate` 也可以用參數覆寫。
 - 模擬完整進度：開局 → 結算 → 配點 → 下一局 → 轉生 …，直到時間上限或目標波次。局間停留時間是可設定的假設值（預設 20 秒），用來換算玩家實際遊玩時間。
 - 輸出 CSV：
-  - `runs.csv`：每局一列（累計時間、局數、最遠波次、各類 DPS、資源收入、已點節點數）
+  - `runs.csv`：每局一列（累計時間、局數、起始波次、最遠波次、該波標準怪血量、有效單發傷害 `D`、前線擊殺次數、溢傷 10 倍以上波次的時間比例、各類 DPS、資源收入（含跳波補償）、已點節點數）
   - `milestones.csv`：到達第 N 波、第一個 keystone、第一次轉生的累計時間
+  - `curve_check.csv`：每個驗收時間點的實際值與 GDD 第 7 節主曲線目標並列，標出超出容許範圍的列
   - `dps_probe.csv`：固定 build 對木樁的 DPS 曲線
+- 驗收標準就是 GDD 第 7.5 節；主曲線（血量分段、擊殺次數倍率）放在 `src/data/curve.ts`，遊戲與模擬器共用同一份。
 - `worker_threads` 平行跑；M0 先量效能，目標一局 3 分鐘的模擬在 100 ms 內跑完。
 
 ## 13. i18n
