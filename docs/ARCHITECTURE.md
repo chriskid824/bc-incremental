@@ -94,15 +94,14 @@ type Modifier = {
 - 最終值 = `(base + Σflat) × (1 + Σincreased) × Π(1 + more)`，依標籤分別計算。
 - **keystone 不寫成腳本**：每個 keystone 對應一個在程式裡列舉的 `RuleId` 加上型別化參數（例：`{ rule: 'critsAlwaysIgnite' }`）。資料檔只能引用已存在的規則，zod 會擋掉打錯字的 ID。
 
-### 4.5 操作模式與輸入
+### 4.5 輸入
 
 ```ts
 type InputFrame = { cursor: Vec2 | null; activate: boolean };
-type ControlMode = 'auto' | 'cursorZone' | 'activeSkill';
+type ControlMode = 'auto';
 ```
 
-- 模式是 `sim` 的設定，三種模式共用所有系統，只有「攻擊來源」系統不同。
-- 平衡模擬器的機器人策略：`cursorZone` 游標追最密集的敵群（空間雜湊格裡敵人最多的格子），`activeSkill` 冷卻好就對最密集處施放。
+- 操作模式定為全自動（GDD 2.3），`sim` 目前不讀 `InputFrame`。介面保留，之後如果要加局中操作，不必改模擬核心的呼叫方式。
 
 ## 5. 大數字
 
@@ -161,8 +160,8 @@ interface Platform {
 ## 9. 試玩數據
 
 - 匿名安裝 ID（隨機 UUID，存在本機），不收任何個資。
-- 事件：`session_start`、`run_end`（起始波次、最遠波次、時長、操作模式、各流派投入點數、最高傷害）、`talent_allocate`、`mode_switch`、`prestige`、`session_end`（最後停留的畫面 = 退出點）。
-- **每種操作模式的遊玩時間分開記錄**：session 文件裡有 `playtimeByMode` 和 `firstAssignedMode`、`timeBeforeFirstSwitch`。M1 閘門用「切換模式前」的遊玩時間比較各模式。
+- 事件：`session_start`、`run_end`（起始波次、最遠波次、時長、各流派投入點數、keystone、最高傷害）、`talent_allocate`、`respec`、`prestige`、`session_end`（最後停留的畫面 = 退出點）。
+- M1 閘門看每位玩家的總遊玩時間中位數（GDD 2.3：只有模式 A）。
 - 本機先緩衝，再批次寫入 Firestore（一個 session 一份文件），減少寫入次數：
   - 網頁試玩版：每 5 分鐘、結算畫面、關閉頁面時寫入。
   - Steam demo：每 10 分鐘與關閉遊戲時寫入（Electron main process 可以在結束前確實送出）。
@@ -194,10 +193,10 @@ interface Platform {
 ## 12. 平衡模擬器
 
 ```
-npm run balance -- --strategy crit-greedy --mode auto --runs 2000 --seed 1 --out out/crit
+npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --out out/crit
 ```
 
-- **策略** = 配點策略（依優先順序貪婪購買，例：`crit-greedy`、`dot-greedy`、`chain-greedy`、`hybrid-crit-dot`）＋ 操作機器人（第 4.5 節）＋ 起始波次策略 ＋ 何時轉生。
+- **策略** = 配點策略（依優先順序貪婪購買，例：`crit-greedy`、`dot-greedy`、`chain-greedy`、`hybrid-crit-dot`）＋ 起始波次策略 ＋ 何時轉生。
 - 起始波次策略（`--start-wave`）：`max`（預設，每局選允許的最高波次）、`ratio:<x>`（選最遠波次的 x 倍）、`1`（永遠從頭打，用來和跳波比較收入）。`startWaveRatio`、`skipRewardRate` 也可以用參數覆寫。
 - 模擬完整進度：開局 → 結算 → 配點 → 下一局 → 轉生 …，直到時間上限或目標波次。局間停留時間是可設定的假設值（預設 20 秒），用來換算玩家實際遊玩時間。
 - 輸出 CSV：
