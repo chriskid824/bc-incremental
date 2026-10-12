@@ -4,6 +4,7 @@ import {
   GameLoop,
   HIT_STOP_BUDGET_MS,
   HIT_STOP_BUDGET_RATE,
+  HIT_STOP_COOLDOWN_MS,
   HIT_STOP_MAX_MS,
   HIT_STOP_MIN_MS,
   HIT_STOP_TIME_SCALE,
@@ -71,9 +72,39 @@ describe('HitStop', () => {
     expect(stop.request(HIT_STOP_MAX_MS)).toBe(0);
     expect(stop.remaining).toBe(HIT_STOP_MAX_MS);
     stop.scale(30);
-    // A new big request tops the stop back up to the cap, never past it.
-    expect(stop.request(HIT_STOP_MAX_MS)).toBe(30);
-    expect(stop.remaining).toBe(HIT_STOP_MAX_MS);
+    // A full stop cannot be stretched: no stop runs past the cap from its start.
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(0);
+    expect(stop.remaining).toBe(HIT_STOP_MAX_MS - 30);
+  });
+
+  it('lets a bigger request stretch a short stop, up to the cap from its start', () => {
+    const stop = new HitStop(true);
+    expect(stop.request(30)).toBe(30);
+    stop.scale(10);
+    // 20 ms left; a boss kill asks for a full stop and gets what fits since the stop began.
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS - 30);
+    expect(stop.remaining).toBe(HIT_STOP_MAX_MS - 10);
+  });
+
+  it('waits out a cooldown after a stop before starting the next one', () => {
+    const stop = new HitStop(true);
+    stop.request(HIT_STOP_MAX_MS);
+    stop.scale(HIT_STOP_MAX_MS);
+    expect(stop.remaining).toBe(0);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(0);
+    stop.scale(HIT_STOP_COOLDOWN_MS - 1);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(0);
+    stop.scale(1);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS);
+  });
+
+  it('lets only a longer stop cut the cooldown short', () => {
+    const stop = new HitStop(true);
+    // A crit stop ends; another crit right after is refused, a boss kill is not.
+    stop.request(30);
+    stop.scale(30);
+    expect(stop.request(30)).toBe(0);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS);
   });
 
   it('ignores requests too short to notice', () => {
@@ -91,28 +122,36 @@ describe('HitStop', () => {
     let run = 0;
     for (let frame = 0; frame < 60 * 60; frame++) {
       stop.request(HIT_STOP_MAX_MS);
-      run = stop.remaining > 0 ? run + FRAME : 0;
+      const simMs = stop.scale(FRAME);
+      // Wall-clock ms of this frame spent stopped; a run of them is one continuous stop.
+      const stopped = (FRAME - simMs) / (1 - HIT_STOP_TIME_SCALE);
+      run = stopped > 1e-9 ? run + stopped : 0;
       longest = Math.max(longest, run);
-      sim += stop.scale(FRAME);
+      sim += simMs;
       wall += FRAME;
     }
     // Over a minute of constant requests, stops eat at most the budget rate (plus the bank).
     const stoppedShare = (wall - sim) / (1 - HIT_STOP_TIME_SCALE) / wall;
     expect(stoppedShare).toBeLessThanOrEqual(HIT_STOP_BUDGET_RATE + HIT_STOP_BUDGET_MS / wall);
     expect(sim / wall).toBeGreaterThan(0.9);
-    // The opening bank allows about two full stops back to back (plus what refills meanwhile).
-    expect(longest).toBeLessThanOrEqual(HIT_STOP_BUDGET_MS * 1.25);
+    // Requests every frame never merge into one long freeze.
+    expect(longest).toBeGreaterThan(0);
+    expect(longest).toBeLessThanOrEqual(HIT_STOP_MAX_MS + 1e-6);
   });
 
   it('refills its budget over time', () => {
     const stop = new HitStop(true);
-    stop.request(HIT_STOP_MAX_MS);
-    stop.scale(HIT_STOP_MAX_MS);
-    stop.request(HIT_STOP_MAX_MS);
-    stop.scale(HIT_STOP_MAX_MS);
-    // The bank is spent: a request right away gets only what refilled meanwhile.
-    expect(stop.request(HIT_STOP_MAX_MS)).toBeLessThan(HIT_STOP_MIN_MS);
-    stop.scale(HIT_STOP_MAX_MS / HIT_STOP_BUDGET_RATE);
+    const fullStop = (): number => {
+      const granted = stop.request(HIT_STOP_MAX_MS);
+      stop.scale(HIT_STOP_MAX_MS);
+      stop.scale(HIT_STOP_COOLDOWN_MS);
+      return granted;
+    };
+    // The bank covers two full stops in quick succession; the third gets what refilled.
+    expect(fullStop()).toBe(HIT_STOP_MAX_MS);
+    expect(fullStop()).toBe(HIT_STOP_MAX_MS);
+    expect(fullStop()).toBeLessThan(HIT_STOP_MAX_MS);
+    stop.scale(HIT_STOP_BUDGET_MS / HIT_STOP_BUDGET_RATE);
     expect(stop.request(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS);
   });
 
@@ -122,11 +161,16 @@ describe('HitStop', () => {
     expect(stop.scale(FRAME)).toBeCloseTo(FRAME);
   });
 
-  it('resets to no stop and a full budget', () => {
+  it('resets to no stop, no cooldown and a full budget', () => {
     const stop = new HitStop(true);
     stop.request(HIT_STOP_MAX_MS);
+    stop.scale(HIT_STOP_MAX_MS / 2);
+    stop.reset();
+    expect(stop.remaining).toBe(0);
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS);
     stop.scale(HIT_STOP_MAX_MS);
-    stop.request(HIT_STOP_MAX_MS);
+    // Refused inside the cooldown, until reset.
+    expect(stop.request(HIT_STOP_MAX_MS)).toBe(0);
     stop.reset();
     expect(stop.remaining).toBe(0);
     expect(stop.request(HIT_STOP_MAX_MS)).toBe(HIT_STOP_MAX_MS);

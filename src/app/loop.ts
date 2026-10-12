@@ -46,28 +46,39 @@ export class FixedStepClock {
   }
 }
 
-/** Longest single hit-stop, in wall-clock ms. */
+/** Longest hit-stop, in wall-clock ms from its start, however many requests extend it. */
 export const HIT_STOP_MAX_MS = 80;
 /** A request that would add less than this is ignored. */
 export const HIT_STOP_MIN_MS = 15;
 /** Simulation time runs at this fraction of wall-clock time during a hit-stop. */
 export const HIT_STOP_TIME_SCALE = 0.1;
 /**
+ * After a stop ends, requests are refused for this long, so stops never run back to back;
+ * only a request longer than the stop that just ended (a boss kill after a crit) may cut it short.
+ */
+export const HIT_STOP_COOLDOWN_MS = 200;
+/**
  * Hit-stop ms earned back per wall-clock ms, up to HIT_STOP_BUDGET_MS. Stopped time can never
  * exceed this share of play however often stops are requested, so they cannot chain into a
  * slideshow.
  */
 export const HIT_STOP_BUDGET_RATE = 0.08;
-/** Banked hit-stop: enough for two full stops back to back (a crit, then a boss kill). */
+/** Banked hit-stop: enough for two full stops in quick succession (a crit, then a boss kill). */
 export const HIT_STOP_BUDGET_MS = HIT_STOP_MAX_MS * 2;
 
 /**
  * Brief time dilation on big moments. Requests that overlap a running stop merge (the longer
- * wins) instead of stacking, each stop is capped at HIT_STOP_MAX_MS, and all stops draw on a
- * budget that refills with wall-clock time. Disabled under reduced motion.
+ * wins) instead of stacking, and no stop runs longer than HIT_STOP_MAX_MS from its start.
+ * A new stop waits out HIT_STOP_COOLDOWN_MS after the last one unless it is longer, and all
+ * stops draw on a budget that refills with wall-clock time. Disabled under reduced motion.
  */
 export class HitStop {
   private remainingMs = 0;
+  /** Wall-clock ms granted to the running stop: elapsed plus remaining. */
+  private lengthMs = 0;
+  /** Length of the last finished stop, while its cooldown runs. */
+  private lastLengthMs = 0;
+  private cooldownMs = 0;
   private budgetMs = HIT_STOP_BUDGET_MS;
 
   constructor(private readonly enabled: boolean) {}
@@ -81,9 +92,13 @@ export class HitStop {
   request(ms: number): number {
     if (!this.enabled || !(ms > 0)) return 0;
     const wanted = Math.min(ms, HIT_STOP_MAX_MS);
-    const extra = Math.min(wanted - this.remainingMs, this.budgetMs);
+    const running = this.remainingMs > 0;
+    if (!running && this.cooldownMs > 0 && wanted <= this.lastLengthMs) return 0;
+    const length = running ? this.lengthMs : 0;
+    const extra = Math.min(wanted - this.remainingMs, HIT_STOP_MAX_MS - length, this.budgetMs);
     if (extra <= 0 || this.remainingMs + extra < HIT_STOP_MIN_MS) return 0;
     this.remainingMs += extra;
+    this.lengthMs = length + extra;
     this.budgetMs -= extra;
     return extra;
   }
@@ -92,14 +107,27 @@ export class HitStop {
   scale(elapsedMs: number): number {
     const elapsed = Math.max(0, elapsedMs);
     this.budgetMs = Math.min(HIT_STOP_BUDGET_MS, this.budgetMs + elapsed * HIT_STOP_BUDGET_RATE);
-    if (this.remainingMs <= 0) return elapsed;
+    if (this.remainingMs <= 0) {
+      this.cooldownMs = Math.max(0, this.cooldownMs - elapsed);
+      return elapsed;
+    }
     const stopped = Math.min(elapsed, this.remainingMs);
     this.remainingMs -= stopped;
+    if (this.remainingMs <= 0) {
+      this.remainingMs = 0;
+      this.lastLengthMs = this.lengthMs;
+      this.lengthMs = 0;
+      // The rest of this frame already counts toward the cooldown.
+      this.cooldownMs = Math.max(0, HIT_STOP_COOLDOWN_MS - (elapsed - stopped));
+    }
     return elapsed - stopped + stopped * HIT_STOP_TIME_SCALE;
   }
 
   reset(): void {
     this.remainingMs = 0;
+    this.lengthMs = 0;
+    this.lastLengthMs = 0;
+    this.cooldownMs = 0;
     this.budgetMs = HIT_STOP_BUDGET_MS;
   }
 }
