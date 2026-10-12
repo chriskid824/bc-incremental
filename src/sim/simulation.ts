@@ -2,10 +2,12 @@
  * Deterministic run simulation (docs/ARCHITECTURE.md §4, docs/GDD.md §2–3, §7).
  *
  * Each step() advances one fixed tick and runs the systems in a fixed order:
- * wave start → spawn → movement and contact → attack → projectiles (hits, chains, kills,
- * drops) → burn → compaction → wave clears → overkill → run end.
+ * wave start → spawn → movement and contact → attack → projectiles (retargets, hits, chains,
+ * kills, drops) → burn → compaction → wave clears → overkill → run end.
  * Randomness comes only from the seeded spawn, combat and drops streams, and entity arrays
  * stay ordered by increasing id, so a seed fully determines the run.
+ * Projectiles spread over enemies that projectiles already in flight will not kill, and
+ * retarget when their target dies first (src/sim/targeting.ts).
  * Keystone rules (config.rules) arrive in M1; M0 ignores them.
  */
 
@@ -16,7 +18,8 @@ import { composeWave } from '../data/compose';
 import { shardsPerStdEnemy, stdHp } from '../data/curve';
 import { DAMAGE_TAG_BIT, DAMAGE_TAG_MASK_COUNT, STAT_IDS } from '../data/stats';
 import type { EnemyDef, GameData } from '../data/types';
-import { ARENA_HEIGHT, ARENA_WIDTH, DT, MAX_RUN_SECONDS, TICK_RATE } from './types';
+import { pickTarget } from './targeting';
+import { ARENA_HEIGHT, ARENA_WIDTH, DT, MAX_RUN_SECONDS, PLAYER_RADIUS, TICK_RATE } from './types';
 import type {
   EndReason,
   EnemyState,
@@ -28,9 +31,6 @@ import type {
   SimState,
   Simulation,
 } from './types';
-
-/** Player collision radius in arena units. */
-export const PLAYER_RADIUS = 30;
 
 /** Burn damage is dealt on a global cadence of this many ticks (0.25 s). */
 export const BURN_TICK_INTERVAL = 15;
@@ -52,7 +52,10 @@ interface WaveRecord {
   readonly startTick: number;
   /** Released enemies of this wave, split children included, that are still alive. */
   alive: number;
+  /** Every enemy is released and gone, killed or not. */
   cleared: boolean;
+  /** One of its enemies, split children included, reached the player. */
+  leaked: boolean;
   readonly stdHp: number;
   readonly shardsPerStd: number;
 }
@@ -83,10 +86,12 @@ interface Enemy extends EnemyState {
   burnNextEnd: number;
   /** Serial of the last attack that hit this enemy, so chains skip it. */
   hitMark: number;
+  /** Projectiles in flight towards this enemy (see src/sim/targeting.ts). */
+  inbound: number;
 }
 
 interface Projectile extends ProjectileState {
-  readonly target: Enemy;
+  target: Enemy;
 }
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
@@ -155,6 +160,8 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   const coreGain = Math.max(0, values.coreGain);
   /** Average primary hit, for overkill tracking (docs/GDD.md §2.2). */
   const expectedHit = values.damage * multAt(HIT) * (1 + critChance * (critMultiplier - 1));
+  /** Damage a projectile in flight is expected to deal, for targeting: the non-crit primary hit. */
+  const projectileEstimate = mul(damage, multAt(HIT));
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
@@ -181,7 +188,8 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   /** Started waves that are not cleared yet, in wave order. */
   const open: WaveRecord[] = [];
   let current: WaveRecord | null = null;
-  let startWaveCleared = false;
+  /** The start wave, once started; it decides RunResult.clearedStartWave. */
+  let startRec: WaveRecord | null = null;
   let now = 0;
   let nextEnemyId = 1;
   let nextProjectileId = 1;
@@ -220,11 +228,13 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       startTick: now,
       alive: 0,
       cleared: false,
+      leaked: false,
       stdHp: stdHp(wave),
       shardsPerStd: shardsPerStdEnemy(wave),
     };
     open.push(rec);
     current = rec;
+    if (wave === startWaveNumber) startRec = rec;
     state.wave = wave;
     state.highestWaveReached = wave;
     events.push({ type: 'waveStarted', wave });
@@ -295,6 +305,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       burnPending: ZERO,
       burnNextEnd: Infinity,
       hitMark: 0,
+      inbound: 0,
     };
     enemies.push(enemy);
     rec.alive++;
@@ -329,7 +340,6 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       if (rec.alive === 0 && rec.released === rec.queue.length) {
         rec.cleared = true;
         if (rec.wave > state.highestWaveCleared) state.highestWaveCleared = rec.wave;
-        if (rec.wave === startWaveNumber) startWaveCleared = true;
         events.push({ type: 'waveCleared', wave: rec.wave });
       } else {
         open[kept++] = rec;
@@ -354,6 +364,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       if (enemy.dist <= enemy.contactDist && player.life > 0) {
         const damageTaken = enemy.def.contactDamage;
         player.life = Math.max(0, player.life - damageTaken);
+        enemy.rec.leaked = true;
         removeEnemy(enemy);
         events.push({
           type: 'playerHit',
@@ -367,17 +378,18 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
 
   // ---- Attacks, projectiles, hits and chains ----
 
+  /** Fires every due attack, each at its own target so projectiles spread over enemies. */
   function attack(): void {
     attackTicks += 1;
-    if (attackTicks < attackInterval) return;
-    const target = nearestToPlayer();
-    if (target === null) {
-      // Stay ready without banking attacks: fire on the tick a target appears.
-      attackTicks = attackInterval - 1;
-      return;
-    }
-    do {
+    while (attackTicks >= attackInterval) {
+      const target = pickTarget(enemies, player.x, player.y, projectileEstimate);
+      if (target === null) {
+        // Stay ready without banking attacks: fire on the tick a target appears.
+        attackTicks = attackInterval - 1;
+        return;
+      }
       attackTicks -= attackInterval;
+      target.inbound++;
       const projectile: Projectile = {
         id: nextProjectileId++,
         x: player.x,
@@ -390,21 +402,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       };
       projectiles.push(projectile);
       events.push({ type: 'attack', projectileId: projectile.id, targetId: target.id });
-    } while (attackTicks >= attackInterval);
-  }
-
-  /** Alive enemy closest to the player; the lower id wins ties. */
-  function nearestToPlayer(): Enemy | null {
-    let best: Enemy | null = null;
-    let bestDist = Infinity;
-    for (let i = 0; i < enemies.length; i++) {
-      const enemy = enemies[i] as Enemy;
-      if (enemy.alive && enemy.dist < bestDist) {
-        best = enemy;
-        bestDist = enemy.dist;
-      }
     }
-    return best;
   }
 
   /** Alive enemy closest to (x, y) within chain range not hit by the current attack. */
@@ -425,16 +423,25 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     return best;
   }
 
+  /** Homes each projectile on its target, retargeting first if the target died. */
   function moveProjectiles(): void {
     for (let i = 0; i < projectiles.length; i++) {
       const projectile = projectiles[i] as Projectile;
       projectile.prevX = projectile.x;
       projectile.prevY = projectile.y;
-      const target = projectile.target;
+      let target = projectile.target;
       if (!target.alive) {
-        projectile.alive = false;
-        projectilesDirty = true;
-        continue;
+        target.inbound--;
+        const next = pickTarget(enemies, projectile.x, projectile.y, projectileEstimate);
+        if (next === null) {
+          projectile.alive = false;
+          projectilesDirty = true;
+          continue;
+        }
+        target = next;
+        target.inbound++;
+        projectile.target = target;
+        projectile.targetId = target.id;
       }
       const dx = target.x - projectile.x;
       const dy = target.y - projectile.y;
@@ -444,6 +451,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
         projectile.y = target.y;
         projectile.alive = false;
         projectilesDirty = true;
+        target.inbound--;
         resolveAttack(target);
       } else {
         const k = projectileStep / dist;
@@ -652,7 +660,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       startWave: startWaveNumber,
       highestWaveReached: state.highestWaveReached,
       highestWaveCleared: state.highestWaveCleared,
-      clearedStartWave: startWaveCleared,
+      clearedStartWave: startRec !== null && startRec.cleared && !startRec.leaked,
       endReason: reason,
       ticks: state.tick,
       shards: state.shards,

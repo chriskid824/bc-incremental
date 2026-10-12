@@ -71,6 +71,80 @@ function runWith(
   return { ticks, result: sim.result() };
 }
 
+/** Kills any early enemy in one hit, never dies, no chains. */
+const ONE_SHOT_VALUES = { damage: 1e6, attackSpeed: 20, critChance: 0, maxLife: 1e9 };
+const ONE_SHOT = makeStats(ONE_SHOT_VALUES);
+
+/** 40 slow squares a second, more than ONE_SHOT can kill: targets never run out. */
+const PLENTIFUL_DATA = makeTestData({
+  waves: onlyRules([{ enemy: 'square', fromWave: 1, base: 40, perWave: 0, maxCount: 40 }], {
+    spawnDurationSec: 1,
+    waveTimerSec: 1,
+  }),
+});
+
+interface ProjectileTrack {
+  readonly result: RunResult;
+  readonly attacks: number;
+  readonly primaryHits: number;
+  readonly primaryTargets: readonly number[];
+  /** Projectiles gone without a primary hit. */
+  readonly fizzles: number;
+  /** Fizzles on ticks that ended with enemies still alive. */
+  readonly fizzlesWithEnemiesLeft: number;
+  /** Projectiles seen homing on a new target after their previous one died. */
+  readonly retargets: number;
+  /** Projectiles still flying when the run ended. */
+  readonly inFlight: number;
+}
+
+/** Runs to the end and accounts for every projectile through events and state. */
+function trackProjectiles(config: RunConfig, data: GameData = PLENTIFUL_DATA): ProjectileTrack {
+  let attacks = 0;
+  let fizzles = 0;
+  let fizzlesWithEnemiesLeft = 0;
+  let retargets = 0;
+  const primaryTargets: number[] = [];
+  let targets = new Map<number, number>();
+  const { result } = runWith(config, data, (sim, events) => {
+    let fired = 0;
+    let hits = 0;
+    for (const event of events) {
+      if (event.type === 'attack') fired++;
+      if (event.type === 'hit' && event.chainIndex === 0) {
+        hits++;
+        primaryTargets.push(event.targetId);
+      }
+    }
+    attacks += fired;
+    const { enemies, projectiles } = sim.state;
+    const fizzled = targets.size + fired - projectiles.length - hits;
+    fizzles += fizzled;
+    if (enemies.length > 0) fizzlesWithEnemiesLeft += fizzled;
+    const alive = new Set(enemies.map((enemy) => enemy.id));
+    const next = new Map<number, number>();
+    for (const projectile of projectiles) {
+      const before = targets.get(projectile.id);
+      if (before !== undefined && before !== projectile.targetId) {
+        retargets++;
+        expect(alive.has(before)).toBe(false);
+      }
+      next.set(projectile.id, projectile.targetId);
+    }
+    targets = next;
+  });
+  return {
+    result,
+    attacks,
+    primaryHits: primaryTargets.length,
+    primaryTargets,
+    fizzles,
+    fizzlesWithEnemiesLeft,
+    retargets,
+    inFlight: targets.size,
+  };
+}
+
 describe('createSimulation', () => {
   const data = makeTestData();
 
@@ -241,6 +315,78 @@ describe('run end', () => {
     expect(dead.result.endReason).toBe('death');
     expect(dead.result.clearedStartWave).toBe(false);
     expect(dead.result.highestWaveCleared).toBe(0);
+  });
+});
+
+describe('start wave clear', () => {
+  it('needs every start-wave enemy killed; reaching the player still clears the wave', () => {
+    // Wave 1 is six triangles. A slow attacker kills some and survives the rest.
+    const slow = makeStats({ damage: 1e6, attackSpeed: 0.5, maxLife: 1000 });
+    const leaky = recordRun(makeConfig({ stats: slow, waveCap: 1 }), makeTestData());
+    expect(eventsOf(leaky.ticks, 'enemyKilled').length).toBeGreaterThan(0);
+    expect(eventsOf(leaky.ticks, 'playerHit').length).toBeGreaterThan(0);
+    expect(eventsOf(leaky.ticks, 'waveCleared').map((event) => event.wave)).toEqual([1]);
+    expect(leaky.result).toMatchObject({
+      endReason: 'waveCap',
+      highestWaveCleared: 1,
+      clearedStartWave: false,
+    });
+
+    const strong = recordRun(makeConfig({ stats: ONE_SHOT, waveCap: 1 }), makeTestData());
+    expect(eventsOf(strong.ticks, 'playerHit')).toHaveLength(0);
+    expect(strong.result).toMatchObject({
+      endReason: 'waveCap',
+      highestWaveCleared: 1,
+      clearedStartWave: true,
+    });
+  });
+
+  describe('with split children', () => {
+    // Wave 1: two triangles. Later waves: one pentagon whose shards reach the player on the
+    // tick after they split off, unless a chain kills them at once.
+    const data = makeTestData({
+      enemies: { shard: { speed: 1e5 } },
+      waves: onlyRules([
+        { enemy: 'triangle', fromWave: 1, base: 2, perWave: -2, maxCount: 2 },
+        { enemy: 'pentagon', fromWave: 2, base: 1, perWave: 0, maxCount: 1 },
+      ]),
+    });
+    const chained = makeStats({ ...ONE_SHOT_VALUES, chainCount: 3, chainRange: 5000 });
+
+    it('does not count a start wave whose children reached the player', () => {
+      const { ticks, result } = recordRun(
+        makeConfig({ stats: ONE_SHOT, startWave: 2, waveCap: 2 }),
+        data,
+      );
+      expect(eventsOf(ticks, 'enemyKilled').map((event) => event.enemy)).toEqual(['pentagon']);
+      expect(eventsOf(ticks, 'playerHit')).toHaveLength(3);
+      expect(result).toMatchObject({
+        endReason: 'waveCap',
+        highestWaveCleared: 2,
+        clearedStartWave: false,
+      });
+    });
+
+    it('counts it when the children are killed too', () => {
+      const { ticks, result } = recordRun(
+        makeConfig({ stats: chained, startWave: 2, waveCap: 2 }),
+        data,
+      );
+      const kills = eventsOf(ticks, 'enemyKilled').map((event) => event.enemy);
+      expect(kills).toEqual(['pentagon', 'shard', 'shard', 'shard']);
+      expect(eventsOf(ticks, 'playerHit')).toHaveLength(0);
+      expect(result.clearedStartWave).toBe(true);
+    });
+
+    it('ignores enemies of later waves reaching the player', () => {
+      const { ticks, result } = recordRun(makeConfig({ stats: ONE_SHOT, waveCap: 2 }), data);
+      expect(eventsOf(ticks, 'playerHit')).toHaveLength(3);
+      expect(result).toMatchObject({
+        endReason: 'waveCap',
+        highestWaveCleared: 2,
+        clearedStartWave: true,
+      });
+    });
   });
 });
 
@@ -416,14 +562,64 @@ describe('attacks', () => {
     ]);
   });
 
-  it('fizzles projectiles whose target died first', () => {
-    const { ticks } = recordRun(makeConfig({ stats: STRONG, maxTicks: 600 }), makeTestData());
-    const attacks = eventsOf(ticks, 'attack');
-    const primaries = eventsOf(ticks, 'hit').filter((hit) => hit.chainIndex === 0);
-    expect(primaries.length).toBeLessThan(attacks.length);
-    // Every target is hit at most once; the rest of its projectiles vanish.
-    const primaryTargets = primaries.map((hit) => hit.targetId);
-    expect(new Set(primaryTargets).size).toBe(primaryTargets.length);
+  it('lands nearly every one-shot attack when enemies are plentiful', () => {
+    const track = trackProjectiles(makeConfig({ stats: ONE_SHOT, maxTicks: 20 * TICK_RATE }));
+    expect(track.attacks).toBeGreaterThan(350);
+    expect(track.primaryHits).toBeGreaterThanOrEqual(0.9 * track.attacks);
+    // Nothing fizzles: every attack hit or is still in flight.
+    expect(track.fizzles).toBe(0);
+    expect(track.primaryHits + track.inFlight).toBe(track.attacks);
+    // Each enemy takes exactly one primary hit, the one that kills it.
+    expect(new Set(track.primaryTargets).size).toBe(track.primaryTargets.length);
+    expect(track.result.kills).toBe(track.primaryHits);
+  });
+
+  it('aims at the nearest enemy that projectiles in flight will not kill', () => {
+    const sim = createSimulation(
+      makeConfig({ stats: ONE_SHOT, maxTicks: 5 * TICK_RATE }),
+      PLENTIFUL_DATA,
+    );
+    const { player } = sim.state;
+    const distOf = (enemy: { x: number; y: number }): number =>
+      Math.hypot(enemy.x - player.x, enemy.y - player.y);
+    let checked = 0;
+    while (!sim.state.finished) {
+      // One-shot damage: an enemy is covered once any projectile flies at it.
+      const covered = new Set(sim.state.projectiles.map((projectile) => projectile.targetId));
+      const events = sim.step(NO_INPUT);
+      // Enemies do not move after attacking, and squares do not split, so every enemy alive
+      // now stood at this position when the attack picked its target.
+      const enemies = sim.state.enemies;
+      for (const event of events) {
+        if (event.type !== 'attack') continue;
+        expect(covered.has(event.targetId)).toBe(false);
+        const target = enemies.find((enemy) => enemy.id === event.targetId);
+        if (target !== undefined) {
+          for (const other of enemies) {
+            if (covered.has(other.id)) continue;
+            expect(distOf(other)).toBeGreaterThanOrEqual(distOf(target) - 1e-9);
+          }
+          checked++;
+        }
+        covered.add(event.targetId);
+      }
+    }
+    expect(checked).toBeGreaterThan(50);
+  });
+
+  it('retargets projectiles whose target died first; they fizzle only with no enemy left', () => {
+    // Chains kill enemies that other projectiles are flying at, and sometimes every enemy.
+    const stats = makeStats({ ...ONE_SHOT_VALUES, chainCount: 3, chainRange: 5000 });
+    const track = trackProjectiles(makeConfig({ stats, maxTicks: 20 * TICK_RATE }));
+    expect(track.retargets).toBeGreaterThan(20);
+    expect(track.fizzles).toBeGreaterThan(0);
+    expect(track.fizzlesWithEnemiesLeft).toBe(0);
+
+    // Early waves, where one chained hit clears the whole wave.
+    const strong = trackProjectiles(makeConfig({ stats: STRONG, maxTicks: 600 }), makeTestData());
+    expect(strong.fizzles).toBeGreaterThan(0);
+    expect(strong.fizzlesWithEnemiesLeft).toBe(0);
+    expect(new Set(strong.primaryTargets).size).toBe(strong.primaryTargets.length);
   });
 });
 

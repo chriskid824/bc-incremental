@@ -17,6 +17,9 @@ export const DT = 1 / TICK_RATE;
 export const ARENA_WIDTH = 1920;
 export const ARENA_HEIGHT = 1080;
 
+/** Player collision radius in arena units; an enemy touches the player at this + its radius. */
+export const PLAYER_RADIUS = 30;
+
 /** Hard cap on run length (docs/GDD.md §2.1). */
 export const MAX_RUN_SECONDS = 180;
 
@@ -68,7 +71,12 @@ export interface ProjectileState {
   y: number;
   prevX: number;
   prevY: number;
-  /** Enemy id the projectile homes on; it fizzles if the target dies first. */
+  /**
+   * Enemy id the projectile homes on. An attack picks the alive enemy nearest to the player
+   * that projectiles already in flight are not expected to kill, else the nearest alive one.
+   * If the target dies first, the projectile retargets by the same rule measured from its own
+   * position; it fizzles only when no enemy is alive.
+   */
   targetId: number;
   alive: boolean;
 }
@@ -86,7 +94,10 @@ export interface SimState {
   wave: number;
   /** Highest wave whose spawning has started this run. */
   highestWaveReached: number;
-  /** Highest wave whose enemies were all killed or removed this run. */
+  /**
+   * Highest wave whose enemies, split children included, are all spawned and gone this run,
+   * whether killed or removed on reaching the player.
+   */
   highestWaveCleared: number;
   readonly player: PlayerState;
   /** Dense arrays; dead entries may be reused or compacted by the simulation. */
@@ -102,8 +113,10 @@ export type EndReason = 'death' | 'timeout' | 'waveCap';
 
 export type SimEvent =
   | { readonly type: 'waveStarted'; readonly wave: number }
+  /** Every enemy of the wave is gone, killed or not (see SimState.highestWaveCleared). */
   | { readonly type: 'waveCleared'; readonly wave: number }
   | { readonly type: 'enemySpawned'; readonly enemyId: number; readonly enemy: EnemyId }
+  /** `targetId` is the first target; see ProjectileState.targetId for retargeting. */
   | { readonly type: 'attack'; readonly projectileId: number; readonly targetId: number }
   | {
       readonly type: 'hit';
@@ -154,8 +167,14 @@ export interface DamageBreakdown {
 export interface RunResult {
   readonly startWave: number;
   readonly highestWaveReached: number;
+  /** See SimState.highestWaveCleared: enemies that reached the player count as gone. */
   readonly highestWaveCleared: number;
-  /** True when the start wave was fully cleared (required for skip compensation). */
+  /**
+   * True only when the start wave was cleared by killing: all of its enemies spawned and every
+   * one of them, split children included, was killed; none reached the player. Stricter than
+   * highestWaveCleared, which also counts a wave whose enemies reached the player. Skip
+   * compensation requires it (docs/GDD.md §2.2).
+   */
   readonly clearedStartWave: boolean;
   readonly endReason: EndReason;
   readonly ticks: number;
