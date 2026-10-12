@@ -15,6 +15,9 @@ export interface MetaState {
   /** Highest wave reached in the current prestige cycle. */
   maxWave: number;
   runs: number;
+  /** Totals spent on talents since the last full refund, returned by refundAll. */
+  spentShards: Num;
+  spentCores: number;
 }
 
 export interface Settlement {
