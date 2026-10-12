@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { loadGameData } from '../data';
 import { DAMAGE_TAG_BIT } from '../data/stats';
 import { num } from '../core/num';
-import { DEFAULT_ECONOMY, allowedStartWave, createMetaState } from '../meta';
+import { DEFAULT_ECONOMY, allowedStartWave, createMetaState, estimateBuild } from '../meta';
+import type { MetaState } from '../meta';
 import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
-import { RESULT_SCREEN_MS, Session } from './session';
+import { FAILED_START_RATIO, RESULT_SCREEN_MS, Session } from './session';
 import type { ActiveRun, RunReport, SessionOptions } from './session';
 
 function createSession(options: SessionOptions = {}) {
@@ -142,5 +143,176 @@ describe('Session', () => {
     meta.maxWave = 200;
     session.setStartWave(1000);
     expect(session.startWave).toBe(40);
+  });
+
+  it('opens on the talent web for a returning profile and starts runs from there', () => {
+    const { session, meta, started, opened } = createSession();
+    meta.runs = 7;
+    meta.maxWave = 12;
+    session.resume();
+    expect(session.phase).toBe('talents');
+    expect(opened()).toBe(1);
+    expect(started).toHaveLength(0);
+    expect(session.currentRun).toBeNull();
+    expect(() => session.start()).toThrow();
+    session.startNextRun();
+    expect(session.phase).toBe('running');
+    expect(session.run.number).toBe(8);
+    expect(session.run.config.startWave).toBe(6);
+    expect(session.currentRun).toBe(session.run);
+  });
+
+  it('opens the talent web when a run ends if T was pressed during it', () => {
+    const { session, finished, opened } = createSession();
+    expect(session.queueTalents()).toBe(false);
+    session.start();
+    expect(session.queueTalents()).toBe(true);
+    expect(session.talentsQueued).toBe(true);
+    playRun(session);
+    expect(finished).toHaveLength(1);
+    expect(session.phase).toBe('talents');
+    expect(opened()).toBe(1);
+    expect(session.talentsQueued).toBe(false);
+    expect(session.resultTimeLeftMs).toBe(0);
+    expect(session.queueTalents()).toBe(false);
+    session.startNextRun();
+    playRun(session);
+    expect(session.phase).toBe('results');
+  });
+});
+
+/** A session between runs with a long-played profile: allowed start wave 12, plenty to spend. */
+function veteranSession() {
+  const created = createSession({ waveCap: 40 });
+  const { session, meta } = created;
+  meta.runs = 20;
+  meta.maxWave = 24;
+  meta.shards = num(1e12);
+  meta.cores = 1000;
+  session.resume();
+  return created;
+}
+
+function buyMight(session: Session, ranks: number): void {
+  for (let i = 0; i < ranks; i++) expect(session.allocate('might')).toBe(true);
+}
+
+/** A copy of the talent state, for trying allocations without touching the session's meta. */
+function cloneMeta(meta: MetaState): MetaState {
+  return {
+    ...meta,
+    allocated: new Set(meta.allocated),
+    ranks: new Map(meta.ranks),
+  };
+}
+
+describe('Session start wave', () => {
+  it('follows the highest allowed wave while the build keeps up', () => {
+    const { session } = veteranSession();
+    expect(session.maxStartWave).toBe(12);
+    expect(session.startWave).toBe(12);
+    buyMight(session, 5);
+    expect(session.startWave).toBe(12);
+  });
+
+  it('drops to the estimate after a respec and climbs back as the build is rebought', () => {
+    const { session, meta } = veteranSession();
+    buyMight(session, 70);
+    expect(session.estimate.startWave).toBeGreaterThanOrEqual(12);
+    expect(session.startWave).toBe(12);
+
+    session.refund();
+    const empty = estimateBuild(meta, loadGameData(), DEFAULT_ECONOMY);
+    expect(session.startWave).toBe(empty.startWave);
+    expect(session.startWave).toBeLessThan(12);
+
+    let previous = session.startWave;
+    for (let rank = 1; rank <= 70; rank++) {
+      buyMight(session, 1);
+      expect(session.startWave).toBe(Math.min(12, session.estimate.startWave));
+      expect(session.startWave).toBeGreaterThanOrEqual(previous);
+      previous = session.startWave;
+    }
+    expect(session.startWave).toBe(12);
+    // Back at the highest allowed wave, it follows that wave upward again.
+    meta.maxWave = 30;
+    expect(session.startWave).toBe(15);
+  });
+
+  it('keeps a start wave the player picked unless the build gets weaker than it', () => {
+    const { session } = veteranSession();
+    session.setStartWave(3);
+    buyMight(session, 70);
+    expect(session.startWave).toBe(3);
+    session.setStartWave(10);
+    session.refund();
+    expect(session.startWave).toBe(session.estimate.startWave);
+    expect(session.startWave).toBeLessThan(10);
+  });
+
+  it('drops when a keystone with a damage cost lowers the estimate below it', () => {
+    const { session, meta } = veteranSession();
+    const data = loadGameData();
+    for (const id of ['kindling', 'fuel', 'slowBurn', 'inferno', 'stoke', 'heat']) {
+      expect(session.allocate(id)).toBe(true);
+    }
+    // Find a Might rank where Pandemic's hit damage cost moves the estimate down a start wave.
+    let rank = 0;
+    const withPandemic = (ranks: number) => {
+      const trial = cloneMeta(meta);
+      trial.ranks.set('might', ranks);
+      trial.allocated.add('might');
+      const before = estimateBuild(trial, data, DEFAULT_ECONOMY).startWave;
+      trial.allocated.add('pandemic');
+      return { before, after: estimateBuild(trial, data, DEFAULT_ECONOMY).startWave };
+    };
+    while (rank < 200) {
+      const { before, after } = withPandemic(rank);
+      if (after < before && before <= 12) break;
+      rank++;
+    }
+    const { before, after } = withPandemic(rank);
+    expect(after).toBeLessThan(before);
+    buyMight(session, rank);
+    session.setStartWave(before);
+    expect(session.startWave).toBe(before);
+    expect(session.allocate('pandemic')).toBe(true);
+    expect(session.startWave).toBe(after);
+  });
+
+  it('steps down after a run that does not clear it and climbs back once runs clear it', () => {
+    const { session, meta } = veteranSession();
+    session.startNextRun();
+    expect(session.run.config.startWave).toBe(12);
+    playRun(session);
+    const failed = session.report as RunReport;
+    expect(failed.result.clearedStartWave).toBe(false);
+    const lowered = Math.min(11, Math.floor(failed.result.highestWaveReached * FAILED_START_RATIO));
+    expect(session.startWave).toBe(Math.max(1, lowered));
+
+    // Keep failing until a start wave is cleared; each failure lowers it.
+    let guard = 0;
+    while (!(session.report as RunReport).result.clearedStartWave) {
+      const before = session.startWave;
+      session.startNextRun();
+      playRun(session);
+      if (!(session.report as RunReport).result.clearedStartWave) {
+        expect(session.startWave).toBeLessThan(Math.max(2, before));
+      }
+      if (++guard > 20) throw new Error('never cleared a start wave');
+    }
+
+    // A much stronger build clears its start wave and the start wave climbs back.
+    meta.allocated.add('might');
+    meta.ranks.set('might', 80);
+    const low = session.startWave;
+    session.startNextRun();
+    playRun(session);
+    const cleared = session.report as RunReport;
+    expect(cleared.result.clearedStartWave).toBe(true);
+    const reached = cleared.result.highestWaveReached;
+    const climbed = Math.floor(reached * DEFAULT_ECONOMY.startWaveRatio);
+    expect(climbed).toBeGreaterThan(low);
+    expect(session.startWave).toBe(Math.min(session.maxStartWave, climbed));
   });
 });
