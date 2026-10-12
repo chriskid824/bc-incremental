@@ -14,7 +14,14 @@ import { parseArgs } from 'node:util';
 import { DEFAULT_ECONOMY } from '../../src/meta';
 import type { EconomyConfig } from '../../src/meta';
 import { runSessions } from './pool';
-import { curveCheckCsv, milestonesCsv, runsCsv, sortResults, summaryTable } from './report';
+import {
+  curveCheckCsv,
+  milestonesCsv,
+  multiplierTable,
+  runsCsv,
+  sortResults,
+  summaryTable,
+} from './report';
 import { formatStartWavePolicy, parseStartWavePolicy } from './session';
 import type { SessionConfig, StartWavePolicy } from './session';
 import { isStrategyId, STRATEGY_IDS } from './strategies';
@@ -178,7 +185,7 @@ export async function runBalance(
     runsCsv: runsCsv(sorted),
     milestonesCsv: milestonesCsv(sorted),
     curveCheckCsv: curveCheckCsv(sorted, options.strategies),
-    summary: summaryTable(sorted, options.strategies),
+    summary: `${summaryTable(sorted, options.strategies)}\n\n${multiplierTable(sorted, options.strategies)}`,
     mode: pool.mode === 'workers' ? `${pool.workers} workers` : 'in-process',
   };
 }

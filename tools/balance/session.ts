@@ -17,7 +17,7 @@ import {
 } from '../../src/meta';
 import type { EconomyConfig, MetaState } from '../../src/meta';
 import { compileRules, createSimulation, NO_INPUT, TICK_RATE } from '../../src/sim';
-import type { EndReason, RunConfig } from '../../src/sim';
+import type { EndReason, RuleEffects, RunConfig } from '../../src/sim';
 import { spend } from './strategies';
 import type { StrategyId } from './strategies';
 
@@ -84,30 +84,115 @@ const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 const HIT = DAMAGE_TAG_BIT.hit;
 const CRIT = DAMAGE_TAG_BIT.crit;
 const BURN = DAMAGE_TAG_BIT.burn;
+const CHAIN = DAMAGE_TAG_BIT.chain;
 
 /**
- * Effective damage per attack `D` against one target (docs/GDD.md §7.2): the expected primary
- * hit including crits, plus the total burn that hit is expected to cause. Mirrors the
- * simulation: crits use damageMult[hit|crit], a crit's burn is computed from the crit hit
- * with damageMult[burn|crit], and rules apply as compiled by src/sim/rules.ts. Ignores burn
- * stack caps, pandemic spread and hits that kill before burning.
+ * Expected damage, per point of base damage before retention, of one hit `jump` chain jumps
+ * after the primary target (0 = the primary): the hit with its crit expectation plus the
+ * burn it is expected to cause. Mirrors the simulation: crits use damageMult[hit|crit], jumps
+ * add the chain tag to the hit (not to its burn), a crit's burn is computed from the crit hit
+ * with damageMult[burn|crit], a steady shot crits on every jump, and rules apply as compiled
+ * by src/sim/rules.ts.
  */
-export function effectiveHit(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
+function hitValue(stats: StatBlock, fx: RuleEffects, jump: number): number {
   const { values, damageMult } = stats;
-  const fx = compileRules(rules);
   const mult = (mask: number): number => damageMult[mask] as number;
-  const critChance = fx.steadyAimEvery > 0 ? 1 / fx.steadyAimEvery : clamp01(values.critChance);
+  const chain = jump > 0 ? CHAIN : 0;
+  const critChance =
+    fx.steadyAimEvery > 0
+      ? 1 / fx.steadyAimEvery
+      : clamp01(values.critChance + fx.chainCritPerJump * jump);
   const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
   const critFactor = critChance * critMultiplier;
   const hit =
-    fx.hitMult * ((1 - critChance) * mult(HIT) * fx.nonCritHitMult + critFactor * mult(HIT | CRIT));
-  const ignite = clamp01(values.igniteChance);
-  const critIgnite = fx.critsAlwaysIgnite ? 1 : clamp01(ignite + fx.critIgniteChance);
+    fx.hitMult *
+    ((1 - critChance) * mult(HIT | chain) * fx.nonCritHitMult +
+      critFactor * mult(HIT | CRIT | chain));
+  const igniteBase = values.igniteChance + (jump > 0 ? fx.chainIgniteChance : 0);
+  const ignite = clamp01(igniteBase);
+  const critIgnite = fx.critsAlwaysIgnite ? 1 : clamp01(igniteBase + fx.critIgniteChance);
   const burnPerDamage =
     (1 - critChance) * ignite * mult(BURN) + critFactor * critIgnite * mult(BURN | CRIT);
   const burn =
     values.burnDamage * Math.max(0, values.burnDuration * fx.burnDurationMult) * burnPerDamage;
-  return values.damage * fx.allDamageMult * (hit + burn);
+  return hit + burn;
+}
+
+/**
+ * Effective damage per attack `D` against one target (docs/GDD.md §7.2): the expected primary
+ * hit including crits, plus the total burn that hit is expected to cause. Ignores chain jumps,
+ * burn stack caps, pandemic spread and hits that kill before burning.
+ */
+export function effectiveHit(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
+  const fx = compileRules(rules);
+  return stats.values.damage * fx.allDamageMult * hitValue(stats, fx, 0);
+}
+
+/**
+ * Expected damage of one projectile over its primary target and all its chain jumps: `D`
+ * plus the jumps, each scaled by the retention, assuming every jump finds a target.
+ */
+export function attackDamage(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
+  const { values } = stats;
+  const fx = compileRules(rules);
+  const jumps = Math.max(0, values.chainCount * fx.chainCountMult);
+  const retention = clamp01(values.chainRetention - fx.chainRetentionPenalty);
+  const whole = Math.floor(jumps);
+  let total = hitValue(stats, fx, 0);
+  for (let k = 1; k <= whole; k++) total += retention ** k * hitValue(stats, fx, k);
+  total += (jumps - whole) * retention ** (whole + 1) * hitValue(stats, fx, whole + 1);
+  return values.damage * fx.allDamageMult * total;
+}
+
+/**
+ * Damage per second against a crowd: attackDamage × attacks per second × projectiles, as if
+ * every projectile and jump found a target. Ignores overkill and pandemic spread.
+ */
+export function crowdDps(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
+  const { values } = stats;
+  return attackDamage(stats, rules) * values.attackSpeed * Math.max(1, values.projectileCount);
+}
+
+/** Talent ids whose node belongs to a crit, DoT or chain sector (not bridges or generic). */
+function isSectorNode(data: GameData, id: string): boolean {
+  const archetype = data.talents.find((node) => node.id === id)?.archetype;
+  return archetype === 'crit' || archetype === 'dot' || archetype === 'chain';
+}
+
+/** A copy of the build without the talents matching `drop` (ranks included). */
+function buildWithout(meta: Readonly<MetaState>, drop: (id: string) => boolean): MetaState {
+  const copy = createMetaState();
+  for (const id of meta.allocated) if (!drop(id)) copy.allocated.add(id);
+  for (const [id, rank] of meta.ranks) if (!drop(id)) copy.ranks.set(id, rank);
+  return copy;
+}
+
+/**
+ * How much of a build's damage comes from repeatable ranks (Might) and how much from sector
+ * nodes (docs/GDD.md §9.1): each ratio is the build's value over the same build without
+ * those talents. `D` ratios use effectiveHit; crowd ratios use crowdDps, which also counts
+ * chain jumps, attack speed and projectiles.
+ */
+export interface BuildMultipliers {
+  readonly repeatableMultD: number;
+  readonly sectorMultD: number;
+  readonly sectorMultCrowd: number;
+}
+
+export function buildMultipliers(meta: Readonly<MetaState>, data: GameData): BuildMultipliers {
+  const measure = (build: Readonly<MetaState>): { d: number; crowd: number } => {
+    const stats = statBlockFor(build, data);
+    const rules = collectRules(build, data);
+    return { d: effectiveHit(stats, rules), crowd: crowdDps(stats, rules) };
+  };
+  const full = measure(meta);
+  const noRanks = measure(buildWithout(meta, (id) => meta.ranks.has(id)));
+  const noSector = measure(buildWithout(meta, (id) => isSectorNode(data, id)));
+  return {
+    repeatableMultD: full.d / noRanks.d,
+    sectorMultD: full.d / noSector.d,
+    sectorMultCrowd: full.crowd / noSector.crowd,
+  };
 }
 
 /** One row of runs.csv. Damage and currency columns are plain numbers taken from Num. */
@@ -147,6 +232,10 @@ export interface RunRow {
   readonly nodesAllocated: number;
   /** Total ranks on repeatable nodes after this visit's purchases. */
   readonly repeatableRanks: number;
+  /** buildMultipliers of the build after this visit's purchases. */
+  readonly repeatableMultD: number;
+  readonly sectorMultD: number;
+  readonly sectorMultCrowd: number;
   /** Currencies left after this visit's purchases. */
   readonly shardsBank: number;
   readonly coresBank: number;
@@ -241,6 +330,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
         skipCores: settlement.skipCores,
         nodesAllocated: meta.allocated.size - meta.ranks.size,
         repeatableRanks,
+        ...buildMultipliers(meta, data),
         shardsBank: toNumber(meta.shards),
         coresBank: meta.cores,
         bought: compressIds(bought),
