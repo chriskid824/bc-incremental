@@ -75,13 +75,19 @@ export function deriveSeed(seed: number, stream: string): number {
   return hash >>> 0;
 }
 
-export const RNG_STREAMS = ['spawn', 'combat', 'drops'] as const;
+/**
+ * `spawn`: wave shuffles and spawn positions. `split`: split children around their parent,
+ * kept apart from `spawn` because how many split and when depends on combat. `combat`: hit
+ * rolls. `drops`: drop rolls.
+ */
+export const RNG_STREAMS = ['spawn', 'split', 'combat', 'drops'] as const;
 export type RngStreamName = (typeof RNG_STREAMS)[number];
 export type RngStreams = Readonly<Record<RngStreamName, Rng>>;
 
 export function createStreams(seed: number): RngStreams {
   return {
     spawn: createRng(deriveSeed(seed, 'spawn')),
+    split: createRng(deriveSeed(seed, 'split')),
     combat: createRng(deriveSeed(seed, 'combat')),
     drops: createRng(deriveSeed(seed, 'drops')),
   };

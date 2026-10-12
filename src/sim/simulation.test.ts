@@ -222,6 +222,52 @@ describe('determinism', () => {
     expect(other.ticks).not.toEqual(first.ticks);
   });
 
+  it('spawns the same waves whatever the combat stats; only split children differ', () => {
+    interface Spawn {
+      readonly wave: number;
+      readonly type: string;
+      readonly x: number;
+      readonly y: number;
+    }
+    /** Wave enemies in spawn order, and the ticks split children spawned on. */
+    const spawnsWith = (damage: number): { spawns: Spawn[]; children: number[] } => {
+      const spawns: Spawn[] = [];
+      const children: number[] = [];
+      const stats = makeStats({ damage, attackSpeed: 3, critChance: 0, maxLife: 1e9 });
+      const run = makeConfig({ seed: 5, startWave: 8, stats, maxTicks: 60 * TICK_RATE });
+      runWith(run, data, (sim, events) => {
+        for (const event of events) {
+          if (event.type !== 'enemySpawned') continue;
+          if (event.enemy === 'shard') {
+            children.push(sim.state.tick);
+            continue;
+          }
+          // Wave enemies cannot die on their spawn tick; prev holds the spawn position.
+          const enemy = sim.state.enemies.find((e) => e.id === event.enemyId);
+          expect(enemy).toBeDefined();
+          if (enemy !== undefined) {
+            spawns.push({ wave: enemy.wave, type: enemy.type, x: enemy.prevX, y: enemy.prevY });
+          }
+        }
+      });
+      return { spawns, children };
+    };
+    for (const [weak, strong] of [
+      [60, 90],
+      [200, 260],
+      [1000, 1300],
+    ] as const) {
+      const a = spawnsWith(weak);
+      const b = spawnsWith(strong);
+      // Pentagons split at times that depend on damage.
+      expect(a.children.length).toBeGreaterThan(0);
+      expect(b.children).not.toEqual(a.children);
+      const shared = Math.min(a.spawns.length, b.spawns.length);
+      expect(shared).toBeGreaterThan(100);
+      expect(b.spawns.slice(0, shared)).toEqual(a.spawns.slice(0, shared));
+    }
+  });
+
   it('reports damage totals that match the events', () => {
     const { ticks, result } = recordRun(config, data);
     const hits = eventsOf(ticks, 'hit');

@@ -4,8 +4,8 @@
  * Each step() advances one fixed tick and runs the systems in a fixed order:
  * wave start → spawn → movement and contact → attack → projectiles (retargets, hits, chains,
  * kills, drops) → burn → compaction → wave clears → overkill → run end.
- * Randomness comes only from the seeded spawn, combat and drops streams, and entity arrays
- * stay ordered by increasing id, so a seed fully determines the run.
+ * Randomness comes only from the seeded spawn, split, combat and drops streams, and entity
+ * arrays stay ordered by increasing id, so a seed fully determines the run.
  * Projectiles spread over enemies that projectiles already in flight will not kill, and
  * retarget when their target dies first (src/sim/targeting.ts).
  * Keystone rules (config.rules) arrive in M1; M0 ignores them.
@@ -130,7 +130,12 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   validateConfig(config);
 
   const { values, damageMult } = config.stats;
-  const { spawn: spawnRng, combat: combatRng, drops: dropsRng } = createStreams(config.seed);
+  const {
+    spawn: spawnRng,
+    split: splitRng,
+    combat: combatRng,
+    drops: dropsRng,
+  } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
   const waveCap = config.waveCap ?? Infinity;
   const maxTicks = config.maxTicks ?? MAX_RUN_SECONDS * TICK_RATE;
@@ -315,13 +320,16 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     events.push({ type: 'enemySpawned', enemyId: enemy.id, enemy: def.id });
   }
 
-  /** Children appear around the parent and belong to its wave. */
+  /**
+   * Children appear around the parent and belong to its wave. Their angles come from their
+   * own stream: kills depend on combat, and must not shift later waves' spawns.
+   */
   function split(parent: Enemy): void {
     const splitInto = parent.def.splitInto;
     if (splitInto === undefined) return;
     const def = data.enemies[splitInto.enemy];
     for (let i = 0; i < splitInto.count; i++) {
-      const angle = spawnRng.range(0, TAU);
+      const angle = splitRng.range(0, TAU);
       const dx = parent.x + Math.cos(angle) * parent.radius - player.x;
       const dy = parent.y + Math.sin(angle) * parent.radius - player.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
