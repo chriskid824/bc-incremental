@@ -39,7 +39,7 @@ export interface EconomyConfig {
 
 export const DEFAULT_ECONOMY: EconomyConfig = {
   talentBaseShards: 5,
-  talentGrowth: 1.22,
+  talentGrowth: 1.6,
   startWaveRatio: 0.5,
   skipRewardRate: 1,
 };

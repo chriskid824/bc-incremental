@@ -16,6 +16,8 @@ export interface RuleEffects {
   readonly critMultiplierMult: number;
   /** Burn spreads on death within this radius; 0 when pandemic is not taken. */
   readonly pandemicRadius: number;
+  /** Damage of a spread stack relative to its source stack. */
+  readonly pandemicEffect: number;
   /** Multiplier on hit damage (crit or not; burn excluded). */
   readonly hitMult: number;
   /** Burn stacks are uncapped (eternalFlame). */
@@ -39,6 +41,7 @@ export const NO_RULES: RuleEffects = {
   steadyAimEvery: 0,
   critMultiplierMult: 1,
   pandemicRadius: 0,
+  pandemicEffect: 0,
   hitMult: 1,
   burnUncapped: false,
   burnDurationMult: 1,
@@ -66,6 +69,7 @@ export function compileRules(rules: readonly RuleSpec[]): RuleEffects {
         break;
       case 'pandemic':
         fx.pandemicRadius = Math.max(fx.pandemicRadius, rule.spreadRadius);
+        fx.pandemicEffect = Math.max(fx.pandemicEffect, rule.spreadEffect);
         fx.hitMult *= 1 + rule.hitMore;
         break;
       case 'eternalFlame':

@@ -243,6 +243,7 @@ function ruleIssues(rule: RuleSpec): string[] {
       if (!(rule.spreadRadius > 0)) {
         issues.push(`spreadRadius must be > 0 (got ${rule.spreadRadius})`);
       }
+      chance('spreadEffect', rule.spreadEffect);
       more('hitMore', rule.hitMore);
       break;
     case 'eternalFlame':

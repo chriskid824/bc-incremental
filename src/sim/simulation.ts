@@ -229,7 +229,16 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   let shots = 0;
   /** Serial of the current attack's volley; enemies it already targets carry it. */
   let volley = 0;
-  const inVolley = (enemy: Enemy): boolean => enemy.volleyMark === volley;
+  /** Burns already on the enemy will kill it: shots should go elsewhere. */
+  const doomed = (enemy: Enemy): boolean => {
+    if (enemy.burns.length === 0) return false;
+    let left = enemy.burnPending;
+    for (let s = 0; s < enemy.burns.length; s++) {
+      left = add(left, accrued(enemy.burns[s] as BurnStack, Infinity));
+    }
+    return lte(enemy.hp, left);
+  };
+  const doomedOrInVolley = (enemy: Enemy): boolean => enemy.volleyMark === volley || doomed(enemy);
   let lastBurnTick = 0;
   let enemiesDirty = false;
   let projectilesDirty = false;
@@ -427,7 +436,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   function attack(): void {
     attackTicks += 1;
     while (attackTicks >= attackInterval) {
-      let target = pickTarget(enemies, player.x, player.y, projectileEstimate);
+      let target = pickTarget(enemies, player.x, player.y, projectileEstimate, doomed);
       if (target === null) {
         // Stay ready without banking attacks: fire on the tick a target appears.
         attackTicks = attackInterval - 1;
@@ -440,7 +449,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
         target.volleyMark = volley;
         fire(target);
         if (n + 1 < count) {
-          target = pickTarget(enemies, player.x, player.y, projectileEstimate, inVolley);
+          target = pickTarget(enemies, player.x, player.y, projectileEstimate, doomedOrInVolley);
         }
       }
     }
@@ -491,7 +500,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       let target = projectile.target;
       if (!target.alive) {
         target.inbound--;
-        const next = pickTarget(enemies, projectile.x, projectile.y, projectileEstimate);
+        const next = pickTarget(enemies, projectile.x, projectile.y, projectileEstimate, doomed);
         if (next === null) {
           projectile.alive = false;
           projectilesDirty = true;
@@ -677,8 +686,8 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   // ---- Deaths and drops ----
 
   /**
-   * pandemic: copies the dying enemy's active stacks (same damage, same end) onto every
-   * alive enemy within the spread radius.
+   * pandemic: copies the dying enemy's active stacks (same end, pandemicEffect × damage) onto
+   * every alive enemy within the spread radius. Spread stacks spread again, weaker each time.
    */
   function spreadBurns(source: Enemy): void {
     if (now >= source.burnNextEnd) expireBurns(source);
@@ -693,7 +702,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       if (dx * dx + dy * dy > pandemicRadiusSq) continue;
       for (let s = 0; s < burns.length; s++) {
         const stack = burns[s] as BurnStack;
-        addBurn(enemy, stack.dps, stack.end);
+        addBurn(enemy, mul(stack.dps, fx.pandemicEffect), stack.end);
       }
       spreadTo++;
     }

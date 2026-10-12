@@ -87,7 +87,7 @@ export const TALENTS: readonly TalentNode[] = [
     kind: 'repeatable',
     pos: at(DOT_CHAIN, 120),
     links: ['start', 'glassCannon'],
-    repeat: { baseShards: 10, growth: 1.12 },
+    repeat: { baseShards: 10, growth: 1.13 },
     modifiers: [{ stat: 'damage', kind: 'more', value: 0.1 }],
     archetype: 'none',
   }),
@@ -186,7 +186,7 @@ export const TALENTS: readonly TalentNode[] = [
   node('kindling', {
     pos: at(DOT, 120),
     links: ['start', 'fuel'],
-    modifiers: [flat('igniteChance', 0.1)],
+    modifiers: [flat('igniteChance', 0.2)],
     archetype: 'dot',
   }),
   node('fuel', {
@@ -205,7 +205,7 @@ export const TALENTS: readonly TalentNode[] = [
     ...NOTABLE,
     pos: at(DOT, 480),
     links: ['slowBurn', 'stoke', 'scorch'],
-    modifiers: [flat('igniteChance', 0.2), dmg(0.4, 'burn')],
+    modifiers: [flat('igniteChance', 0.3), dmg(0.4, 'burn')],
     archetype: 'dot',
   }),
   node('stoke', {
@@ -230,14 +230,14 @@ export const TALENTS: readonly TalentNode[] = [
     ...NOTABLE_2,
     pos: at(DOT + 10, 720),
     links: ['scorch', 'pandemic'],
-    modifiers: [flat('igniteChance', 0.15), flat('burnDamage', 0.15)],
+    modifiers: [flat('igniteChance', 0.25), flat('burnDamage', 0.15)],
     archetype: 'dot',
   }),
   node('pandemic', {
     ...KEYSTONE,
     pos: at(DOT, 840),
     links: ['heat', 'wildfire'],
-    rules: [{ id: 'pandemic', spreadRadius: 160, hitMore: -0.3 }],
+    rules: [{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.8, hitMore: -0.3 }],
     archetype: 'dot',
   }),
 

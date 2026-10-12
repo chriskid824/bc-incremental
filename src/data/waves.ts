@@ -4,9 +4,9 @@ import type { WaveTable } from './types';
 
 export const WAVES = {
   rules: [
-    { enemy: 'triangle', fromWave: 1, base: 6, perWave: 0.6, maxCount: 40 },
-    { enemy: 'square', fromWave: 3, base: 2, perWave: 0.3, maxCount: 20 },
-    { enemy: 'pentagon', fromWave: 8, base: 1, perWave: 0.2, maxCount: 12 },
+    { enemy: 'triangle', fromWave: 1, base: 5, perWave: 0.4, maxCount: 24 },
+    { enemy: 'square', fromWave: 3, base: 2, perWave: 0.25, maxCount: 12 },
+    { enemy: 'pentagon', fromWave: 8, base: 1, perWave: 0.15, maxCount: 6 },
   ],
   eliteEvery: 5,
   bossEvery: 10,

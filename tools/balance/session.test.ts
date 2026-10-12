@@ -48,13 +48,32 @@ describe('start-wave policy', () => {
 
 describe('effectiveHit', () => {
   it('is the base hit with the crit expectation for base stats', () => {
-    expect(effectiveHit(makeStats())).toBeCloseTo(10 * (0.95 + 0.05 * 1.5), 12);
+    expect(effectiveHit(makeStats({ igniteChance: 0 }))).toBeCloseTo(10 * (0.95 + 0.05 * 1.5), 12);
+  });
+
+  it('applies keystone rules', () => {
+    const stats = makeStats({ igniteChance: 0, critChance: 0.5, critMultiplier: 2 });
+    expect(effectiveHit(stats, [{ id: 'glassCannon', damageMore: 1 }])).toBeCloseTo(
+      2 * 10 * (0.5 + 0.5 * 2),
+      12,
+    );
+    // steadyAim: one crit in three, crit multiplier × 1.5.
+    expect(
+      effectiveHit(stats, [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }]),
+    ).toBeCloseTo(10 * (2 / 3 + (1 / 3) * 3), 12);
   });
 
   it('adds the expected burn, computed from the crit hit on crits', () => {
     const { hit, crit, burn } = DAMAGE_TAG_BIT;
     const stats = makeStats(
-      { damage: 100, critChance: 0.5, critMultiplier: 3, igniteChance: 0.4 },
+      {
+        damage: 100,
+        critChance: 0.5,
+        critMultiplier: 3,
+        igniteChance: 0.4,
+        burnDamage: 0.4,
+        burnDuration: 4,
+      },
       (mask) => ((mask & burn) !== 0 ? 2 : 1) * ((mask & crit) !== 0 ? 1.5 : 1),
     );
     const hitPart = 0.5 * 1 + 0.5 * 3 * 1.5;

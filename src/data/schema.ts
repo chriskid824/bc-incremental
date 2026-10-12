@@ -95,7 +95,14 @@ export const RuleSpecSchema = exact<RuleSpec>()(
     z
       .strictObject({ id: z.literal('steadyAim'), everyNth: finite, critMultiplierMore: finite })
       .readonly(),
-    z.strictObject({ id: z.literal('pandemic'), spreadRadius: finite, hitMore: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('pandemic'),
+        spreadRadius: finite,
+        spreadEffect: finite,
+        hitMore: finite,
+      })
+      .readonly(),
     z.strictObject({ id: z.literal('eternalFlame'), durationMore: finite }).readonly(),
     z
       .strictObject({

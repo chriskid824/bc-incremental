@@ -87,11 +87,17 @@ describe('keystones in the simulation', () => {
 
   it('critsAlwaysIgnite ignites every crit and halves non-crit hits', () => {
     const rules: RuleSpec[] = [{ id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 }];
-    const crits = run({ stats: makeStats({ damage: 10, critChance: 1 }), rules }, dummyData(1));
+    const crits = run(
+      { stats: makeStats({ damage: 10, critChance: 1, igniteChance: 0 }), rules },
+      dummyData(1),
+    );
     const critHits = eventsOf(crits.ticks, 'hit');
     expect(critHits.length).toBeGreaterThan(0);
     expect(eventsOf(crits.ticks, 'ignite').length).toBe(critHits.length);
-    const plain = run({ stats: makeStats({ damage: 10, critChance: 0 }), rules }, dummyData(1));
+    const plain = run(
+      { stats: makeStats({ damage: 10, critChance: 0, igniteChance: 0 }), rules },
+      dummyData(1),
+    );
     expect(eventsOf(plain.ticks, 'hit').every((hit) => hit.amount === 5)).toBe(true);
     expect(eventsOf(plain.ticks, 'ignite')).toHaveLength(0);
   });
@@ -107,7 +113,9 @@ describe('keystones in the simulation', () => {
       burnDuration: 4,
     });
     const data = dummyData(30, 30 / 20);
-    const rules: RuleSpec[] = [{ id: 'pandemic', spreadRadius: 5000, hitMore: -0.3 }];
+    const rules: RuleSpec[] = [
+      { id: 'pandemic', spreadRadius: 5000, spreadEffect: 1, hitMore: -0.3 },
+    ];
     const { ticks } = run({ stats, rules, maxTicks: 1200 }, data);
     const hits = eventsOf(ticks, 'hit');
     expect(hits[0]?.amount).toBeCloseTo(0.7, 12);
@@ -173,7 +181,7 @@ describe('keystones in the simulation', () => {
   });
 
   it('chainIgniteChance and critIgniteChance add ignite chance to their hits only', () => {
-    const base = { damage: 10, chainCount: 1, chainRange: 5000, attackSpeed: 10 };
+    const base = { damage: 10, chainCount: 1, chainRange: 5000, attackSpeed: 10, igniteChance: 0 };
     const chain = run(
       {
         stats: makeStats({ ...base, critChance: 0 }),
@@ -206,5 +214,24 @@ describe('projectileCount', () => {
     const attacks = eventsOf([events], 'attack');
     expect(attacks.length % 3).toBe(0);
     expect(new Set(attacks.slice(0, 3).map((attack) => attack.targetId)).size).toBe(3);
+  });
+});
+
+describe('targeting doomed enemies', () => {
+  it('does not shoot an enemy its burns will already kill', () => {
+    const stats = makeStats({
+      damage: 1,
+      attackSpeed: 2,
+      critChance: 0,
+      igniteChance: 1,
+      burnDamage: 100,
+      burnDuration: 3,
+      projectileSpeed: 1e6,
+    });
+    // Projectiles land on the next tick. 100 HP each: one hit ignites 300 burn damage, enough to kill within the second.
+    const { ticks } = run({ stats, maxTicks: 150 }, dummyData(2, 5));
+    const hits = eventsOf(ticks, 'hit');
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+    expect(hits[1]?.targetId).not.toBe(hits[0]?.targetId);
   });
 });

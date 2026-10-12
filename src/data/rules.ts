@@ -9,8 +9,16 @@ export type RuleSpec =
   | { readonly id: 'critsAlwaysIgnite'; readonly nonCritHitMore: number }
   /** Every Nth shot crits, no random crits; crit multiplier gets an extra more multiplier. */
   | { readonly id: 'steadyAim'; readonly everyNth: number; readonly critMultiplierMore: number }
-  /** Burning enemies spread their burn on death; hit damage gets (1 + hitMore). */
-  | { readonly id: 'pandemic'; readonly spreadRadius: number; readonly hitMore: number }
+  /**
+   * Burning enemies spread their burns on death to enemies within spreadRadius, each spread
+   * stack dealing spreadEffect × the source stack's damage; hit damage gets (1 + hitMore).
+   */
+  | {
+      readonly id: 'pandemic';
+      readonly spreadRadius: number;
+      readonly spreadEffect: number;
+      readonly hitMore: number;
+    }
   /** No burn stack cap; burn duration gets (1 + durationMore). */
   | { readonly id: 'eternalFlame'; readonly durationMore: number }
   /** Chain count × chainCountMultiplier; chain retention reduced by retentionPenalty (absolute). */

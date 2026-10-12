@@ -27,7 +27,7 @@ function talentAt(data: Mutable<GameData>, id: string): [number, Mutable<TalentN
 const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   critsAlwaysIgnite: { id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 },
   steadyAim: { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 },
-  pandemic: { id: 'pandemic', spreadRadius: 150, hitMore: -0.3 },
+  pandemic: { id: 'pandemic', spreadRadius: 150, spreadEffect: 0.5, hitMore: -0.3 },
   eternalFlame: { id: 'eternalFlame', durationMore: -0.5 },
   overload: { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.15 },
   glassCannon: { id: 'glassCannon', damageMore: 1 },

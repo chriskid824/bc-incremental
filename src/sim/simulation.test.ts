@@ -946,6 +946,7 @@ describe('burning', () => {
       critChance: 0.5,
       critMultiplier: 4,
       igniteChance: 1,
+      burnDamage: 0.4,
       burnDuration: 2,
       burnMaxStacks: 2,
     });

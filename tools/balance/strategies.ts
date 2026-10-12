@@ -86,8 +86,8 @@ function allocatedCount(meta: Readonly<MetaState>, data: GameData, cls: NodeClas
 
 /**
  * The node the strategy buys next, or null when it is done for now.
- * - `<archetype>-greedy`: cheapest node of that archetype, else cheapest generic node; nodes
- *   of the other archetypes and bridge (hybrid) nodes are never bought (pure builds).
+ * - `<archetype>-greedy`: cheapest node of that archetype, else cheapest generic node, else
+ *   cheapest bridge (hybrid) node; sector nodes of the other archetypes are never bought.
  * - `cheapest`: cheapest node of any class.
  * - `balanced`: round-robin over the archetypes, implemented statelessly as "the archetype
  *   with the fewest allocated nodes first" (ties in crit, dot, chain order); falls back to
@@ -103,11 +103,11 @@ export function nextPurchase(
     cheapestAllocatable(meta, data, economy, ofClass(cls));
   switch (strategy) {
     case 'crit-greedy':
-      return pick('crit') ?? pick('generic');
+      return pick('crit') ?? pick('generic') ?? pick('hybrid');
     case 'dot-greedy':
-      return pick('dot') ?? pick('generic');
+      return pick('dot') ?? pick('generic') ?? pick('hybrid');
     case 'chain-greedy':
-      return pick('chain') ?? pick('generic');
+      return pick('chain') ?? pick('generic') ?? pick('hybrid');
     case 'cheapest':
       return cheapestAllocatable(meta, data, economy, () => true);
     case 'balanced': {

@@ -43,10 +43,13 @@ describe('nodePrice', () => {
     const meta = createMetaState();
     expect(toNumber(nodePrice(meta, node('b'), DEFAULT_ECONOMY).shards)).toBe(5);
     meta.allocated.add('a');
-    expect(toNumber(nodePrice(meta, node('b'), DEFAULT_ECONOMY).shards)).toBeCloseTo(5 * 1.22, 12);
+    expect(toNumber(nodePrice(meta, node('b'), DEFAULT_ECONOMY).shards)).toBeCloseTo(
+      5 * DEFAULT_ECONOMY.talentGrowth,
+      12,
+    );
     meta.allocated.add('b');
     expect(toNumber(nodePrice(meta, node('far'), DEFAULT_ECONOMY).shards)).toBeCloseTo(
-      5 * 1.22 ** 2,
+      5 * DEFAULT_ECONOMY.talentGrowth ** 2,
       12,
     );
   });

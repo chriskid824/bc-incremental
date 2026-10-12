@@ -22,14 +22,17 @@ describe('computeStatBlock', () => {
       { stat: 'attackSpeed', kind: 'more', value: 0.5 },
       { stat: 'attackSpeed', kind: 'more', value: 0.1 },
     ]);
-    // (1.5 + 0.5) × (1 + 0.2 + 0.3) × 1.5 × 1.1
-    expect(block.values.attackSpeed).toBeCloseTo(4.95, 12);
+    // (base + 0.5) × (1 + 0.2 + 0.3) × 1.5 × 1.1
+    expect(block.values.attackSpeed).toBeCloseTo(
+      (BASE_STATS.attackSpeed + 0.5) * 1.5 * 1.5 * 1.1,
+      12,
+    );
     expect(block.values.critChance).toBe(BASE_STATS.critChance);
   });
 
   it('supports negative more (penalties) and leaves other stats untouched', () => {
     const block = computeStatBlock([{ stat: 'burnDuration', kind: 'more', value: -0.5 }]);
-    expect(block.values.burnDuration).toBe(2);
+    expect(block.values.burnDuration).toBe(BASE_STATS.burnDuration / 2);
     expect(block.values.maxLife).toBe(100);
   });
 
