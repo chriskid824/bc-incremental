@@ -240,13 +240,16 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     events.push({ type: 'waveStarted', wave });
   }
 
-  /** Starts the first wave, or the next one once the current wave is cleared or timed out. */
+  /**
+   * Starts the first wave, or the next one once the field is clear (every started wave is
+   * cleared, docs/GDD.md §2.1) or the current wave has run for waveTimerSec.
+   */
   function startDueWave(): void {
     if (current === null) {
       startWave(startWaveNumber);
     } else if (
       current.wave < waveCap &&
-      (current.cleared || now - current.startTick >= waveTimerTicks)
+      (open.length === 0 || now - current.startTick >= waveTimerTicks)
     ) {
       startWave(current.wave + 1);
     }

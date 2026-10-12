@@ -4,7 +4,14 @@ import { BASE_STATS } from '../data/stats';
 import type { StatBlock } from '../data/stats';
 import type { EnemyId, GameData, WaveTable } from '../data/types';
 import { BURN_TICK_INTERVAL, createSimulation } from './simulation';
-import { makeConfig, makeStats, makeTestData, recordRun, TEST_ENEMIES } from './testing';
+import {
+  makeConfig,
+  makeStats,
+  makeTestData,
+  recordRun,
+  TEST_ENEMIES,
+  TEST_WAVES,
+} from './testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, NO_INPUT, TICK_RATE } from './types';
 import type { RunConfig, RunResult, SimEvent, Simulation } from './types';
 
@@ -494,19 +501,67 @@ describe('waves and spawning', () => {
     // Wave 1 alone holds an immortal, stationary square, so it never clears.
     const data = makeTestData({
       enemies: { square: { hpMult: 1e12, speed: 0 } },
-      waves: onlyRules([
-        { enemy: 'triangle', fromWave: 1, base: 2, perWave: 0, maxCount: 2 },
-        { enemy: 'square', fromWave: 1, base: 1, perWave: -1, maxCount: 1 },
-      ]),
+      waves: onlyRules(
+        [
+          { enemy: 'triangle', fromWave: 1, base: 2, perWave: 0, maxCount: 2 },
+          { enemy: 'square', fromWave: 1, base: 1, perWave: -1, maxCount: 1 },
+        ],
+        { waveTimerSec: 2 },
+      ),
     });
     const config = makeConfig({ stats: makeStats({ damage: 1e4, attackSpeed: 6 }) });
     const { ticks, result } = recordRun({ ...config, maxTicks: 20 * TICK_RATE }, data);
-    const cleared = eventsOf(ticks, 'waveCleared').map((event) => event.wave);
-    expect(cleared).not.toContain(1);
+    const cleared = eventsOf(ticks, 'waveCleared');
+    expect(cleared.map((event) => event.wave)).not.toContain(1);
     expect(cleared.length).toBeGreaterThan(2);
-    expect(result.highestWaveCleared).toBe(Math.max(...cleared));
+    expect(result.highestWaveCleared).toBe(Math.max(...cleared.map((event) => event.wave)));
     expect(result.clearedStartWave).toBe(false);
     expect(result.endReason).toBe('timeout');
+
+    // The field is never clear, so each wave starts on the timer of the one before, even
+    // when that one was cleared long before.
+    const started = eventsOf(ticks, 'waveStarted');
+    expect(started.map((event) => event.tick)).toEqual(
+      started.map((_, i) => 1 + i * 2 * TICK_RATE),
+    );
+    const startedAt = new Map(started.map((event) => [event.wave, event.tick]));
+    const early = cleared.filter((event) => {
+      const next = startedAt.get(event.wave + 1);
+      return next !== undefined && event.tick + 1 < next;
+    });
+    expect(early.length).toBeGreaterThan(2);
+  });
+
+  it('starts the next wave once the field is clear or the current wave times out', () => {
+    // Elites and bosses outlive later waves now and then, so several waves are often open.
+    const timerTicks = TEST_WAVES.waveTimerSec * TICK_RATE;
+    let starts = 0;
+    for (const [seed, startWave, damage] of [
+      [1, 5, 20],
+      [2, 5, 30],
+      [3, 8, 20],
+      [2, 5, 50],
+    ] as const) {
+      const stats = makeStats({ damage, attackSpeed: 6, maxLife: 1e9 });
+      const { ticks } = recordRun(
+        makeConfig({ seed, startWave, stats, maxTicks: 60 * TICK_RATE }),
+        makeTestData(),
+      );
+      const startedAt = new Map(eventsOf(ticks, 'waveStarted').map((e) => [e.wave, e.tick]));
+      const clearedAt = new Map(eventsOf(ticks, 'waveCleared').map((e) => [e.wave, e.tick]));
+      for (const [wave, tick] of startedAt) {
+        if (wave === startWave) continue;
+        // The tick after the last earlier wave clears, if every earlier wave clears.
+        let fieldClear = 0;
+        for (let earlier = startWave; earlier < wave; earlier++) {
+          fieldClear = Math.max(fieldClear, (clearedAt.get(earlier) ?? Infinity) + 1);
+        }
+        const timedOut = (startedAt.get(wave - 1) as number) + timerTicks;
+        expect(tick, `wave ${wave}, seed ${seed}`).toBe(Math.min(fieldClear, timedOut));
+        starts++;
+      }
+    }
+    expect(starts).toBeGreaterThan(20);
   });
 
   it('splits a pentagon into shards of the same wave; the wave clears after them', () => {
