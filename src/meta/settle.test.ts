@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { num, toNumber, ZERO } from '../core/num';
 import { shardsPerStdEnemy } from '../data/curve';
+import { ENEMY_IDS } from '../data/types';
 import type { RunResult } from '../sim/types';
 import { allowedStartWave, expectedWaveDrops, settleRun } from './settle';
 import { createMetaState } from './state';
@@ -29,6 +30,12 @@ function runResult(overrides: Partial<RunResult> = {}): RunResult {
     damage: { hit: ZERO, crit: ZERO, burn: ZERO, chain: ZERO },
     maxHit: num(10),
     overkillSeconds: 0,
+    leaks: 0,
+    damageTaken: 0,
+    damageTakenBy: Object.fromEntries(
+      ENEMY_IDS.map((id) => [id, { hits: 0, damage: 0 }]),
+    ) as RunResult['damageTakenBy'],
+    killedBy: null,
     ...overrides,
   };
 }

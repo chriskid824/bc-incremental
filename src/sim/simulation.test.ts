@@ -12,6 +12,7 @@ import {
   TEST_ENEMIES,
   TEST_WAVES,
 } from './testing';
+import type { TestDataOverrides } from './testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, NO_INPUT, TICK_RATE } from './types';
 import type { RunConfig, RunResult, SimEvent, Simulation } from './types';
 
@@ -209,6 +210,7 @@ describe('determinism', () => {
     const second = recordRun(config, data);
     expect(second.ticks).toEqual(first.ticks);
     expect(second.result).toEqual(first.result);
+    expect(first.result.killedBy).not.toBeNull();
     // The run exercised every system.
     for (const type of ['hit', 'ignite', 'burnTick', 'enemyKilled', 'playerHit'] as const) {
       expect(eventsOf(first.ticks, type).length).toBeGreaterThan(0);
@@ -374,6 +376,103 @@ describe('run end', () => {
     expect(dead.result.endReason).toBe('death');
     expect(dead.result.clearedStartWave).toBe(false);
     expect(dead.result.highestWaveCleared).toBe(0);
+  });
+});
+
+describe('damage taken', () => {
+  /** Wave 1 only: the given enemies, all released at once. */
+  const waveOne = (
+    rules: WaveTable['rules'],
+    enemies: NonNullable<TestDataOverrides['enemies']>,
+  ): GameData =>
+    makeTestData({ enemies, waves: onlyRules(rules, { spawnDurationSec: 0, waveTimerSec: 1000 }) });
+
+  it('tallies contacts by type and names the type that dealt the killing blow', () => {
+    // Two triangles arrive at once (16), the slow square last (15): 31 ≥ 30 life.
+    const data = waveOne(
+      [
+        { enemy: 'triangle', fromWave: 1, base: 2, perWave: 0, maxCount: 2 },
+        { enemy: 'square', fromWave: 1, base: 1, perWave: 0, maxCount: 1 },
+      ],
+      { triangle: { speed: 1e5 }, square: { speed: 200 } },
+    );
+    const stats = makeStats({ damage: 1e-6, maxLife: 30 });
+    const { ticks, result } = recordRun(makeConfig({ stats }), data);
+    expect(result.endReason).toBe('death');
+    expect(result.killedBy).toBe('square');
+    expect(result.leaks).toBe(3);
+    // The killing blow counts in full, past the remaining 14 life.
+    expect(result.damageTaken).toBe(31);
+    expect(result.damageTakenBy).toEqual({
+      triangle: { hits: 2, damage: 16 },
+      square: { hits: 1, damage: 15 },
+      pentagon: { hits: 0, damage: 0 },
+      shard: { hits: 0, damage: 0 },
+      hexagon: { hits: 0, damage: 0 },
+      boss: { hits: 0, damage: 0 },
+    });
+    expect(eventsOf(ticks, 'playerHit').map((hit) => hit.damage)).toEqual([8, 8, 15]);
+  });
+
+  it('stops counting once life is 0, even for enemies arriving on the same tick', () => {
+    const data = waveOne([{ enemy: 'triangle', fromWave: 1, base: 3, perWave: 0, maxCount: 3 }], {
+      triangle: { speed: 1e5 },
+    });
+    const stats = makeStats({ damage: 1e-6, maxLife: 10 });
+    const { ticks, result } = recordRun(makeConfig({ stats }), data);
+    expect(ticks).toHaveLength(1);
+    expect(result).toMatchObject({
+      endReason: 'death',
+      killedBy: 'triangle',
+      leaks: 2,
+      damageTaken: 16,
+    });
+    expect(result.damageTakenBy.triangle).toEqual({ hits: 2, damage: 16 });
+  });
+
+  it('has no killer when the run ends any other way', () => {
+    const slow = makeStats({ damage: 1e6, attackSpeed: 0.5, maxLife: 1000 });
+    const leaky = recordRun(makeConfig({ stats: slow, waveCap: 1 }), makeTestData()).result;
+    expect(leaky.endReason).toBe('waveCap');
+    expect(leaky.leaks).toBeGreaterThan(0);
+    expect(leaky.damageTaken).toBe(leaky.leaks * TEST_ENEMIES.triangle.contactDamage);
+    expect(leaky.killedBy).toBeNull();
+
+    const strong = recordRun(makeConfig({ stats: STRONG, maxTicks: 600 }), makeTestData()).result;
+    expect(strong).toMatchObject({ endReason: 'timeout', leaks: 0, damageTaken: 0 });
+    expect(strong.killedBy).toBeNull();
+    for (const tally of Object.values(strong.damageTakenBy)) {
+      expect(tally).toEqual({ hits: 0, damage: 0 });
+    }
+  });
+
+  it('matches the playerHit events of a mixed run, split children included', () => {
+    const config = makeConfig({
+      seed: 3,
+      startWave: 8,
+      stats: makeStats({ damage: 60, attackSpeed: 3, critChance: 0, maxLife: 400 }),
+    });
+    const { ticks, result } = recordRun(config, makeTestData());
+    const typeOf = new Map(eventsOf(ticks, 'enemySpawned').map((e) => [e.enemyId, e.enemy]));
+    const hits = eventsOf(ticks, 'playerHit');
+    const expected: Partial<Record<EnemyId, { hits: number; damage: number }>> = {};
+    for (const hit of hits) {
+      const type = typeOf.get(hit.enemyId) as EnemyId;
+      const tally = (expected[type] ??= { hits: 0, damage: 0 });
+      tally.hits++;
+      tally.damage += hit.damage;
+    }
+    expect(result.endReason).toBe('death');
+    expect(Object.keys(expected).length).toBeGreaterThan(2);
+    expect(expected.shard?.hits ?? 0).toBeGreaterThan(0);
+    for (const [type, tally] of Object.entries(result.damageTakenBy)) {
+      expect(tally, type).toEqual(expected[type as EnemyId] ?? { hits: 0, damage: 0 });
+    }
+    expect(result.leaks).toBe(hits.length);
+    expect(result.damageTaken).toBe(sum(hits.map((hit) => hit.damage)));
+    const last = hits[hits.length - 1];
+    expect(last?.lifeLeft).toBe(0);
+    expect(result.killedBy).toBe(typeOf.get(last?.enemyId ?? -1));
   });
 });
 
