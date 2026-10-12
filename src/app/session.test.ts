@@ -149,8 +149,7 @@ describe('Session', () => {
     const { session, meta, started, opened } = createSession();
     meta.runs = 7;
     meta.maxWave = 12;
-    meta.allocated.add('might');
-    meta.ranks.set('might', 20);
+    giveMight(meta, mightRanksFor(meta, 12));
     session.resume();
     expect(session.phase).toBe('talents');
     expect(opened()).toBe(1);
@@ -183,27 +182,24 @@ describe('Session', () => {
   });
 });
 
-/**
- * A session between runs with a long-played profile: allowed start wave 12, plenty to spend,
- * and `might` ranks of the repeatable damage node already bought.
- */
-function veteranSession(might = 60) {
-  const created = createSession({ waveCap: 40 });
-  const { session, meta } = created;
-  meta.runs = 20;
-  meta.maxWave = 24;
-  meta.shards = num(1e12);
-  meta.cores = 1000;
-  if (might > 0) {
-    meta.allocated.add('might');
-    meta.ranks.set('might', might);
-  }
-  session.resume();
-  return created;
+/** Sets the rank of the repeatable damage node directly, as a loaded profile would. */
+function giveMight(meta: MetaState, ranks: number): void {
+  meta.allocated.add('might');
+  meta.ranks.set('might', ranks);
 }
 
-function buyMight(session: Session, ranks: number): void {
-  for (let i = 0; i < ranks; i++) expect(session.allocate('might')).toBe(true);
+/**
+ * The fewest Might ranks on top of `meta`'s talents whose estimated frontier reaches `wave`.
+ * Searched rather than hard-coded, so the tests survive retuning of the curve and of Might.
+ */
+function mightRanksFor(meta: MetaState, wave: number): number {
+  const data = loadGameData();
+  for (let ranks = 0; ranks <= 1000; ranks++) {
+    const trial = cloneMeta(meta);
+    giveMight(trial, ranks);
+    if (estimateBuild(trial, data, DEFAULT_ECONOMY).frontier >= wave) return ranks;
+  }
+  throw new Error(`Might cannot reach wave ${wave}`);
 }
 
 /** A copy of the talent state, for trying allocations without touching the session's meta. */
@@ -213,6 +209,26 @@ function cloneMeta(meta: MetaState): MetaState {
     allocated: new Set(meta.allocated),
     ranks: new Map(meta.ranks),
   };
+}
+
+/**
+ * A session between runs with a long-played profile: allowed start wave 12, plenty to spend,
+ * and, when `strong`, enough Might ranks for a build that reached wave 24.
+ */
+function veteranSession(strong = true) {
+  const created = createSession({ waveCap: 40 });
+  const { session, meta } = created;
+  meta.runs = 20;
+  meta.maxWave = 24;
+  meta.shards = num(1e100);
+  meta.cores = 1000;
+  if (strong) giveMight(meta, mightRanksFor(meta, 24));
+  session.resume();
+  return created;
+}
+
+function buyMight(session: Session, ranks: number): void {
+  for (let i = 0; i < ranks; i++) expect(session.allocate('might')).toBe(true);
 }
 
 describe('Session start wave', () => {
@@ -226,7 +242,7 @@ describe('Session start wave', () => {
   });
 
   it('drops on load when the build is not expected to reach the start wave', () => {
-    const { session } = veteranSession(0);
+    const { session } = veteranSession(false);
     expect(session.estimate.frontier).toBeLessThan(12);
     expect(session.startWave).toBe(session.estimate.startWave);
   });
@@ -239,13 +255,13 @@ describe('Session start wave', () => {
     expect(session.startWave).toBe(empty.startWave);
 
     let previous = session.startWave;
-    for (let rank = 1; rank <= 70; rank++) {
+    while (session.startWave < 12) {
       buyMight(session, 1);
       expect(session.startWave).toBe(Math.min(12, session.estimate.startWave));
       expect(session.startWave).toBeGreaterThanOrEqual(previous);
       previous = session.startWave;
+      expect(meta.ranks.get('might')).toBeLessThan(1000);
     }
-    expect(session.startWave).toBe(12);
     // Back at the highest allowed wave, it follows that wave upward again.
     meta.maxWave = 30;
     expect(session.startWave).toBe(15);
@@ -268,7 +284,7 @@ describe('Session start wave', () => {
   });
 
   it('drops when a keystone with a damage cost puts the start wave past the estimate', () => {
-    const { session, meta } = veteranSession(0);
+    const { session, meta } = veteranSession(false);
     const data = loadGameData();
     for (const id of ['kindling', 'fuel', 'slowBurn', 'inferno', 'stoke', 'heat']) {
       expect(session.allocate(id)).toBe(true);
@@ -276,8 +292,7 @@ describe('Session start wave', () => {
     // Find a Might rank where Pandemic's hit damage cost lowers the estimated frontier.
     const withPandemic = (ranks: number) => {
       const trial = cloneMeta(meta);
-      trial.allocated.add('might');
-      trial.ranks.set('might', ranks);
+      giveMight(trial, ranks);
       const before = estimateBuild(trial, data, DEFAULT_ECONOMY);
       trial.allocated.add('pandemic');
       return { before, after: estimateBuild(trial, data, DEFAULT_ECONOMY) };
@@ -290,8 +305,7 @@ describe('Session start wave', () => {
     }
     const { before, after } = withPandemic(rank);
     expect(after.frontier).toBeLessThan(before.frontier);
-    meta.allocated.add('might');
-    meta.ranks.set('might', rank);
+    giveMight(meta, rank);
     session.setStartWave(before.frontier);
     expect(session.startWave).toBe(before.frontier);
     expect(session.allocate('pandemic')).toBe(true);
@@ -302,7 +316,7 @@ describe('Session start wave', () => {
     const { session, meta } = veteranSession();
     expect(session.startWave).toBe(12);
     // The build is far weaker than the session assumes, as when the estimate is too kind.
-    meta.ranks.set('might', 0);
+    giveMight(meta, 0);
     session.startNextRun();
     expect(session.run.config.startWave).toBe(12);
     playRun(session);
@@ -324,7 +338,7 @@ describe('Session start wave', () => {
     }
 
     // A much stronger build clears its start wave and the start wave climbs back.
-    meta.ranks.set('might', 80);
+    giveMight(meta, mightRanksFor(meta, 34));
     const low = session.startWave;
     session.startNextRun();
     playRun(session);
