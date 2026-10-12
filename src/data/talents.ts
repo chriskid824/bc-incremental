@@ -182,7 +182,7 @@ export const TALENTS: readonly TalentNode[] = [
     ...KEYSTONE,
     pos: at(CRIT, 840),
     links: ['assassin', 'volley'],
-    modifiers: [moreDmg(2.5, 'crit')],
+    modifiers: [moreDmg(2, 'crit')],
     rules: [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }],
     archetype: 'crit',
   }),
@@ -228,7 +228,7 @@ export const TALENTS: readonly TalentNode[] = [
   node('heat', {
     pos: at(DOT - 10, 720),
     links: ['stoke', 'pandemic'],
-    modifiers: [dmg(0.3, 'burn')],
+    modifiers: [dmg(0.4, 'burn')],
     archetype: 'dot',
   }),
   node('wildfire', {
