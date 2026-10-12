@@ -1,12 +1,10 @@
-/** End-of-run panel: why the run ended, how far it got, what it earned and what was bought. */
+/** End-of-run panel: why the run ended, how far it got and what it earned. */
 
 import { formatNum } from '../core/format';
 import type { Num } from '../core/num';
-import type { TalentNode } from '../data/types';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import type { EndReason } from '../sim/types';
-import { talentName } from './strings';
 import { el } from './style';
 
 export interface ResultInfo {
@@ -21,10 +19,15 @@ export interface ResultInfo {
   readonly clearedStartWave: boolean;
   readonly skipShards: Num;
   readonly skipCores: number;
-  readonly purchases: readonly {
-    readonly talent: Pick<TalentNode, 'id' | 'nameKey'>;
-    readonly count: number;
-  }[];
+  /** A talent is affordable: the panel leads to the talent web instead of counting down. */
+  readonly affordable: boolean;
+}
+
+export interface ResultActions {
+  /** Click anywhere: talent web if affordable, else the next run. */
+  continue(): void;
+  openTalents(): void;
+  nextRun(): void;
 }
 
 const FORMAT = { format: 'short' } as const;
@@ -41,16 +44,31 @@ export class ResultPanel {
   private readonly next: HTMLElement;
   private shownSeconds = '';
 
+  private readonly actions: HTMLElement;
+  private readonly talentsButton: HTMLButtonElement;
+
   constructor(
     private readonly doc: Document,
-    onContinue: () => void,
+    handlers: ResultActions,
   ) {
     this.root = el(doc, 'div', 'bc-ui bc-result');
     this.root.hidden = true;
     this.card = el(doc, 'div', 'bc-result-card');
     this.next = el(doc, 'div', 'bc-result-next');
+    this.actions = el(doc, 'div', 'bc-result-actions');
+    this.talentsButton = el(doc, 'button', 'bc-button', t('result.toTalents'));
+    const nextButton = el(doc, 'button', 'bc-button', t('result.nextRun'));
+    this.talentsButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handlers.openTalents();
+    });
+    nextButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handlers.nextRun();
+    });
+    this.actions.append(this.talentsButton, nextButton);
     this.root.append(this.card);
-    this.root.addEventListener('click', () => onContinue());
+    this.root.addEventListener('click', () => handlers.continue());
   }
 
   show(info: ResultInfo): void {
@@ -79,21 +97,13 @@ export class ResultPanel {
     }
     row(t('result.skipCompensation'), skip);
 
-    const talents = el(doc, 'div', 'bc-result-talents');
-    const bought = info.purchases.map((p) =>
-      p.count > 1
-        ? t('result.talentRank', { name: talentName(p.talent), count: p.count })
-        : talentName(p.talent),
-    );
-    talents.append(
-      el(doc, 'span', 'bc-label', t('result.talents')),
-      doc.createTextNode(
-        bought.length > 0 ? bought.join(t('result.talentSeparator')) : t('result.talentsNone'),
-      ),
-    );
+    this.talentsButton.classList.toggle('bc-button-glow', info.affordable);
+    this.talentsButton.classList.toggle('bc-button-primary', info.affordable);
+    const hint = el(doc, 'div', 'bc-result-hint', info.affordable ? t('result.affordable') : '');
 
     this.shownSeconds = '';
-    this.card.replaceChildren(run, title, rows, talents, this.next);
+    this.next.textContent = '';
+    this.card.replaceChildren(run, title, rows, this.actions, info.affordable ? hint : this.next);
     this.root.hidden = false;
     // Next frame, so the opacity transition runs.
     requestAnimationFrame(() => {
@@ -101,8 +111,9 @@ export class ResultPanel {
     });
   }
 
-  /** Updates the countdown to the next run. */
+  /** Updates the countdown to the next run; 0 hides it. */
   setTimeLeft(ms: number): void {
+    if (ms <= 0) return;
     const seconds = (Math.max(0, ms) / 1000).toFixed(1);
     if (seconds === this.shownSeconds) return;
     this.shownSeconds = seconds;

@@ -8,7 +8,18 @@ import { loadGameData } from '../data';
 import type { GameData } from '../data';
 import { LOCALES, pickLocale, setLocale, t } from '../i18n';
 import type { Locale } from '../i18n';
-import { createMetaState } from '../meta';
+import {
+  DEFAULT_ECONOMY,
+  canAllocate,
+  createMetaState,
+  nodePrice,
+  nodeRank,
+  statBlockFor,
+} from '../meta';
+import { LocalSaveStorage, MemorySaveStorage } from '../platform/storage';
+import type { SaveStorage } from '../platform/storage';
+import { loadSave, serializeSave } from '../save';
+import type { Profile } from '../save';
 import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
 import { Renderer } from '../render';
 import { Hud } from '../ui/hud';
@@ -16,7 +27,9 @@ import type { HudInfo } from '../ui/hud';
 import { ResultPanel } from '../ui/result';
 import type { ResultInfo } from '../ui/result';
 import { injectStyle } from '../ui/style';
-import { bindSpeedKeys } from './input';
+import { TalentWebPanel } from '../ui/talentWeb';
+import type { TalentWebView } from '../ui/talentWeb';
+import { bindMenuKeys, bindSpeedKeys } from './input';
 import { GameLoop, SPEEDS } from './loop';
 import type { Speed } from './loop';
 import { Session } from './session';
@@ -24,6 +37,32 @@ import type { ActiveRun, RunReport } from './session';
 
 /** Becomes a settings toggle later (docs/ARCHITECTURE.md §10). */
 const REDUCED_MOTION = false;
+
+/** The M1 prototype stops at wave 40, like the demo (docs/GDD.md §9). */
+const WAVE_CAP = 40;
+
+/** Autosave interval outside runs (docs/ARCHITECTURE.md §8). */
+const AUTOSAVE_MS = 30_000;
+
+function openStorage(): SaveStorage {
+  try {
+    return new LocalSaveStorage(window.localStorage);
+  } catch {
+    return new MemorySaveStorage();
+  }
+}
+
+/** The main slot, else the backup, else a fresh profile. */
+function loadProfile(storage: SaveStorage, data: GameData): Profile {
+  for (const slot of ['main', 'backup'] as const) {
+    const text = storage.read(slot);
+    if (text === null) continue;
+    const loaded = loadSave(text, data);
+    if (loaded.ok) return loaded.profile;
+    console.warn(`Ignoring ${slot} save: ${loaded.error}`);
+  }
+  return { meta: createMetaState(), playSeconds: 0, speed: 1 };
+}
 
 async function main(root: HTMLElement): Promise<void> {
   injectStyle(document);
@@ -39,41 +78,104 @@ async function main(root: HTMLElement): Promise<void> {
   root.appendChild(app.canvas);
 
   const data = loadGameData();
-  const meta = createMetaState();
+  const storage = openStorage();
+  const profile = loadProfile(storage, data);
+  const meta = profile.meta;
   const renderer = new Renderer(app, data, { reducedMotion: REDUCED_MOTION });
+
+  let lastSaveMs = performance.now();
+  const save = (): void => {
+    const previous = storage.read('main');
+    if (previous !== null) storage.write('backup', previous);
+    storage.write('main', serializeSave(profile, new Date().toISOString()));
+    lastSaveMs = performance.now();
+  };
 
   const setSpeed = (speed: Speed): void => {
     loop.speed = speed;
+    profile.speed = speed;
   };
   const hud = new Hud(document, SPEEDS, setSpeed);
-  const results = new ResultPanel(document, () => session.skipResults());
-  root.append(hud.root, results.root);
-
-  const session = new Session(data, meta, {
-    runStarted(run) {
-      renderer.beginRun(run.typicalHit);
-      results.hide();
-      loop.resetClock();
-    },
-    runFinished(report) {
-      results.show(toResultInfo(report, data));
-      results.setTimeLeft(session.resultTimeLeftMs);
-    },
+  const results = new ResultPanel(document, {
+    continue: () => session.continueFromResults(),
+    openTalents: () => session.openTalents(),
+    nextRun: () => session.startNextRun(),
   });
+  const talentWeb = new TalentWebPanel(document, data.talents, {
+    allocate: (id) => {
+      if (session.allocate(id)) talentWeb.update(webView());
+    },
+    refund: () => {
+      session.refund();
+      talentWeb.update(webView());
+    },
+    setStartWave: (wave) => {
+      session.setStartWave(wave);
+      talentWeb.update(webView());
+    },
+    start: () => session.startNextRun(),
+  });
+  root.append(hud.root, results.root, talentWeb.root);
+
+  const webView = (): TalentWebView => ({
+    talents: data.talents,
+    shards: meta.shards,
+    cores: meta.cores,
+    rank: (node) => nodeRank(meta, node),
+    check: (node) => canAllocate(meta, node.id, data, DEFAULT_ECONOMY),
+    price: (node) => nodePrice(meta, node, DEFAULT_ECONOMY),
+    stats: statBlockFor(meta, data),
+    startWave: session.startWave,
+    maxStartWave: session.maxStartWave,
+  });
+
+  const session = new Session(
+    data,
+    meta,
+    {
+      runStarted(run) {
+        renderer.beginRun(run.typicalHit);
+        results.hide();
+        talentWeb.hide();
+        loop.resetClock();
+      },
+      runFinished(report) {
+        results.show(toResultInfo(report));
+        results.setTimeLeft(session.resultTimeLeftMs);
+      },
+      talentsOpened() {
+        results.hide();
+        talentWeb.show(webView());
+      },
+      profileChanged: save,
+    },
+    { waveCap: WAVE_CAP },
+  );
 
   const loop = new GameLoop({
     isRunning: () => session.phase === 'running',
     step: () => renderer.handleEvents(session.step()),
     frame: (alpha, elapsedMs, speed) => {
+      if (document.visibilityState === 'visible') profile.playSeconds += elapsedMs / 1000;
       session.update(elapsedMs);
+      if (session.phase === 'idle') return;
       const run = session.run;
       renderer.render(run.sim.state, alpha, elapsedMs);
       hud.update(toHudInfo(run, speed));
       if (session.phase === 'results') results.setTimeLeft(session.resultTimeLeftMs);
+      if (session.phase !== 'running' && performance.now() - lastSaveMs > AUTOSAVE_MS) save();
     },
   });
 
   bindSpeedKeys(window, setSpeed);
+  bindMenuKeys(window, {
+    confirm: () => {
+      if (session.phase === 'results' || session.phase === 'talents') session.startNextRun();
+    },
+    talents: () => session.openTalents(),
+  });
+  window.addEventListener('pagehide', save);
+  setSpeed(profile.speed);
   session.start();
   app.ticker.add((ticker) => loop.tick(ticker.elapsedMS));
 }
@@ -94,9 +196,8 @@ function toHudInfo(run: ActiveRun, speed: number): HudInfo {
   };
 }
 
-function toResultInfo(report: RunReport, data: GameData): ResultInfo {
+function toResultInfo(report: RunReport): ResultInfo {
   const { result, settlement } = report;
-  const talents = new Map(data.talents.map((node) => [node.id, node]));
   return {
     runNumber: report.run.number,
     endReason: result.endReason,
@@ -108,10 +209,7 @@ function toResultInfo(report: RunReport, data: GameData): ResultInfo {
     clearedStartWave: result.clearedStartWave,
     skipShards: settlement.skipShards,
     skipCores: settlement.skipCores,
-    purchases: report.purchases.map((purchase) => ({
-      talent: talents.get(purchase.id) ?? { id: purchase.id, nameKey: '' },
-      count: purchase.count,
-    })),
+    affordable: report.affordable,
   };
 }
 

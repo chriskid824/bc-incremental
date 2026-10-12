@@ -1,20 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { loadGameData } from '../data';
 import { DAMAGE_TAG_BIT } from '../data/stats';
+import { num } from '../core/num';
 import { DEFAULT_ECONOMY, allowedStartWave, createMetaState } from '../meta';
 import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
 import { RESULT_SCREEN_MS, Session } from './session';
-import type { ActiveRun, RunReport } from './session';
+import type { ActiveRun, RunReport, SessionOptions } from './session';
 
-function createSession() {
+function createSession(options: SessionOptions = {}) {
   const started: ActiveRun[] = [];
   const finished: RunReport[] = [];
+  let opened = 0;
+  let changed = 0;
   const meta = createMetaState();
-  const session = new Session(loadGameData(), meta, {
-    runStarted: (run) => started.push(run),
-    runFinished: (report) => finished.push(report),
-  });
-  return { session, meta, started, finished };
+  const session = new Session(
+    loadGameData(),
+    meta,
+    {
+      runStarted: (run) => started.push(run),
+      runFinished: (report) => finished.push(report),
+      talentsOpened: () => opened++,
+      profileChanged: () => changed++,
+    },
+    options,
+  );
+  return {
+    session,
+    meta,
+    started,
+    finished,
+    opened: () => opened,
+    changed: () => changed,
+  };
 }
 
 /** Steps until the run ends; a run can never outlast its tick cap. */
@@ -45,8 +62,8 @@ describe('Session', () => {
     expect(() => session.start()).toThrow();
   });
 
-  it('settles a finished run, auto-buys talents and shows the result', () => {
-    const { session, meta, finished } = createSession();
+  it('settles a finished run, saves and shows the result', () => {
+    const { session, meta, finished, changed } = createSession();
     session.start();
     const ticks = playRun(session);
     expect(session.phase).toBe('results');
@@ -55,16 +72,21 @@ describe('Session', () => {
     expect(report.result.ticks).toBe(ticks);
     expect(meta.runs).toBe(1);
     expect(meta.maxWave).toBe(report.result.highestWaveReached);
-    for (const purchase of report.purchases) expect(meta.allocated.has(purchase.id)).toBe(true);
+    expect(meta.allocated.size).toBe(0);
     expect(report.bankShards).toBe(meta.shards);
-    expect(session.resultTimeLeftMs).toBe(RESULT_SCREEN_MS);
+    expect(report.affordable).toBe(session.canAffordAny());
+    expect(changed()).toBe(1);
     expect(() => session.step()).toThrow();
   });
 
-  it('starts the next run after the result screen with the next seed and start wave', () => {
+  it('counts down to the next run when nothing is affordable', () => {
     const { session, meta, started } = createSession();
     session.start();
     playRun(session);
+    meta.shards = num(0);
+    // Re-evaluate affordability as the report would after a poor run.
+    (session.report as { affordable: boolean }).affordable = false;
+    expect(session.resultTimeLeftMs).toBe(RESULT_SCREEN_MS);
     session.update(RESULT_SCREEN_MS - 1);
     expect(session.phase).toBe('results');
     session.update(1);
@@ -75,14 +97,50 @@ describe('Session', () => {
     expect(session.run.config.startWave).toBe(allowedStartWave(meta, DEFAULT_ECONOMY));
   });
 
-  it('skips the result screen on request', () => {
-    const { session, started } = createSession();
+  it('waits on the result screen and leads to the talent web when something is affordable', () => {
+    const { session, opened } = createSession();
     session.start();
-    session.skipResults();
-    expect(started).toHaveLength(1);
     playRun(session);
-    session.skipResults();
+    expect(session.report?.affordable).toBe(true);
+    expect(session.resultTimeLeftMs).toBe(0);
+    session.update(RESULT_SCREEN_MS * 10);
+    expect(session.phase).toBe('results');
+    session.continueFromResults();
+    expect(session.phase).toBe('talents');
+    expect(opened()).toBe(1);
+  });
+
+  it('allocates and refunds only on the talent web', () => {
+    const { session, meta, changed } = createSession();
+    session.start();
+    expect(session.allocate('keenEye')).toBe(false);
+    playRun(session);
+    session.openTalents();
+    const before = changed();
+    expect(session.allocate('arcStorm')).toBe(false);
+    expect(session.allocate('keenEye')).toBe(true);
+    expect(meta.allocated.has('keenEye')).toBe(true);
+    session.refund();
+    expect(meta.allocated.size).toBe(0);
+    expect(changed()).toBe(before + 2);
+    session.startNextRun();
     expect(session.phase).toBe('running');
-    expect(started).toHaveLength(2);
+  });
+
+  it('lets the player pick a lower start wave and caps runs at the wave cap', () => {
+    const { session, meta } = createSession({ waveCap: 40 });
+    session.start();
+    playRun(session);
+    meta.maxWave = 30;
+    expect(session.maxStartWave).toBe(15);
+    session.setStartWave(4);
+    expect(session.startWave).toBe(4);
+    session.startNextRun();
+    expect(session.run.config.startWave).toBe(4);
+    expect(session.run.config.waveCap).toBe(40);
+    playRun(session);
+    meta.maxWave = 200;
+    session.setStartWave(1000);
+    expect(session.startWave).toBe(40);
   });
 });
