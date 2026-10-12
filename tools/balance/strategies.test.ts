@@ -86,6 +86,19 @@ describe('spend', () => {
     expect(nextPurchase('crit-greedy', meta, data, ECONOMY)?.id).toBe('might');
   });
 
+  it('saves for an archetype node it has the cores for instead of buying fallbacks', () => {
+    // precision (notable: 2 × 5 × 1.22³ ≈ 18.2 shards + 1 core) is short of shards only.
+    const meta = richMeta(15, 1);
+    for (const id of ['keenEye', 'sharpen', 'quickDraw']) meta.allocated.add(id);
+    expect(nextPurchase('crit-greedy', meta, data, ECONOMY)).toBeNull();
+    expect(nextPurchase('balanced', meta, data, ECONOMY)?.id).toBe('kindling');
+    meta.shards = num(19);
+    expect(nextPurchase('crit-greedy', meta, data, ECONOMY)?.id).toBe('precision');
+    // Neither cheapest nor might-only save up.
+    meta.shards = num(15);
+    expect(nextPurchase('cheapest', meta, data, ECONOMY)?.id).toBe('swiftness');
+  });
+
   it('might-only buys ranks of the repeatable node and nothing else', () => {
     const meta = richMeta(1e4, 50);
     const bought = spend('might-only', meta, data, ECONOMY);
