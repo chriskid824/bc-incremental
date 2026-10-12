@@ -114,6 +114,12 @@ export class EnemyLayer {
   private timeMs = 0;
   /** Flames per second all burning enemies asked for last frame. */
   private flameDemand = 0;
+  /** Map visitor for update(): frees views of enemies gone this frame, without allocating. */
+  private readonly releaseUnseen = (view: EnemyView, id: number): void => {
+    if (view.seenFrame === this.frame) return;
+    this.release(view);
+    this.active.delete(id);
+  };
 
   constructor(
     private readonly data: GameData,
@@ -217,12 +223,7 @@ export class EnemyLayer {
     this.flameDemand = demand;
     glowChildren.length = glowCount;
     if (glowCount !== previousGlows) this.burnGlow.update();
-    for (const [id, view] of this.active) {
-      if (view.seenFrame !== this.frame) {
-        this.release(view);
-        this.active.delete(id);
-      }
-    }
+    this.active.forEach(this.releaseUnseen);
   }
 
   private acquire(enemy: EnemyState): EnemyView {
