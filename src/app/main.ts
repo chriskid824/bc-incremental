@@ -199,6 +199,8 @@ async function main(root: HTMLElement): Promise<void> {
       },
       talentsOpened() {
         results.hide();
+        // The run's HUD would show through the web and collide with its header.
+        hud.root.hidden = true;
         talentWeb.show(webView());
       },
       profileChanged: save,
