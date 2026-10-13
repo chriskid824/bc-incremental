@@ -52,9 +52,14 @@ function node(id: string, spec: NodeSpec): TalentNode {
   };
 }
 
+/**
+ * Price tiers (docs/GDD.md §4.2): a node costs talentBaseShards × talentGrowth^n × factor.
+ * Bridge nodes override the factor (small 1.5, notables 6, searingCrits 8) so a build
+ * finishes its own sector before the bridges, which stay a mid-game goal.
+ */
 const NOTABLE = { kind: 'notable', shardCostFactor: 2, coreCost: 1 } as const;
 const NOTABLE_2 = { kind: 'notable', shardCostFactor: 3, coreCost: 2 } as const;
-const KEYSTONE = { kind: 'keystone', shardCostFactor: 3, coreCost: 3 } as const;
+const KEYSTONE = { kind: 'keystone', shardCostFactor: 4, coreCost: 3 } as const;
 
 const flat = (stat: Modifier['stat'], value: number): Modifier => ({ stat, kind: 'flat', value });
 const inc = (stat: Modifier['stat'], value: number): Modifier => ({
@@ -86,12 +91,13 @@ export const TALENTS: readonly TalentNode[] = [
     archetype: 'none',
   }),
 
-  // Generic twigs next to the start.
+  // Generic twigs next to the start. Might's first rank fits in the first two or three runs;
+  // its ×1.35 price per rank keeps it a sink for spare shards, not the main engine.
   node('might', {
     kind: 'repeatable',
     pos: at(DOT_CHAIN, 120),
     links: ['start', 'glassCannon'],
-    repeat: { baseShards: 3500, growth: 1.1 },
+    repeat: { baseShards: 300, growth: 1.35 },
     modifiers: [{ stat: 'damage', kind: 'more', value: 0.1 }],
     archetype: 'none',
   }),
@@ -242,6 +248,8 @@ export const TALENTS: readonly TalentNode[] = [
     ...KEYSTONE,
     pos: at(DOT, 840),
     links: ['heat', 'wildfire'],
+    // Half the keystone price: it adds no damage of its own (hit damage −30%) until burns spread.
+    shardCostFactor: 2,
     rules: [{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.5, hitMore: -0.3 }],
     archetype: 'dot',
   }),
@@ -309,12 +317,14 @@ export const TALENTS: readonly TalentNode[] = [
   node('emberEdge', {
     pos: at(CRIT_DOT, 420),
     links: ['quickDraw', 'slowBurn', 'cinder'],
+    shardCostFactor: 1.5,
     modifiers: [flat('critChance', 0.02), flat('igniteChance', 0.05)],
     archetype: 'hybrid',
   }),
   node('cinder', {
     pos: at(CRIT_DOT, 540),
     links: ['emberEdge', 'flashpoint'],
+    shardCostFactor: 1.5,
     modifiers: [dmg(0.15), flat('maxLife', 15)],
     archetype: 'hybrid',
   }),
@@ -322,6 +332,7 @@ export const TALENTS: readonly TalentNode[] = [
     ...NOTABLE,
     pos: at(CRIT_DOT, 660),
     links: ['cinder', 'searingCrits'],
+    shardCostFactor: 6,
     modifiers: [flat('critMultiplier', 0.3)],
     rules: [{ id: 'critIgniteChance', chance: 0.3 }],
     archetype: 'hybrid',
@@ -330,6 +341,7 @@ export const TALENTS: readonly TalentNode[] = [
     ...KEYSTONE,
     pos: at(CRIT_DOT, 780),
     links: ['flashpoint'],
+    shardCostFactor: 8,
     rules: [{ id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 }],
     archetype: 'hybrid',
   }),
@@ -338,12 +350,14 @@ export const TALENTS: readonly TalentNode[] = [
   node('staticHeat', {
     pos: at(DOT_CHAIN, 420),
     links: ['slowBurn', 'charge', 'arcFlame'],
+    shardCostFactor: 1.5,
     modifiers: [flat('chainCount', 0.25), flat('igniteChance', 0.05)],
     archetype: 'hybrid',
   }),
   node('arcFlame', {
     pos: at(DOT_CHAIN, 540),
     links: ['staticHeat', 'conduction'],
+    shardCostFactor: 1.5,
     modifiers: [dmg(0.15), flat('maxLife', 15)],
     archetype: 'hybrid',
   }),
@@ -351,6 +365,7 @@ export const TALENTS: readonly TalentNode[] = [
     ...NOTABLE,
     pos: at(DOT_CHAIN, 660),
     links: ['arcFlame'],
+    shardCostFactor: 6,
     modifiers: [dmg(0.2, 'burn')],
     rules: [{ id: 'chainIgniteChance', chance: 0.25 }],
     archetype: 'hybrid',
@@ -360,12 +375,14 @@ export const TALENTS: readonly TalentNode[] = [
   node('stormEye', {
     pos: at(CHAIN_CRIT, 420),
     links: ['charge', 'quickDraw', 'thunderclap'],
+    shardCostFactor: 1.5,
     modifiers: [flat('critChance', 0.02), flat('chainRetention', 0.03)],
     archetype: 'hybrid',
   }),
   node('thunderclap', {
     pos: at(CHAIN_CRIT, 540),
     links: ['stormEye', 'staticFocus'],
+    shardCostFactor: 1.5,
     modifiers: [dmg(0.15), flat('maxLife', 15)],
     archetype: 'hybrid',
   }),
@@ -373,6 +390,7 @@ export const TALENTS: readonly TalentNode[] = [
     ...NOTABLE,
     pos: at(CHAIN_CRIT, 660),
     links: ['thunderclap'],
+    shardCostFactor: 6,
     modifiers: [flat('chainCount', 0.5)],
     rules: [{ id: 'chainCritChance', perJump: 0.1 }],
     archetype: 'hybrid',
