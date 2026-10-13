@@ -8,7 +8,7 @@ import { composeWave } from '../data/compose';
 import { shardsPerStdEnemy } from '../data/curve';
 import type { StatBlock } from '../data/stats';
 import type { EnemyId, GameData } from '../data/types';
-import type { RunResult } from '../sim/types';
+import type { RunResult, SimState } from '../sim/types';
 import type { EconomyConfig, MetaState, Settlement } from './types';
 
 /** Highest start wave the player may pick: max(1, floor(maxWave × startWaveRatio)). */
@@ -99,5 +99,26 @@ export function settleRun(
     coresFromRun: result.cores,
     skipShards,
     skipCores,
+  };
+}
+
+/**
+ * Credits a run that stopped before it finished, because the page was closed or reloaded
+ * mid-run: the drops collected so far, the highest wave reached and the run counter. No skip
+ * compensation, since the run never finished clearing its start wave on record.
+ */
+export function settleUnfinishedRun(
+  meta: MetaState,
+  progress: Pick<SimState, 'shards' | 'cores' | 'highestWaveReached'>,
+): Settlement {
+  meta.shards = assertFinite(add(meta.shards, progress.shards), 'settleUnfinishedRun shards');
+  meta.cores += progress.cores;
+  meta.maxWave = Math.max(meta.maxWave, progress.highestWaveReached);
+  meta.runs += 1;
+  return {
+    shardsFromRun: progress.shards,
+    coresFromRun: progress.cores,
+    skipShards: ZERO,
+    skipCores: 0,
   };
 }

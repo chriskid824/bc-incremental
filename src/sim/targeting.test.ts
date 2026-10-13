@@ -70,4 +70,40 @@ describe('pickTarget', () => {
     expect(pickTarget([], 0, 0, ESTIMATE)).toBeNull();
     expect(pickTarget([dummy(1, 10, 0, 10, 0, false)], 0, 0, ESTIMATE)).toBeNull();
   });
+
+  describe('with focus targets', () => {
+    /** Ids from 10 up stand for elites and bosses near the player. */
+    const isFocus = (target: Dummy): boolean => target.id >= 10;
+    const pick = (targets: readonly Dummy[], avoid?: (target: Dummy) => boolean): number | null =>
+      idOf(pickTarget(targets, 0, 0, ESTIMATE, avoid, isFocus));
+
+    it('prefers the closest uncovered focus target over closer ordinary ones', () => {
+      const targets = [dummy(1, 50, 0), dummy(10, 400, 0), dummy(11, 300, 0), dummy(2, 100, 0)];
+      expect(pick(targets)).toBe(11);
+      // Without the predicate nothing is a focus target.
+      expect(idOf(pickTarget(targets, 0, 0, ESTIMATE))).toBe(1);
+    });
+
+    it('skips focus targets that are covered, avoided or dead', () => {
+      const targets = [
+        dummy(1, 50, 0),
+        dummy(10, 100, 0, 10, 1), // covered
+        dummy(11, 200, 0),
+        dummy(12, 150, 0, 10, 0, false), // dead
+        dummy(2, 80, 0),
+      ];
+      expect(pick(targets)).toBe(11);
+      expect(pick(targets, (target) => target.id === 11)).toBe(1);
+    });
+
+    it('falls back to the closest alive target when everything is covered', () => {
+      const targets = [dummy(10, 100, 0, 10, 1), dummy(1, 50, 0, 10, 1)];
+      expect(pick(targets)).toBe(1);
+    });
+
+    it('prefers the earlier focus entry on equal distance', () => {
+      const targets = [dummy(1, 10, 0), dummy(10, 100, 0), dummy(11, 0, 100)];
+      expect(pick(targets)).toBe(10);
+    });
+  });
 });

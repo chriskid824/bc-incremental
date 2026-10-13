@@ -16,10 +16,10 @@ describe('talentName', () => {
   afterEach(() => setLocale('en'));
 
   it('translates the nameKey in the current locale', () => {
-    const node = { id: 'critChance1', nameKey: 'talent.critChance1.name' };
-    expect(talentName(node)).toBe('Crit Chance 1');
+    const node = { id: 'keenEye', nameKey: 'talent.keenEye.name' };
+    expect(talentName(node)).toBe('Keen Eye');
     setLocale('zh-TW');
-    expect(talentName(node)).toBe('暴擊率 1');
+    expect(talentName(node)).toBe('銳眼');
   });
 
   it('falls back to the id for an unknown nameKey', () => {

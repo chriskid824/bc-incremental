@@ -1,30 +1,39 @@
-/** End-of-run panel: why the run ended, how far it got, what it earned and what was bought. */
+/** End-of-run panel: why the run ended, how far it got and what it earned. */
 
 import { formatNum } from '../core/format';
+import { num } from '../core/num';
 import type { Num } from '../core/num';
-import type { TalentNode } from '../data/types';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import type { EndReason } from '../sim/types';
-import { talentName } from './strings';
+import { describeRunEnd } from './runEnd';
+import type { EnemySpeeds, RunEndFacts } from './runEnd';
 import { el } from './style';
 
-export interface ResultInfo {
+export interface ResultInfo extends RunEndFacts {
   readonly runNumber: number;
-  readonly endReason: EndReason;
-  readonly startWave: number;
-  readonly highestWave: number;
   readonly kills: number;
+  /** Damage dealt per second over the whole run, all sources. */
+  readonly averageDps: Num;
   readonly shardsFromRun: Num;
   readonly coresFromRun: number;
-  /** Whether the start wave was cleared, which skip compensation requires. */
-  readonly clearedStartWave: boolean;
   readonly skipShards: Num;
   readonly skipCores: number;
-  readonly purchases: readonly {
-    readonly talent: Pick<TalentNode, 'id' | 'nameKey'>;
-    readonly count: number;
-  }[];
+  /** A talent is affordable. */
+  readonly affordable: boolean;
+  /** The panel leads to the talent web instead of counting down (affordable, or T pressed). */
+  readonly toTalents: boolean;
+  /** The survey link to offer under the buttons, or null for none. */
+  readonly feedbackUrl: string | null;
+}
+
+export interface ResultActions {
+  /** Click anywhere: the talent web if the panel leads there, else the next run. */
+  continue(): void;
+  openTalents(): void;
+  nextRun(): void;
+  /** The survey link was opened (it opens itself in a new tab). */
+  feedback(): void;
 }
 
 const FORMAT = { format: 'short' } as const;
@@ -41,16 +50,57 @@ export class ResultPanel {
   private readonly next: HTMLElement;
   private shownSeconds = '';
 
+  private readonly actions: HTMLElement;
+  private readonly talentsButton: HTMLButtonElement;
+  private readonly feedbackLink: HTMLAnchorElement;
+  private pointerOnCard = false;
+
   constructor(
     private readonly doc: Document,
-    onContinue: () => void,
+    private readonly enemies: EnemySpeeds,
+    handlers: ResultActions,
   ) {
     this.root = el(doc, 'div', 'bc-ui bc-result');
     this.root.hidden = true;
     this.card = el(doc, 'div', 'bc-result-card');
     this.next = el(doc, 'div', 'bc-result-next');
+    this.actions = el(doc, 'div', 'bc-result-actions');
+    this.talentsButton = el(doc, 'button', 'bc-button', t('result.toTalents'));
+    const nextButton = el(doc, 'button', 'bc-button', t('result.nextRun'));
+    this.talentsButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handlers.openTalents();
+    });
+    nextButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handlers.nextRun();
+    });
+    this.actions.append(this.talentsButton, nextButton);
+    this.feedbackLink = el(doc, 'a', 'bc-link bc-result-feedback', t('result.feedback'));
+    this.feedbackLink.target = '_blank';
+    this.feedbackLink.rel = 'noopener';
+    this.feedbackLink.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handlers.feedback();
+    });
     this.root.append(this.card);
-    this.root.addEventListener('click', () => onContinue());
+    this.root.addEventListener('click', () => handlers.continue());
+    // Only a pointer that moves onto the card counts: one left resting where "Next run" was
+    // clicked must not hold every later countdown of a player who just watches.
+    this.card.addEventListener('pointermove', () => {
+      this.pointerOnCard = true;
+    });
+    this.card.addEventListener('pointerleave', () => {
+      this.pointerOnCard = false;
+    });
+  }
+
+  /**
+   * The pointer moved onto the card since it was shown and is still on it: the player is
+   * reading it, so the countdown holds.
+   */
+  get hovered(): boolean {
+    return !this.root.hidden && this.pointerOnCard;
   }
 
   show(info: ResultInfo): void {
@@ -58,6 +108,10 @@ export class ResultPanel {
     const run = el(doc, 'div', 'bc-label', t('result.run', { run: info.runNumber }));
     const title = el(doc, 'div', 'bc-result-title', t(TITLES[info.endReason]));
     title.dataset['reason'] = info.endReason;
+    const text = describeRunEnd(info, this.enemies);
+    const cause = el(doc, 'div', 'bc-result-cause');
+    if (text.cause !== null) cause.append(el(doc, 'div', 'bc-result-cause-main', text.cause));
+    cause.append(el(doc, 'div', 'bc-result-cause-leaks', text.leaks));
 
     const rows = el(doc, 'dl', 'bc-result-rows');
     const row = (label: string, value: string): void => {
@@ -66,6 +120,8 @@ export class ResultPanel {
     row(t('result.highestWave'), String(info.highestWave));
     row(t('result.startWave'), String(info.startWave));
     row(t('result.kills'), String(info.kills));
+    row(t('result.averageDps'), formatNum(info.averageDps, FORMAT));
+    row(t('result.damageTaken'), formatNum(num(info.damageTaken), FORMAT));
     row(t('result.shardsFromRun'), formatNum(info.shardsFromRun, FORMAT));
     row(t('result.coresFromRun'), String(info.coresFromRun));
     let skip: string;
@@ -79,21 +135,32 @@ export class ResultPanel {
     }
     row(t('result.skipCompensation'), skip);
 
-    const talents = el(doc, 'div', 'bc-result-talents');
-    const bought = info.purchases.map((p) =>
-      p.count > 1
-        ? t('result.talentRank', { name: talentName(p.talent), count: p.count })
-        : talentName(p.talent),
-    );
-    talents.append(
-      el(doc, 'span', 'bc-label', t('result.talents')),
-      doc.createTextNode(
-        bought.length > 0 ? bought.join(t('result.talentSeparator')) : t('result.talentsNone'),
-      ),
+    this.talentsButton.classList.toggle('bc-button-glow', info.toTalents);
+    this.talentsButton.classList.toggle('bc-button-primary', info.toTalents);
+    const hint = el(
+      doc,
+      'div',
+      'bc-result-hint',
+      info.affordable ? t('result.affordable') : t('result.toTalentsHint'),
     );
 
     this.shownSeconds = '';
-    this.card.replaceChildren(run, title, rows, talents, this.next);
+    this.next.textContent = '';
+    const parts: HTMLElement[] = [run, title, cause, rows];
+    const tips = [text.lowerStart, text.tip].filter((line): line is string => line !== null);
+    if (tips.length > 0) {
+      const tip = el(doc, 'div', 'bc-result-tip');
+      tip.append(...tips.map((line) => el(doc, 'div', 'bc-result-tip-line', line)));
+      tip.firstElementChild?.prepend(el(doc, 'span', 'bc-result-tip-label', t('result.tipLabel')));
+      parts.push(tip);
+    }
+    parts.push(this.actions, info.toTalents ? hint : this.next);
+    if (info.feedbackUrl !== null) {
+      this.feedbackLink.href = info.feedbackUrl;
+      parts.push(this.feedbackLink);
+    }
+    this.card.replaceChildren(...parts);
+    this.pointerOnCard = false;
     this.root.hidden = false;
     // Next frame, so the opacity transition runs.
     requestAnimationFrame(() => {
@@ -101,8 +168,9 @@ export class ResultPanel {
     });
   }
 
-  /** Updates the countdown to the next run. */
+  /** Updates the countdown to the next run; 0 hides it. */
   setTimeLeft(ms: number): void {
+    if (ms <= 0) return;
     const seconds = (Math.max(0, ms) / 1000).toFixed(1);
     if (seconds === this.shownSeconds) return;
     this.shownSeconds = seconds;
@@ -112,5 +180,6 @@ export class ResultPanel {
   hide(): void {
     this.root.classList.remove('bc-visible');
     this.root.hidden = true;
+    this.pointerOnCard = false;
   }
 }

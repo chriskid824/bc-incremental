@@ -6,9 +6,10 @@
  * kills, drops) → burn → compaction → wave clears → overkill → run end.
  * Randomness comes only from the seeded spawn, split, combat and drops streams, and entity
  * arrays stay ordered by increasing id, so a seed fully determines the run.
- * Projectiles spread over enemies that projectiles already in flight will not kill, and
- * retarget when their target dies first (src/sim/targeting.ts).
- * Keystone rules (config.rules) arrive in M1; M0 ignores them.
+ * Projectiles spread over enemies that projectiles already in flight will not kill, focus
+ * elites and bosses that come close, and retarget when their target dies first
+ * (src/sim/targeting.ts).
+ * Keystone and notable rules (config.rules) are compiled once per run (src/sim/rules.ts).
  */
 
 import type { Num } from '../core/num';
@@ -17,10 +18,13 @@ import { createStreams } from '../core/rng';
 import { composeWave } from '../data/compose';
 import { shardsPerStdEnemy, stdHp } from '../data/curve';
 import { DAMAGE_TAG_BIT, DAMAGE_TAG_MASK_COUNT, STAT_IDS } from '../data/stats';
-import type { EnemyDef, GameData } from '../data/types';
-import { pickTarget } from './targeting';
+import { ENEMY_IDS } from '../data/types';
+import type { EnemyDef, EnemyId, GameData } from '../data/types';
+import { compileRules } from './rules';
+import { FOCUS_RANGE, pickTarget } from './targeting';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, MAX_RUN_SECONDS, PLAYER_RADIUS, TICK_RATE } from './types';
 import type {
+  ContactTally,
   EndReason,
   EnemyState,
   InputFrame,
@@ -34,6 +38,9 @@ import type {
 
 /** Burn damage is dealt on a global cadence of this many ticks (0.25 s). */
 export const BURN_TICK_INTERVAL = 15;
+
+/** Stack cap under eternalFlame ("no cap"); a guard against runaway stack lists. */
+export const UNCAPPED_BURN_STACKS = 1000;
 
 const HIT = DAMAGE_TAG_BIT.hit;
 const CRIT = DAMAGE_TAG_BIT.crit;
@@ -88,17 +95,27 @@ interface Enemy extends EnemyState {
   hitMark: number;
   /** Projectiles in flight towards this enemy (see src/sim/targeting.ts). */
   inbound: number;
+  /** Serial of the last volley that targeted this enemy. */
+  volleyMark: number;
+  /** An elite or boss: a focus target once within FOCUS_RANGE (src/sim/targeting.ts). */
+  readonly tough: boolean;
 }
 
 interface Projectile extends ProjectileState {
   target: Enemy;
 }
 
+/** Whole part plus a chance for one more, e.g. 2.3 → 2 or 3 (30%). */
+function rollCount(value: number, roll: (chance: number) => boolean): number {
+  const whole = Math.floor(value);
+  return whole + (value > whole && roll(value - whole) ? 1 : 0);
+}
+
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
 function validateConfig(config: RunConfig): void {
-  if (config.mode !== 'auto') {
-    throw new Error(`Control mode '${config.mode}' arrives in M1; M0 supports 'auto' only.`);
+  if ((config.mode as string) !== 'auto') {
+    throw new Error(`Unknown control mode '${config.mode}'; only 'auto' exists.`);
   }
   if (!Number.isInteger(config.startWave) || config.startWave < 1) {
     throw new RangeError(`startWave must be an integer >= 1, got ${config.startWave}`);
@@ -130,6 +147,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   validateConfig(config);
 
   const { values, damageMult } = config.stats;
+  const fx = compileRules(config.rules);
   const {
     spawn: spawnRng,
     split: splitRng,
@@ -145,18 +163,25 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   // Derived stats, clamped as documented in src/data/stats.ts.
   const multAt = (mask: number): number => damageMult[mask] as number;
   const damage = num(values.damage);
-  const critChance = clamp01(values.critChance);
-  const critMultiplier = values.critMultiplier;
+  /** Random crit chance; steadyAim turns random crits off. */
+  const critChance = fx.steadyAimEvery > 0 ? 0 : clamp01(values.critChance);
+  const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
   const igniteChance = clamp01(values.igniteChance);
   const burnDamage = values.burnDamage;
-  const burnTicks = values.burnDuration * TICK_RATE;
-  const burnCap = Math.max(1, Math.floor(values.burnMaxStacks));
-  const burnMult = multAt(BURN);
-  const burnCritMult = multAt(BURN | CRIT);
-  const chainCount = Math.max(0, values.chainCount);
-  const chainWhole = Math.floor(chainCount);
-  const chainFrac = chainCount - chainWhole;
-  const chainRetention = clamp01(values.chainRetention);
+  const burnTicks = Math.max(0, values.burnDuration * fx.burnDurationMult * TICK_RATE);
+  const burnCap = fx.burnUncapped
+    ? UNCAPPED_BURN_STACKS
+    : Math.max(1, Math.floor(values.burnMaxStacks));
+  const allMult = fx.allDamageMult;
+  const burnMult = multAt(BURN) * allMult;
+  const burnCritMult = multAt(BURN | CRIT) * allMult;
+  /** Hit multipliers on top of damageMult: non-crit and crit. */
+  const plainHitMult = fx.hitMult * fx.nonCritHitMult * allMult;
+  const critHitMult = fx.hitMult * allMult;
+  const chainCount = Math.max(0, values.chainCount * fx.chainCountMult);
+  const chainRetention = clamp01(values.chainRetention - fx.chainRetentionPenalty);
+  const projectileCount = Math.max(1, values.projectileCount);
+  const pandemicRadiusSq = fx.pandemicRadius ** 2;
   const chainRangeSq = Math.max(0, values.chainRange) ** 2;
   /** Ticks between attacks; Infinity disables attacking. */
   const attackInterval = values.attackSpeed > 0 ? TICK_RATE / values.attackSpeed : Infinity;
@@ -164,19 +189,22 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   const shardGain = values.shardGain;
   const coreGain = Math.max(0, values.coreGain);
   /** Average primary hit, for overkill tracking (docs/GDD.md §2.2); crits use mult[hit|crit]. */
+  const averageCrit = fx.steadyAimEvery > 0 ? 1 / fx.steadyAimEvery : critChance;
   const expectedHit =
     values.damage *
-    ((1 - critChance) * multAt(HIT) + critChance * critMultiplier * multAt(HIT | CRIT));
+    ((1 - averageCrit) * multAt(HIT) * plainHitMult +
+      averageCrit * critMultiplier * multAt(HIT | CRIT) * critHitMult);
   /** Damage a projectile in flight is expected to deal, for targeting: the non-crit primary hit. */
-  const projectileEstimate = mul(damage, multAt(HIT));
+  const projectileEstimate = mul(damage, multAt(HIT) * plainHitMult);
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
+  const maxLife = fx.maxLife ?? values.maxLife;
   const player = {
     x: HALF_WIDTH,
     y: HALF_HEIGHT,
-    life: values.maxLife,
-    maxLife: values.maxLife,
+    life: maxLife,
+    maxLife,
   };
   const state: SimState = {
     tick: 0,
@@ -202,6 +230,24 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   let nextProjectileId = 1;
   let attackSerial = 0;
   let attackTicks = 0;
+  /** Projectiles fired so far, for steadyAim's every-Nth shot. */
+  let shots = 0;
+  /** Serial of the current attack's volley; enemies it already targets carry it. */
+  let volley = 0;
+  /** Burns already on the enemy will kill it: shots should go elsewhere. */
+  const doomed = (enemy: Enemy): boolean => {
+    if (enemy.burns.length === 0) return false;
+    let left = enemy.burnPending;
+    for (let s = 0; s < enemy.burns.length; s++) {
+      left = add(left, accrued(enemy.burns[s] as BurnStack, Infinity));
+    }
+    return lte(enemy.hp, left);
+  };
+  /** Elites and bosses close to the player draw every shot until covered. */
+  const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
+  /** Later projectiles of a volley spread over other enemies, except onto a focus target. */
+  const doomedOrInVolley = (enemy: Enemy): boolean =>
+    (enemy.volleyMark === volley && !focused(enemy)) || doomed(enemy);
   let lastBurnTick = 0;
   let enemiesDirty = false;
   let projectilesDirty = false;
@@ -212,6 +258,10 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   let damageChain = ZERO;
   let damageBurn = ZERO;
   let maxHit = ZERO;
+  /** Contact hits and damage per enemy type (RunResult.damageTakenBy). */
+  const taken = {} as Record<EnemyId, { hits: number; damage: number }>;
+  for (const id of ENEMY_IDS) taken[id] = { hits: 0, damage: 0 };
+  let killedBy: EnemyId | null = null;
   let runResult: RunResult | null = null;
 
   // ---- Waves and spawning ----
@@ -316,6 +366,8 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       burnNextEnd: Infinity,
       hitMark: 0,
       inbound: 0,
+      volleyMark: 0,
+      tough: def.id === 'hexagon' || def.id === 'boss',
     };
     enemies.push(enemy);
     rec.alive++;
@@ -377,6 +429,10 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       if (enemy.dist <= enemy.contactDist && player.life > 0) {
         const damageTaken = enemy.def.contactDamage;
         player.life = Math.max(0, player.life - damageTaken);
+        const tally = taken[enemy.type];
+        tally.hits++;
+        tally.damage += damageTaken;
+        if (player.life <= 0) killedBy = enemy.type;
         enemy.rec.leaked = true;
         removeEnemy(enemy);
         events.push({
@@ -391,31 +447,55 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
 
   // ---- Attacks, projectiles, hits and chains ----
 
-  /** Fires every due attack, each at its own target so projectiles spread over enemies. */
+  /**
+   * Fires every due attack. An attack fires projectileCount projectiles, each at its own
+   * target so projectiles spread over enemies; extra projectiles without a target are lost.
+   */
   function attack(): void {
     attackTicks += 1;
     while (attackTicks >= attackInterval) {
-      const target = pickTarget(enemies, player.x, player.y, projectileEstimate);
+      let target = pickTarget(enemies, player.x, player.y, projectileEstimate, doomed, focused);
       if (target === null) {
         // Stay ready without banking attacks: fire on the tick a target appears.
         attackTicks = attackInterval - 1;
         return;
       }
       attackTicks -= attackInterval;
-      target.inbound++;
-      const projectile: Projectile = {
-        id: nextProjectileId++,
-        x: player.x,
-        y: player.y,
-        prevX: player.x,
-        prevY: player.y,
-        targetId: target.id,
-        alive: true,
-        target,
-      };
-      projectiles.push(projectile);
-      events.push({ type: 'attack', projectileId: projectile.id, targetId: target.id });
+      const count = rollCount(projectileCount, (p) => combatRng.chance(p));
+      volley++;
+      for (let n = 0; n < count && target !== null; n++) {
+        target.volleyMark = volley;
+        fire(target);
+        if (n + 1 < count) {
+          target = pickTarget(
+            enemies,
+            player.x,
+            player.y,
+            projectileEstimate,
+            doomedOrInVolley,
+            focused,
+          );
+        }
+      }
     }
+  }
+
+  function fire(target: Enemy): void {
+    shots++;
+    target.inbound++;
+    const projectile: Projectile = {
+      id: nextProjectileId++,
+      x: player.x,
+      y: player.y,
+      prevX: player.x,
+      prevY: player.y,
+      targetId: target.id,
+      steady: fx.steadyAimEvery > 0 && shots % fx.steadyAimEvery === 0,
+      alive: true,
+      target,
+    };
+    projectiles.push(projectile);
+    events.push({ type: 'attack', projectileId: projectile.id, targetId: target.id });
   }
 
   /** Alive enemy closest to (x, y) within chain range not hit by the current attack. */
@@ -445,7 +525,14 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       let target = projectile.target;
       if (!target.alive) {
         target.inbound--;
-        const next = pickTarget(enemies, projectile.x, projectile.y, projectileEstimate);
+        const next = pickTarget(
+          enemies,
+          projectile.x,
+          projectile.y,
+          projectileEstimate,
+          doomed,
+          focused,
+        );
         if (next === null) {
           projectile.alive = false;
           projectilesDirty = true;
@@ -465,7 +552,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
         projectile.alive = false;
         projectilesDirty = true;
         target.inbound--;
-        resolveAttack(target);
+        resolveAttack(target, projectile.steady);
       } else {
         const k = projectileStep / dist;
         projectile.x += dx * k;
@@ -474,11 +561,14 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     }
   }
 
-  /** Primary hit, then instant chain jumps from the last hit position. */
-  function resolveAttack(primary: Enemy): void {
+  /**
+   * Primary hit, then instant chain jumps from the last hit position. A steady shot
+   * (steadyAim) crits on every hit, chain jumps included.
+   */
+  function resolveAttack(primary: Enemy, steady: boolean): void {
     attackSerial++;
-    hitEnemy(primary, 0, 1, null, null);
-    const jumps = chainWhole + (combatRng.chance(chainFrac) ? 1 : 0);
+    hitEnemy(primary, 0, 1, null, null, steady);
+    const jumps = rollCount(chainCount, (p) => combatRng.chance(p));
     let fromX = primary.x;
     let fromY = primary.y;
     let retention = 1;
@@ -486,7 +576,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       const next = nearestChainTarget(fromX, fromY);
       if (next === null) break;
       retention *= chainRetention;
-      hitEnemy(next, k, retention, fromX, fromY);
+      hitEnemy(next, k, retention, fromX, fromY, steady);
       fromX = next.x;
       fromY = next.y;
     }
@@ -498,12 +588,22 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     retention: number,
     fromX: number | null,
     fromY: number | null,
+    steady: boolean,
   ): void {
-    const crit = combatRng.chance(critChance);
-    const ignite = combatRng.chance(igniteChance);
+    // steadyAim sets critChance to 0 and also turns off chainCritChance's random crits.
+    const chance =
+      fx.steadyAimEvery > 0 ? 0 : clamp01(critChance + fx.chainCritPerJump * chainIndex);
+    const crit = combatRng.chance(chance) || steady;
+    let ignite = igniteChance;
+    if (crit) ignite += fx.critIgniteChance;
+    if (chainIndex > 0) ignite += fx.chainIgniteChance;
+    const ignites = combatRng.chance(clamp01(ignite)) || (crit && fx.critsAlwaysIgnite);
     const baseHit = mul(damage, (crit ? critMultiplier : 1) * retention);
     const mask = HIT | (crit ? CRIT : 0) | (chainIndex > 0 ? CHAIN : 0);
-    const amount = assertFinite(mul(baseHit, multAt(mask)), 'hit damage');
+    const amount = assertFinite(
+      mul(baseHit, multAt(mask) * (crit ? critHitMult : plainHitMult)),
+      'hit damage',
+    );
     enemy.hp = sub(enemy.hp, amount);
     enemy.hitMark = attackSerial;
     if (crit) damageCrit = add(damageCrit, amount);
@@ -523,8 +623,8 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     });
     if (lte(enemy.hp, ZERO)) {
       killEnemy(enemy);
-    } else if (ignite && burnTicks > 0) {
-      addBurn(enemy, mul(baseHit, burnDamage * (crit ? burnCritMult : burnMult)));
+    } else if (ignites && burnTicks > 0) {
+      addBurn(enemy, mul(baseHit, burnDamage * (crit ? burnCritMult : burnMult)), now + burnTicks);
     }
   }
 
@@ -555,10 +655,10 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     enemy.burnStacks = kept;
   }
 
-  function addBurn(enemy: Enemy, dps: Num): void {
+  /** Adds a stack ending at tick `end` (spread stacks keep their source's end). */
+  function addBurn(enemy: Enemy, dps: Num, end: number): void {
     if (now >= enemy.burnNextEnd) expireBurns(enemy);
     const burns = enemy.burns;
-    const end = now + burnTicks;
     if (burns.length < burnCap) {
       burns.push({ dps, start: now, end });
       if (end < enemy.burnNextEnd) enemy.burnNextEnd = end;
@@ -617,7 +717,39 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
 
   // ---- Deaths and drops ----
 
+  /**
+   * pandemic: copies the dying enemy's active stacks (same end, pandemicEffect × damage) onto
+   * every alive enemy within the spread radius. Spread stacks spread again, weaker each time.
+   */
+  function spreadBurns(source: Enemy): void {
+    if (now >= source.burnNextEnd) expireBurns(source);
+    const burns = source.burns;
+    if (burns.length === 0) return;
+    let spreadTo = 0;
+    for (let i = 0; i < enemies.length; i++) {
+      const enemy = enemies[i] as Enemy;
+      if (!enemy.alive || enemy === source) continue;
+      const dx = enemy.x - source.x;
+      const dy = enemy.y - source.y;
+      if (dx * dx + dy * dy > pandemicRadiusSq) continue;
+      for (let s = 0; s < burns.length; s++) {
+        const stack = burns[s] as BurnStack;
+        addBurn(enemy, mul(stack.dps, fx.pandemicEffect), stack.end);
+      }
+      spreadTo++;
+    }
+    events.push({
+      type: 'burnSpread',
+      enemyId: source.id,
+      x: source.x,
+      y: source.y,
+      radius: fx.pandemicRadius,
+      targets: spreadTo,
+    });
+  }
+
   function killEnemy(enemy: Enemy): void {
+    if (pandemicRadiusSq > 0) spreadBurns(enemy);
     removeEnemy(enemy);
     kills++;
     const def = enemy.def;
@@ -669,6 +801,15 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   function end(reason: EndReason): void {
     state.finished = true;
     events.push({ type: 'runEnded', reason });
+    const takenBy = {} as Record<EnemyId, ContactTally>;
+    let leaks = 0;
+    let damageTaken = 0;
+    for (const id of ENEMY_IDS) {
+      const tally = taken[id];
+      takenBy[id] = { hits: tally.hits, damage: tally.damage };
+      leaks += tally.hits;
+      damageTaken += tally.damage;
+    }
     runResult = {
       startWave: startWaveNumber,
       highestWaveReached: state.highestWaveReached,
@@ -682,6 +823,10 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       damage: { hit: damageHit, crit: damageCrit, burn: damageBurn, chain: damageChain },
       maxHit,
       overkillSeconds: overkillTicks / TICK_RATE,
+      leaks,
+      damageTaken,
+      damageTakenBy: takenBy,
+      killedBy,
     };
   }
 

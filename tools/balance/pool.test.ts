@@ -91,7 +91,14 @@ describe('parseOptions', () => {
       '2',
     ]);
     expect(options).toEqual({
-      strategies: ['crit-greedy', 'dot-greedy', 'chain-greedy', 'cheapest', 'balanced'],
+      strategies: [
+        'crit-greedy',
+        'dot-greedy',
+        'chain-greedy',
+        'cheapest',
+        'balanced',
+        'might-only',
+      ],
       sessions: 3,
       minutes: 12.5,
       seed: 9,

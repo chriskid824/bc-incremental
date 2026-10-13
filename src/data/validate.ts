@@ -4,6 +4,7 @@
  * the same messages.
  */
 
+import type { RuleSpec } from './rules';
 import { ENEMY_IDS } from './types';
 import type { EnemyDef, EnemyId, GameData, TalentNode, WaveTable } from './types';
 
@@ -95,6 +96,10 @@ function validateWaves(data: GameData): string[] {
     if (!isNonNegativeInt(rule.maxCount)) {
       issues.push(`${at}: maxCount must be a non-negative integer (got ${rule.maxCount})`);
     }
+    const minCount = rule.minCount ?? 0;
+    if (!isNonNegativeInt(minCount) || minCount > rule.maxCount) {
+      issues.push(`${at}: minCount must be an integer in 0..maxCount (got ${rule.minCount})`);
+    }
   });
 
   for (const key of ['eliteEvery', 'bossEvery'] as const) {
@@ -173,8 +178,14 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     if (node.kind === 'keystone' && node.rules.length === 0) {
       issues.push(`${at}: keystone needs at least one rule`);
     }
-    if (node.kind !== 'keystone' && node.rules.length > 0) {
-      issues.push(`${at}: only keystones may have rules`);
+    if (node.kind !== 'keystone' && node.kind !== 'notable' && node.rules.length > 0) {
+      issues.push(`${at}: only keystones and notables may have rules`);
+    }
+    const ruleIds = new Set<string>();
+    for (const rule of node.rules) {
+      if (ruleIds.has(rule.id)) issues.push(`${at}: duplicate rule '${rule.id}'`);
+      ruleIds.add(rule.id);
+      for (const problem of ruleIssues(rule)) issues.push(`${at}: rule '${rule.id}' ${problem}`);
     }
 
     if (node.shardCostFactor !== undefined && !(node.shardCostFactor >= 0)) {
@@ -185,6 +196,12 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     }
     if (node.nameKey === '') issues.push(`${at}: empty nameKey`);
     if (node.descKey === '') issues.push(`${at}: empty descKey`);
+    if (node.rules.length > 0 && node.descKey === undefined) {
+      issues.push(`${at}: a node with rules needs a descKey`);
+    }
+    if (node.rules.length === 0 && node.descKey !== undefined) {
+      issues.push(`${at}: descKey describes rules; this node has none`);
+    }
   }
 
   // Reachability over the links as listed; asymmetric links are reported above.
@@ -204,5 +221,54 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     }
   }
 
+  return issues;
+}
+
+/** Parameter ranges of one rule; the simulation relies on them (src/sim/rules.ts). */
+function ruleIssues(rule: RuleSpec): string[] {
+  const issues: string[] = [];
+  const more = (name: string, value: number): void => {
+    if (!(value > -1)) issues.push(`${name} must be > -1 (got ${value})`);
+  };
+  const chance = (name: string, value: number): void => {
+    if (!(value >= 0 && value <= 1)) issues.push(`${name} must be in [0, 1] (got ${value})`);
+  };
+  switch (rule.id) {
+    case 'critsAlwaysIgnite':
+      more('nonCritHitMore', rule.nonCritHitMore);
+      break;
+    case 'steadyAim':
+      if (!isPositiveInt(rule.everyNth)) {
+        issues.push(`everyNth must be a positive integer (got ${rule.everyNth})`);
+      }
+      more('critMultiplierMore', rule.critMultiplierMore);
+      break;
+    case 'pandemic':
+      if (!(rule.spreadRadius > 0)) {
+        issues.push(`spreadRadius must be > 0 (got ${rule.spreadRadius})`);
+      }
+      chance('spreadEffect', rule.spreadEffect);
+      more('hitMore', rule.hitMore);
+      break;
+    case 'eternalFlame':
+      more('durationMore', rule.durationMore);
+      break;
+    case 'overload':
+      if (!(rule.chainCountMultiplier >= 0)) {
+        issues.push(`chainCountMultiplier must be >= 0 (got ${rule.chainCountMultiplier})`);
+      }
+      chance('retentionPenalty', rule.retentionPenalty);
+      break;
+    case 'glassCannon':
+      more('damageMore', rule.damageMore);
+      break;
+    case 'critIgniteChance':
+    case 'chainIgniteChance':
+      chance('chance', rule.chance);
+      break;
+    case 'chainCritChance':
+      chance('perJump', rule.perJump);
+      break;
+  }
   return issues;
 }

@@ -15,7 +15,7 @@ type Mutable<T> = T extends readonly (infer U)[]
     : T;
 
 const content = (): Mutable<GameData> =>
-  structuredClone({ enemies: ENEMIES, waves: WAVES, talents: TALENTS });
+  structuredClone({ enemies: ENEMIES, waves: WAVES, talents: TALENTS }) as Mutable<GameData>;
 
 function talentAt(data: Mutable<GameData>, id: string): [number, Mutable<TalentNode>] {
   const index = data.talents.findIndex((node) => node.id === id);
@@ -27,10 +27,13 @@ function talentAt(data: Mutable<GameData>, id: string): [number, Mutable<TalentN
 const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   critsAlwaysIgnite: { id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 },
   steadyAim: { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 },
-  pandemic: { id: 'pandemic', spreadRadius: 150, hitMore: -0.3 },
+  pandemic: { id: 'pandemic', spreadRadius: 150, spreadEffect: 0.5, hitMore: -0.3 },
   eternalFlame: { id: 'eternalFlame', durationMore: -0.5 },
   overload: { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.15 },
   glassCannon: { id: 'glassCannon', damageMore: 1 },
+  critIgniteChance: { id: 'critIgniteChance', chance: 0.3 },
+  chainIgniteChance: { id: 'chainIgniteChance', chance: 0.25 },
+  chainCritChance: { id: 'chainCritChance', perJump: 0.1 },
 };
 
 describe('ModifierSchema', () => {
@@ -121,18 +124,20 @@ describe('GameDataSchema', () => {
 describe('parseGameData schema errors', () => {
   it('rejects a tag on a non-damage stat, naming the path', () => {
     const data = content();
-    const [i, node] = talentAt(data, 'critChance1');
+    const [i, node] = talentAt(data, 'keenEye');
+    const m = node.modifiers.length;
     node.modifiers.push({ stat: 'critChance', kind: 'more', value: 0.1, tags: ['crit'] });
     expect(() => parseGameData(data)).toThrow(
-      `talents.${i}.modifiers.1.tags: tags are only allowed on increased/more damage modifiers`,
+      `talents.${i}.modifiers.${m}.tags: tags are only allowed on increased/more damage modifiers`,
     );
   });
 
   it('rejects a tag on a flat damage modifier', () => {
     const data = content();
-    const [i, node] = talentAt(data, 'critChance1');
+    const [i, node] = talentAt(data, 'keenEye');
+    const m = node.modifiers.length;
     node.modifiers.push({ stat: 'damage', kind: 'flat', value: 2, tags: ['hit'] });
-    expect(() => parseGameData(data)).toThrow(`talents.${i}.modifiers.1.tags: tags are only`);
+    expect(() => parseGameData(data)).toThrow(`talents.${i}.modifiers.${m}.tags: tags are only`);
   });
 
   it('rejects an unknown rule id', () => {

@@ -72,6 +72,10 @@ export const RUN_COLUMNS = [
   'skipCores',
   'nodesAllocated',
   'repeatableRanks',
+  'repeatableMultD',
+  'sectorMultD',
+  'sectorMultAttack',
+  'sectorMultCrowd',
   'shardsBank',
   'coresBank',
   'bought',
@@ -343,5 +347,49 @@ export function summaryTable(
     formatTable(lines) +
     '\n* = median frontier outside ±15% of the target. Waves and D are medians over sessions;' +
     '\n  "runs >30%" = share of runs over the overkill limit; hits@F = stdHp(frontier) ÷ D.'
+  );
+}
+
+/** Play time at which multiplierTable compares Might with sector nodes (docs/GDD.md §9.1). */
+export const MULTIPLIER_MINUTES = 30;
+
+/**
+ * Per strategy, medians over sessions of the build playing at `minutes`: repeatable ranks,
+ * the D multiplier from those ranks (Might), and the D, attack and crowd multipliers from
+ * sector nodes (see buildMultipliers). A pure archetype's sector multiplier should beat
+ * Might's.
+ */
+export function multiplierTable(
+  sorted: readonly SessionResult[],
+  strategies: readonly StrategyId[],
+  minutes: number = MULTIPLIER_MINUTES,
+): string {
+  const lines: string[][] = [
+    [`@${minutes}m`, 'ranks', 'Might× D', 'sector× D', 'sector× attack', 'sector× crowd'],
+  ];
+  for (const strategy of strategies) {
+    const rows: RunRow[] = [];
+    for (const result of sorted) {
+      if (result.strategy !== strategy) continue;
+      const found = rowAt(result, minutes);
+      if (found) rows.push(found);
+    }
+    if (rows.length === 0) continue;
+    const median = (pick: (row: RunRow) => number): number =>
+      quantile(ascending(rows.map(pick)), 0.5);
+    lines.push([
+      strategy,
+      fmt(median((row) => row.repeatableRanks)),
+      ratio(median((row) => row.repeatableMultD)),
+      ratio(median((row) => row.sectorMultD)),
+      ratio(median((row) => row.sectorMultAttack)),
+      ratio(median((row) => row.sectorMultCrowd)),
+    ]);
+  }
+  return (
+    formatTable(lines) +
+    '\nMight× = D ÷ D without repeatable ranks; sector× = ÷ the build without crit/dot/chain' +
+    "\n  sector nodes. D is one target (§7.2); attack adds one projectile's chain jumps; crowd" +
+    '\n  also counts attack speed and projectiles. Medians over sessions.'
   );
 }

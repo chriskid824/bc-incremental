@@ -1,7 +1,9 @@
 /**
- * Projectile target selection (docs/GDD.md §2.3). Projectiles home on one enemy; choosing
- * targets that projectiles already in flight will not kill spreads the attacks, so attack
- * speed is not wasted on overkill.
+ * Projectile target selection (docs/GDD.md §2.3, §2.4). Projectiles home on one enemy;
+ * choosing targets that projectiles already in flight will not kill spreads the attacks, so
+ * attack speed is not wasted on overkill. Focus targets (elites and bosses close to the
+ * player) come first: in a swarm the nearest enemy is nearly always a small one, and the
+ * tough target would walk in untouched.
  */
 
 import type { Num } from '../core/num';
@@ -25,16 +27,28 @@ export const isCovered = (target: Targetable, estimate: Num): boolean =>
   target.inbound > 0 && lte(target.hp, mul(estimate, target.inbound));
 
 /**
- * Alive target closest to (x, y) that is not covered; when every alive target is covered,
- * the closest alive one. Earlier entries win ties, so arrays ordered by id prefer the lower
- * id. Null when no target is alive. Allocation-free.
+ * Elites and bosses at most this far from the player are focus targets
+ * (docs/GDD.md §2.4): shots go to them before any other enemy.
+ */
+export const FOCUS_RANGE = 800;
+
+/**
+ * Alive target closest to (x, y) that is not covered, preferring targets for which `focus`
+ * returns true; when every alive target is covered, the closest alive one. Targets for which
+ * `avoid` returns true count as covered (used to spread one volley over different enemies).
+ * Earlier entries win ties, so arrays ordered by id prefer the lower id. Null when no target
+ * is alive. Allocation-free.
  */
 export function pickTarget<T extends Targetable>(
   targets: readonly T[],
   x: number,
   y: number,
   estimate: Num,
+  avoid?: (target: T) => boolean,
+  focus?: (target: T) => boolean,
 ): T | null {
+  let focused: T | null = null;
+  let focusedDistSq = Infinity;
   let uncovered: T | null = null;
   let uncoveredDistSq = Infinity;
   let closest: T | null = null;
@@ -49,10 +63,21 @@ export function pickTarget<T extends Targetable>(
       closest = target;
       closestDistSq = distSq;
     }
-    if (distSq < uncoveredDistSq && !isCovered(target, estimate)) {
-      uncovered = target;
-      uncoveredDistSq = distSq;
+    const isFocus = focus !== undefined && focus(target);
+    if (
+      (distSq < uncoveredDistSq || (isFocus && distSq < focusedDistSq)) &&
+      !isCovered(target, estimate) &&
+      (avoid === undefined || !avoid(target))
+    ) {
+      if (distSq < uncoveredDistSq) {
+        uncovered = target;
+        uncoveredDistSq = distSq;
+      }
+      if (isFocus && distSq < focusedDistSq) {
+        focused = target;
+        focusedDistSq = distSq;
+      }
     }
   }
-  return uncovered ?? closest;
+  return focused ?? uncovered ?? closest;
 }

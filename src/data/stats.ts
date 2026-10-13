@@ -8,6 +8,8 @@ export const STAT_IDS = [
   'damage',
   /** Attacks per second. */
   'attackSpeed',
+  /** Projectiles per attack, each at its own target. Fractional part is a chance for one more. */
+  'projectileCount',
   /** Probability in [0, 1]; the simulation clamps it. */
   'critChance',
   /** Damage multiplier on crit, e.g. 1.5 = 150%. */
@@ -41,12 +43,14 @@ export type StatId = (typeof STAT_IDS)[number];
 /** Base values before any modifier (docs/GDD.md §3.1–3.4). */
 export const BASE_STATS: Readonly<Record<StatId, number>> = {
   damage: 10,
-  attackSpeed: 1.5,
+  attackSpeed: 4,
+  projectileCount: 2,
   critChance: 0.05,
   critMultiplier: 1.5,
-  igniteChance: 0,
-  burnDamage: 0.4,
-  burnDuration: 4,
+  igniteChance: 0.1,
+  // 1.5/s for 1.2 s: 180% of the hit, as before, but dealt before the swarm walks in.
+  burnDamage: 1.5,
+  burnDuration: 1.2,
   burnMaxStacks: 5,
   chainCount: 0,
   chainRetention: 0.7,

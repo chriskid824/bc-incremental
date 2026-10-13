@@ -23,12 +23,12 @@ export const PLAYER_RADIUS = 30;
 /** Hard cap on run length (docs/GDD.md §2.1). */
 export const MAX_RUN_SECONDS = 180;
 
-export type ControlMode = 'auto' | 'cursorZone' | 'activeSkill';
+/** Full auto is the only mode (docs/GDD.md §2.3); InputFrame is kept for future input. */
+export type ControlMode = 'auto';
 
-/** Player input for one tick, in arena coordinates. Bots produce the same shape. */
+/** Player input for one tick, in arena coordinates. The simulation does not read it yet. */
 export interface InputFrame {
   readonly cursor: Vec2 | null;
-  /** True on the tick the player triggers the active skill (mode C). */
   readonly activate: boolean;
 }
 
@@ -73,11 +73,14 @@ export interface ProjectileState {
   prevY: number;
   /**
    * Enemy id the projectile homes on. An attack picks the alive enemy nearest to the player
-   * that projectiles already in flight are not expected to kill, else the nearest alive one.
+   * that projectiles already in flight are not expected to kill, an elite or boss within
+   * FOCUS_RANGE first (src/sim/targeting.ts), else the nearest alive one.
    * If the target dies first, the projectile retargets by the same rule measured from its own
    * position; it fizzles only when no enemy is alive.
    */
   targetId: number;
+  /** A steadyAim shot: every hit of it crits. */
+  readonly steady: boolean;
   alive: boolean;
 }
 
@@ -132,6 +135,15 @@ export type SimEvent =
       readonly fromY: number | null;
     }
   | { readonly type: 'ignite'; readonly targetId: number; readonly stacks: number }
+  /** pandemic: a burning enemy died and passed its stacks to `targets` enemies nearby. */
+  | {
+      readonly type: 'burnSpread';
+      readonly enemyId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly radius: number;
+      readonly targets: number;
+    }
   | {
       readonly type: 'burnTick';
       readonly targetId: number;
@@ -164,6 +176,12 @@ export interface DamageBreakdown {
   readonly chain: Num;
 }
 
+/** Enemies of one type that reached the player, and their contact damage. */
+export interface ContactTally {
+  readonly hits: number;
+  readonly damage: number;
+}
+
 export interface RunResult {
   readonly startWave: number;
   readonly highestWaveReached: number;
@@ -187,6 +205,17 @@ export interface RunResult {
   readonly maxHit: Num;
   /** Seconds spent in waves where the enemies' standard HP was ≤ 1/10 of the average hit. */
   readonly overkillSeconds: number;
+  /** Enemies that reached the player (one playerHit event each). */
+  readonly leaks: number;
+  /**
+   * Their total contact damage, as in the playerHit events: the hit that brings life to 0
+   * counts in full, so this can exceed max life.
+   */
+  readonly damageTaken: number;
+  /** leaks and damageTaken by enemy type; every type is present, zero if it never got through. */
+  readonly damageTakenBy: Readonly<Record<EnemyId, ContactTally>>;
+  /** Type of the enemy whose contact brought life to 0; null unless endReason is 'death'. */
+  readonly killedBy: EnemyId | null;
 }
 
 export interface Simulation {

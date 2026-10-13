@@ -95,7 +95,14 @@ export const RuleSpecSchema = exact<RuleSpec>()(
     z
       .strictObject({ id: z.literal('steadyAim'), everyNth: finite, critMultiplierMore: finite })
       .readonly(),
-    z.strictObject({ id: z.literal('pandemic'), spreadRadius: finite, hitMore: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('pandemic'),
+        spreadRadius: finite,
+        spreadEffect: finite,
+        hitMore: finite,
+      })
+      .readonly(),
     z.strictObject({ id: z.literal('eternalFlame'), durationMore: finite }).readonly(),
     z
       .strictObject({
@@ -105,6 +112,9 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       })
       .readonly(),
     z.strictObject({ id: z.literal('glassCannon'), damageMore: finite }).readonly(),
+    z.strictObject({ id: z.literal('critIgniteChance'), chance: finite }).readonly(),
+    z.strictObject({ id: z.literal('chainIgniteChance'), chance: finite }).readonly(),
+    z.strictObject({ id: z.literal('chainCritChance'), perJump: finite }).readonly(),
   ]),
 );
 
@@ -135,6 +145,7 @@ export const SpawnRuleSchema = exact<SpawnRule>()(
       fromWave: finite,
       base: finite,
       perWave: finite,
+      minCount: finite.exactOptional(),
       maxCount: finite,
     })
     .readonly(),
@@ -166,7 +177,7 @@ export const TalentNodeSchema = exact<TalentNode>()(
       rules: z.array(RuleSpecSchema).readonly(),
       archetype: z.enum(TALENT_ARCHETYPES),
       nameKey: z.string(),
-      descKey: z.string(),
+      descKey: z.string().exactOptional(),
     })
     .readonly(),
 );

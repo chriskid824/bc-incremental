@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "savedAt": "2026-10-20T12:00:00.000Z",
+  "game": "bc-incremental",
+  "data": {
+    "meta": {
+      "shards": 1234.5,
+      "cores": 3,
+      "allocated": ["keenEye", "sharpen", "might", "kindling"],
+      "ranks": { "might": 4 },
+      "maxWave": 18,
+      "runs": 27,
+      "spentShards": 987.25,
+      "spentCores": 0
+    },
+    "playSeconds": 1520,
+    "speed": 2
+  }
+}

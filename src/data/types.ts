@@ -39,9 +39,14 @@ export interface SpawnRule {
   readonly enemy: EnemyId;
   /** First wave this rule applies to. */
   readonly fromWave: number;
-  /** count(w) = min(maxCount, floor(base + perWave × (w − fromWave))). */
+  /** count(w) = min(maxCount, max(minCount, floor(base + perWave × (w − fromWave)))). */
   readonly base: number;
   readonly perWave: number;
+  /**
+   * Floor on the count, so the first waves already fill the screen; once the growth passes
+   * it, the rule grows as before. Defaults to 0.
+   */
+  readonly minCount?: number;
   readonly maxCount: number;
 }
 
@@ -78,7 +83,8 @@ export interface TalentNode {
   /** Archetype for UI color and balance reporting. */
   readonly archetype: 'none' | 'crit' | 'dot' | 'chain' | 'hybrid';
   readonly nameKey: string;
-  readonly descKey: string;
+  /** Text for what the node's rules do; required exactly when the node has rules. */
+  readonly descKey?: string;
 }
 
 export interface GameData {

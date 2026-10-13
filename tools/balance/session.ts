@@ -7,7 +7,7 @@
 import { assertFinite, num, toNumber } from '../../src/core/num';
 import { deriveSeed } from '../../src/core/rng';
 import { DAMAGE_TAG_BIT, loadGameData, stdHp } from '../../src/data';
-import type { GameData, StatBlock } from '../../src/data';
+import type { GameData, RuleSpec, StatBlock } from '../../src/data';
 import {
   allowedStartWave,
   collectRules,
@@ -16,8 +16,8 @@ import {
   statBlockFor,
 } from '../../src/meta';
 import type { EconomyConfig, MetaState } from '../../src/meta';
-import { createSimulation, NO_INPUT, TICK_RATE } from '../../src/sim';
-import type { EndReason, RunConfig } from '../../src/sim';
+import { compileRules, createSimulation, NO_INPUT, TICK_RATE } from '../../src/sim';
+import type { EndReason, RuleEffects, RunConfig, SimEvent, SimState } from '../../src/sim';
 import { spend } from './strategies';
 import type { StrategyId } from './strategies';
 
@@ -72,6 +72,8 @@ export interface SessionConfig {
   readonly menuSeconds: number;
   /** Optional wave cap passed to every run (demo / prototype limit). */
   readonly waveCap: number | null;
+  /** Record every elite and boss in SessionResult.toughTargets (tools/balance/probe.ts). */
+  readonly trackToughTargets?: boolean;
 }
 
 /** Seed of one run: the same for every strategy, so strategies face the same spawns. */
@@ -84,26 +86,171 @@ const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 const HIT = DAMAGE_TAG_BIT.hit;
 const CRIT = DAMAGE_TAG_BIT.crit;
 const BURN = DAMAGE_TAG_BIT.burn;
+const CHAIN = DAMAGE_TAG_BIT.chain;
+
+/**
+ * Expected damage, per point of base damage before retention, of one hit `jump` chain jumps
+ * after the primary target (0 = the primary): the hit with its crit expectation plus the
+ * burn it is expected to cause. Mirrors the simulation: crits use damageMult[hit|crit], jumps
+ * add the chain tag to the hit (not to its burn), a crit's burn is computed from the crit hit
+ * with damageMult[burn|crit], a steady shot crits on every jump, and rules apply as compiled
+ * by src/sim/rules.ts.
+ */
+function hitValue(stats: StatBlock, fx: RuleEffects, jump: number): number {
+  const { values, damageMult } = stats;
+  const mult = (mask: number): number => damageMult[mask] as number;
+  const chain = jump > 0 ? CHAIN : 0;
+  const critChance =
+    fx.steadyAimEvery > 0
+      ? 1 / fx.steadyAimEvery
+      : clamp01(values.critChance + fx.chainCritPerJump * jump);
+  const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
+  const critFactor = critChance * critMultiplier;
+  const hit =
+    fx.hitMult *
+    ((1 - critChance) * mult(HIT | chain) * fx.nonCritHitMult +
+      critFactor * mult(HIT | CRIT | chain));
+  const igniteBase = values.igniteChance + (jump > 0 ? fx.chainIgniteChance : 0);
+  const ignite = clamp01(igniteBase);
+  const critIgnite = fx.critsAlwaysIgnite ? 1 : clamp01(igniteBase + fx.critIgniteChance);
+  const burnPerDamage =
+    (1 - critChance) * ignite * mult(BURN) + critFactor * critIgnite * mult(BURN | CRIT);
+  const burn =
+    values.burnDamage * Math.max(0, values.burnDuration * fx.burnDurationMult) * burnPerDamage;
+  return hit + burn;
+}
 
 /**
  * Effective damage per attack `D` against one target (docs/GDD.md §7.2): the expected primary
- * hit including crits, plus the total burn that hit is expected to cause. Mirrors the
- * simulation: crits use damageMult[hit|crit], and a crit's burn is computed from the crit hit
- * with damageMult[burn|crit]. Ignores burn stack caps and hits that kill before burning.
+ * hit including crits, plus the total burn that hit is expected to cause. Ignores chain jumps,
+ * burn stack caps, pandemic spread and hits that kill before burning.
  */
-export function effectiveHit(stats: StatBlock): number {
-  const { values, damageMult } = stats;
-  const mult = (mask: number): number => damageMult[mask] as number;
-  const critChance = clamp01(values.critChance);
-  const critFactor = critChance * values.critMultiplier;
-  const hit = (1 - critChance) * mult(HIT) + critFactor * mult(HIT | CRIT);
-  const burnPerDamage = (1 - critChance) * mult(BURN) + critFactor * mult(BURN | CRIT);
-  const burn =
-    clamp01(values.igniteChance) *
-    values.burnDamage *
-    Math.max(0, values.burnDuration) *
-    burnPerDamage;
-  return values.damage * (hit + burn);
+export function effectiveHit(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
+  const fx = compileRules(rules);
+  return stats.values.damage * fx.allDamageMult * hitValue(stats, fx, 0);
+}
+
+/**
+ * Expected damage of one projectile over its primary target and all its chain jumps: `D`
+ * plus the jumps, each scaled by the retention, assuming every jump finds a target.
+ */
+export function attackDamage(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
+  const { values } = stats;
+  const fx = compileRules(rules);
+  const jumps = Math.max(0, values.chainCount * fx.chainCountMult);
+  const retention = clamp01(values.chainRetention - fx.chainRetentionPenalty);
+  const whole = Math.floor(jumps);
+  let total = hitValue(stats, fx, 0);
+  for (let k = 1; k <= whole; k++) total += retention ** k * hitValue(stats, fx, k);
+  total += (jumps - whole) * retention ** (whole + 1) * hitValue(stats, fx, whole + 1);
+  return values.damage * fx.allDamageMult * total;
+}
+
+/**
+ * Damage per second against a crowd: attackDamage × attacks per second × projectiles, as if
+ * every projectile and jump found a target. Ignores overkill and pandemic spread.
+ */
+export function crowdDps(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
+  const { values } = stats;
+  return attackDamage(stats, rules) * values.attackSpeed * Math.max(1, values.projectileCount);
+}
+
+/** Talent ids whose node belongs to a crit, DoT or chain sector (not bridges or generic). */
+function isSectorNode(data: GameData, id: string): boolean {
+  const archetype = data.talents.find((node) => node.id === id)?.archetype;
+  return archetype === 'crit' || archetype === 'dot' || archetype === 'chain';
+}
+
+/** A copy of the build without the talents matching `drop` (ranks included). */
+function buildWithout(meta: Readonly<MetaState>, drop: (id: string) => boolean): MetaState {
+  const copy = createMetaState();
+  for (const id of meta.allocated) if (!drop(id)) copy.allocated.add(id);
+  for (const [id, rank] of meta.ranks) if (!drop(id)) copy.ranks.set(id, rank);
+  return copy;
+}
+
+/**
+ * How much of a build's damage comes from repeatable ranks (Might) and how much from sector
+ * nodes (docs/GDD.md §9.1): each ratio is the build's value over the same build without
+ * those talents. `D` ratios use effectiveHit; attack ratios use attackDamage, which adds the
+ * chain jumps of one projectile; crowd ratios use crowdDps, which also counts attack speed
+ * and projectiles.
+ */
+export interface BuildMultipliers {
+  readonly repeatableMultD: number;
+  readonly sectorMultD: number;
+  readonly sectorMultAttack: number;
+  readonly sectorMultCrowd: number;
+}
+
+export function buildMultipliers(meta: Readonly<MetaState>, data: GameData): BuildMultipliers {
+  const measure = (build: Readonly<MetaState>): { d: number; attack: number; crowd: number } => {
+    const stats = statBlockFor(build, data);
+    const rules = collectRules(build, data);
+    return {
+      d: effectiveHit(stats, rules),
+      attack: attackDamage(stats, rules),
+      crowd: crowdDps(stats, rules),
+    };
+  };
+  const full = measure(meta);
+  const noRanks = measure(buildWithout(meta, (id) => meta.ranks.has(id)));
+  const noSector = measure(buildWithout(meta, (id) => isSectorNode(data, id)));
+  return {
+    repeatableMultD: full.d / noRanks.d,
+    sectorMultD: full.d / noSector.d,
+    sectorMultAttack: full.attack / noSector.attack,
+    sectorMultCrowd: full.crowd / noSector.crowd,
+  };
+}
+
+/** What happened to one elite or boss of a run (SessionConfig.trackToughTargets). */
+export interface ToughTarget {
+  readonly run: number;
+  readonly enemy: 'hexagon' | 'boss';
+  /** Wave the enemy belongs to. */
+  readonly wave: number;
+  /** meta.maxWave when the run started: the frontier the run pushes against. */
+  readonly frontier: number;
+  /** Killed, reached the player, or still alive when the run ended. */
+  readonly outcome: 'killed' | 'reached' | 'alive';
+  /** Seconds from spawn to kill; null unless killed. */
+  readonly killSeconds: number | null;
+}
+
+/** Follows the elites and bosses of one run through its events. */
+function toughTargetTracker(run: number, frontier: number) {
+  const open = new Map<number, { enemy: 'hexagon' | 'boss'; wave: number; tick: number }>();
+  const done: ToughTarget[] = [];
+  const close = (id: number, outcome: ToughTarget['outcome'], tick: number): void => {
+    const entry = open.get(id);
+    if (entry === undefined) return;
+    open.delete(id);
+    const killSeconds = outcome === 'killed' ? (tick - entry.tick) / TICK_RATE : null;
+    done.push({ run, enemy: entry.enemy, wave: entry.wave, frontier, outcome, killSeconds });
+  };
+  return {
+    observe(events: readonly SimEvent[], state: Readonly<SimState>): void {
+      for (const event of events) {
+        if (
+          event.type === 'enemySpawned' &&
+          (event.enemy === 'hexagon' || event.enemy === 'boss')
+        ) {
+          const spawned = state.enemies.find((enemy) => enemy.id === event.enemyId);
+          const wave = spawned?.wave ?? state.wave;
+          open.set(event.enemyId, { enemy: event.enemy, wave, tick: state.tick });
+        } else if (event.type === 'enemyKilled') {
+          close(event.enemyId, 'killed', state.tick);
+        } else if (event.type === 'playerHit') {
+          close(event.enemyId, 'reached', state.tick);
+        }
+      }
+    },
+    finish(tick: number): ToughTarget[] {
+      for (const id of [...open.keys()]) close(id, 'alive', tick);
+      return done;
+    },
+  };
 }
 
 /** One row of runs.csv. Damage and currency columns are plain numbers taken from Num. */
@@ -143,6 +290,11 @@ export interface RunRow {
   readonly nodesAllocated: number;
   /** Total ranks on repeatable nodes after this visit's purchases. */
   readonly repeatableRanks: number;
+  /** buildMultipliers of the build after this visit's purchases. */
+  readonly repeatableMultD: number;
+  readonly sectorMultD: number;
+  readonly sectorMultAttack: number;
+  readonly sectorMultCrowd: number;
   /** Currencies left after this visit's purchases. */
   readonly shardsBank: number;
   readonly coresBank: number;
@@ -159,6 +311,8 @@ export interface SessionResult {
   /** Play time at the end of the run after which the first notable / keystone was bought. */
   readonly firstNotableMinutes: number | null;
   readonly firstKeystoneMinutes: number | null;
+  /** Every elite and boss, in run order; only with SessionConfig.trackToughTargets. */
+  readonly toughTargets?: readonly ToughTarget[];
 }
 
 /** Safety net against a zero-length loop; a 60 minute session has a few hundred runs at most. */
@@ -173,6 +327,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
   let clockSeconds = 0;
   let firstNotableMinutes: number | null = null;
   let firstKeystoneMinutes: number | null = null;
+  const toughTargets: ToughTarget[] = [];
 
   for (let run = 1; clockSeconds < budgetSeconds; run++) {
     if (run > MAX_RUNS) throw new Error(`Session exceeded ${MAX_RUNS} runs`);
@@ -191,7 +346,13 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
     let row: RunRow;
     try {
       const sim = createSimulation(runConfig, data);
-      while (!sim.state.finished) sim.step(NO_INPUT);
+      if (config.trackToughTargets === true) {
+        const tracker = toughTargetTracker(run, meta.maxWave);
+        while (!sim.state.finished) tracker.observe(sim.step(NO_INPUT), sim.state);
+        toughTargets.push(...tracker.finish(sim.state.tick));
+      } else {
+        while (!sim.state.finished) sim.step(NO_INPUT);
+      }
       const result = sim.result();
       const settlement = settleRun(meta, result, data, stats, economy);
       const runSeconds = result.ticks / TICK_RATE;
@@ -206,7 +367,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
         if (kind === 'keystone') firstKeystoneMinutes ??= minutes;
       }
 
-      const d = toNumber(assertFinite(num(effectiveHit(stats)), 'effective hit'));
+      const d = toNumber(assertFinite(num(effectiveHit(stats, runConfig.rules)), 'effective hit'));
       const frontierHp = stdHp(result.highestWaveReached);
       let repeatableRanks = 0;
       for (const rank of meta.ranks.values()) repeatableRanks += rank;
@@ -237,6 +398,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
         skipCores: settlement.skipCores,
         nodesAllocated: meta.allocated.size - meta.ranks.size,
         repeatableRanks,
+        ...buildMultipliers(meta, data),
         shardsBank: toNumber(meta.shards),
         coresBank: meta.cores,
         bought: compressIds(bought),
@@ -258,6 +420,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
     endMinutes: clockSeconds / 60,
     firstNotableMinutes,
     firstKeystoneMinutes,
+    ...(config.trackToughTargets === true ? { toughTargets } : {}),
   };
 }
 

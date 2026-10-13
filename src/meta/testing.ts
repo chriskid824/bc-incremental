@@ -30,7 +30,7 @@ export function talent(
     rules: [],
     archetype: 'none',
     nameKey: `talent.${id}.name`,
-    descKey: `talent.${id}.desc`,
+    ...((extras.rules?.length ?? 0) > 0 ? { descKey: `talent.${id}.desc` } : {}),
     ...extras,
   };
 }

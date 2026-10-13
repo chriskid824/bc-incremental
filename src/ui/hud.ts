@@ -1,5 +1,6 @@
 /**
- * In-run HUD as a DOM overlay: wave, life, run currencies, run time and game speed.
+ * In-run HUD as a DOM overlay: wave, life, currencies collected this run, elapsed run time
+ * (the time limit only shows in its last seconds), game speed and an optional hint line.
  * Only the speed buttons take pointer input. Text nodes are written only when they change.
  */
 
@@ -24,11 +25,16 @@ export interface HudInfo {
 
 const FORMAT = { format: 'short' } as const;
 
+/** The remaining run time shows once this little is left. */
+export const TIME_WARNING_SEC = 30;
+
 export class Hud<S extends number> {
   readonly root: HTMLElement;
   private readonly wave: HTMLElement;
   private readonly runLine: HTMLElement;
   private readonly time: HTMLElement;
+  private readonly timeLeft: HTMLElement;
+  private readonly hint: HTMLElement;
   private readonly lifeValue: HTMLElement;
   private readonly lifeFill: HTMLElement;
   private readonly shards: HTMLElement;
@@ -45,7 +51,15 @@ export class Hud<S extends number> {
     this.wave = el(doc, 'div', 'bc-hud-wave-number');
     this.runLine = el(doc, 'div', 'bc-hud-sub');
     this.time = el(doc, 'div', 'bc-hud-sub');
-    waveBox.append(el(doc, 'div', 'bc-label', t('hud.wave')), this.wave, this.runLine, this.time);
+    this.timeLeft = el(doc, 'div', 'bc-hud-time-left');
+    this.timeLeft.hidden = true;
+    waveBox.append(
+      el(doc, 'div', 'bc-label', t('hud.wave')),
+      this.wave,
+      this.runLine,
+      this.time,
+      this.timeLeft,
+    );
 
     const lifeBox = el(doc, 'div', 'bc-hud-life');
     const lifeRow = el(doc, 'div', 'bc-hud-life-row');
@@ -60,9 +74,9 @@ export class Hud<S extends number> {
     this.shards = el(doc, 'span', 'bc-hud-currency-value');
     this.cores = el(doc, 'span', 'bc-hud-currency-value');
     currency.append(
-      el(doc, 'span', 'bc-label', t('hud.shards')),
+      el(doc, 'span', 'bc-label', t('hud.shardsRun')),
       this.shards,
-      el(doc, 'span', 'bc-label', t('hud.cores')),
+      el(doc, 'span', 'bc-label', t('hud.coresRun')),
       this.cores,
     );
 
@@ -78,16 +92,26 @@ export class Hud<S extends number> {
     }
     speedBox.append(el(doc, 'span', 'bc-label', t('hud.speed')), buttons);
 
-    this.root.append(waveBox, lifeBox, currency, speedBox);
+    this.hint = el(doc, 'div', 'bc-hud-hint');
+    this.hint.hidden = true;
+
+    this.root.append(waveBox, lifeBox, currency, speedBox, this.hint);
+  }
+
+  /** A short line at the bottom of the screen, or null to hide it. */
+  setHint(text: string | null): void {
+    this.hint.hidden = text === null;
+    this.set(this.hint, text ?? '');
   }
 
   update(info: HudInfo): void {
     this.set(this.wave, String(info.wave));
     this.set(this.runLine, t('hud.run', { run: info.runNumber, startWave: info.startWave }));
-    this.set(
-      this.time,
-      t('hud.time', { elapsed: formatClock(info.elapsedSec), limit: formatClock(info.limitSec) }),
-    );
+    this.set(this.time, formatClock(info.elapsedSec));
+    const left = info.limitSec - info.elapsedSec;
+    const warn = left <= TIME_WARNING_SEC;
+    this.timeLeft.hidden = !warn;
+    if (warn) this.set(this.timeLeft, t('hud.timeLeft', { time: formatClock(Math.ceil(left)) }));
     this.set(
       this.lifeValue,
       t('hud.lifeValue', { life: Math.ceil(info.life), maxLife: Math.ceil(info.maxLife) }),

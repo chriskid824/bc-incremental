@@ -1,12 +1,19 @@
 /**
  * Enemy views: one pooled view per live enemy id, built once per enemy type. Geometry is drawn
- * in white and colored by tint, so hit flashes and burn flicker only change the tint.
+ * in white and colored by tint, so hit flashes and burn flicker only change the tint; a dark
+ * backing under the fill keeps each shape a readable silhouette over bright effects.
+ * Burning enemies (docs/GDD.md §3.3) also get a flickering fire glow on a shared additive
+ * particle layer under the crowd, and shed flames that rise and cool, also drawn under the
+ * crowd so the enemy's own outline and color stay on top; both grow with the stack count up to
+ * a low cap. Flame emission shares one budget per second across all burning enemies.
  */
 
-import { Container, Graphics, Sprite, Texture } from 'pixi.js';
+import { Container, Graphics, Particle, ParticleContainer, Sprite, Texture } from 'pixi.js';
 import { div, toNumber } from '../core/num';
 import type { EnemyDef, EnemyId, EnemyShape, GameData } from '../data/types';
 import type { EnemyState } from '../sim';
+import type { Bursts } from './bursts';
+import { packColor } from './fx';
 import { COLORS, mixColor } from './palette';
 
 const SIDES: Readonly<Record<EnemyShape, number>> = {
@@ -17,8 +24,23 @@ const SIDES: Readonly<Record<EnemyShape, number>> = {
   octagon: 8,
 };
 
-const FLASH_MS = 90;
+const FLASH_MS = 100;
+/** Scale punch of a normal hit flash; crits pass a bigger one. */
+export const HIT_PUNCH = 0.18;
 const HP_BAR_HEIGHT = 6;
+/** Burn visuals stop growing at this many stacks (eternalFlame has no stack cap). */
+const BURN_VISUAL_STACKS = 4;
+/** Flames per second from one burning enemy, at 1 stack and per extra stack. */
+const FLAME_RATE = 11;
+const FLAME_RATE_PER_STACK = 3;
+/** Flames per second across all burning enemies; above it each enemy emits proportionally less. */
+const FLAME_BUDGET = 650;
+/** How far a burning enemy's tint leans toward the fire color: base, at full heat, flicker. */
+const BURN_TINT = 0.06;
+const BURN_TINT_HEAT = 0.08;
+const BURN_TINT_FLICKER = 0.06;
+/** Glow texture diameter in pixels (src/render/fxTextures.ts). */
+const GLOW_SIZE = 64;
 /** Radians per second; small enemies spin faster. */
 const SPIN_BASE = 0.9;
 
@@ -31,11 +53,17 @@ class EnemyView {
   readonly spin: number;
   seenFrame = 0;
   flashMs = 0;
+  punch = HIT_PUNCH;
+  /** Fractional flames owed; one is emitted per whole unit. */
+  flameDebt = 0;
 
   constructor(readonly def: EnemyDef) {
     const r = def.radius;
     const sides = SIDES[def.shape];
     const hull = new Graphics()
+      // Tinting leaves black black: a dark backing that keeps the shape solid over fire.
+      .regularPoly(0, 0, r, sides)
+      .fill({ color: 0x000000, alpha: 0.6 })
       .regularPoly(0, 0, r * 1.1, sides)
       .stroke({ width: 10, color: 0xffffff, alpha: 0.16 })
       .regularPoly(0, 0, r, sides)
@@ -86,29 +114,63 @@ class EnemyView {
 
 export class EnemyLayer {
   readonly view = new Container({ label: 'enemies' });
+  /** Fire glows of burning enemies; add it under `view`. */
+  readonly burnGlow: ParticleContainer;
+  private readonly glows: Particle[] = [];
   private readonly active = new Map<number, EnemyView>();
   private readonly pools = new Map<EnemyId, EnemyView[]>();
   private frame = 0;
   private timeMs = 0;
+  /** Flames per second all burning enemies asked for last frame. */
+  private flameDemand = 0;
+  /** Map visitor for update(): frees views of enemies gone this frame, without allocating. */
+  private readonly releaseUnseen = (view: EnemyView, id: number): void => {
+    if (view.seenFrame === this.frame) return;
+    this.release(view);
+    this.active.delete(id);
+  };
 
-  constructor(private readonly data: GameData) {}
+  constructor(
+    private readonly data: GameData,
+    private readonly glowTexture: Texture,
+  ) {
+    this.burnGlow = new ParticleContainer({
+      label: 'burn-glow',
+      texture: glowTexture,
+      dynamicProperties: { position: true, color: true, vertex: true },
+    });
+    this.burnGlow.blendMode = 'add';
+  }
 
-  /** Starts a white flash on the enemy, if it has a view. */
-  flash(enemyId: number): void {
+  /** Starts a white flash on the enemy, if it has a view; `punch` is the scale bump. */
+  flash(enemyId: number, punch = HIT_PUNCH): void {
     const view = this.active.get(enemyId);
-    if (view) view.flashMs = FLASH_MS;
+    if (view === undefined) return;
+    // Overlapping flashes keep the bigger punch.
+    view.punch = view.flashMs > 0 ? Math.max(punch, view.punch) : punch;
+    view.flashMs = FLASH_MS;
   }
 
   /** Releases every view; enemy ids restart with each run. */
   clear(): void {
     for (const view of this.active.values()) this.release(view);
     this.active.clear();
+    this.burnGlow.particleChildren.length = 0;
+    this.burnGlow.update();
+    this.flameDemand = 0;
   }
 
-  update(enemies: readonly EnemyState[], alpha: number, dtMs: number): void {
+  /** Positions and tints every live enemy; burning ones glow and shed flames via `bursts`. */
+  update(enemies: readonly EnemyState[], alpha: number, dtMs: number, bursts: Bursts): void {
     this.frame++;
     this.timeMs += dtMs;
     const seconds = this.timeMs / 1000;
+    const dt = dtMs / 1000;
+    const flameShare = this.flameDemand > FLAME_BUDGET ? FLAME_BUDGET / this.flameDemand : 1;
+    let demand = 0;
+    let glowCount = 0;
+    const glowChildren = this.burnGlow.particleChildren;
+    const previousGlows = glowChildren.length;
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i] as EnemyState;
       if (!enemy.alive) continue;
@@ -119,10 +181,9 @@ export class EnemyLayer {
       }
       view.seenFrame = this.frame;
       view.flashMs = Math.max(0, view.flashMs - dtMs);
-      view.root.position.set(
-        enemy.prevX + (enemy.x - enemy.prevX) * alpha,
-        enemy.prevY + (enemy.y - enemy.prevY) * alpha,
-      );
+      const x = enemy.prevX + (enemy.x - enemy.prevX) * alpha;
+      const y = enemy.prevY + (enemy.y - enemy.prevY) * alpha;
+      view.root.position.set(x, y);
       // Alternate spin direction by id so crowds do not rotate in lockstep.
       const direction = enemy.id % 2 === 0 ? 1 : -1;
       view.body.rotation = direction * seconds * view.spin + enemy.id;
@@ -130,25 +191,61 @@ export class EnemyLayer {
 
       let tint = view.def.color;
       if (enemy.burnStacks > 0) {
-        const flicker = 0.35 + 0.2 * Math.sin(seconds * 26 + enemy.id * 1.7);
-        tint = mixColor(tint, COLORS.burn, flicker);
+        const heat = Math.min(enemy.burnStacks, BURN_VISUAL_STACKS) / BURN_VISUAL_STACKS;
+        const flicker = 0.5 + 0.5 * Math.sin(seconds * 23 + enemy.id * 1.7);
+        const flutter = 0.5 + 0.5 * Math.sin(seconds * 37 + enemy.id * 0.9);
+        // A warm cast only: the enemy keeps its own color and outline over its fire.
+        tint = mixColor(
+          tint,
+          COLORS.burn,
+          BURN_TINT + BURN_TINT_HEAT * heat + BURN_TINT_FLICKER * flicker,
+        );
+
+        let glow = this.glows[glowCount];
+        if (glow === undefined) {
+          glow = new Particle({ texture: this.glowTexture, anchorX: 0.5, anchorY: 0.5 });
+          this.glows.push(glow);
+        }
+        const size = (view.def.radius * (3.4 + 1.6 * heat) * (0.9 + 0.15 * flutter)) / GLOW_SIZE;
+        glow.x = x;
+        glow.y = y - view.def.radius * 0.35;
+        glow.scaleX = size;
+        glow.scaleY = size * 1.2;
+        // Deep orange, never the hot yellow: the glow texture's core already peaks at full.
+        glow.color = packColor(
+          mixColor(COLORS.burnDeep, COLORS.burn, 0.45 + 0.35 * flicker),
+          (0.32 + 0.2 * heat) * (0.8 + 0.2 * flicker),
+        );
+        glowChildren[glowCount++] = glow;
+
+        const rate =
+          FLAME_RATE + FLAME_RATE_PER_STACK * (Math.min(enemy.burnStacks, BURN_VISUAL_STACKS) - 1);
+        demand += rate;
+        view.flameDebt += rate * flameShare * dt;
+        while (view.flameDebt >= 1) {
+          view.flameDebt -= 1;
+          bursts.flame(x, y, view.def.radius, heat);
+        }
+      } else {
+        view.flameDebt = 0;
       }
-      if (view.flashMs > 0) tint = mixColor(tint, COLORS.hitFlash, view.flashMs / FLASH_MS);
+      const flash = view.flashMs / FLASH_MS;
+      if (flash > 0) tint = mixColor(tint, COLORS.hitFlash, flash);
       view.body.tint = tint;
-      view.body.scale.set(1 + 0.12 * (view.flashMs / FLASH_MS));
+      view.body.scale.set(1 + view.punch * flash);
       if (view.hpFill) view.setHp(toNumber(div(enemy.hp, enemy.maxHp)));
     }
-    for (const [id, view] of this.active) {
-      if (view.seenFrame !== this.frame) {
-        this.release(view);
-        this.active.delete(id);
-      }
-    }
+    this.flameDemand = demand;
+    glowChildren.length = glowCount;
+    if (glowCount !== previousGlows) this.burnGlow.update();
+    this.active.forEach(this.releaseUnseen);
   }
 
   private acquire(enemy: EnemyState): EnemyView {
     const view = this.pools.get(enemy.type)?.pop() ?? new EnemyView(this.data.enemies[enemy.type]);
     view.flashMs = 0;
+    view.punch = HIT_PUNCH;
+    view.flameDebt = Math.random();
     view.setHp(1);
     // Bosses and elites draw under the crowd so small enemies stay visible.
     if (view.def.radius >= 30) this.view.addChildAt(view.root, 0);
