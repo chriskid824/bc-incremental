@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuleSpec } from '../data/rules';
-import { BASE_STATS } from '../data/stats';
+import { BASE_STATS, DAMAGE_TAG_BIT } from '../data/stats';
 import { setLocale, t } from '../i18n';
 import { makeStats } from '../sim/testing';
 import { describeBuild, describeModifier } from './describe';
@@ -20,10 +20,36 @@ describe('describeBuild', () => {
       [t('stat.projectileCount')]: String(BASE_STATS.projectileCount),
       [t('stat.critChance')]: '5%',
       [t('stat.critMultiplier')]: '150%',
+      [t('build.critHit')]: '15',
       [t('stat.igniteChance')]: '10%',
+      [t('build.burnPerStack')]: '15/s',
+      [t('stat.burnDuration')]: '1.2',
+      [t('stat.burnMaxStacks')]: '5',
       [t('stat.chainCount')]: '0',
+      [t('build.chainJump')]: '7',
       [t('stat.maxLife')]: '100',
     });
+  });
+
+  it('shows what crit, burn and chain damage nodes do, each on its own line', () => {
+    const { crit, burn, chain } = DAMAGE_TAG_BIT;
+    // ×2 on every crit mask, ×3 on every burn mask, ×5 on every chain mask.
+    const mult = (mask: number): number =>
+      (mask & crit ? 2 : 1) * (mask & burn ? 3 : 1) * (mask & chain ? 5 : 1);
+    const lines = build([], makeStats({}, mult));
+    expect(lines[t('stat.damage.hit')]).toBe('10');
+    expect(lines[t('build.critHit')]).toBe('30');
+    expect(lines[t('build.burnPerStack')]).toBe('45/s');
+    expect(lines[t('build.chainJump')]).toBe('35');
+  });
+
+  it('applies the overload retention penalty to the first chain jump', () => {
+    const lines = build(
+      [{ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2 }],
+      makeStats({ chainCount: 1.5, chainRetention: 0.7 }),
+    );
+    expect(lines[t('stat.chainCount')]).toBe('3');
+    expect(lines[t('build.chainJump')]).toBe('5');
   });
 
   it('shows the steadyAim rhythm instead of a crit chance, with its crit multiplier', () => {

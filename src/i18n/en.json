@@ -170,5 +170,8 @@
   "talents.startWaveLoweredRun": "Lowered automatically: the last run did not clear its start wave.",
   "result.toTalentsHint": "Click to open the talent web",
   "result.tip.lowerStart": "This run did not clear its start wave {wave}, so it earned no skip compensation. The next run starts lower on its own, at wave {next}.",
-  "talents.startWaveClimbing": "Lowered earlier: it rises again as your runs clear it."
+  "talents.startWaveClimbing": "Lowered earlier: it rises again as your runs clear it.",
+  "build.critHit": "Crit hit",
+  "build.burnPerStack": "Burn per stack",
+  "build.chainJump": "First chain jump"
 }

@@ -170,5 +170,8 @@
   "talents.startWaveLoweredRun": "已自動調降：上一局沒有清掉起始波次。",
   "result.toTalentsHint": "點擊開啟天賦網",
   "result.tip.lowerStart": "這局沒有清掉起始的第 {wave} 波，所以沒有跳波補償。下一局會自動從比較低的第 {next} 波開始。",
-  "talents.startWaveClimbing": "先前已自動調降：之後每局清掉起始波次，就會再往上調。"
+  "talents.startWaveClimbing": "先前已自動調降：之後每局清掉起始波次，就會再往上調。",
+  "build.critHit": "暴擊一發",
+  "build.burnPerStack": "每層燃燒",
+  "build.chainJump": "連鎖第一跳"
 }
