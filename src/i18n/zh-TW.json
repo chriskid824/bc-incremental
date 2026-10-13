@@ -165,5 +165,7 @@
   "intro.start": "開始 · Space",
   "build.critEveryNth": "每 {n} 發一次",
   "talents.priceGrowth": "每點一個天賦，下一個的價格就 ×{growth}（可重複升級的天賦不算）。",
-  "talents.startWaveWarning": "目前配置預估能推到第 {frontier} 波，從更高的波次開始幾乎賺不到。建議起始波次：第 {wave} 波。"
+  "talents.startWaveAbove": "目前配置應該能清到第 {reach} 波。清不掉起始波次就拿不到跳波補償。",
+  "talents.startWaveLoweredBuild": "已自動調降：目前配置應該能清到第 {reach} 波。",
+  "talents.startWaveLoweredRun": "已自動調降：上一局沒有清掉起始波次。"
 }

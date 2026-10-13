@@ -286,6 +286,11 @@ const CSS = `
   font-size: 13px;
   line-height: 1.35;
 }
+.bc-talents-warning[data-tone='info'] {
+  background: rgba(159, 232, 255, 0.08);
+  border-color: rgba(159, 232, 255, 0.35);
+  color: #bfeeff;
+}
 .bc-talents-build {
   display: grid;
   grid-template-columns: 1fr auto;

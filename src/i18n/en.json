@@ -165,5 +165,7 @@
   "intro.start": "Start · Space",
   "build.critEveryNth": "Every {n} shots",
   "talents.priceGrowth": "Each talent you own raises the next one's price ×{growth} (repeatable talents don't count).",
-  "talents.startWaveWarning": "Your build is estimated to push wave {frontier} — starting higher earns little. Suggested start: wave {wave}."
+  "talents.startWaveAbove": "Your build should clear up to wave {reach}. A start wave it does not clear earns no skip bonus.",
+  "talents.startWaveLoweredBuild": "Lowered automatically: your build should clear up to wave {reach}.",
+  "talents.startWaveLoweredRun": "Lowered automatically: the last run did not clear its start wave."
 }

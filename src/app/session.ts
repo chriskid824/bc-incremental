@@ -2,8 +2,10 @@
  * Run lifecycle of the browser build: run → result screen → talent web → next run.
  * The talent web opens on its own when something is affordable; otherwise the result screen
  * counts down and the next run starts, so a player who only watches still progresses.
- * The start wave follows the highest allowed wave unless the player picks a lower one, and
- * steps down on its own when the build gets weaker (a respec) or a run fails to clear it.
+ * The start wave follows the highest allowed wave unless the player picks a lower one. The
+ * session lowers it on its own to the highest start wave the talents clear (src/meta/
+ * startWave.ts) on load, after a respec and when the talents or the allowed start wave
+ * change, and steps it down after a run that does not clear it.
  */
 
 import type { Num } from '../core/num';
@@ -15,12 +17,13 @@ import {
   allowedStartWave,
   canAllocate,
   collectRules,
-  estimateBuild,
+  highestClearedStartWave,
+  nodeRank,
   refundAll,
   settleRun,
   statBlockFor,
 } from '../meta';
-import type { BuildEstimate, EconomyConfig, MetaState, Settlement } from '../meta';
+import type { EconomyConfig, MetaState, Settlement } from '../meta';
 import { NO_INPUT, createSimulation } from '../sim';
 import type { RunConfig, RunResult, SimEvent, Simulation } from '../sim';
 
@@ -35,6 +38,13 @@ const SEED_BASE = 1000;
  * start wave is at most this share of the wave the run reached, and always lower than before.
  */
 export const FAILED_START_RATIO = 0.7;
+
+/** Why the session lowered the start wave below the one the player picked. */
+export type StartWaveLowering =
+  /** The talents do not clear it (after a respec, on load, or after talents changed). */
+  | 'build'
+  /** The last run did not clear its start wave. */
+  | 'failedRun';
 
 export interface ActiveRun {
   /** 1-based. */
@@ -69,9 +79,22 @@ export interface SessionOptions {
   readonly economy?: EconomyConfig;
   /** Runs end once this wave is cleared; start waves never exceed it (M1 prototype: 40). */
   readonly waveCap?: number;
+  /**
+   * Highest start wave up to `maxStartWave` that the talents in `meta` clear. Defaults to the
+   * simulation (highestClearedStartWave); tests may pass a stand-in.
+   */
+  readonly reach?: (meta: Readonly<MetaState>, maxStartWave: number) => number;
 }
 
 export type SessionPhase = 'idle' | 'running' | 'results' | 'talents';
+
+/** Highest start wave a build clears, measured with the allowed start wave at the time. */
+interface Reach {
+  /** buildKey() of the talents it was measured for. */
+  readonly build: string;
+  readonly maxStartWave: number;
+  readonly wave: number;
+}
 
 export class Session {
   private phaseValue: SessionPhase = 'idle';
@@ -79,16 +102,24 @@ export class Session {
   private resultMsLeft = 0;
   private lastReport: RunReport | null = null;
   /** Start wave picked on the talent screen; null follows the highest allowed wave. */
-  private startWaveChoice: number | null = null;
+  private startWavePick: number | null = null;
+  /** A lower start wave set by the session, below the pick; null when none applies. */
+  private startWaveLowered: number | null = null;
+  private loweredBy: StartWaveLowering | null = null;
   /**
-   * The choice was lowered by the session, not picked by the player, so it climbs back on its
-   * own as the build gets stronger and runs clear it.
+   * The player picked the start wave above the build's measured reach, warning in view: the
+   * session leaves it there until the next respec.
    */
-  private startWaveAuto = false;
+  private pickedPastReach = false;
+  /** Last reach measurement (it costs a few ms of simulation, so it is kept). */
+  private reachCache: Reach | null = null;
+  /** Reach of the talents the start wave was last aimed for; null before the first aim. */
+  private aimed: Reach | null = null;
   /** T was pressed during the run: open the talent web when it ends. */
   private talentsQueuedValue = false;
   private readonly economy: EconomyConfig;
   private readonly waveCap: number | undefined;
+  private readonly reachFor: (meta: Readonly<MetaState>, maxStartWave: number) => number;
 
   constructor(
     private readonly data: GameData,
@@ -97,7 +128,17 @@ export class Session {
     options: SessionOptions = {},
   ) {
     this.economy = options.economy ?? DEFAULT_ECONOMY;
-    this.waveCap = options.waveCap;
+    const waveCap = options.waveCap;
+    this.waveCap = waveCap;
+    this.reachFor =
+      options.reach ??
+      ((meta, maxStartWave) =>
+        highestClearedStartWave(
+          meta,
+          data,
+          maxStartWave,
+          waveCap === undefined ? {} : { waveCap },
+        ));
   }
 
   get phase(): SessionPhase {
@@ -138,21 +179,37 @@ export class Session {
 
   /** The start wave of the next run. */
   get startWave(): number {
-    const max = this.maxStartWave;
-    return this.startWaveChoice === null ? max : Math.min(this.startWaveChoice, max);
+    const picked = this.pickedStartWave;
+    return this.startWaveLowered === null ? picked : Math.min(this.startWaveLowered, picked);
+  }
+
+  /** Why the start wave is below the player's pick, or null when it is not. */
+  get startWaveLowering(): StartWaveLowering | null {
+    return this.startWave < this.pickedStartWave ? this.loweredBy : null;
+  }
+
+  /**
+   * Highest start wave the current talents clear (src/meta/startWave.ts), or null when the
+   * talents or the allowed start wave changed since it was last measured.
+   */
+  get reach(): number | null {
+    const cache = this.reachCache;
+    return cache !== null &&
+      cache.build === this.buildKey() &&
+      cache.maxStartWave === this.maxStartWave
+      ? cache.wave
+      : null;
   }
 
   /** Picks the next run's start wave; picking the highest allowed wave follows it upward. */
   setStartWave(wave: number): void {
     const max = this.maxStartWave;
     const clamped = Math.max(1, Math.min(max, Math.round(wave)));
-    this.startWaveChoice = clamped >= max ? null : clamped;
-    this.startWaveAuto = false;
-  }
-
-  /** How far the current talents should get (src/meta/estimate.ts). */
-  get estimate(): BuildEstimate {
-    return estimateBuild(this.meta, this.data, this.economy);
+    this.startWavePick = clamped >= max ? null : clamped;
+    this.startWaveLowered = null;
+    this.loweredBy = null;
+    // Picked with the build's reach in view (the talent web warns above it): keep it.
+    this.pickedPastReach = clamped > this.measureReach();
   }
 
   /** Starts the first run. */
@@ -167,7 +224,7 @@ export class Session {
    */
   resume(): void {
     if (this.phaseValue !== 'idle') throw new Error('Session already started');
-    this.followEstimate(null);
+    this.aimStartWave(true);
     this.phaseValue = 'talents';
     this.listener.talentsOpened();
   }
@@ -220,23 +277,33 @@ export class Session {
     if (this.phaseValue === 'results' || this.phaseValue === 'talents') this.nextRun();
   }
 
-  /** Buys a node (or its next rank). Only between runs. Returns whether it was bought. */
+  /**
+   * Buys a node (or its next rank). Only between runs. Returns whether it was bought. The
+   * start wave is re-aimed later (refreshStartWave, or when the next run starts), not on every
+   * purchase, since measuring the build takes a few ms of simulation.
+   */
   allocate(nodeId: string): boolean {
     if (this.phaseValue !== 'talents') return false;
     if (!canAllocate(this.meta, nodeId, this.data, this.economy).ok) return false;
-    const before = this.estimate;
     allocate(this.meta, nodeId, this.data, this.economy);
-    this.followEstimate(before);
     this.listener.profileChanged();
     return true;
   }
 
-  /** Free full respec. Only between runs. Lowers the start wave to what the new build can do. */
+  /** Free full respec. Only between runs. Lowers the start wave to what the new build clears. */
   refund(): void {
     if (this.phaseValue !== 'talents') return;
     refundAll(this.meta);
-    this.followEstimate(null);
+    this.aimStartWave(true);
     this.listener.profileChanged();
+  }
+
+  /**
+   * Re-aims the start wave if the talents or the allowed start wave changed since it was last
+   * aimed. Between runs only.
+   */
+  refreshStartWave(): void {
+    if (this.phaseValue === 'talents' || this.phaseValue === 'results') this.aimIfStale();
   }
 
   /** Whether any node can be bought with the current currencies. */
@@ -250,6 +317,8 @@ export class Session {
     const result = run.sim.result();
     const settlement = settleRun(this.meta, result, this.data, run.config.stats, this.economy);
     this.followRun(result);
+    // A deeper run allows higher start waves: aim now, so the result screen tells the truth.
+    this.aimIfStale();
     const queued = this.talentsQueuedValue;
     this.talentsQueuedValue = false;
     this.phaseValue = 'results';
@@ -267,61 +336,118 @@ export class Session {
     if (queued) this.openTalents();
   }
 
-  /**
-   * Re-aims the start wave for the current talents; `previous` is the estimate before an
-   * allocation, null after a respec or on load. A start wave the build is no longer expected to
-   * reach (past the estimated frontier) drops to the estimated start wave; a start wave the
-   * player already picked past the frontier stays, with the talent web's warning. A start wave
-   * the session lowered climbs toward the estimate as the build gets stronger, by no more than
-   * the estimate gained, so the step down after a failed run is not undone by the next purchase
-   * when the estimate is too kind (burn builds, docs/GDD.md §7.2 ignores stack caps).
-   */
-  private followEstimate(previous: BuildEstimate | null): void {
-    const estimate = this.estimate;
-    const current = this.startWave;
-    const fellBehind =
-      current > estimate.frontier && (previous === null || current <= previous.frontier);
-    if (fellBehind) this.setAutoStartWave(estimate.startWave);
-    else if (
-      this.startWaveAuto &&
-      previous !== null &&
-      estimate.startWave > previous.startWave &&
-      estimate.startWave > current
-    ) {
-      const gained = estimate.startWave - previous.startWave;
-      this.setAutoStartWave(Math.min(estimate.startWave, current + gained));
+  /** Identifies the talents (ids and ranks) that the stats and rules come from. */
+  private buildKey(): string {
+    const parts: string[] = [];
+    for (const node of this.data.talents) {
+      const rank = nodeRank(this.meta, node);
+      if (rank > 0 && node.kind !== 'start') parts.push(`${node.id}:${rank}`);
     }
+    return parts.join(',');
+  }
+
+  /** Highest start wave the current talents clear, measured once per build and allowed wave. */
+  private measureReach(): number {
+    const cached = this.reach;
+    if (cached !== null) return cached;
+    const maxStartWave = this.maxStartWave;
+    const wave = Math.max(1, Math.min(maxStartWave, this.reachFor(this.meta, maxStartWave)));
+    this.reachCache = { build: this.buildKey(), maxStartWave, wave };
+    return wave;
+  }
+
+  private aimIfStale(): void {
+    const aimed = this.aimed;
+    if (
+      aimed === null ||
+      aimed.build !== this.buildKey() ||
+      aimed.maxStartWave !== this.maxStartWave
+    ) {
+      this.aimStartWave(false);
+    }
+  }
+
+  /**
+   * Re-aims the start wave for the current talents; `fresh` after a respec or on load, where
+   * nothing the player picked before carries over. A start wave above the build's reach drops
+   * to the reach, unless the player picked it above the reach. A start wave the session lowered
+   * climbs toward the reach as the build gets stronger, by no more than the reach gained, so
+   * the step down after a failed run is not undone by the next purchase (the reach is measured
+   * on fixed seeds; the failed run had its own). A reach that was capped by the allowed wave
+   * says nothing about the gain, so it does not climb.
+   */
+  private aimStartWave(fresh: boolean): void {
+    const reach = this.measureReach();
+    const previous = fresh ? null : this.aimed;
+    if (fresh) this.pickedPastReach = false;
+    const current = this.startWave;
+    if (current > reach && !this.pickedPastReach) {
+      this.lowerStartWave(reach, 'build');
+    } else if (
+      this.startWaveLowered !== null &&
+      previous !== null &&
+      previous.wave < previous.maxStartWave &&
+      reach > previous.wave &&
+      reach > current
+    ) {
+      this.raiseLowered(Math.min(reach, current + reach - previous.wave));
+    }
+    this.aimed = this.reachCache;
   }
 
   /**
    * A run that did not clear its start wave lowers the next one, more so the earlier it died.
    * A start wave the session lowered climbs back once runs clear it, to the start wave the run
-   * would allow as a frontier.
+   * would allow as a frontier, but not past the build's measured reach.
    */
   private followRun(result: RunResult): void {
     if (result.startWave > 1 && !result.clearedStartWave) {
-      this.setAutoStartWave(
-        Math.min(result.startWave - 1, Math.floor(result.highestWaveReached * FAILED_START_RATIO)),
+      const next = Math.min(
+        result.startWave - 1,
+        Math.floor(result.highestWaveReached * FAILED_START_RATIO),
       );
-    } else if (this.startWaveAuto) {
-      this.setAutoStartWave(
-        Math.max(
-          this.startWave,
-          Math.floor(result.highestWaveReached * this.economy.startWaveRatio),
-        ),
-      );
+      if (next < this.startWave) this.lowerStartWave(next, 'failedRun');
+    } else if (this.startWaveLowered !== null) {
+      const aimed = this.aimed;
+      // A reach below the allowed wave it was measured with is a ceiling; one at it is not.
+      const ceiling =
+        aimed !== null && aimed.build === this.buildKey() && aimed.wave < aimed.maxStartWave
+          ? aimed.wave
+          : Infinity;
+      const frontier = Math.floor(result.highestWaveReached * this.economy.startWaveRatio);
+      this.raiseLowered(Math.min(ceiling, Math.max(this.startWave, frontier)));
     }
   }
 
-  /** Sets a start wave chosen by the session, never above the allowed wave. */
-  private setAutoStartWave(wave: number): void {
+  /** The player's pick, or the highest allowed wave when following it. */
+  private get pickedStartWave(): number {
     const max = this.maxStartWave;
-    const clamped = Math.max(1, Math.min(max, Math.floor(wave)));
-    this.startWaveChoice = clamped >= max ? null : clamped;
-    this.startWaveAuto = this.startWaveChoice !== null;
+    return this.startWavePick === null ? max : Math.min(this.startWavePick, max);
+  }
+
+  /** Lowers the start wave below the pick; a wave at or above the pick clears the lowering. */
+  private lowerStartWave(wave: number, reason: StartWaveLowering): void {
+    const lowered = Math.max(1, Math.floor(wave));
+    if (lowered >= this.pickedStartWave) {
+      this.startWaveLowered = null;
+      this.loweredBy = null;
+    } else {
+      this.startWaveLowered = lowered;
+      this.loweredBy = reason;
+    }
+    this.pickedPastReach = false;
+  }
+
+  /** Raises a start wave the session lowered, never past the player's pick. */
+  private raiseLowered(wave: number): void {
+    if (this.startWaveLowered === null || wave <= this.startWaveLowered) return;
+    const reason = this.loweredBy ?? 'build';
+    this.lowerStartWave(wave, reason);
   }
 
   private nextRun(): void {
+    // Lazily, once per change of talents rather than on every purchase.
+    this.aimIfStale();
     const stats = statBlockFor(this.meta, this.data);
     const config: RunConfig = {
       seed: SEED_BASE + this.meta.runs,
