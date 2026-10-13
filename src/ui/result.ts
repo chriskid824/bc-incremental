@@ -73,7 +73,9 @@ export class ResultPanel {
     this.actions.append(this.talentsButton, nextButton);
     this.root.append(this.card);
     this.root.addEventListener('click', () => handlers.continue());
-    this.card.addEventListener('pointerenter', () => {
+    // Only a pointer that moves onto the card counts: one left resting where "Next run" was
+    // clicked must not hold every later countdown of a player who just watches.
+    this.card.addEventListener('pointermove', () => {
       this.pointerOnCard = true;
     });
     this.card.addEventListener('pointerleave', () => {
@@ -81,7 +83,10 @@ export class ResultPanel {
     });
   }
 
-  /** The pointer is on the card: the player is reading it, so the countdown holds. */
+  /**
+   * The pointer moved onto the card since it was shown and is still on it: the player is
+   * reading it, so the countdown holds.
+   */
   get hovered(): boolean {
     return !this.root.hidden && this.pointerOnCard;
   }
@@ -139,6 +144,7 @@ export class ResultPanel {
     }
     parts.push(this.actions, info.toTalents ? hint : this.next);
     this.card.replaceChildren(...parts);
+    this.pointerOnCard = false;
     this.root.hidden = false;
     // Next frame, so the opacity transition runs.
     requestAnimationFrame(() => {
@@ -158,5 +164,6 @@ export class ResultPanel {
   hide(): void {
     this.root.classList.remove('bc-visible');
     this.root.hidden = true;
+    this.pointerOnCard = false;
   }
 }
