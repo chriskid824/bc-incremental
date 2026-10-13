@@ -66,6 +66,7 @@ const RECOIL = 3;
 const EMBERS = 9;
 const EMBER_MS = 1700;
 const EMBER_RISE = 46;
+const EMBER_MIN_ALPHA = 0.25;
 
 /** How far the plate along `plateAngle` opens for an attack toward `target`, 0 to 1. */
 export function plateOpening(plateAngle: number, target: number): number {
@@ -290,9 +291,9 @@ export class MagmaCoreView implements ConstructView {
     g.clear();
     for (let k = 0; k < EMBERS; k++) {
       const e = ember(k, this.timeMs);
-      if (e.alpha <= 0.01) continue;
-      // The glow fades faster than the spark, so dim embers do not read as dark specks.
-      g.circle(e.x, e.y, e.size * 1.8).fill({ color: C.ember, alpha: e.alpha * e.alpha * 0.4 });
+      // Dim embers read as dark specks on the floor, so they go out a little early.
+      if (e.alpha < EMBER_MIN_ALPHA) continue;
+      g.circle(e.x, e.y, e.size * 1.8).fill({ color: C.ember, alpha: e.alpha * 0.3 });
       g.circle(e.x, e.y, e.size).fill({ color: C.ember, alpha: e.alpha });
     }
 
