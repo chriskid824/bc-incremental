@@ -135,8 +135,8 @@ export interface NumberBox {
  * either side. y is in box heights; x is in box widths plus the side gap (GAP_X).
  */
 const CANDIDATES = [0, 0, 0, -1, 0, 1, 0, -2, 1, 0, -1, 0] as const;
-/** Stacked rows may overlap by this fraction of their heights (outlines may touch). */
-const SLACK_Y = 0.15;
+/** Stacked rows may overlap by this fraction of their heights: just their outlines touch. */
+const SLACK_Y = 0.05;
 /**
  * Side by side, two numbers need a gap of this fraction of their summed half heights (about a
  * fifth of their height) on top of their outlines, or they read as one ("84.384.3").

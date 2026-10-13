@@ -133,8 +133,7 @@ describe('findSpot', () => {
     expect(findSpot(out, area, [shown], 504, 502, halfW, halfH, 40)).toBe(true);
     const b = shown[0] as NumberBox;
     const apart =
-      Math.abs(out.x - b.x) >= (halfW + b.halfW) * 0.85 ||
-      Math.abs(out.y - b.y) >= (halfH + b.halfH) * 0.85;
+      Math.abs(out.x - b.x) >= halfW + b.halfW || Math.abs(out.y - b.y) >= (halfH + b.halfH) * 0.95;
     expect(apart).toBe(true);
   });
 
