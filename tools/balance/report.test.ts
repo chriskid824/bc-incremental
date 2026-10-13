@@ -46,6 +46,7 @@ function row(overrides: Partial<RunRow>): RunRow {
     repeatableRanks: 0,
     repeatableMultD: 1,
     sectorMultD: 1,
+    sectorMultAttack: 1,
     sectorMultCrowd: 1,
     shardsBank: 0,
     coresBank: 0,
@@ -178,14 +179,17 @@ describe('outputs', () => {
         repeatableRanks: r.run * 2,
         repeatableMultD: r.run + i,
         sectorMultD: 10 * r.run,
+        sectorMultAttack: 30 * r.run,
         sectorMultCrowd: 100 * r.run,
       })),
     }));
     const table = multiplierTable(withMults, ['balanced', 'dot-greedy'], 12);
     const lines = table.split('\n');
-    expect(lines[0]).toMatch(/^@12m\s+ranks\s+Might× D\s+sector× D\s+sector× crowd$/);
+    expect(lines[0]).toMatch(
+      /^@12m\s+ranks\s+Might× D\s+sector× D\s+sector× attack\s+sector× crowd$/,
+    );
     // Might× over sessions: 2, 3, 4, 5 → median 3.5. No dot-greedy sessions, so no row.
-    expect(lines[1]).toMatch(/^balanced\s+4\s+3\.5\s+20\s+200$/);
+    expect(lines[1]).toMatch(/^balanced\s+4\s+3\.5\s+20\s+60\s+200$/);
     expect(lines[2]).toMatch(/^Might× = /);
   });
 });

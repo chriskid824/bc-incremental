@@ -74,6 +74,7 @@ export const RUN_COLUMNS = [
   'repeatableRanks',
   'repeatableMultD',
   'sectorMultD',
+  'sectorMultAttack',
   'sectorMultCrowd',
   'shardsBank',
   'coresBank',
@@ -354,15 +355,18 @@ export const MULTIPLIER_MINUTES = 30;
 
 /**
  * Per strategy, medians over sessions of the build playing at `minutes`: repeatable ranks,
- * the D multiplier from those ranks (Might), and the D and crowd multipliers from sector nodes
- * (see buildMultipliers). A pure archetype's sector multiplier should beat Might's.
+ * the D multiplier from those ranks (Might), and the D, attack and crowd multipliers from
+ * sector nodes (see buildMultipliers). A pure archetype's sector multiplier should beat
+ * Might's.
  */
 export function multiplierTable(
   sorted: readonly SessionResult[],
   strategies: readonly StrategyId[],
   minutes: number = MULTIPLIER_MINUTES,
 ): string {
-  const lines: string[][] = [[`@${minutes}m`, 'ranks', 'Might× D', 'sector× D', 'sector× crowd']];
+  const lines: string[][] = [
+    [`@${minutes}m`, 'ranks', 'Might× D', 'sector× D', 'sector× attack', 'sector× crowd'],
+  ];
   for (const strategy of strategies) {
     const rows: RunRow[] = [];
     for (const result of sorted) {
@@ -378,13 +382,14 @@ export function multiplierTable(
       fmt(median((row) => row.repeatableRanks)),
       ratio(median((row) => row.repeatableMultD)),
       ratio(median((row) => row.sectorMultD)),
+      ratio(median((row) => row.sectorMultAttack)),
       ratio(median((row) => row.sectorMultCrowd)),
     ]);
   }
   return (
     formatTable(lines) +
     '\nMight× = D ÷ D without repeatable ranks; sector× = ÷ the build without crit/dot/chain' +
-    '\n  sector nodes. D is one target (§7.2); crowd also counts chain jumps, attack speed and' +
-    '\n  projectiles. Medians over sessions.'
+    "\n  sector nodes. D is one target (§7.2); attack adds one projectile's chain jumps; crowd" +
+    '\n  also counts attack speed and projectiles. Medians over sessions.'
   );
 }
