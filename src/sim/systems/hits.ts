@@ -15,9 +15,14 @@ const HIT = DAMAGE_TAG_BIT.hit;
 const CRIT = DAMAGE_TAG_BIT.crit;
 const CHAIN = DAMAGE_TAG_BIT.chain;
 
-/** Alive enemy closest to (x, y) within chain range not hit by the current attack. */
+/**
+ * Alive enemy closest to (x, y) within chain range (inclusive) not hit by the current attack;
+ * the lower id on ties. While the grid scans linearly (few enemies), the scan runs here with
+ * the hit check inlined, which is faster than nearest() through a predicate.
+ */
 function nearestChainTarget(ctx: RunContext, x: number, y: number): Enemy | null {
-  const enemies = ctx.enemies;
+  const enemies = ctx.grid.linearSource();
+  if (enemies === null) return ctx.grid.nearest(x, y, ctx.chainRangeSq, ctx.chainable);
   const attackSerial = ctx.attackSerial;
   let best: Enemy | null = null;
   let bestDistSq = ctx.chainRangeSq;

@@ -3,7 +3,7 @@
  * resolves each hit the moment a projectile arrives (src/sim/systems/hits.ts).
  */
 
-import { pickTarget } from '../targeting';
+import { pickTargetInGrid } from '../targeting';
 import { focused } from './context';
 import type { Projectile, RunContext } from './context';
 import { resolveAttack } from './hits';
@@ -19,14 +19,7 @@ export function moveProjectiles(ctx: RunContext): void {
     let target = projectile.target;
     if (!target.alive) {
       target.inbound--;
-      const next = pickTarget(
-        ctx.enemies,
-        projectile.x,
-        projectile.y,
-        ctx.projectileEstimate,
-        ctx.doomed,
-        focused,
-      );
+      const next = pickTargetInGrid(ctx.grid, projectile.x, projectile.y, ctx.shootable, focused);
       if (next === null) {
         projectile.alive = false;
         ctx.projectilesDirty = true;

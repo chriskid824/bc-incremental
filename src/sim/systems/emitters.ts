@@ -4,7 +4,7 @@
  * them and resolves their hits.
  */
 
-import { pickTarget } from '../targeting';
+import { pickTargetInGrid } from '../targeting';
 import { focused, rollCount } from './context';
 import type { Enemy, Projectile, RunContext } from './context';
 
@@ -13,19 +13,12 @@ import type { Enemy, Projectile, RunContext } from './context';
  * target so projectiles spread over enemies; extra projectiles without a target are lost.
  */
 export function attack(ctx: RunContext): void {
-  const enemies = ctx.enemies;
+  const grid = ctx.grid;
   const player = ctx.player;
   const attackInterval = ctx.attackInterval;
   ctx.attackTicks += 1;
   while (ctx.attackTicks >= attackInterval) {
-    let target = pickTarget(
-      enemies,
-      player.x,
-      player.y,
-      ctx.projectileEstimate,
-      ctx.doomed,
-      focused,
-    );
+    let target = pickTargetInGrid(grid, player.x, player.y, ctx.shootable, focused);
     if (target === null) {
       // Stay ready without banking attacks: fire on the tick a target appears.
       ctx.attackTicks = attackInterval - 1;
@@ -38,14 +31,7 @@ export function attack(ctx: RunContext): void {
       target.volleyMark = ctx.volley;
       fire(ctx, target);
       if (n + 1 < count) {
-        target = pickTarget(
-          enemies,
-          player.x,
-          player.y,
-          ctx.projectileEstimate,
-          ctx.doomedOrInVolley,
-          focused,
-        );
+        target = pickTargetInGrid(grid, player.x, player.y, ctx.shootableInVolley, focused);
       }
     }
   }

@@ -9,7 +9,8 @@
  * arrays stay ordered by increasing id, so a seed fully determines the run.
  * Projectiles spread over enemies that projectiles already in flight will not kill, focus
  * elites and bosses that come close, and retarget when their target dies first
- * (src/sim/targeting.ts).
+ * (src/sim/targeting.ts). Target queries read a spatial grid rebuilt every tick
+ * (src/sim/grid.ts), with exactly the results of a linear scan.
  * Keystone and notable rules (config.rules) are compiled once per run (src/sim/rules.ts).
  */
 
@@ -20,6 +21,7 @@ import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
 import { compact } from './systems/death';
 import { attack } from './systems/emitters';
+import { rebuildGrid } from './systems/grid';
 import { moveEnemies } from './systems/movement';
 import { moveProjectiles } from './systems/projectiles';
 import { checkRunEnd, trackOverkill } from './systems/runEnd';
@@ -72,16 +74,17 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
    * 2. spawn: start the due wave (waveControl's wave start, waves.ts), then release queued
    *    enemies (spawn.ts), so a new wave's first enemy appears on its start tick.
    * 3. movement: every enemy walks towards the player (movement.ts).
-   * 4. contact: enemies that reached the player hit it and leak (contact.ts).
-   * 5. emitters: due attacks fire projectiles (emitters.ts).
-   * 6. projectiles: move, retarget, and hit on arrival (projectiles.ts). Hits and chains
+   * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
+   * 5. contact: enemies that reached the player hit it and leak (contact.ts).
+   * 6. emitters: due attacks fire projectiles (emitters.ts).
+   * 7. projectiles: move, retarget, and hit on arrival (projectiles.ts). Hits and chains
    *    (hits.ts) and kills with their spread, drops and splits (death.ts) resolve inline.
-   * 7. ailments: burn stacks expire; burn damage every BURN_TICK_INTERVAL (ailments.ts).
-   * 8. death: compact dead enemies and projectiles (death.ts).
-   * 9. waveControl: record cleared waves (waves.ts).
-   * 10. runEnd: overkill tracking, then the end checks (runEnd.ts).
+   * 8. ailments: burn stacks expire; burn damage every BURN_TICK_INTERVAL (ailments.ts).
+   * 9. death: compact dead enemies and projectiles (death.ts), after the last grid query.
+   * 10. waveControl: record cleared waves (waves.ts).
+   * 11. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
-   * Steps 5–7 run only while the player is alive.
+   * Steps 6–8 run only while the player is alive.
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -91,6 +94,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     startDueWave(ctx);
     releaseEnemies(ctx);
     moveEnemies(ctx);
+    rebuildGrid(ctx);
     resolveContacts(ctx);
     if (ctx.player.life > 0) {
       attack(ctx);

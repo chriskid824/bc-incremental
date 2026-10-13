@@ -89,21 +89,21 @@ export function addBurn(ctx: RunContext, enemy: Enemy, dps: Num, end: number): v
 
 /**
  * pandemic: copies the dying enemy's active stacks (same end, pandemicEffect × damage) onto
- * every alive enemy within the spread radius. Spread stacks spread again, weaker each time.
+ * every alive enemy within the spread radius, in id order. Spread stacks spread again, weaker
+ * each time.
  */
 export function spreadBurns(ctx: RunContext, source: Enemy): void {
   if (ctx.now >= source.burnNextEnd) expireBurns(ctx, source);
   const burns = source.burns;
   if (burns.length === 0) return;
-  const enemies = ctx.enemies;
   const fx = ctx.fx;
+  // In id order; addBurn kills nothing, so collecting the targets first changes nothing.
+  const targets = ctx.spreadTargets;
+  const count = ctx.grid.within(source.x, source.y, ctx.pandemicRadiusSq, targets);
   let spreadTo = 0;
-  for (let i = 0; i < enemies.length; i++) {
-    const enemy = enemies[i] as Enemy;
-    if (!enemy.alive || enemy === source) continue;
-    const dx = enemy.x - source.x;
-    const dy = enemy.y - source.y;
-    if (dx * dx + dy * dy > ctx.pandemicRadiusSq) continue;
+  for (let i = 0; i < count; i++) {
+    const enemy = targets[i] as Enemy;
+    if (enemy === source) continue;
     for (let s = 0; s < burns.length; s++) {
       const stack = burns[s] as BurnStack;
       addBurn(ctx, enemy, mul(stack.dps, fx.pandemicEffect), stack.end);

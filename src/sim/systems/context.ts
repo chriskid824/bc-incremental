@@ -12,9 +12,10 @@ import { createStreams } from '../../core/rng';
 import { DAMAGE_TAG_BIT } from '../../data/stats';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
+import type { SpatialGrid } from '../grid';
 import { compileRules } from '../rules';
 import type { RuleEffects } from '../rules';
-import { FOCUS_RANGE } from '../targeting';
+import { FOCUS_RANGE, isCovered } from '../targeting';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, MAX_RUN_SECONDS, TICK_RATE } from '../types';
 import type {
   EnemyState,
@@ -26,6 +27,7 @@ import type {
   SimState,
 } from '../types';
 import { doomed, UNCAPPED_BURN_STACKS } from './burn';
+import { createEnemyGrid } from './grid';
 
 const HIT = DAMAGE_TAG_BIT.hit;
 const CRIT = DAMAGE_TAG_BIT.crit;
@@ -139,6 +141,13 @@ export interface RunContext {
   readonly state: SimState;
   /** Events of the current tick; step() clears it at the start of each tick. */
   readonly events: SimEvent[];
+  /** The enemies sorted into cells, rebuilt every tick after movement (systems/grid.ts). */
+  readonly grid: SpatialGrid<Enemy>;
+  /**
+   * spreadBurns' scratch list for the targets of one spread; only spreadBurns may use it. A
+   * kill spreads burns, so a query whose targets can die needs a list of its own.
+   */
+  readonly spreadTargets: Enemy[];
 
   // ---- Waves ----
   /** Started waves that are not cleared yet, in wave order. */
@@ -175,11 +184,19 @@ export interface RunContext {
   killedBy: EnemyId | null;
   runResult: RunResult | null;
 
-  // ---- Target predicates for pickTarget (src/sim/targeting.ts), bound once per run ----
-  /** Burns already on the enemy will kill it: shots should go elsewhere. */
-  readonly doomed: (enemy: Enemy) => boolean;
-  /** Later projectiles of a volley spread over other enemies, except onto a focus target. */
-  readonly doomedOrInVolley: (enemy: Enemy) => boolean;
+  // ---- Target predicates for grid queries (src/sim/targeting.ts), bound once per run ----
+  /**
+   * Worth a projectile: not covered by the projectiles in flight, and the burns already on it
+   * will not kill it.
+   */
+  readonly shootable: (enemy: Enemy) => boolean;
+  /**
+   * shootable for later projectiles of a volley: they spread over other enemies than the
+   * volley's earlier ones, except onto a focus target.
+   */
+  readonly shootableInVolley: (enemy: Enemy) => boolean;
+  /** Not hit by the current attack yet, so a chain jump can reach it. */
+  readonly chainable: (enemy: Enemy) => boolean;
 }
 
 /** Whole part plus a chance for one more, e.g. 2.3 → 2 or 3 (30%). */
@@ -218,6 +235,8 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     values.damage *
     ((1 - averageCrit) * multAt(HIT) * plainHitMult +
       averageCrit * critMultiplier * multAt(HIT | CRIT) * critHitMult);
+
+  const projectileEstimate = mul(damage, multAt(HIT) * plainHitMult);
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
@@ -278,13 +297,15 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     shardGain: values.shardGain,
     coreGain: Math.max(0, values.coreGain),
     expectedHit,
-    projectileEstimate: mul(damage, multAt(HIT) * plainHitMult),
+    projectileEstimate,
 
     enemies,
     projectiles,
     player,
     state,
     events: [],
+    grid: createEnemyGrid(),
+    spreadTargets: [],
 
     open: [],
     current: null,
@@ -312,9 +333,11 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     killedBy: null,
     runResult: null,
 
-    doomed: (enemy) => doomed(ctx, enemy),
-    doomedOrInVolley: (enemy) =>
-      (enemy.volleyMark === ctx.volley && !focused(enemy)) || doomed(ctx, enemy),
+    shootable: (enemy) => !isCovered(enemy, projectileEstimate) && !doomed(ctx, enemy),
+    shootableInVolley: (enemy) =>
+      !isCovered(enemy, projectileEstimate) &&
+      !((enemy.volleyMark === ctx.volley && !focused(enemy)) || doomed(ctx, enemy)),
+    chainable: (enemy) => enemy.hitMark !== ctx.attackSerial,
   };
   return ctx;
 }

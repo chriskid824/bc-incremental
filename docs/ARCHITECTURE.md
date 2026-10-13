@@ -77,8 +77,8 @@ flowchart LR
 
 ### 4.3 狀態與系統
 
-- 不用 ECS 框架。實體是物件陣列＋物件池（避免 GC 抖動）。附近目標查詢目前是線性掃描；v3 改用均勻空間格（`docs/v3/implementation-plan-v3.md` §2.3）。
-- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變）：`input → spawn → movement → contact → emitters → projectiles（命中、連鎖、擊殺當下結算）→ ailments → death（壓縮陣列）→ waveControl → runEnd`。v3 的完整順序（空間格、無人機、線段、地面區域、效果佇列）見 `docs/v3/implementation-plan-v3.md` §2.15。
+- 不用 ECS 框架。實體是物件陣列＋物件池（避免 GC 抖動）。附近目標查詢走均勻空間格（`src/sim/grid.ts`，`docs/v3/implementation-plan-v3.md` §2.3）：格子 128，場地 15 × 9 格外多一圈，更遠的夾到最外圈；每 tick 敵人移動後重建（計數排序寫進 typed array，實際排序延到當 tick 第一次查詢，沒有查詢的 tick 不花成本；敵人少於 128 隻時不排序，查詢直接線性掃描，實測比較快）。投射物選目標、連鎖、瘟疫擴散都查格子，結果和原本的線性掃描完全一樣：同距離取陣列裡較前面（ID 較小）的；同一 tick 後來才加入的敵人（分裂子怪）每次查詢另外線性掃；死掉的留在格子裡、查詢時跳過。同一 tick 內被移動的敵人（例如之後的擊退）下一 tick 才更新所在的格子。
+- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變）：`input → spawn → movement → grid（重建空間格）→ contact → emitters → projectiles（命中、連鎖、擊殺當下結算）→ ailments → death（壓縮陣列）→ waveControl → runEnd`。v3 的完整順序（空間格、無人機、線段、地面區域、效果佇列）見 `docs/v3/implementation-plan-v3.md` §2.15。
 
 ### 4.4 屬性與修正
 
