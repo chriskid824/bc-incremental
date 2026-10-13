@@ -1,9 +1,11 @@
 /**
  * Enemy views: one pooled view per live enemy id, built once per enemy type. Geometry is drawn
- * in white and colored by tint, so hit flashes and burn flicker only change the tint.
+ * in white and colored by tint, so hit flashes and burn flicker only change the tint; a dark
+ * backing under the fill keeps each shape a readable silhouette over bright effects.
  * Burning enemies (docs/GDD.md §3.3) also get a flickering fire glow on a shared additive
- * particle layer under the crowd, and shed flames that rise and cool; both grow with the
- * stack count. Flame emission shares one budget per second across all burning enemies.
+ * particle layer under the crowd, and shed flames that rise and cool, also drawn under the
+ * crowd so the enemy's own outline and color stay on top; both grow with the stack count up to
+ * a low cap. Flame emission shares one budget per second across all burning enemies.
  */
 
 import { Container, Graphics, Particle, ParticleContainer, Sprite, Texture } from 'pixi.js';
@@ -27,12 +29,16 @@ const FLASH_MS = 100;
 export const HIT_PUNCH = 0.18;
 const HP_BAR_HEIGHT = 6;
 /** Burn visuals stop growing at this many stacks (eternalFlame has no stack cap). */
-const BURN_VISUAL_STACKS = 6;
+const BURN_VISUAL_STACKS = 4;
 /** Flames per second from one burning enemy, at 1 stack and per extra stack. */
-const FLAME_RATE = 18;
-const FLAME_RATE_PER_STACK = 5;
+const FLAME_RATE = 11;
+const FLAME_RATE_PER_STACK = 3;
 /** Flames per second across all burning enemies; above it each enemy emits proportionally less. */
-const FLAME_BUDGET = 1100;
+const FLAME_BUDGET = 650;
+/** How far a burning enemy's tint leans toward the fire color: base, at full heat, flicker. */
+const BURN_TINT = 0.06;
+const BURN_TINT_HEAT = 0.08;
+const BURN_TINT_FLICKER = 0.06;
 /** Glow texture diameter in pixels (src/render/fxTextures.ts). */
 const GLOW_SIZE = 64;
 /** Radians per second; small enemies spin faster. */
@@ -55,6 +61,9 @@ class EnemyView {
     const r = def.radius;
     const sides = SIDES[def.shape];
     const hull = new Graphics()
+      // Tinting leaves black black: a dark backing that keeps the shape solid over fire.
+      .regularPoly(0, 0, r, sides)
+      .fill({ color: 0x000000, alpha: 0.6 })
       .regularPoly(0, 0, r * 1.1, sides)
       .stroke({ width: 10, color: 0xffffff, alpha: 0.16 })
       .regularPoly(0, 0, r, sides)
@@ -185,21 +194,27 @@ export class EnemyLayer {
         const heat = Math.min(enemy.burnStacks, BURN_VISUAL_STACKS) / BURN_VISUAL_STACKS;
         const flicker = 0.5 + 0.5 * Math.sin(seconds * 23 + enemy.id * 1.7);
         const flutter = 0.5 + 0.5 * Math.sin(seconds * 37 + enemy.id * 0.9);
-        tint = mixColor(tint, COLORS.burn, 0.35 + 0.2 * heat + 0.15 * flicker);
+        // A warm cast only: the enemy keeps its own color and outline over its fire.
+        tint = mixColor(
+          tint,
+          COLORS.burn,
+          BURN_TINT + BURN_TINT_HEAT * heat + BURN_TINT_FLICKER * flicker,
+        );
 
         let glow = this.glows[glowCount];
         if (glow === undefined) {
           glow = new Particle({ texture: this.glowTexture, anchorX: 0.5, anchorY: 0.5 });
           this.glows.push(glow);
         }
-        const size = (view.def.radius * (5 + 2.5 * heat) * (0.9 + 0.15 * flutter)) / GLOW_SIZE;
+        const size = (view.def.radius * (3.4 + 1.6 * heat) * (0.9 + 0.15 * flutter)) / GLOW_SIZE;
         glow.x = x;
-        glow.y = y - view.def.radius * 0.25;
+        glow.y = y - view.def.radius * 0.35;
         glow.scaleX = size;
-        glow.scaleY = size * 1.15;
+        glow.scaleY = size * 1.2;
+        // Deep orange, never the hot yellow: the glow texture's core already peaks at full.
         glow.color = packColor(
-          mixColor(COLORS.burn, COLORS.burnHot, 0.3 * flicker),
-          (0.55 + 0.25 * heat) * (0.75 + 0.25 * flicker),
+          mixColor(COLORS.burnDeep, COLORS.burn, 0.45 + 0.35 * flicker),
+          (0.32 + 0.2 * heat) * (0.8 + 0.2 * flicker),
         );
         glowChildren[glowCount++] = glow;
 

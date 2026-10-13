@@ -3,10 +3,11 @@
  * never mutates them. The arena (ARENA_WIDTH × ARENA_HEIGHT) is scaled to fit the window with
  * letterboxing; every effect runs on its own timers driven by the frame time, not the sim.
  *
- * Feel (docs/GDD.md §1, §3): kills explode in the enemy's color, crits flare and pop big
- * numbers, burning enemies glow and shed flames, pandemic spreads as a fire nova, chains arc as
- * flickering lightning. Shake and hit-stop are budgeted so they punch instead of jitter, and
- * every effect pool is capped so a crowded screen sheds detail instead of frame rate.
+ * Feel (docs/GDD.md §1, §3): kills explode in the enemy's color, crits flare and pop numbers
+ * (a few big pops at a time), burning enemies glow and shed flames behind their outlines,
+ * pandemic spreads as a fire nova, chains arc as flickering lightning. Shake and hit-stop are
+ * budgeted so they punch instead of jitter, and every effect pool is capped so a crowded screen
+ * sheds detail instead of frame rate. docs/ARCHITECTURE.md §10 lists the layers and budgets.
  */
 
 import { Container, Graphics } from 'pixi.js';
@@ -71,6 +72,8 @@ export class Renderer {
   private readonly arcs = new ArcLayer();
   private readonly rings = new RingLayer();
   private readonly fx: FxParticles;
+  /** Flames of burning enemies, drawn under the crowd. */
+  private readonly flames: FxParticles;
   private readonly bursts: Bursts;
   private readonly player = new PlayerView();
   private readonly shards: ShardParticles;
@@ -102,7 +105,8 @@ export class Renderer {
     this.enemies = new EnemyLayer(data, textures.glow);
     this.projectiles = new ProjectileLayer(textures);
     this.fx = new FxParticles(textures);
-    this.bursts = new Bursts(this.fx, textures, this.rings);
+    this.flames = new FxParticles(textures);
+    this.bursts = new Bursts(this.fx, this.flames, textures, this.rings);
     this.shards = new ShardParticles(app.renderer);
     this.shake = new ScreenShake(options.reducedMotion);
     this.hitStop = options.hitStop ?? ((): void => undefined);
@@ -112,6 +116,7 @@ export class Renderer {
     this.world.addChild(
       backdrop,
       this.enemies.burnGlow,
+      this.flames.view,
       this.enemies.view,
       this.rings.view,
       this.player.view,
@@ -132,6 +137,7 @@ export class Renderer {
     this.arcs.clear();
     this.rings.clear();
     this.fx.clear();
+    this.flames.clear();
     this.shards.clear();
     this.numbers.clear();
     this.burnTally.clear();
@@ -193,6 +199,7 @@ export class Renderer {
     this.projectiles.update(state.projectiles, alpha);
     this.arcs.update(dt);
     this.rings.update(dt);
+    this.flames.update(dt);
     this.fx.update(dt);
     this.fx.drainFollowUps(this.flamePuff);
     this.player.update(state.player, dt);
