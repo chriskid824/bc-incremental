@@ -2,8 +2,8 @@
  * Composite effects built from FX particles and rings: kill explosions, hit sparks, crit
  * flares, chain sparks, flames and the pandemic fire nova. Sizes are in arena units; every
  * spawn goes through the capped pools, so these can be called for every event. Flames licking
- * off burning enemies go to a separate layer under the crowd, so each burning enemy's own
- * outline stays on top of its fire.
+ * off burning enemies and the puffs of landed embers go to a separate layer under the crowd,
+ * so each burning enemy's own outline stays on top of its fire.
  */
 
 import type { FxGroup, FxParticles } from './fx';
@@ -33,7 +33,7 @@ const FLAME_ROOT = mixColor(COLORS.burn, COLORS.burnHot, 0.35);
 const CRIT_FLARE_DECADES = 1.5;
 
 export class Bursts {
-  /** `fx` draws above the crowd; `under` (enemy flames only) draws below it. */
+  /** `fx` draws above the crowd; `under` (enemy flames and ember puffs) draws below it. */
   constructor(
     private readonly fx: FxParticles,
     private readonly under: FxParticles,
@@ -168,8 +168,11 @@ export class Bursts {
       const s = rand(44, 60) / FLAME_HEIGHT;
       p.scale0 = s;
       p.scale1 = s * 0.6;
-      p.color0 = COLORS.burnHot;
+      // The tongues all start on the same spot and add up: orange and part-transparent, so
+      // the nova's heart is hot but not a white disc over the enemies around it.
+      p.color0 = FLAME_ROOT;
       p.color1 = COLORS.burnDeep;
+      p.alpha0 = 0.65;
       p.fadeFrom = 0.5;
     }
   }
@@ -201,9 +204,9 @@ export class Bursts {
     halo.alpha0 = 0.8;
   }
 
-  /** An ember landed: a burst of flame. */
+  /** An ember landed: a burst of flame, under the crowd like the flames of burning enemies. */
   flamePuff(x: number, y: number): void {
-    this.glow(FX_FLASH, x, y, 70, COLORS.burnHot, COLORS.burn, 1, 190);
+    this.glow(FX_FLASH, x, y, 70, COLORS.burnHot, COLORS.burn, 0.75, 190, this.under);
     for (let i = 0; i < 4; i++) this.flame(x, y, 20, 1);
   }
 
@@ -216,8 +219,9 @@ export class Bursts {
     color1: number,
     alpha: number,
     lifeMs: number,
+    layer: FxParticles = this.fx,
   ): void {
-    const p = this.fx.spawn(group, this.tex.glow, x, y, lifeMs);
+    const p = layer.spawn(group, this.tex.glow, x, y, lifeMs);
     if (p === null) return;
     const s = diameter / GLOW_SIZE;
     p.scale0 = s * 0.7;
