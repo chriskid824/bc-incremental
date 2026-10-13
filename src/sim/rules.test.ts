@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { createRng, deriveSeed } from '../core/rng';
 import type { RuleSpec } from '../data/rules';
+import type { Modifier } from '../data/stats';
 import type { GameData, WaveTable } from '../data/types';
 import { compileRules, NO_RULES } from './rules';
 import { createSimulation, UNCAPPED_BURN_STACKS } from './simulation';
-import { makeConfig, makeStats, makeTestData, recordRun } from './testing';
+import { makeConfig, makeStats, makeTestData, recordRun, SEARING_CRITS_MODS } from './testing';
 import { NO_INPUT } from './types';
 import type { RunConfig, SimEvent } from './types';
 
@@ -40,17 +42,18 @@ describe('compileRules', () => {
     expect(compileRules([])).toEqual(NO_RULES);
   });
 
-  it('multiplies multipliers and adds chances', () => {
+  it('multiplies multipliers and adds penalties', () => {
     const rules: RuleSpec[] = [
       { id: 'glassCannon', damageMore: 1 },
       { id: 'glassCannon', damageMore: 0.5 },
-      { id: 'chainIgniteChance', chance: 0.25 },
-      { id: 'chainIgniteChance', chance: 0.1 },
+      { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.25 },
+      { id: 'overload', chainCountMultiplier: 1.5, retentionPenalty: 0.1 },
     ];
     const fx = compileRules(rules);
     expect(fx.allDamageMult).toBe(3);
     expect(fx.maxLife).toBe(1);
-    expect(fx.chainIgniteChance).toBeCloseTo(0.35, 12);
+    expect(fx.chainCountMult).toBe(3);
+    expect(fx.chainRetentionPenalty).toBeCloseTo(0.35, 12);
   });
 });
 
@@ -83,23 +86,6 @@ describe('keystones in the simulation', () => {
       expect(hit.crit).toBe(crit);
       expect(hit.amount).toBe(crit ? 10 * 2 * 1.5 : 10);
     });
-  });
-
-  it('critsAlwaysIgnite ignites every crit and halves non-crit hits', () => {
-    const rules: RuleSpec[] = [{ id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 }];
-    const crits = run(
-      { stats: makeStats({ damage: 10, critChance: 1, igniteChance: 0 }), rules },
-      dummyData(1),
-    );
-    const critHits = eventsOf(crits.ticks, 'hit');
-    expect(critHits.length).toBeGreaterThan(0);
-    expect(eventsOf(crits.ticks, 'ignite').length).toBe(critHits.length);
-    const plain = run(
-      { stats: makeStats({ damage: 10, critChance: 0, igniteChance: 0 }), rules },
-      dummyData(1),
-    );
-    expect(eventsOf(plain.ticks, 'hit').every((hit) => hit.amount === 5)).toBe(true);
-    expect(eventsOf(plain.ticks, 'ignite')).toHaveLength(0);
   });
 
   it('pandemic spreads the burns of a dying enemy to enemies in range', () => {
@@ -165,28 +151,81 @@ describe('keystones in the simulation', () => {
     const first = hits.find((hit) => hit.chainIndex === 1);
     expect(first?.amount).toBeCloseTo(5, 12);
   });
+});
 
-  it('chainCritChance adds crit chance per jump', () => {
-    const stats = makeStats({
-      damage: 10,
-      critChance: 0,
-      chainCount: 1,
-      chainRange: 5000,
-      attackSpeed: 10,
-    });
-    const { ticks } = run({ stats, rules: [{ id: 'chainCritChance', perJump: 1 }] }, dummyData(4));
+/** A flat `stat` modifier for the hits that carry `tag`. */
+const tagged = (stat: Modifier['stat'], tag: 'crit' | 'chain', value = 1): Modifier => ({
+  stat,
+  kind: 'flat',
+  value,
+  tags: [tag],
+});
+
+describe('bridge notables and Searing Crits as data', () => {
+  it('Searing Crits ignites every crit and halves non-crit hits', () => {
+    const crits = run(
+      { stats: makeStats({ damage: 10, critChance: 1, igniteChance: 0 }, SEARING_CRITS_MODS) },
+      dummyData(1),
+    );
+    const critHits = eventsOf(crits.ticks, 'hit');
+    expect(critHits.length).toBeGreaterThan(0);
+    expect(critHits.every((hit) => hit.crit && hit.amount === 15)).toBe(true);
+    expect(eventsOf(crits.ticks, 'ignite').length).toBe(critHits.length);
+    const plain = run(
+      { stats: makeStats({ damage: 10, critChance: 0, igniteChance: 0 }, SEARING_CRITS_MODS) },
+      dummyData(1),
+    );
+    expect(eventsOf(plain.ticks, 'hit').every((hit) => hit.amount === 5)).toBe(true);
+    expect(eventsOf(plain.ticks, 'ignite')).toHaveLength(0);
+  });
+
+  it('Searing Crits still draws the ignite roll of a crit', () => {
+    // Nothing dies, so each hit draws exactly its crit roll, then its ignite roll.
+    const stats = makeStats(
+      { damage: 10, critChance: 0.5, igniteChance: 0.3, attackSpeed: 6, projectileCount: 1 },
+      SEARING_CRITS_MODS,
+    );
+    const { ticks } = run({ seed: 5, stats }, dummyData(1));
+    const hits = eventsOf(ticks, 'hit');
+    expect(hits.length).toBeGreaterThan(30);
+    const combat = createRng(deriveSeed(5, 'combat'));
+    let ignites = 0;
+    for (const hit of hits) {
+      const crit = combat.chance(0.5);
+      const rolled = combat.chance(0.3);
+      expect(hit.crit).toBe(crit);
+      if (crit || rolled) ignites++;
+    }
+    expect(hits.some((hit) => hit.crit) && hits.some((hit) => !hit.crit)).toBe(true);
+    expect(eventsOf(ticks, 'ignite')).toHaveLength(ignites);
+  });
+
+  it('Static Focus adds crit chance per jump', () => {
+    const stats = makeStats(
+      { damage: 10, critChance: 0, chainCount: 1, chainRange: 5000, attackSpeed: 10 },
+      [{ stat: 'critChance', kind: 'flat', value: 1, scaling: { per: 'chainJump' } }],
+    );
+    const { ticks } = run({ stats }, dummyData(4));
     const hits = eventsOf(ticks, 'hit');
     expect(hits.length).toBeGreaterThan(10);
     for (const hit of hits) expect(hit.crit).toBe(hit.chainIndex > 0);
   });
 
-  it('chainIgniteChance and critIgniteChance add ignite chance to their hits only', () => {
+  it('steadyAim turns off the crit chance Static Focus adds', () => {
+    const stats = makeStats(
+      { damage: 10, critChance: 0, chainCount: 1, chainRange: 5000, attackSpeed: 10 },
+      [{ stat: 'critChance', kind: 'flat', value: 1, scaling: { per: 'chainJump' } }],
+    );
+    const rules: RuleSpec[] = [{ id: 'steadyAim', everyNth: 1000, critMultiplierMore: 0 }];
+    const hits = eventsOf(run({ stats, rules }, dummyData(4)).ticks, 'hit');
+    expect(hits.some((hit) => hit.chainIndex > 0)).toBe(true);
+    expect(hits.every((hit) => !hit.crit)).toBe(true);
+  });
+
+  it('Conduction and Flashpoint add ignite chance to their hits only', () => {
     const base = { damage: 10, chainCount: 1, chainRange: 5000, attackSpeed: 10, igniteChance: 0 };
     const chain = run(
-      {
-        stats: makeStats({ ...base, critChance: 0 }),
-        rules: [{ id: 'chainIgniteChance', chance: 1 }],
-      },
+      { stats: makeStats({ ...base, critChance: 0 }, [tagged('igniteChance', 'chain')]) },
       dummyData(4),
     );
     const chainHits = eventsOf(chain.ticks, 'hit').filter((hit) => hit.chainIndex > 0);
@@ -196,12 +235,46 @@ describe('keystones in the simulation', () => {
 
     const crit = run(
       {
-        stats: makeStats({ ...base, chainCount: 0, critChance: 1 }),
-        rules: [{ id: 'critIgniteChance', chance: 1 }],
+        stats: makeStats({ ...base, chainCount: 0, critChance: 1 }, [
+          tagged('igniteChance', 'crit'),
+        ]),
       },
       dummyData(4),
     );
     expect(eventsOf(crit.ticks, 'ignite').length).toBe(eventsOf(crit.ticks, 'hit').length);
+    const plain = run(
+      {
+        stats: makeStats({ ...base, chainCount: 0, critChance: 0 }, [
+          tagged('igniteChance', 'crit'),
+        ]),
+      },
+      dummyData(4),
+    );
+    expect(eventsOf(plain.ticks, 'ignite')).toHaveLength(0);
+  });
+
+  it('critAlways crits the hits with its tags and reads the crit multiplier of their row', () => {
+    const stats = makeStats(
+      {
+        damage: 10,
+        critChance: 0,
+        critMultiplier: 2,
+        chainCount: 1,
+        chainRange: 5000,
+        chainRetention: 1,
+        attackSpeed: 10,
+      },
+      [
+        tagged('critAlways', 'chain'),
+        { stat: 'critMultiplier', kind: 'more', value: 0.5, tags: ['chain'] },
+      ],
+    );
+    const hits = eventsOf(run({ stats }, dummyData(4)).ticks, 'hit');
+    expect(hits.some((hit) => hit.chainIndex > 0)).toBe(true);
+    for (const hit of hits) {
+      expect(hit.crit).toBe(hit.chainIndex > 0);
+      expect(hit.amount).toBe(hit.chainIndex > 0 ? 30 : 10);
+    }
   });
 });
 

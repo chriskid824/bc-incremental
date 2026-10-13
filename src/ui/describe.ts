@@ -4,7 +4,7 @@ import { formatNum } from '../core/format';
 import { num } from '../core/num';
 import type { RuleSpec } from '../data/rules';
 import type { Modifier, StatBlock, StatId } from '../data/stats';
-import { DAMAGE_TAG_BIT } from '../data/stats';
+import { DAMAGE_TAG_BIT, isBehaviourModifier } from '../data/stats';
 import type { DamageTag } from '../data/tags';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
@@ -55,8 +55,12 @@ function signed(text: string, value: number): string {
   return value >= 0 ? `+${text}` : `−${text.replace('-', '')}`;
 }
 
-/** One line per modifier, e.g. "+3% crit chance", "20% increased burn damage". */
-export function describeModifier(mod: Modifier): string {
+/**
+ * One line per modifier, e.g. "+3% crit chance", "20% increased burn damage"; null for a
+ * behaviour modifier (src/data/stats.ts), which its node's descKey text describes.
+ */
+export function describeModifier(mod: Modifier): string | null {
+  if (isBehaviourModifier(mod)) return null;
   const stat = statName(mod);
   if (mod.kind === 'flat') {
     const value = PERCENT_STATS.has(mod.stat)
@@ -81,14 +85,16 @@ const pct = (value: number): string => `${trim(value * 100)}%`;
  * simulation plays with once keystone rules apply (src/sim/systems/ and rules.ts): hit
  * damage is a non-crit primary hit, a crit hit is one primary crit, a burn stack is what a
  * non-crit hit ignites, the first chain jump is a non-crit jump, and steadyAim replaces the crit
- * chance with its every-Nth-shot rhythm. Each archetype's nodes move at least one line.
+ * chance with its every-Nth-shot rhythm. Damage reads each instance's damage row, so tagged
+ * modifiers (Searing Crits' non-crit half included) count. Each archetype's nodes move at least
+ * one line.
  */
 export function describeBuild(stats: StatBlock, rules: readonly RuleSpec[] = []): BuildLine[] {
   const { values } = stats;
   const multAt = (mask: number): number => damageRow(stats, mask);
   const { hit: HIT, crit: CRIT, burn: BURN, chain: CHAIN } = DAMAGE_TAG_BIT;
   const fx = compileRules(rules);
-  const plainHitMult = fx.hitMult * fx.nonCritHitMult * fx.allDamageMult;
+  const plainHitMult = fx.hitMult * fx.allDamageMult;
   const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
   const hit = values.damage * multAt(HIT) * plainHitMult;
   const critHit =

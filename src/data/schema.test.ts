@@ -25,15 +25,11 @@ function talentAt(data: Mutable<GameData>, id: string): [number, Mutable<TalentN
 }
 
 const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
-  critsAlwaysIgnite: { id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 },
   steadyAim: { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 },
   pandemic: { id: 'pandemic', spreadRadius: 150, spreadEffect: 0.5, hitMore: -0.3 },
   eternalFlame: { id: 'eternalFlame', durationMore: -0.5 },
   overload: { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.15 },
   glassCannon: { id: 'glassCannon', damageMore: 1 },
-  critIgniteChance: { id: 'critIgniteChance', chance: 0.3 },
-  chainIgniteChance: { id: 'chainIgniteChance', chance: 0.25 },
-  chainCritChance: { id: 'chainCritChance', perJump: 0.1 },
 };
 
 describe('ModifierSchema', () => {
@@ -49,22 +45,41 @@ describe('ModifierSchema', () => {
     { stat: 'damage', kind: 'increased', value: 0.2, scope: 'center', tags: ['hit'] },
     { stat: 'damage', kind: 'increased', value: 0.3, scope: 'outer.barrage' },
     { stat: 'damage', kind: 'more', value: 0.1, scope: 'outer' },
+    { stat: 'igniteChance', kind: 'flat', value: 0.3, tags: ['crit'] },
+    { stat: 'critChance', kind: 'increased', value: 0.5, notTags: ['chain'], scope: 'hub' },
+    { stat: 'critMultiplier', kind: 'more', value: 0.2, tags: ['chain'] },
+    { stat: 'igniteAlways', kind: 'flat', value: 1, tags: ['crit'] },
+    { stat: 'critAlways', kind: 'flat', value: 1, tags: ['chain'] },
+    { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
+    {
+      stat: 'damage',
+      kind: 'more',
+      value: 0.2,
+      tags: ['chain'],
+      scaling: { per: 'chainJump', every: 2, curve: 'log10', cap: 0.5 },
+    },
+    {
+      stat: 'damage',
+      kind: 'increased',
+      value: 0.1,
+      scaling: { per: 'chainJump', curve: 'pow', exponent: 1.5 },
+    },
   ])('accepts %o', (modifier) => {
     expect(ModifierSchema.parse(modifier)).toEqual(modifier);
   });
 
   it.each([
     [
-      'a tag on a non-damage stat',
-      { stat: 'critChance', kind: 'increased', value: 1, tags: ['crit'] },
+      'a tag on a stat that is not scoped',
+      { stat: 'attackSpeed', kind: 'increased', value: 1, tags: ['crit'] },
     ],
     ['a tag on a flat modifier', { stat: 'damage', kind: 'flat', value: 5, tags: ['burn'] }],
     ['empty tags', { stat: 'damage', kind: 'increased', value: 0.1, tags: [] }],
     ['duplicate tags', { stat: 'damage', kind: 'more', value: 0.1, tags: ['burn', 'burn'] }],
     ['an unknown tag', { stat: 'damage', kind: 'more', value: 0.1, tags: ['all'] }],
     [
-      'notTags on a non-damage stat',
-      { stat: 'critChance', kind: 'increased', value: 1, notTags: ['crit'] },
+      'notTags on a stat that is not scoped',
+      { stat: 'chainCount', kind: 'increased', value: 1, notTags: ['crit'] },
     ],
     ['notTags on a flat modifier', { stat: 'damage', kind: 'flat', value: 5, notTags: ['burn'] }],
     ['empty notTags', { stat: 'damage', kind: 'increased', value: 0.1, notTags: [] }],
@@ -73,7 +88,10 @@ describe('ModifierSchema', () => {
       'a tag in both tags and notTags',
       { stat: 'damage', kind: 'more', value: 0.1, tags: ['hit', 'crit'], notTags: ['crit'] },
     ],
-    ['a scope on a non-damage stat', { stat: 'critChance', kind: 'flat', value: 1, scope: 'hub' }],
+    [
+      'a scope on a stat that is not scoped',
+      { stat: 'burnDamage', kind: 'flat', value: 1, scope: 'hub' },
+    ],
     ['a scope on a flat modifier', { stat: 'damage', kind: 'flat', value: 5, scope: 'center' }],
     ['an unknown outer board', { stat: 'damage', kind: 'more', value: 1, scope: 'outer.water' }],
     ['a node id as scope', { stat: 'damage', kind: 'more', value: 1, scope: 'outer.fire.a.b' }],
@@ -82,6 +100,34 @@ describe('ModifierSchema', () => {
       { stat: 'damage', kind: 'more', value: 1, scope: 'fusion.fire' },
     ],
     ['a non-string scope', { stat: 'damage', kind: 'more', value: 1, scope: 0 }],
+    [
+      'a scaling on a stat that is not scoped',
+      { stat: 'chainCount', kind: 'flat', value: 1, scaling: { per: 'chainJump' } },
+    ],
+    [
+      'a scaling on a flat damage modifier',
+      { stat: 'damage', kind: 'flat', value: 1, scaling: { per: 'chainJump' } },
+    ],
+    [
+      'an unknown scaling variable',
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'minionCount' } },
+    ],
+    [
+      'an unknown scaling curve',
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump', curve: 'exp' } },
+    ],
+    [
+      'a pow curve without an exponent',
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump', curve: 'pow' } },
+    ],
+    [
+      'an exponent without the pow curve',
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump', exponent: 2 } },
+    ],
+    [
+      'an unknown scaling key',
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump', step: 2 } },
+    ],
     ['an unknown stat', { stat: 'armour', kind: 'flat', value: 1 }],
     ['an unknown kind', { stat: 'damage', kind: 'added', value: 1 }],
     ['an infinite value', { stat: 'damage', kind: 'flat', value: Infinity }],
@@ -91,7 +137,7 @@ describe('ModifierSchema', () => {
     expect(ModifierSchema.safeParse(modifier).success).toBe(false);
   });
 
-  it('reports tag and scope errors on their fields', () => {
+  it('reports tag, scope and scaling errors on their fields', () => {
     const result = ModifierSchema.safeParse({
       stat: 'chainCount',
       kind: 'more',
@@ -121,6 +167,20 @@ describe('ModifierSchema', () => {
       scope: 'x',
     });
     expect(unknown.error?.issues.map((issue) => issue.path)).toEqual([['scope']]);
+    const scaling = ModifierSchema.safeParse({
+      stat: 'maxLife',
+      kind: 'flat',
+      value: 1,
+      scaling: { per: 'chainJump' },
+    });
+    expect(scaling.error?.issues.map((issue) => issue.path)).toEqual([['scaling']]);
+    const pow = ModifierSchema.safeParse({
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      scaling: { per: 'chainJump', curve: 'pow' },
+    });
+    expect(pow.error?.issues.map((issue) => issue.path)).toEqual([['scaling', 'exponent']]);
   });
 });
 
@@ -132,7 +192,7 @@ describe('RuleSpecSchema', () => {
   });
 
   it.each([
-    ['an unknown rule id', { id: 'searingCrits', nonCritHitMore: -0.5 }],
+    ['a rule that became data', { id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 }],
     ['a missing parameter', { id: 'steadyAim', everyNth: 3 }],
     ['a parameter of another rule', { id: 'glassCannon', damageMore: 1, hitMore: 1 }],
     ['a non-numeric parameter', { id: 'eternalFlame', durationMore: '-0.5' }],
@@ -175,7 +235,7 @@ describe('parseGameData schema errors', () => {
     const data = content();
     const [i, node] = talentAt(data, 'keenEye');
     const m = node.modifiers.length;
-    node.modifiers.push({ stat: 'critChance', kind: 'more', value: 0.1, tags: ['crit'] });
+    node.modifiers.push({ stat: 'attackSpeed', kind: 'more', value: 0.1, tags: ['crit'] });
     expect(() => parseGameData(data)).toThrow(
       `talents.${i}.modifiers.${m}.tags: tags are only allowed on scoped stats, and not on flat damage`,
     );

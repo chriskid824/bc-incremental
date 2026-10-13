@@ -6,6 +6,7 @@
 import type { SourceSelector } from './sources';
 import { TAG } from './tags';
 import type { DamageTag } from './tags';
+import type { ScalingSpec } from './triggers';
 
 export const STAT_IDS = [
   /** Flat base damage per attack. Damage modifiers may carry tags; see src/data/tags.ts. */
@@ -40,6 +41,10 @@ export const STAT_IDS = [
   'shardGain',
   /** Multiplier on core drops. */
   'coreGain',
+  /** Above 0, a hit crits whatever its crit roll, which is drawn all the same. */
+  'critAlways',
+  /** Above 0, a hit ignites whatever its ignite roll, which is drawn all the same. */
+  'igniteAlways',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -63,6 +68,8 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   projectileSpeed: 1400,
   shardGain: 1,
   coreGain: 1,
+  critAlways: 0,
+  igniteAlways: 0,
 };
 
 /**
@@ -71,15 +78,25 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
 export const DAMAGE_TAG_BIT = TAG;
 
 /**
- * Stats whose modifiers may carry tags, notTags and a scope: their value depends on the damage
- * instance, so the simulation reads them from ModTable rows keyed by the instance's tags and
- * source (src/sim/build/modTable.ts). A row holds them in this order.
+ * Stats whose modifiers may carry tags, notTags, a scope and a scaling: their value depends on
+ * the damage instance, so the simulation reads them from ModTable rows keyed by the instance's
+ * tags and source (src/sim/build/modTable.ts). A row holds them in this order.
  */
-export const SCOPED_STATS = ['damage'] as const satisfies readonly StatId[];
+export const SCOPED_STATS = [
+  'damage',
+  'critChance',
+  'critMultiplier',
+  'igniteChance',
+  'critAlways',
+  'igniteAlways',
+] as const satisfies readonly StatId[];
 export type ScopedStat = (typeof SCOPED_STATS)[number];
 
 export const isScopedStat = (stat: StatId): stat is ScopedStat =>
   (SCOPED_STATS as readonly StatId[]).includes(stat);
+
+/** Stats that force a roll's outcome rather than change its chance. */
+export const ALWAYS_STATS = ['critAlways', 'igniteAlways'] as const satisfies readonly ScopedStat[];
 
 export type ModifierKind = 'flat' | 'increased' | 'more';
 
@@ -87,8 +104,8 @@ export type ModifierKind = 'flat' | 'increased' | 'more';
  * `flat` adds to the base, `increased` values add together, `more` values multiply:
  * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more).
  * `value` is a fraction for increased/more (0.2 = 20%).
- * Only modifiers of SCOPED_STATS may carry tags, notTags or a scope, and flat damage never does:
- * it stays in StatBlock.values.damage. An empty list counts as no list.
+ * Only modifiers of SCOPED_STATS may carry tags, notTags, a scope or a scaling, and flat damage
+ * never does: it stays in StatBlock.values.damage. An empty list counts as no list.
  */
 export interface Modifier {
   readonly stat: StatId;
@@ -100,6 +117,22 @@ export interface Modifier {
   readonly notTags?: readonly DamageTag[];
   /** Sources the damage instance must be credited to (src/data/sources.ts). */
   readonly scope?: SourceSelector;
+  /** The value counts per damage instance, scaled by one of its variables (src/data/triggers.ts). */
+  readonly scaling?: ScalingSpec;
+}
+
+/**
+ * A modifier that changes how hits play out rather than a number the player reads off the
+ * stat list: tags on a stat other than damage, notTags, a scaling, or an ALWAYS_STATS stat. The
+ * talent screen leaves it to its node's descKey text, which data validation requires.
+ */
+export function isBehaviourModifier(mod: Modifier): boolean {
+  return (
+    ((mod.tags?.length ?? 0) > 0 && mod.stat !== 'damage') ||
+    (mod.notTags?.length ?? 0) > 0 ||
+    mod.scaling !== undefined ||
+    (ALWAYS_STATS as readonly StatId[]).includes(mod.stat)
+  );
 }
 
 /**
@@ -118,14 +151,15 @@ export interface StatBlock {
   /** Every stat before modifiers: BASE_STATS, or a test's overridden values. */
   readonly base: Readonly<Record<StatId, number>>;
   /**
-   * Final value of every stat from its untagged, unscoped modifiers. For `damage` this is the
-   * untagged base (base + Σflat); damage increased/more modifiers count per damage instance.
+   * Final value of every stat from its untagged, unscoped modifiers without a scaling. For
+   * `damage` this is the untagged base (base + Σflat); damage increased/more modifiers count per
+   * damage instance.
    */
   readonly values: Readonly<Record<StatId, number>>;
   /**
    * Every modifier of a scoped stat, untagged ones included, in data order. The simulation folds
    * them per tag mask and source into ModTable rows: damage of an instance = values.damage × its
-   * damage row.
+   * damage row; another scoped stat of an instance is its row's value.
    */
   readonly scoped: readonly Modifier[];
   readonly triggers: StatExtras['triggers'];

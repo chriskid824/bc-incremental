@@ -139,6 +139,8 @@
   "stat.projectileSpeed": "Projectile speed",
   "stat.shardGain": "Shards gained",
   "stat.coreGain": "Cores gained",
+  "stat.critAlways": "Always crit",
+  "stat.igniteAlways": "Always ignite",
   "enemy.triangle.name": "Triangle",
   "enemy.triangle.plural": "Triangles",
   "enemy.square.name": "Square",

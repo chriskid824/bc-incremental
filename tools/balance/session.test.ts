@@ -112,12 +112,13 @@ describe('attackDamage and crowdDps', () => {
   });
 
   it('applies per-jump crit chance, and steady shots crit on every jump', () => {
-    const stats = makeStats({ igniteChance: 0, critChance: 0, critMultiplier: 2, chainCount: 1 });
+    const values = { igniteChance: 0, critChance: 0, critMultiplier: 2, chainCount: 1 } as const;
+    const stats = makeStats(values);
     const retention = stats.values.chainRetention;
-    expect(attackDamage(stats, [{ id: 'chainCritChance', perJump: 0.5 }])).toBeCloseTo(
-      10 * (1 + retention * (0.5 + 0.5 * 2)),
-      12,
-    );
+    const perJump = makeStats(values, [
+      { stat: 'critChance', kind: 'flat', value: 0.5, scaling: { per: 'chainJump' } },
+    ]);
+    expect(attackDamage(perJump)).toBeCloseTo(10 * (1 + retention * (0.5 + 0.5 * 2)), 12);
     expect(
       attackDamage(stats, [{ id: 'steadyAim', everyNth: 2, critMultiplierMore: 0 }]),
     ).toBeCloseTo(10 * (1 + retention) * (0.5 + 0.5 * 2), 12);

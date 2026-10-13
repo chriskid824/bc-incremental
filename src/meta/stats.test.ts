@@ -111,14 +111,33 @@ describe('computeStatBlock', () => {
     expect(rows(stats)).toEqual(ALL_MASKS.map(() => 2));
   });
 
-  it('throws on tags, notTags or a scope outside scoped stats and on flat damage', () => {
+  it('keeps chance modifiers in scoped and only the plain ones in values', () => {
+    const modifiers: Modifier[] = [
+      { stat: 'critChance', kind: 'flat', value: 0.1 },
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
+      { stat: 'igniteChance', kind: 'flat', value: 0.3, tags: ['crit'] },
+      { stat: 'attackSpeed', kind: 'flat', value: 1 },
+      { stat: 'igniteAlways', kind: 'flat', value: 1, tags: ['crit'] },
+      { stat: 'critMultiplier', kind: 'flat', value: 0.5 },
+    ];
+    const stats = block(modifiers);
+    expect(stats.values.critChance).toBe(BASE_STATS.critChance + 0.1);
+    expect(stats.values.igniteChance).toBe(BASE_STATS.igniteChance);
+    expect(stats.values.igniteAlways).toBe(0);
+    expect(stats.values.critMultiplier).toBe(BASE_STATS.critMultiplier + 0.5);
+    expect(stats.scoped).toEqual(modifiers.filter((mod) => mod.stat !== 'attackSpeed'));
+  });
+
+  it('throws on tags, notTags, a scope or a scaling outside scoped stats and on flat damage', () => {
     const rejected: Modifier[] = [
-      { stat: 'critChance', kind: 'increased', value: 1, tags: ['crit'] },
+      { stat: 'attackSpeed', kind: 'increased', value: 1, tags: ['crit'] },
       { stat: 'damage', kind: 'flat', value: 5, tags: ['burn'] },
-      { stat: 'critChance', kind: 'flat', value: 0.1, notTags: ['chain'] },
+      { stat: 'chainCount', kind: 'flat', value: 0.1, notTags: ['chain'] },
       { stat: 'damage', kind: 'flat', value: 5, notTags: ['burn'] },
-      { stat: 'critChance', kind: 'flat', value: 0.1, scope: 'outer.crit' },
+      { stat: 'burnDamage', kind: 'flat', value: 0.1, scope: 'outer.crit' },
       { stat: 'damage', kind: 'flat', value: 5, scope: 'center' },
+      { stat: 'chainCount', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
+      { stat: 'damage', kind: 'flat', value: 5, scaling: { per: 'chainJump' } },
     ];
     for (const mod of rejected) expect(() => block([mod]), JSON.stringify(mod)).toThrow(/Tags/);
   });

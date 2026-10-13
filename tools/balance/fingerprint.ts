@@ -27,12 +27,14 @@ import { collectRules, statBlockFor } from '../../src/meta';
 import { createSimulation, NO_INPUT } from '../../src/sim';
 import type { RunConfig, RunResult } from '../../src/sim';
 import {
+  BRIDGE_MODS,
   makeConfig,
   makeStats,
   makeTestData,
   maskProbeMods,
   projectEvent,
   projectResult,
+  SEARING_CRITS_MODS,
 } from '../../src/sim/testing';
 import { SECTORS, sectorBuild } from './builds';
 import { formatTable } from './report';
@@ -62,6 +64,11 @@ export interface RuleSet {
 }
 
 const rulesOnly = (...rules: RuleSpec[]): RuleSet => ({ rules, modifiers: [], triggers: [] });
+const modifiersOnly = (modifiers: readonly Modifier[]): RuleSet => ({
+  rules: [],
+  modifiers,
+  triggers: [],
+});
 const PANDEMIC: RuleSpec = { id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 };
 const ETERNAL: RuleSpec = { id: 'eternalFlame', durationMore: -0.5 };
 
@@ -73,12 +80,9 @@ export const RULE_SETS: Readonly<Record<string, RuleSet>> = {
   eternalPandemic: rulesOnly(ETERNAL, PANDEMIC),
   overload: rulesOnly({ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2 }),
   glass: rulesOnly({ id: 'glassCannon', damageMore: 1 }),
-  searing: rulesOnly({ id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 }),
-  bridges: rulesOnly(
-    { id: 'critIgniteChance', chance: 0.3 },
-    { id: 'chainIgniteChance', chance: 0.25 },
-    { id: 'chainCritChance', perJump: 0.1 },
-  ),
+  // Searing Crits and the bridge notables are data since C3.3 (src/data/talents.ts).
+  searing: modifiersOnly(SEARING_CRITS_MODS),
+  bridges: modifiersOnly(BRIDGE_MODS),
 };
 
 const SYNTHETIC_SEEDS = [1, 2, 3] as const;

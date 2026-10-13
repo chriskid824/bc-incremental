@@ -16,7 +16,14 @@ import {
   statBlockFor,
 } from '../../src/meta';
 import type { EconomyConfig, MetaState } from '../../src/meta';
-import { compileRules, createSimulation, damageRow, NO_INPUT, TICK_RATE } from '../../src/sim';
+import {
+  compileRules,
+  createSimulation,
+  NO_INPUT,
+  SCOPED_INDEX,
+  scopedStat,
+  TICK_RATE,
+} from '../../src/sim';
 import type { EndReason, RuleEffects, RunConfig, SimEvent, SimState } from '../../src/sim';
 import { spend } from './strategies';
 import type { StrategyId } from './strategies';
@@ -88,31 +95,44 @@ const CRIT = DAMAGE_TAG_BIT.crit;
 const BURN = DAMAGE_TAG_BIT.burn;
 const CHAIN = DAMAGE_TAG_BIT.chain;
 
+const DAMAGE = SCOPED_INDEX.damage;
+const CRIT_CHANCE = SCOPED_INDEX.critChance;
+const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
+const IGNITE_CHANCE = SCOPED_INDEX.igniteChance;
+const CRIT_ALWAYS = SCOPED_INDEX.critAlways;
+const IGNITE_ALWAYS = SCOPED_INDEX.igniteAlways;
+
 /**
  * Expected damage, per point of base damage before retention, of one hit `jump` chain jumps
  * after the primary target (0 = the primary): the hit with its crit expectation plus the
- * burn it is expected to cause. Mirrors the simulation: crits use the hit|crit damage row, jumps
- * add the chain tag to the hit (not to its burn), a crit's burn is computed from the crit hit
- * with the burn|crit row, a steady shot crits on every jump, and rules apply as compiled by
- * src/sim/rules.ts.
+ * burn it is expected to cause. Mirrors the simulation (src/sim/systems/hits.ts): the crit
+ * chance comes from the hit's row, everything else from the row of its outcome (hit|crit for
+ * crits), jumps add the chain tag to the hit (not to its burn), a crit's burn is computed from
+ * the crit hit with the burn|crit row, a steady shot crits on every jump, *Always stats make
+ * their chance 1, and rules apply as compiled by src/sim/rules.ts.
  */
 function hitValue(stats: StatBlock, fx: RuleEffects, jump: number): number {
   const { values } = stats;
-  const mult = (mask: number): number => damageRow(stats, mask);
   const chain = jump > 0 ? CHAIN : 0;
+  // Burns are no chain instances: their rows read at jump 0, as in the simulation.
+  const at = (mask: number, stat: number): number =>
+    scopedStat(stats, mask, stat, (mask & BURN) === 0 ? jump : 0);
+  const mult = (mask: number): number => at(mask, DAMAGE);
+  /** A roll's chance, or 1 when its *Always stat forces it. */
+  const chance = (mask: number, stat: number, always: number): number =>
+    at(mask, always) > 0 ? 1 : clamp01(at(mask, stat));
   const critChance =
-    fx.steadyAimEvery > 0
-      ? 1 / fx.steadyAimEvery
-      : clamp01(values.critChance + fx.chainCritPerJump * jump);
-  const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
+    at(HIT | chain, CRIT_ALWAYS) > 0
+      ? 1
+      : fx.steadyAimEvery > 0
+        ? 1 / fx.steadyAimEvery
+        : clamp01(at(HIT | chain, CRIT_CHANCE));
+  const critMultiplier = at(HIT | CRIT | chain, CRIT_MULTIPLIER) * fx.critMultiplierMult;
   const critFactor = critChance * critMultiplier;
   const hit =
-    fx.hitMult *
-    ((1 - critChance) * mult(HIT | chain) * fx.nonCritHitMult +
-      critFactor * mult(HIT | CRIT | chain));
-  const igniteBase = values.igniteChance + (jump > 0 ? fx.chainIgniteChance : 0);
-  const ignite = clamp01(igniteBase);
-  const critIgnite = fx.critsAlwaysIgnite ? 1 : clamp01(igniteBase + fx.critIgniteChance);
+    fx.hitMult * ((1 - critChance) * mult(HIT | chain) + critFactor * mult(HIT | CRIT | chain));
+  const ignite = chance(HIT | chain, IGNITE_CHANCE, IGNITE_ALWAYS);
+  const critIgnite = chance(HIT | CRIT | chain, IGNITE_CHANCE, IGNITE_ALWAYS);
   const burnPerDamage =
     (1 - critChance) * ignite * mult(BURN) + critFactor * critIgnite * mult(BURN | CRIT);
   const burn =

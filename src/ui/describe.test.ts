@@ -3,7 +3,7 @@ import type { RuleSpec } from '../data/rules';
 import { BASE_STATS } from '../data/stats';
 import { DAMAGE_TAGS } from '../data/tags';
 import { setLocale, t } from '../i18n';
-import { makeStats } from '../sim/testing';
+import { makeStats, SEARING_CRITS_MODS } from '../sim/testing';
 import { describeBuild, describeModifier } from './describe';
 
 /** describeBuild as a label → value record. */
@@ -85,8 +85,10 @@ describe('describeBuild', () => {
   });
 
   it('shows the non-crit hit under searingCrits', () => {
-    const lines = build([{ id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 }]);
+    const lines = build([], makeStats({}, SEARING_CRITS_MODS));
     expect(lines[t('stat.damage.hit')]).toBe('5');
+    expect(lines[t('build.critHit')]).toBe('15');
+    expect(lines[t('build.chainJump')]).toBe('3.5');
   });
 });
 
@@ -106,15 +108,44 @@ describe('describeModifier', () => {
   it('names the damage of every tag, each differently, in both locales', () => {
     const poison = { stat: 'damage', kind: 'more', value: 0.3, tags: ['poison'] } as const;
     expect(describeModifier(poison)).toBe('30% more Poison damage');
-    const texts = (): Set<string> =>
+    const texts = (): Set<string | null> =>
       new Set(
         DAMAGE_TAGS.map((tag) =>
           describeModifier({ stat: 'damage', kind: 'increased', value: 0.1, tags: [tag] }),
         ),
       );
     expect(texts().size).toBe(DAMAGE_TAGS.length);
+    expect(texts()).not.toContain(null);
     setLocale('zh-TW');
     expect(describeModifier(poison)).toBe('毒傷害總增 30%');
     expect(texts().size).toBe(DAMAGE_TAGS.length);
+  });
+
+  it('leaves behaviour modifiers to the node text', () => {
+    expect(
+      describeModifier({ stat: 'igniteChance', kind: 'flat', value: 0.3, tags: ['crit'] }),
+    ).toBeNull();
+    expect(
+      describeModifier({
+        stat: 'damage',
+        kind: 'more',
+        value: -0.5,
+        tags: ['hit'],
+        notTags: ['crit'],
+      }),
+    ).toBeNull();
+    expect(
+      describeModifier({
+        stat: 'critChance',
+        kind: 'flat',
+        value: 0.1,
+        scaling: { per: 'chainJump' },
+      }),
+    ).toBeNull();
+    expect(describeModifier({ stat: 'igniteAlways', kind: 'flat', value: 1 })).toBeNull();
+    // Untagged chances and tagged damage stay plain lines.
+    expect(describeModifier({ stat: 'igniteChance', kind: 'flat', value: 0.1 })).toBe(
+      '+10% Ignite chance',
+    );
   });
 });

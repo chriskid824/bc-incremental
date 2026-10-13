@@ -161,7 +161,7 @@ describe('validateGameData: talents', () => {
       issuesAfter((d) => talent(d, 'vitality').rules.push({ id: 'glassCannon', damageMore: 1 })),
     ).toEqual([
       "talent 'vitality': only keystones and notables may have rules",
-      "talent 'vitality': a node with rules needs a descKey",
+      "talent 'vitality': a node with rules or behaviour modifiers needs a descKey",
     ]);
     expect(
       issuesAfter((d) => {
@@ -169,7 +169,22 @@ describe('validateGameData: talents', () => {
         node.rules = [];
         delete node.descKey;
       }),
-    ).toEqual(["talent 'glassCannon': keystone needs at least one rule"]);
+    ).toEqual(["talent 'glassCannon': keystone needs a rule or a behaviour modifier"]);
+  });
+
+  it('accepts a keystone whose behaviour is all modifiers (Searing Crits)', () => {
+    const searing = talent(content(), 'searingCrits');
+    expect(searing.kind).toBe('keystone');
+    expect(searing.rules).toEqual([]);
+    expect(
+      issuesAfter((d) => {
+        // Plain modifiers alone do not make a keystone.
+        talent(d, 'searingCrits').modifiers = [{ stat: 'damage', kind: 'more', value: -0.5 }];
+      }),
+    ).toEqual([
+      "talent 'searingCrits': keystone needs a rule or a behaviour modifier",
+      "talent 'searingCrits': descKey describes rules and behaviour modifiers; this node has neither",
+    ]);
   });
 
   it(`rejects more than ${MAX_KEYSTONES} keystones`, () => {
@@ -201,14 +216,57 @@ describe('validateGameData: talents', () => {
     ]);
   });
 
-  it('requires a descKey exactly on nodes with rules', () => {
+  it('requires a descKey exactly on nodes with rules or behaviour modifiers', () => {
     const issues = issuesAfter((d) => {
       delete talent(d, 'glassCannon').descKey;
+      delete talent(d, 'staticFocus').descKey;
       talent(d, 'vitality').descKey = 'talent.vitality.desc';
+      talent(d, 'keenEye').modifiers.push({
+        stat: 'igniteChance',
+        kind: 'flat',
+        value: 0.1,
+        tags: ['crit'],
+      });
+      talent(d, 'precision').modifiers.push({ stat: 'critAlways', kind: 'flat', value: 1 });
+      talent(d, 'kindling').modifiers.push({
+        stat: 'damage',
+        kind: 'more',
+        value: 0.1,
+        notTags: ['crit'],
+      });
+      // Tags on damage only change a number the talent screen can show.
+      talent(d, 'spark').modifiers.push({
+        stat: 'damage',
+        kind: 'more',
+        value: 0.1,
+        tags: ['chain'],
+      });
     });
     expect(issues).toEqual([
-      "talent 'glassCannon': a node with rules needs a descKey",
-      "talent 'vitality': descKey describes rules; this node has none",
+      "talent 'glassCannon': a node with rules or behaviour modifiers needs a descKey",
+      "talent 'vitality': descKey describes rules and behaviour modifiers; this node has neither",
+      "talent 'keenEye': a node with rules or behaviour modifiers needs a descKey",
+      "talent 'precision': a node with rules or behaviour modifiers needs a descKey",
+      "talent 'kindling': a node with rules or behaviour modifiers needs a descKey",
+      "talent 'staticFocus': a node with rules or behaviour modifiers needs a descKey",
+    ]);
+  });
+
+  it('rejects scaling parameters out of range', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'staticFocus').modifiers.push(
+        { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump', every: 0 } },
+        {
+          stat: 'damage',
+          kind: 'more',
+          value: 0.1,
+          scaling: { per: 'chainJump', curve: 'pow', exponent: -1 },
+        },
+      );
+    });
+    expect(issues).toEqual([
+      "talent 'staticFocus': modifiers[3] scaling.every must be > 0 (got 0)",
+      "talent 'staticFocus': modifiers[4] scaling.exponent must be > 0 (got -1)",
     ]);
   });
 

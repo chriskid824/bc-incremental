@@ -1,15 +1,11 @@
 /**
- * Compiles keystone and notable rules (src/data/rules.ts) into the numbers the simulation
- * reads each hit. Multipliers from several rules multiply; chances add.
+ * Compiles keystone rules (src/data/rules.ts) into the numbers the simulation reads each hit.
+ * Multipliers from several rules multiply; penalties add.
  */
 
 import type { RuleSpec } from '../data/rules';
 
 export interface RuleEffects {
-  /** Crits always ignite (critsAlwaysIgnite). */
-  readonly critsAlwaysIgnite: boolean;
-  /** Multiplier on non-crit hit damage. */
-  readonly nonCritHitMult: number;
   /** Every Nth shot crits and random crits are off; 0 when steadyAim is not taken. */
   readonly steadyAimEvery: number;
   /** Extra multiplier on the crit multiplier. */
@@ -30,14 +26,9 @@ export interface RuleEffects {
   readonly allDamageMult: number;
   /** Max life override (glassCannon), or null. */
   readonly maxLife: number | null;
-  readonly critIgniteChance: number;
-  readonly chainIgniteChance: number;
-  readonly chainCritPerJump: number;
 }
 
 export const NO_RULES: RuleEffects = {
-  critsAlwaysIgnite: false,
-  nonCritHitMult: 1,
   steadyAimEvery: 0,
   critMultiplierMult: 1,
   pandemicRadius: 0,
@@ -49,19 +40,12 @@ export const NO_RULES: RuleEffects = {
   chainRetentionPenalty: 0,
   allDamageMult: 1,
   maxLife: null,
-  critIgniteChance: 0,
-  chainIgniteChance: 0,
-  chainCritPerJump: 0,
 };
 
 export function compileRules(rules: readonly RuleSpec[]): RuleEffects {
   const fx = { ...NO_RULES } as { -readonly [K in keyof RuleEffects]: RuleEffects[K] };
   for (const rule of rules) {
     switch (rule.id) {
-      case 'critsAlwaysIgnite':
-        fx.critsAlwaysIgnite = true;
-        fx.nonCritHitMult *= 1 + rule.nonCritHitMore;
-        break;
       case 'steadyAim':
         fx.steadyAimEvery =
           fx.steadyAimEvery === 0 ? rule.everyNth : Math.min(fx.steadyAimEvery, rule.everyNth);
@@ -83,15 +67,6 @@ export function compileRules(rules: readonly RuleSpec[]): RuleEffects {
       case 'glassCannon':
         fx.allDamageMult *= 1 + rule.damageMore;
         fx.maxLife = 1;
-        break;
-      case 'critIgniteChance':
-        fx.critIgniteChance += rule.chance;
-        break;
-      case 'chainIgniteChance':
-        fx.chainIgniteChance += rule.chance;
-        break;
-      case 'chainCritChance':
-        fx.chainCritPerJump += rule.perJump;
         break;
     }
   }

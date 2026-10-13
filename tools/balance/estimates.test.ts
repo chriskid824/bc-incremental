@@ -2,8 +2,9 @@
  * Snapshot of the build estimators behind probe T6 (effectiveHit, attackDamage, crowdDps and
  * buildMultipliers in tools/balance/session.ts) and of the talent screen's build summary
  * (src/ui/describe.ts) for six fixed builds of the real talent web, which between them carry
- * every M1 rule on a talent node. A refactor of how stats, tags and rules compile must keep the
- * numbers within 1e-12 (exactly, in practice) and the summary text unchanged.
+ * every M1 rule on a talent node (Searing Crits and the bridge notables as modifiers since C3.3).
+ * A refactor of how stats, tags and rules compile must keep the numbers within 1e-12 (exactly,
+ * in practice) and the summary text unchanged.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -168,7 +169,8 @@ const EXPECTED: Readonly<Record<string, Expected>> = {
     ],
   },
   'dot+bridges': {
-    rules: ['critIgniteChance', 'critsAlwaysIgnite', 'chainIgniteChance'],
+    // Searing Crits and the bridge notables are behaviour modifiers since C3.3.
+    rules: [],
     effectiveHit: 1623.8871583541022,
     attackDamage: 1964.9034616084634,
     crowdDps: 39298.06923216927,
@@ -195,7 +197,7 @@ const EXPECTED: Readonly<Record<string, Expected>> = {
     ],
   },
   'chain+staticFocus': {
-    rules: ['chainCritChance'],
+    rules: [],
     effectiveHit: 228.64455021493063,
     attackDamage: 1102.0276327106412,
     crowdDps: 14105.953698696208,

@@ -2,7 +2,10 @@
  * Hits (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2–3): a shared function, not a
  * phase. A projectile that arrives resolves its attack at once: the primary hit, then
  * instant chain jumps; each hit rolls crit and ignite, deals damage, and kills or ignites.
- * Every damage instance, hits and burn ticks alike, goes into the run's tallies through tally.
+ * Chances, the crit multiplier and the damage multiplier are the scoped stats of the hit's own
+ * ModTable row (its tags and source), so tagged and scaling modifiers such as the bridge
+ * notables' apply per hit. Every damage instance, hits and burn ticks alike, goes into the run's
+ * tallies through tally.
  */
 
 import type { Num } from '../../core/num';
@@ -10,6 +13,8 @@ import { add, assertFinite, gt, lte, mul, sub, ZERO } from '../../core/num';
 import { DAMAGE_TAG_BIT } from '../../data/stats';
 import { DOT_MASK } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
+import { statAt } from '../build/eval';
+import { SCOPED_INDEX } from '../build/modTable';
 import { rowKey } from '../build/sources';
 import { addBurn } from './burn';
 import { ATTACK_SOURCE, clamp01, rollCount } from './context';
@@ -21,6 +26,13 @@ const CRIT = DAMAGE_TAG_BIT.crit;
 const BURN = DAMAGE_TAG_BIT.burn;
 const CHAIN = DAMAGE_TAG_BIT.chain;
 const POISON = DAMAGE_TAG_BIT.poison;
+
+const DAMAGE = SCOPED_INDEX.damage;
+const CRIT_CHANCE = SCOPED_INDEX.critChance;
+const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
+const IGNITE_CHANCE = SCOPED_INDEX.igniteChance;
+const CRIT_ALWAYS = SCOPED_INDEX.critAlways;
+const IGNITE_ALWAYS = SCOPED_INDEX.igniteAlways;
 
 /**
  * Adds a damage instance with these tags, credited to `source`, to the run's tallies: the
@@ -84,6 +96,15 @@ export function resolveAttack(ctx: RunContext, primary: Enemy, steady: boolean):
   }
 }
 
+/** The attack's ModTable row for hits with these tags, cached in `slot` of ctx.hitRows. */
+function hitRow(ctx: RunContext, slot: number, mask: TagMask): number {
+  const cached = ctx.hitRows[slot] as number;
+  if (cached >= 0) return cached;
+  const row = ctx.table.row(rowKey(mask, ATTACK_SOURCE));
+  ctx.hitRows[slot] = row;
+  return row;
+}
+
 function hitEnemy(
   ctx: RunContext,
   enemy: Enemy,
@@ -94,21 +115,28 @@ function hitEnemy(
   steady: boolean,
 ): void {
   const fx = ctx.fx;
-  // steadyAim sets critChance to 0 and also turns off chainCritChance's random crits.
+  const table = ctx.table;
+  // The crit roll reads the hit's row without the crit tag, the rest the row of its outcome.
+  const plain = chainIndex > 0 ? HIT | CHAIN : HIT;
+  const slot = chainIndex > 0 ? 2 : 0;
+  const plainRow = hitRow(ctx, slot, plain);
+  // steadyAim turns random crits off, Static Focus's per-jump chance included.
   const chance =
-    fx.steadyAimEvery > 0 ? 0 : clamp01(ctx.critChance + fx.chainCritPerJump * chainIndex);
-  const crit = ctx.combatRng.chance(chance) || steady;
-  let ignite = ctx.igniteChance;
-  if (crit) ignite += fx.critIgniteChance;
-  if (chainIndex > 0) ignite += fx.chainIgniteChance;
-  const ignites = ctx.combatRng.chance(clamp01(ignite)) || (crit && fx.critsAlwaysIgnite);
-  const baseHit = mul(ctx.damage, (crit ? ctx.critMultiplier : 1) * retention);
-  const mask = HIT | (crit ? CRIT : 0) | (chainIndex > 0 ? CHAIN : 0);
+    fx.steadyAimEvery > 0 ? 0 : clamp01(statAt(table, plainRow, CRIT_CHANCE, chainIndex));
+  const crit =
+    ctx.combatRng.chance(chance) || steady || statAt(table, plainRow, CRIT_ALWAYS, chainIndex) > 0;
+  const mask = crit ? plain | CRIT : plain;
+  const row = crit ? hitRow(ctx, slot + 1, mask) : plainRow;
+  // An *Always stat forces the outcome after the roll is drawn (Searing Crits on crits).
+  const ignites =
+    ctx.combatRng.chance(clamp01(statAt(table, row, IGNITE_CHANCE, chainIndex))) ||
+    statAt(table, row, IGNITE_ALWAYS, chainIndex) > 0;
+  const critMultiplier = crit
+    ? statAt(table, row, CRIT_MULTIPLIER, chainIndex) * fx.critMultiplierMult
+    : 1;
+  const baseHit = mul(ctx.damage, critMultiplier * retention);
   const amount = assertFinite(
-    mul(
-      baseHit,
-      ctx.table.damage(rowKey(mask, ATTACK_SOURCE)) * (crit ? ctx.critHitMult : ctx.plainHitMult),
-    ),
+    mul(baseHit, statAt(table, row, DAMAGE, chainIndex) * ctx.hitMult),
     'hit damage',
   );
   enemy.hp = sub(enemy.hp, amount);

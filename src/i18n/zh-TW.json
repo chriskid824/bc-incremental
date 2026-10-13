@@ -139,6 +139,8 @@
   "stat.projectileSpeed": "投射物速度",
   "stat.shardGain": "碎片獲得量",
   "stat.coreGain": "核心獲得量",
+  "stat.critAlways": "必定暴擊",
+  "stat.igniteAlways": "必定點燃",
   "enemy.triangle.name": "三角",
   "enemy.triangle.plural": "三角",
   "enemy.square.name": "方塊",

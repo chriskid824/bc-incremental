@@ -3,21 +3,38 @@ import { createRng } from '../../core/rng';
 import type { Rng } from '../../core/rng';
 import { loadGameData } from '../../data';
 import type { SourceSelector } from '../../data/sources';
-import { BASE_STATS, NO_EXTRAS, SCOPED_STATS, STAT_IDS } from '../../data/stats';
-import type { Modifier, ModifierKind, StatId } from '../../data/stats';
+import {
+  BASE_STATS,
+  isBehaviourModifier,
+  isScopedStat,
+  NO_EXTRAS,
+  SCOPED_STATS,
+  STAT_IDS,
+} from '../../data/stats';
+import type { Modifier, ModifierKind, ScopedStat, StatId } from '../../data/stats';
 import { DAMAGE_TAGS, TAG, tagMask } from '../../data/tags';
 import type { DamageTag } from '../../data/tags';
 import { computeStatBlock } from '../../meta/stats';
-import { makeStats } from '../testing';
-import { compileMods, damageRow, ModTable, modTableFor } from './modTable';
+import { BRIDGE_MODS, makeStats, maskProbeMods, SEARING_CRITS_MODS } from '../testing';
+import { statAt } from './eval';
+import { compileMods, damageRow, ModTable, modTableFor, SCOPED_INDEX } from './modTable';
 import { createSourceTable, rowKey, SOURCE_SHIFT } from './sources';
 import type { SourceTable } from './sources';
 
 const S = SCOPED_STATS.length;
-const DAMAGE = SCOPED_STATS.indexOf('damage');
+const DAMAGE = SCOPED_INDEX.damage;
 const M1_TAGS = ['hit', 'crit', 'burn', 'chain'] as const satisfies readonly DamageTag[];
 const M1_MASKS = Array.from({ length: 16 }, (_, mask) => mask);
 const KINDS: readonly ModifierKind[] = ['flat', 'increased', 'more'];
+/** Stats M1 had: the *Always stats came with C3.3. */
+const M1_STAT_IDS = STAT_IDS.filter((stat) => stat !== 'critAlways' && stat !== 'igniteAlways');
+
+/** Row base values: `damage` for damage, StatBlock.base for the other scoped stats. */
+function baseRow(damage: number): Float64Array {
+  const base = Float64Array.from(SCOPED_STATS, (stat) => BASE_STATS[stat]);
+  base[DAMAGE] = damage;
+  return base;
+}
 
 /**
  * M1's computeStatBlock (src/meta/stats.ts before C3), kept as the reference the damage rows
@@ -65,15 +82,27 @@ function m1ComputeStatBlock(modifiers: readonly Modifier[]): {
   return { values, damageMult };
 }
 
-/** computeStatBlock and its damage rows equal M1's values and damageMult exactly. */
+/**
+ * computeStatBlock and its damage rows equal M1's values and damageMult exactly. Behaviour
+ * modifiers were rules in M1 (Searing Crits, the bridge notables): M1's values and damageMult
+ * never saw them, and the only one on damage, Searing Crits' −50% on non-crit hits, was a
+ * separate factor that the row now holds; ×0.5 is exact, so the row is damageMult × 0.5.
+ */
 function expectM1(modifiers: readonly Modifier[], label: string): void {
-  const m1 = m1ComputeStatBlock(modifiers);
+  const m1 = m1ComputeStatBlock(modifiers.filter((mod) => !isBehaviourModifier(mod)));
   const stats = computeStatBlock(modifiers, NO_EXTRAS);
   for (const stat of STAT_IDS) expect(stats.values[stat], `${label} ${stat}`).toBe(m1.values[stat]);
   const table = modTableFor(stats);
+  const ruleFactor = (mask: number): number =>
+    modifiers
+      .filter((mod) => mod.stat === 'damage' && isBehaviourModifier(mod))
+      .filter((mod) => (tagMask(mod.tags ?? []) & ~mask) === 0)
+      .filter((mod) => (tagMask(mod.notTags ?? []) & mask) === 0)
+      .reduce((product, mod) => product * (1 + mod.value), 1);
   for (const mask of M1_MASKS) {
-    expect(damageRow(stats, mask), `${label} mask ${mask}`).toBe(m1.damageMult[mask]);
-    expect(table.damage(mask), `${label} mask ${mask}`).toBe(m1.damageMult[mask]);
+    const expected = (m1.damageMult[mask] as number) * ruleFactor(mask);
+    expect(damageRow(stats, mask), `${label} mask ${mask}`).toBe(expected);
+    expect(table.damage(mask), `${label} mask ${mask}`).toBe(expected);
   }
   // The untagged base of a row is values.damage (base + Σflat), bit for bit.
   expect(table.flatV[table.row(0) * S + DAMAGE], label).toBe(stats.values.damage);
@@ -92,7 +121,7 @@ function randomValue(rng: Rng): number {
 
 /** A modifier M1 accepts: tags (M1's four) only on increased/more damage. */
 function randomM1Modifier(rng: Rng): Modifier {
-  const stat = rng.chance(0.6) ? 'damage' : rng.pick(STAT_IDS);
+  const stat = rng.chance(0.6) ? 'damage' : rng.pick(M1_STAT_IDS);
   const kind = rng.pick(KINDS);
   const value = randomValue(rng);
   if (stat !== 'damage' || kind === 'flat') return { stat, kind, value };
@@ -137,12 +166,16 @@ interface Reference {
   readonly more: number;
 }
 
-/** The ModTable formula for damage, written out per key (tags, and the source above them). */
+/**
+ * The ModTable formula of one scoped stat (damage by default), written out per key (tags, and
+ * the source above them), without dynamic entries.
+ */
 function reference(
   modifiers: readonly Modifier[],
   base: number,
   key: number,
   sources: SourceTable = createSourceTable(),
+  stat: ScopedStat = 'damage',
 ): Reference {
   const tags = key & ((1 << SOURCE_SHIFT) - 1);
   const source = key >>> SOURCE_SHIFT;
@@ -150,6 +183,8 @@ function reference(
     (m.tags?.length ?? 0) === 0 && (m.notTags?.length ?? 0) === 0 && m.scope === undefined;
   const matching = modifiers.filter(
     (m) =>
+      m.stat === stat &&
+      m.scaling === undefined &&
       (tagMask(m.tags ?? []) & ~tags) === 0 &&
       (tagMask(m.notTags ?? []) & tags) === 0 &&
       (m.scope === undefined || sources.matches(m.scope, source)),
@@ -163,7 +198,8 @@ function reference(
     .reduce((sum, m) => sum + m.value, base + untaggedFlat);
   const inc = of('increased').reduce((sum, m) => sum + m.value, 0);
   const more = of('more').reduce((product, m) => product * (1 + m.value), 1);
-  return { final: (1 + inc) * more, flat, inc, more };
+  const final = stat === 'damage' ? (1 + inc) * more : flat * (1 + inc) * more;
+  return { final, flat, inc, more };
 }
 
 /** Sources of the random keys; SELECTORS pick them by class and by exact id. */
@@ -187,16 +223,18 @@ function sourcesOf(names: readonly string[]): SourceTable {
 }
 
 /**
- * Damage modifiers over all 17 tags: tags, notTags, both or neither, tagged flats included,
- * some scoped to a source class or id.
+ * Modifiers of the scoped stats (half of them damage) over all 17 tags: tags, notTags, both or
+ * neither, tagged flats included (not on damage), some scoped to a source class or id.
  */
 function randomScopedModifier(rng: Rng): Modifier {
+  const stat = rng.chance(0.5) ? 'damage' : rng.pick(SCOPED_STATS);
   const kind = rng.pick(KINDS);
   const value = randomValue(rng);
+  if (stat === 'damage' && kind === 'flat') return { stat, kind, value };
   const tags = someTags(rng, DAMAGE_TAGS, 0.12);
   const notTags = someTags(rng, DAMAGE_TAGS, 0.06).filter((tag) => !tags.includes(tag));
   return {
-    stat: 'damage',
+    stat,
     kind,
     value,
     ...(tags.length > 0 ? { tags } : {}),
@@ -205,6 +243,7 @@ function randomScopedModifier(rng: Rng): Modifier {
   };
 }
 
+/** Every scoped stat of `key`'s row against the reference; `base` is the damage base. */
 function expectRow(
   table: ModTable,
   modifiers: readonly Modifier[],
@@ -213,22 +252,32 @@ function expectRow(
   sources?: SourceTable,
 ) {
   const row = table.row(key);
-  const ref = reference(modifiers, base, key, sources);
-  const at = row * S + DAMAGE;
-  expect(table.final[at], `key ${key}`).toBe(ref.final);
-  expect(table.flatV[at], `key ${key}`).toBe(ref.flat);
-  expect(table.inc[at], `key ${key}`).toBe(ref.inc);
-  expect(table.more[at], `key ${key}`).toBe(ref.more);
+  const actual = SCOPED_STATS.map((stat) => {
+    const at = row * S + SCOPED_INDEX[stat];
+    return [table.final[at], table.flatV[at], table.inc[at], table.more[at], table.dynCount[at]];
+  });
+  const expected = SCOPED_STATS.map((stat) => {
+    const ref = reference(
+      modifiers,
+      stat === 'damage' ? base : BASE_STATS[stat],
+      key,
+      sources,
+      stat,
+    );
+    return [ref.final, ref.flat, ref.inc, ref.more, 0];
+  });
+  // toEqual compares numbers with Object.is: bit for bit.
+  expect(actual, `key ${key}`).toEqual(expected);
 }
 
 describe('ModTable', () => {
   it('matches the formula written out per key for random 17-bit tags and sources', () => {
     const rng = createRng(23);
-    for (let n = 0; n < 200; n++) {
+    for (let n = 0; n < 100; n++) {
       const sources = sourcesOf(SOURCE_NAMES);
       const modifiers = Array.from({ length: rng.int(25) }, () => randomScopedModifier(rng));
       const base = rng.range(0, 100);
-      const table = new ModTable(compileMods(modifiers, sources), Float64Array.of(base));
+      const table = new ModTable(compileMods(modifiers, sources), baseRow(base));
       const randomSource = (): number => rng.int(SOURCE_NAMES.length);
       for (let k = 0; k < 200; k++) {
         expectRow(table, modifiers, base, rowKey(rng.int(1 << 17), randomSource()), sources);
@@ -275,7 +324,7 @@ describe('ModTable', () => {
         ],
         sources,
       ),
-      Float64Array.of(1),
+      baseRow(1),
     );
     const fire = sources.index('outer.fire');
     const bleed = sources.index('outer.bleed');
@@ -293,7 +342,7 @@ describe('ModTable', () => {
     ];
     const mods = compileMods(modifiers, sources);
     expect(mods.map((mod) => mod.untagged)).toEqual([false, true, true]);
-    const table = new ModTable(mods, Float64Array.of(1));
+    const table = new ModTable(mods, baseRow(1));
     expect(table.flatV[table.row(rowKey(0, 1)) * S + DAMAGE]).toBe(1 + (0.2 + 0.3) + 0.1);
     expect(table.flatV[table.row(rowKey(0, 0)) * S + DAMAGE]).toBe(1 + (0.2 + 0.3));
   });
@@ -326,7 +375,7 @@ describe('ModTable', () => {
       { stat: 'damage', kind: 'flat', value: 0.7, tags: ['hit'] },
       { stat: 'damage', kind: 'flat', value: 0.3 },
     ];
-    const table = new ModTable(compileMods(modifiers, createSourceTable()), Float64Array.of(1));
+    const table = new ModTable(compileMods(modifiers, createSourceTable()), baseRow(1));
     const row = table.row(TAG.hit | TAG.crit);
     expect(table.flatV[row * S + DAMAGE]).toBe(1 + (0.2 + 0.3) + 0.1 + 0.7);
     expect(table.flatV[table.row(0) * S + DAMAGE]).toBe(1 + (0.2 + 0.3));
@@ -349,7 +398,7 @@ describe('ModTable', () => {
   it('grows past its first slots, keeping every row and its number', () => {
     const rng = createRng(31);
     const modifiers = Array.from({ length: 12 }, () => randomScopedModifier(rng));
-    const table = new ModTable(compileMods(modifiers, createSourceTable()), Float64Array.of(10));
+    const table = new ModTable(compileMods(modifiers, createSourceTable()), baseRow(10));
     const keys: number[] = [];
     const seen = new Set<number>();
     while (keys.length < 3000) {
@@ -369,7 +418,92 @@ describe('ModTable', () => {
 
   it('rejects a modifier of a stat that is not scoped', () => {
     expect(() =>
-      compileMods([{ stat: 'critChance', kind: 'flat', value: 0.1 }], createSourceTable()),
+      compileMods([{ stat: 'attackSpeed', kind: 'flat', value: 0.1 }], createSourceTable()),
     ).toThrow(/scoped/);
+  });
+
+  it('folds an untagged row of every scoped stat to StatBlock.values exactly', () => {
+    const rng = createRng(41);
+    const scopedStats = STAT_IDS.filter(isScopedStat);
+    for (let n = 0; n < 300; n++) {
+      const modifiers = Array.from({ length: rng.int(10) }, (): Modifier => {
+        const stat = rng.pick(scopedStats);
+        const kind = stat === 'damage' ? 'flat' : rng.pick(KINDS);
+        return { stat, kind, value: randomValue(rng) };
+      });
+      const stats = computeStatBlock(modifiers, NO_EXTRAS);
+      const table = modTableFor(stats);
+      for (const mask of [0, TAG.hit, TAG.hit | TAG.crit | TAG.chain, TAG.burn]) {
+        const row = table.row(mask);
+        for (const stat of scopedStats) {
+          if (stat === 'damage') continue;
+          expect(statAt(table, row, SCOPED_INDEX[stat], 0), `${n} ${stat}`).toBe(
+            stats.values[stat],
+          );
+        }
+      }
+    }
+  });
+});
+
+/**
+ * M1's crit and ignite chances of a hit (src/sim/systems/hits.ts before C3.3), from the bridge
+ * notables' rule parameters: the crit roll clamp01(clamp01(critChance) + perJump × jump), the
+ * ignite roll clamp01(clamp01(igniteChance) + critIgnite on crits + chainIgnite on jumps), and
+ * Searing Crits forcing every crit's ignite.
+ */
+function m1Chances(
+  values: { readonly critChance: number; readonly igniteChance: number },
+  crit: boolean,
+  jump: number,
+  searing: boolean,
+): { critChance: number; igniteChance: number; igniteAlways: boolean } {
+  const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+  let ignite = clamp01(values.igniteChance);
+  if (crit) ignite += 0.3;
+  if (jump > 0) ignite += 0.25;
+  return {
+    critChance: clamp01(clamp01(values.critChance) + 0.1 * jump),
+    igniteChance: clamp01(ignite),
+    igniteAlways: crit && searing,
+  };
+}
+
+describe('chance rows against the M1 bridge rules', () => {
+  /** critChance and igniteChance of the fingerprint's stat profiles, and a few past 1. */
+  const PROFILES = [
+    { critChance: 0.05, igniteChance: 0.1 },
+    { critChance: 0.4, igniteChance: 0.1 },
+    { critChance: 0.05, igniteChance: 0.6 },
+    { critChance: 0.05, igniteChance: 0.3 },
+    { critChance: 0.3, igniteChance: 0.3 },
+    { critChance: 0.95, igniteChance: 0.7 },
+    { critChance: 1.2, igniteChance: 1.35 },
+  ];
+
+  it.each(PROFILES)('reproduce the M1 chances bit for bit at %o', (values) => {
+    for (const searing of [false, true]) {
+      const modifiers = [
+        ...maskProbeMods(),
+        ...BRIDGE_MODS,
+        ...(searing ? SEARING_CRITS_MODS : []),
+      ];
+      const table = modTableFor(makeStats(values, modifiers));
+      const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+      for (let jump = 0; jump <= 6; jump++) {
+        const plain = jump > 0 ? TAG.hit | TAG.chain : TAG.hit;
+        for (const crit of [false, true]) {
+          const m1 = m1Chances(values, crit, jump, searing);
+          const at = (mask: number, stat: ScopedStat): number =>
+            statAt(table, table.row(mask), SCOPED_INDEX[stat], jump);
+          const label = `${JSON.stringify(values)} searing ${searing} jump ${jump} crit ${crit}`;
+          const row = crit ? plain | TAG.crit : plain;
+          expect(clamp01(at(plain, 'critChance')), label).toBe(m1.critChance);
+          expect(clamp01(at(row, 'igniteChance')), label).toBe(m1.igniteChance);
+          expect(at(row, 'igniteAlways') > 0, label).toBe(m1.igniteAlways);
+          expect(at(plain, 'critAlways'), label).toBe(0);
+        }
+      }
+    }
   });
 });

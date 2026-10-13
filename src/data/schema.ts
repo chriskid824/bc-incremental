@@ -12,6 +12,8 @@ import type { SourceSelector } from './sources';
 import { isScopedStat, STAT_IDS } from './stats';
 import type { Modifier, ModifierKind, StatId } from './stats';
 import { DAMAGE_TAGS } from './tags';
+import { SCALING_CURVES, SCALING_VARS } from './triggers';
+import type { ScalingSpec } from './triggers';
 import { ENEMY_IDS } from './types';
 import type {
   EnemyDef,
@@ -69,13 +71,32 @@ export const TALENT_ARCHETYPES = [
 /** z.number() rejects NaN and ±Infinity in zod v4. */
 const finite = z.number();
 
-/** Scoped stats take tags, notTags and a scope; flat damage stays untagged in StatBlock.values. */
+/**
+ * Scoped stats take tags, notTags, a scope and a scaling; flat damage stays untagged in
+ * StatBlock.values.
+ */
 const taggable = (m: { readonly stat: StatId; readonly kind: ModifierKind }): boolean =>
   isScopedStat(m.stat) && !(m.stat === 'damage' && m.kind === 'flat');
 
 export const SourceSelectorSchema = z.custom<SourceSelector>(
   (value) => typeof value === 'string' && isSourceSelector(value),
   { message: 'must be a source class or a source id (src/data/sources.ts)' },
+);
+
+export const ScalingSpecSchema = exact<ScalingSpec>()(
+  z
+    .strictObject({
+      per: z.enum(SCALING_VARS),
+      every: finite.exactOptional(),
+      curve: z.enum(SCALING_CURVES).exactOptional(),
+      exponent: finite.exactOptional(),
+      cap: finite.exactOptional(),
+    })
+    .refine((s) => (s.curve === 'pow') === (s.exponent !== undefined), {
+      message: "exponent is required with curve 'pow' and allowed only there",
+      path: ['exponent'],
+    })
+    .readonly(),
 );
 
 export const ModifierSchema = exact<Modifier>()(
@@ -87,6 +108,7 @@ export const ModifierSchema = exact<Modifier>()(
       tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
       notTags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
       scope: SourceSelectorSchema.exactOptional(),
+      scaling: ScalingSpecSchema.exactOptional(),
     })
     .refine((m) => m.tags === undefined || taggable(m), {
       message: 'tags are only allowed on scoped stats, and not on flat damage',
@@ -120,12 +142,15 @@ export const ModifierSchema = exact<Modifier>()(
       message: 'scope is only allowed on scoped stats, and not on flat damage',
       path: ['scope'],
     })
+    .refine((m) => m.scaling === undefined || taggable(m), {
+      message: 'scaling is only allowed on scoped stats, and not on flat damage',
+      path: ['scaling'],
+    })
     .readonly(),
 );
 
 export const RuleSpecSchema = exact<RuleSpec>()(
   z.discriminatedUnion('id', [
-    z.strictObject({ id: z.literal('critsAlwaysIgnite'), nonCritHitMore: finite }).readonly(),
     z
       .strictObject({ id: z.literal('steadyAim'), everyNth: finite, critMultiplierMore: finite })
       .readonly(),
@@ -146,9 +171,6 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       })
       .readonly(),
     z.strictObject({ id: z.literal('glassCannon'), damageMore: finite }).readonly(),
-    z.strictObject({ id: z.literal('critIgniteChance'), chance: finite }).readonly(),
-    z.strictObject({ id: z.literal('chainIgniteChance'), chance: finite }).readonly(),
-    z.strictObject({ id: z.literal('chainCritChance'), perJump: finite }).readonly(),
   ]),
 );
 

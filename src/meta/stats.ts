@@ -40,11 +40,11 @@ interface Accumulator {
 
 /**
  * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more) over the untagged, unscoped modifiers
- * of every stat except damage, whose `values` entry keeps only base + Σflat. Every modifier of a
- * scoped stat (SCOPED_STATS) also goes to `scoped`, in data order; tagged and scoped ones go only
- * there, and the simulation folds them per damage instance (src/sim/build/modTable.ts). An empty
- * tag list is untagged. Throws on tags, notTags or a scope outside scoped stats or on flat
- * damage, which data validation should prevent.
+ * without a scaling of every stat except damage, whose `values` entry keeps only base + Σflat.
+ * Every modifier of a scoped stat (SCOPED_STATS) also goes to `scoped`, in data order; tagged,
+ * scoped and scaling ones go only there, and the simulation folds them per damage instance
+ * (src/sim/build/modTable.ts). An empty tag list is untagged. Throws on tags, notTags, a scope or
+ * a scaling outside scoped stats or on flat damage, which data validation should prevent.
  */
 export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExtras): StatBlock {
   const acc = {} as Record<StatId, Accumulator>;
@@ -52,17 +52,22 @@ export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExt
   const scoped: Modifier[] = [];
 
   for (const mod of modifiers) {
-    const tagged =
-      (mod.tags?.length ?? 0) > 0 || (mod.notTags?.length ?? 0) > 0 || mod.scope !== undefined;
+    // Tags, a scope or a scaling make the value depend on the damage instance.
+    const perInstance =
+      (mod.tags?.length ?? 0) > 0 ||
+      (mod.notTags?.length ?? 0) > 0 ||
+      mod.scope !== undefined ||
+      mod.scaling !== undefined;
     const isScoped = isScopedStat(mod.stat);
-    if (tagged && (!isScoped || (mod.stat === 'damage' && mod.kind === 'flat'))) {
+    if (perInstance && (!isScoped || (mod.stat === 'damage' && mod.kind === 'flat'))) {
       throw new Error(
-        `Tags and scopes are only allowed on scoped stats, not flat damage: ${JSON.stringify(mod)}`,
+        'Tags, scopes and scalings are only allowed on scoped stats, not flat damage: ' +
+          JSON.stringify(mod),
       );
     }
     if (isScoped) scoped.push(mod);
-    // Damage increased/more apply per damage instance, like tagged modifiers.
-    if (tagged || (mod.stat === 'damage' && mod.kind !== 'flat')) continue;
+    // Damage increased/more apply per damage instance too.
+    if (perInstance || (mod.stat === 'damage' && mod.kind !== 'flat')) continue;
     const a = acc[mod.stat];
     if (mod.kind === 'flat') a.flat += mod.value;
     else if (mod.kind === 'increased') a.increased += mod.value;

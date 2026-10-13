@@ -371,8 +371,10 @@ export class TalentWebPanel {
       ),
     );
     const body = el(doc, 'div', 'bc-tip-body');
-    for (const mod of node.modifiers)
-      body.append(el(doc, 'div', 'bc-tip-mod', describeModifier(mod)));
+    for (const mod of node.modifiers) {
+      const line = describeModifier(mod);
+      if (line !== null) body.append(el(doc, 'div', 'bc-tip-mod', line));
+    }
     if (node.descKey !== undefined && isMessageKey(node.descKey)) {
       body.append(el(doc, 'div', 'bc-tip-rule', t(node.descKey)));
     }

@@ -224,8 +224,31 @@ export interface GoldenBuild {
   readonly rules: readonly RuleSpec[];
 }
 
-const golden = (values: Partial<Record<StatId, number>>, rules: readonly RuleSpec[] = []) => ({
-  stats: makeStats(values, maskProbeMods()),
+/**
+ * Searing Crits as data (src/data/talents.ts): crits ignite whatever the ignite roll, non-crit
+ * hits deal half.
+ */
+export const SEARING_CRITS_MODS: readonly Modifier[] = [
+  { stat: 'igniteAlways', kind: 'flat', value: 1, tags: ['crit'] },
+  { stat: 'damage', kind: 'more', value: -0.5, tags: ['hit'], notTags: ['crit'] },
+];
+
+/**
+ * The bridge notables' chances as data, in talent order: Flashpoint (+30% ignite on crits),
+ * Conduction (+25% ignite on chain jumps) and Static Focus (+10% crit chance per jump).
+ */
+export const BRIDGE_MODS: readonly Modifier[] = [
+  { stat: 'igniteChance', kind: 'flat', value: 0.3, tags: ['crit'] },
+  { stat: 'igniteChance', kind: 'flat', value: 0.25, tags: ['chain'] },
+  { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
+];
+
+const golden = (
+  values: Partial<Record<StatId, number>>,
+  rules: readonly RuleSpec[] = [],
+  modifiers: readonly Modifier[] = [],
+) => ({
+  stats: makeStats(values, [...maskProbeMods(), ...modifiers]),
   rules,
 });
 
@@ -237,7 +260,8 @@ const PANDEMIC: RuleSpec = { id: 'pandemic', spreadRadius: 250, spreadEffect: 0.
 
 /**
  * Builds of src/sim/golden.test.ts on makeTestData(): each M1 stat archetype, each M1 rule on
- * the archetype it acts on, and every damage mask probed through maskProbeMods.
+ * the archetype it acts on (Searing Crits and the bridge notables as data), and every damage
+ * mask probed through maskProbeMods.
  */
 export const GOLDEN_BUILDS: Readonly<Record<string, GoldenBuild>> = {
   plain: golden({}),
@@ -254,12 +278,10 @@ export const GOLDEN_BUILDS: Readonly<Record<string, GoldenBuild>> = {
   ]),
   overload: golden(CHAIN, [{ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2 }]),
   glass: golden(VOLLEY, [{ id: 'glassCannon', damageMore: 1 }]),
-  searing: golden({ ...CRIT, igniteChance: 0.2 }, [
-    { id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 },
-  ]),
-  bridges: golden({ critChance: 0.3, igniteChance: 0.3, chainCount: 2.5, damage: 30 }, [
-    { id: 'critIgniteChance', chance: 0.3 },
-    { id: 'chainIgniteChance', chance: 0.25 },
-    { id: 'chainCritChance', perJump: 0.1 },
-  ]),
+  searing: golden({ ...CRIT, igniteChance: 0.2 }, [], SEARING_CRITS_MODS),
+  bridges: golden(
+    { critChance: 0.3, igniteChance: 0.3, chainCount: 2.5, damage: 30 },
+    [],
+    BRIDGE_MODS,
+  ),
 };

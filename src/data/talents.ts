@@ -8,6 +8,7 @@
  * start. y grows downward; positions are in talent-web units.
  */
 
+import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
 import type { DamageTag } from './tags';
 import type { RuleSpec } from './rules';
@@ -33,10 +34,14 @@ interface NodeSpec {
   readonly repeat?: TalentNode['repeat'];
 }
 
-/** Fills the boilerplate fields: kind defaults to small, keys follow talent.<id>.name/desc. */
+/**
+ * Fills the boilerplate fields: kind defaults to small, keys follow talent.<id>.name/desc, and a
+ * node with rules or behaviour modifiers gets its desc key.
+ */
 function node(id: string, spec: NodeSpec): TalentNode {
   const kind = spec.kind ?? 'small';
-  const withDesc = (spec.rules?.length ?? 0) > 0;
+  const withDesc =
+    (spec.rules?.length ?? 0) > 0 || (spec.modifiers ?? []).some(isBehaviourModifier);
   return {
     id,
     kind,
@@ -344,16 +349,23 @@ export const TALENTS: readonly TalentNode[] = [
     pos: at(CRIT_DOT, 660),
     links: ['cinder', 'searingCrits'],
     shardCostFactor: 6,
-    modifiers: [flat('critMultiplier', 0.5), moreDmg(0.4)],
-    rules: [{ id: 'critIgniteChance', chance: 0.3 }],
+    modifiers: [
+      flat('critMultiplier', 0.5),
+      moreDmg(0.4),
+      { stat: 'igniteChance', kind: 'flat', value: 0.3, tags: ['crit'] },
+    ],
     archetype: 'hybrid',
   }),
+  // Crits ignite whatever the ignite roll (which is still drawn); non-crit hits deal half.
   node('searingCrits', {
     ...KEYSTONE,
     pos: at(CRIT_DOT, 780),
     links: ['flashpoint'],
     shardCostFactor: 8,
-    rules: [{ id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 }],
+    modifiers: [
+      { stat: 'igniteAlways', kind: 'flat', value: 1, tags: ['crit'] },
+      { stat: 'damage', kind: 'more', value: -0.5, tags: ['hit'], notTags: ['crit'] },
+    ],
     archetype: 'hybrid',
   }),
 
@@ -377,8 +389,11 @@ export const TALENTS: readonly TalentNode[] = [
     pos: at(DOT_CHAIN, 660),
     links: ['arcFlame'],
     shardCostFactor: 6,
-    modifiers: [dmg(0.4, 'burn'), moreDmg(0.3)],
-    rules: [{ id: 'chainIgniteChance', chance: 0.25 }],
+    modifiers: [
+      dmg(0.4, 'burn'),
+      moreDmg(0.3),
+      { stat: 'igniteChance', kind: 'flat', value: 0.25, tags: ['chain'] },
+    ],
     archetype: 'hybrid',
   }),
 
@@ -402,8 +417,12 @@ export const TALENTS: readonly TalentNode[] = [
     pos: at(CHAIN_CRIT, 660),
     links: ['thunderclap'],
     shardCostFactor: 6,
-    modifiers: [flat('chainCount', 0.5), moreDmg(0.4)],
-    rules: [{ id: 'chainCritChance', perJump: 0.1 }],
+    // +10% crit chance per jump so far: the nth jump gets +n × 10%.
+    modifiers: [
+      flat('chainCount', 0.5),
+      moreDmg(0.4),
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
+    ],
     archetype: 'hybrid',
   }),
 ];

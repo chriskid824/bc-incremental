@@ -5,6 +5,8 @@
  */
 
 import type { RuleSpec } from './rules';
+import { isBehaviourModifier } from './stats';
+import type { Modifier } from './stats';
 import { ENEMY_IDS } from './types';
 import type { EnemyDef, EnemyId, GameData, TalentNode, WaveTable } from './types';
 
@@ -175,8 +177,10 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
       }
     }
 
-    if (node.kind === 'keystone' && node.rules.length === 0) {
-      issues.push(`${at}: keystone needs at least one rule`);
+    // Behaviour modifiers change how hits play out, as rules do (Searing Crits is data).
+    const behaviour = node.modifiers.some(isBehaviourModifier);
+    if (node.kind === 'keystone' && node.rules.length === 0 && !behaviour) {
+      issues.push(`${at}: keystone needs a rule or a behaviour modifier`);
     }
     if (node.kind !== 'keystone' && node.kind !== 'notable' && node.rules.length > 0) {
       issues.push(`${at}: only keystones and notables may have rules`);
@@ -187,6 +191,9 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
       ruleIds.add(rule.id);
       for (const problem of ruleIssues(rule)) issues.push(`${at}: rule '${rule.id}' ${problem}`);
     }
+    node.modifiers.forEach((mod, i) => {
+      for (const problem of modifierIssues(mod)) issues.push(`${at}: modifiers[${i}] ${problem}`);
+    });
 
     if (node.shardCostFactor !== undefined && !(node.shardCostFactor >= 0)) {
       issues.push(`${at}: shardCostFactor must be >= 0 (got ${node.shardCostFactor})`);
@@ -196,11 +203,13 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     }
     if (node.nameKey === '') issues.push(`${at}: empty nameKey`);
     if (node.descKey === '') issues.push(`${at}: empty descKey`);
-    if (node.rules.length > 0 && node.descKey === undefined) {
-      issues.push(`${at}: a node with rules needs a descKey`);
+    // The talent screen lists plain modifiers itself; descKey covers rules and behaviour.
+    const described = node.rules.length > 0 || behaviour;
+    if (described && node.descKey === undefined) {
+      issues.push(`${at}: a node with rules or behaviour modifiers needs a descKey`);
     }
-    if (node.rules.length === 0 && node.descKey !== undefined) {
-      issues.push(`${at}: descKey describes rules; this node has none`);
+    if (!described && node.descKey !== undefined) {
+      issues.push(`${at}: descKey describes rules and behaviour modifiers; this node has neither`);
     }
   }
 
@@ -234,9 +243,6 @@ function ruleIssues(rule: RuleSpec): string[] {
     if (!(value >= 0 && value <= 1)) issues.push(`${name} must be in [0, 1] (got ${value})`);
   };
   switch (rule.id) {
-    case 'critsAlwaysIgnite':
-      more('nonCritHitMore', rule.nonCritHitMore);
-      break;
     case 'steadyAim':
       if (!isPositiveInt(rule.everyNth)) {
         issues.push(`everyNth must be a positive integer (got ${rule.everyNth})`);
@@ -262,13 +268,21 @@ function ruleIssues(rule: RuleSpec): string[] {
     case 'glassCannon':
       more('damageMore', rule.damageMore);
       break;
-    case 'critIgniteChance':
-    case 'chainIgniteChance':
-      chance('chance', rule.chance);
-      break;
-    case 'chainCritChance':
-      chance('perJump', rule.perJump);
-      break;
+  }
+  return issues;
+}
+
+/** Ranges of a modifier's scaling (src/data/triggers.ts); the simulation relies on them. */
+function modifierIssues(mod: Modifier): string[] {
+  const issues: string[] = [];
+  const scaling = mod.scaling;
+  if (scaling === undefined) return issues;
+  if (scaling.every !== undefined && !(scaling.every > 0)) {
+    issues.push(`scaling.every must be > 0 (got ${scaling.every})`);
+  }
+  // A positive exponent keeps g(0) = 0, so the primary hit gets no contribution.
+  if (scaling.exponent !== undefined && !(scaling.exponent > 0)) {
+    issues.push(`scaling.exponent must be > 0 (got ${scaling.exponent})`);
   }
   return issues;
 }

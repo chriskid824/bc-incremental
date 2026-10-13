@@ -130,23 +130,24 @@ export interface RunContext {
 
   // ---- Derived stats, clamped as documented in src/data/stats.ts ----
   /**
-   * Damage multiplier per tag mask and source (rowKey), from the build's scoped modifiers,
-   * filled on first use.
+   * Scoped stats (damage multiplier, crit and ignite chances, crit multiplier) per tag mask and
+   * source (rowKey), from the build's scoped modifiers, filled on first use; read through
+   * statAt (src/sim/build/eval.ts).
    */
   readonly table: ModTable;
+  /**
+   * ModTable rows of the attack's hits by slot (2 × chained + crit), −1 until first use. Rows
+   * keep their numbers as the table grows, so a row looked up once stays valid for the run.
+   */
+  readonly hitRows: Int32Array;
   readonly damage: Num;
-  /** Random crit chance; steadyAim turns random crits off. */
-  readonly critChance: number;
-  readonly critMultiplier: number;
-  readonly igniteChance: number;
   readonly burnDamage: number;
   readonly burnTicks: number;
   readonly burnCap: number;
   readonly burnMult: number;
   readonly burnCritMult: number;
-  /** Hit multipliers on top of the damage row: non-crit and crit. */
-  readonly plainHitMult: number;
-  readonly critHitMult: number;
+  /** Rules' multiplier on hit damage on top of the damage row (pandemic, glassCannon). */
+  readonly hitMult: number;
   readonly chainCount: number;
   readonly chainRetention: number;
   readonly projectileCount: number;
@@ -265,18 +266,16 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
   const multAt = (mask: number, source = ATTACK_SOURCE): number =>
     table.damage(rowKey(mask, source));
   const damage = num(values.damage);
-  const critChance = fx.steadyAimEvery > 0 ? 0 : clamp01(values.critChance);
   const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
   const allMult = fx.allDamageMult;
-  const plainHitMult = fx.hitMult * fx.nonCritHitMult * allMult;
-  const critHitMult = fx.hitMult * allMult;
-  const averageCrit = fx.steadyAimEvery > 0 ? 1 / fx.steadyAimEvery : critChance;
+  const hitMult = fx.hitMult * allMult;
+  const averageCrit = fx.steadyAimEvery > 0 ? 1 / fx.steadyAimEvery : clamp01(values.critChance);
   const expectedHit =
     values.damage *
-    ((1 - averageCrit) * multAt(HIT) * plainHitMult +
-      averageCrit * critMultiplier * multAt(HIT | CRIT) * critHitMult);
+    ((1 - averageCrit) * multAt(HIT) * hitMult +
+      averageCrit * critMultiplier * multAt(HIT | CRIT) * hitMult);
 
-  const projectileEstimate = mul(damage, multAt(HIT) * plainHitMult);
+  const projectileEstimate = mul(damage, multAt(HIT) * hitMult);
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
@@ -323,17 +322,14 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     burnCredit,
 
     table,
+    hitRows: new Int32Array(4).fill(-1),
     damage,
-    critChance,
-    critMultiplier,
-    igniteChance: clamp01(values.igniteChance),
     burnDamage: values.burnDamage,
     burnTicks: Math.max(0, values.burnDuration * fx.burnDurationMult * TICK_RATE),
     burnCap: fx.burnUncapped ? UNCAPPED_BURN_STACKS : Math.max(1, Math.floor(values.burnMaxStacks)),
     burnMult: multAt(BURN, burnCredit) * allMult,
     burnCritMult: multAt(BURN | CRIT, burnCredit) * allMult,
-    plainHitMult,
-    critHitMult,
+    hitMult,
     chainCount: Math.max(0, values.chainCount * fx.chainCountMult),
     chainRetention: clamp01(values.chainRetention - fx.chainRetentionPenalty),
     projectileCount: Math.max(1, values.projectileCount),

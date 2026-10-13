@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { num } from '../../src/core/num';
-import { NO_EXTRAS } from '../../src/data';
+import { isBehaviourModifier, NO_EXTRAS } from '../../src/data';
 import { computeStatBlock } from '../../src/meta';
 import { damageRow } from '../../src/sim';
 import { COUNTER_IDS } from '../../src/sim';
 import type { RunResult, SimEvent } from '../../src/sim';
-import { maskProbeMods, projectEvent, projectResult } from '../../src/sim/testing';
+import {
+  BRIDGE_MODS,
+  maskProbeMods,
+  projectEvent,
+  projectResult,
+  SEARING_CRITS_MODS,
+} from '../../src/sim/testing';
 import {
   caseLine,
   compareResults,
@@ -36,12 +42,26 @@ describe('fingerprint cases', () => {
     expect(rulesOf('talent/chain/keystone/s1/w1')).toEqual(['overload']);
     expect(rulesOf('talent/dot/glassCannon/s1/w1')).toEqual(['glassCannon']);
     expect(rulesOf('talent/chain/plain/s1/w1')).toEqual([]);
-    expect(rulesOf('talent/crit/bridges/s1/w1').sort()).toEqual([
-      'chainCritChance',
-      'chainIgniteChance',
-      'critIgniteChance',
-      'critsAlwaysIgnite',
+    // Searing Crits and the bridge notables are behaviour modifiers since C3.3.
+    expect(rulesOf('talent/crit/bridges/s1/w1')).toEqual([]);
+    const bridges = cases.find((c) => c.id === 'talent/crit/bridges/s1/w1')?.config.stats;
+    const behaviour = (bridges?.scoped ?? []).filter(isBehaviourModifier);
+    expect(behaviour).toEqual([
+      { stat: 'igniteChance', kind: 'flat', value: 0.3, tags: ['crit'] },
+      { stat: 'igniteAlways', kind: 'flat', value: 1, tags: ['crit'] },
+      { stat: 'damage', kind: 'more', value: -0.5, tags: ['hit'], notTags: ['crit'] },
+      { stat: 'igniteChance', kind: 'flat', value: 0.25, tags: ['chain'] },
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
     ]);
+  });
+
+  it('runs Searing Crits and the bridge notables as modifiers in their synthetic sets', () => {
+    const scoped = (id: string) => cases.find((c) => c.id === id)?.config.stats.scoped;
+    expect(scoped('test/crit/searing/s1/w1')).toEqual([...maskProbeMods(), ...SEARING_CRITS_MODS]);
+    expect(scoped('real/chain/bridges/s3/w25')).toEqual([...maskProbeMods(), ...BRIDGE_MODS]);
+    for (const set of ['searing', 'bridges']) {
+      expect(RULE_SETS[set]?.rules).toEqual([]);
+    }
   });
 
   it('gives the synthetic builds the damage table of maskProbeMods', () => {

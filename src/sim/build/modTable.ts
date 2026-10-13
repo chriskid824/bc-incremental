@@ -4,7 +4,7 @@
  * (docs/v3/implementation-plan-v3.md §2.1). A key is the instance's tag mask with its source
  * index above the tags (rowKey in src/sim/build/sources.ts); 17 tags make 131,072 masks per
  * source, too many to fold up front as M1's damageMult did. Rows are structure of arrays:
- * scoped stat s of row r sits at index r × S + s.
+ * scoped stat s of row r sits at index r × S + s (s = SCOPED_INDEX[stat]).
  *
  * Every scoped stat folds (base + Σflat) × (1 + Σincreased) × Π(1 + more) over the modifiers
  * that match the key (all of their tags present, none of their notTags, the source in their
@@ -15,20 +15,33 @@
  * - more: Π(1 + value) in the same order.
  * A damage row holds only (1 + Σincreased) × Π(1 + more): flat damage stays in
  * StatBlock.values.damage, so damage of an instance = values.damage × its damage row, which is
- * M1's damageMult[mask] bit for bit.
+ * M1's damageMult[mask] bit for bit. Any other scoped stat folds to its final value; with no
+ * tagged, scoped or scaling modifier that is StatBlock.values[stat] bit for bit.
+ *
+ * Modifiers with a scaling are dynamic entries: a row lists the matching ones per stat in data
+ * order, and statAt (src/sim/build/eval.ts) adds them per damage instance after the static
+ * parts.
  */
 
 import { SCOPED_STATS } from '../../data/stats';
-import type { Modifier, ModifierKind, StatBlock } from '../../data/stats';
+import type { Modifier, ModifierKind, ScopedStat, StatBlock } from '../../data/stats';
 import { tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
+import { compileScaling, statAt } from './eval';
+import type { CompiledScaling } from './eval';
 import { CENTER, createSourceTable, rowKey, SOURCE_SHIFT } from './sources';
 import type { SourceTable } from './sources';
 
 /** Values per row: one per scoped stat. */
 const S = SCOPED_STATS.length;
+
+/** Position of each scoped stat in a row: its SCOPED_STATS index. */
+export const SCOPED_INDEX = Object.fromEntries(
+  SCOPED_STATS.map((stat, index) => [stat, index]),
+) as Readonly<Record<ScopedStat, number>>;
+
 /** Position of damage in a row. */
-const DAMAGE = SCOPED_STATS.indexOf('damage');
+const DAMAGE = SCOPED_INDEX.damage;
 
 const FLAT = 0;
 const INCREASED = 1;
@@ -54,6 +67,8 @@ export interface CompiledMod {
   readonly scopeOk: Uint8Array | null;
   /** No tags, notTags or scope: an untagged flat is summed before the tagged ones. */
   readonly untagged: boolean;
+  /** The modifier's scaling: a dynamic entry, evaluated per damage instance. */
+  readonly scale: CompiledScaling | null;
 }
 
 /**
@@ -75,6 +90,7 @@ export function compileMods(scoped: readonly Modifier[], sources: SourceTable): 
       none,
       scopeOk,
       untagged: all === 0 && none === 0 && scopeOk === null,
+      scale: mod.scaling === undefined ? null : compileScaling(mod.scaling),
     };
   });
 }
@@ -86,6 +102,8 @@ const TAG_BITS = (1 << SOURCE_SHIFT) - 1;
 const INITIAL_SLOTS = 16;
 /** Fibonacci hashing: the top bits of key × 2^32/φ pick the slot. */
 const HASH_MULTIPLIER = 0x9e3779b1;
+/** Dynamic entries a new table has room for; `dyn` doubles when full. */
+const INITIAL_DYNAMIC = 16;
 
 function grown(values: Float64Array, length: number): Float64Array {
   const copy = new Float64Array(length);
@@ -93,10 +111,19 @@ function grown(values: Float64Array, length: number): Float64Array {
   return copy;
 }
 
+function grownInts(values: Int32Array, length: number): Int32Array {
+  const copy = new Int32Array(length);
+  copy.set(values);
+  return copy;
+}
+
 export class ModTable {
   /** Rows filled so far, numbered in first-use order. */
   rows = 0;
-  /** Per row × S: the final value; for damage (1 + Σincreased) × Π(1 + more). */
+  /**
+   * Per row × S: the final value of the static entries; for damage (1 + Σincreased) × Π(1 +
+   * more). statAt adds the dynamic entries.
+   */
   final: Float64Array;
   /** Per row × S: base + Σflat. */
   flatV: Float64Array;
@@ -104,9 +131,18 @@ export class ModTable {
   inc: Float64Array;
   /** Per row × S: Π(1 + more). */
   more: Float64Array;
+  /** Per row × S: where the stat's dynamic entries start in `dyn`, and how many there are. */
+  dynStart: Int32Array;
+  dynCount: Int32Array;
+  /** Dynamic entries of every row and stat: indices into `mods`. */
+  dyn: Int32Array;
 
-  private readonly mods: readonly CompiledMod[];
+  readonly mods: readonly CompiledMod[];
   private readonly base: Float64Array;
+  /** Entries used in `dyn`. */
+  private dynLength = 0;
+  /** Per scoped stat, the indices of its modifiers with a scaling, in data order. */
+  private readonly dynamicMods: readonly (readonly number[])[];
   /** Open addressing with linear probing: key + 1 per slot (0 = empty), and that key's row. */
   private keys: Int32Array;
   private slotRows: Int32Array;
@@ -128,6 +164,12 @@ export class ModTable {
     this.flatV = new Float64Array(rowValues);
     this.inc = new Float64Array(rowValues);
     this.more = new Float64Array(rowValues);
+    this.dynStart = new Int32Array(rowValues);
+    this.dynCount = new Int32Array(rowValues);
+    this.dynamicMods = SCOPED_STATS.map((_, s) =>
+      mods.flatMap((mod, i) => (mod.stat === s && mod.scale !== null ? [i] : [])),
+    );
+    this.dyn = new Int32Array(INITIAL_DYNAMIC);
   }
 
   /** The row of `key`, filled on its first use. */
@@ -142,11 +184,14 @@ export class ModTable {
     }
   }
 
-  /** Damage multiplier of `key`: (1 + Σincreased) × Π(1 + more) of its damage modifiers. */
+  /**
+   * Damage multiplier of `key` for a primary hit (chain jump 0): (1 + Σincreased) × Π(1 + more)
+   * of its damage modifiers.
+   */
   damage(key: number): number {
     // Row first: filling it may grow, and so replace, the arrays.
     const row = this.row(key);
-    return this.final[row * S + DAMAGE] as number;
+    return statAt(this, row, DAMAGE, 0);
   }
 
   /** The first empty slot on `key`'s probe path. */
@@ -190,6 +235,8 @@ export class ModTable {
     this.flatV = grown(this.flatV, rowValues);
     this.inc = grown(this.inc, rowValues);
     this.more = grown(this.more, rowValues);
+    this.dynStart = grownInts(this.dynStart, rowValues);
+    this.dynCount = grownInts(this.dynCount, rowValues);
   }
 
   private fill(row: number, key: number): void {
@@ -207,7 +254,7 @@ export class ModTable {
       more[at + s] = 1;
     }
     for (const mod of mods) {
-      if (!matches(mod)) continue;
+      if (mod.scale !== null || !matches(mod)) continue;
       if (mod.kind === FLAT) {
         if (mod.untagged) untaggedFlat[mod.stat] = (untaggedFlat[mod.stat] as number) + mod.value;
       } else if (mod.kind === INCREASED) {
@@ -218,7 +265,7 @@ export class ModTable {
     }
     for (let s = 0; s < S; s++) flatV[at + s] = (base[s] as number) + (untaggedFlat[s] as number);
     for (const mod of mods) {
-      if (mod.kind !== FLAT || mod.untagged || !matches(mod)) continue;
+      if (mod.kind !== FLAT || mod.untagged || mod.scale !== null || !matches(mod)) continue;
       flatV[at + mod.stat] = (flatV[at + mod.stat] as number) + mod.value;
     }
     for (let s = 0; s < S; s++) {
@@ -227,6 +274,19 @@ export class ModTable {
       final[at + s] =
         s === DAMAGE ? increased * product : (flatV[at + s] as number) * increased * product;
     }
+    for (let s = 0; s < S; s++) {
+      const start = this.dynLength;
+      for (const i of this.dynamicMods[s] as readonly number[]) {
+        if (matches(mods[i] as CompiledMod)) this.pushDynamic(i);
+      }
+      this.dynStart[at + s] = start;
+      this.dynCount[at + s] = this.dynLength - start;
+    }
+  }
+
+  private pushDynamic(mod: number): void {
+    if (this.dynLength === this.dyn.length) this.dyn = grownInts(this.dyn, this.dyn.length * 2);
+    this.dyn[this.dynLength++] = mod;
   }
 }
 
@@ -242,15 +302,23 @@ export function modTableFor(
 const blockTables = new WeakMap<StatBlock, ModTable>();
 
 /**
- * Damage multiplier of `mask` for a center instance of a stat block outside a run (talent
- * screen, estimators): an instance with these tags deals values.damage × damageRow(stats, mask).
+ * Scoped stat `stat` (SCOPED_INDEX) of a center instance with tags `mask`, `chainJump` jumps into
+ * its chain (0 for a primary hit), of a stat block outside a run (talent screen, estimators).
  * The table of each block is built once and kept while the block lives.
  */
-export function damageRow(stats: StatBlock, mask: TagMask): number {
+export function scopedStat(stats: StatBlock, mask: TagMask, stat: number, chainJump = 0): number {
   let table = blockTables.get(stats);
   if (table === undefined) {
     table = modTableFor(stats);
     blockTables.set(stats, table);
   }
-  return table.damage(rowKey(mask, CENTER));
+  return statAt(table, table.row(rowKey(mask, CENTER)), stat, chainJump);
+}
+
+/**
+ * Damage multiplier of `mask` for a center instance of a stat block outside a run: a primary
+ * hit with these tags deals values.damage × damageRow(stats, mask).
+ */
+export function damageRow(stats: StatBlock, mask: TagMask): number {
+  return scopedStat(stats, mask, DAMAGE);
 }
