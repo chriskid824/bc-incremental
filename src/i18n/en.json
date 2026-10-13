@@ -69,7 +69,7 @@
   "talent.glassCannon.desc": "All damage ×2. Your life becomes 1.",
   "talent.steadyAim.desc": "Every 3rd shot is a guaranteed crit with ×1.5 crit multiplier. No random crits.",
   "talent.pandemic.desc": "Burning enemies spread their burns to enemies nearby when they die. Hit damage −30%.",
-  "talent.overload.desc": "Chains jump twice as many times. Chain retention −15 percentage points.",
+  "talent.overload.desc": "Chains jump twice as many times. Chain retention −20 percentage points.",
   "talent.searingCrits.desc": "Crits always ignite. Non-crit hit damage −50%.",
   "talent.flashpoint.desc": "Crits have +30% chance to ignite.",
   "talent.conduction.desc": "Chain jumps have +25% chance to ignite.",

@@ -68,8 +68,8 @@ export const ENEMIES = {
   boss: {
     id: 'boss',
     shape: 'octagon',
-    hpMult: 16,
-    speed: 60,
+    hpMult: 28,
+    speed: 45,
     radius: 70,
     contactDamage: 100,
     dropMult: 16,

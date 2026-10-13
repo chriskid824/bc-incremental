@@ -55,7 +55,9 @@ function node(id: string, spec: NodeSpec): TalentNode {
 /**
  * Price tiers (docs/GDD.md §4.2): a node costs talentBaseShards × talentGrowth^n × factor.
  * Bridge nodes override the factor (small 1.5, notables 6, searingCrits 8) so a build
- * finishes its own sector before the bridges, which stay a mid-game goal.
+ * finishes its own sector before the bridges, which stay a mid-game goal. The archetype
+ * keystones override it too (steadyAim and overload 3, pandemic 2.5): they carry most of their
+ * sector's late "more" damage, so they come about one sector node earlier than a factor of 4.
  */
 const NOTABLE = { kind: 'notable', shardCostFactor: 2, coreCost: 1 } as const;
 const NOTABLE_2 = { kind: 'notable', shardCostFactor: 3, coreCost: 2 } as const;
@@ -67,6 +69,7 @@ const inc = (stat: Modifier['stat'], value: number): Modifier => ({
   kind: 'increased',
   value,
 });
+const more = (stat: Modifier['stat'], value: number): Modifier => ({ stat, kind: 'more', value });
 const dmg = (value: number, tag?: 'crit' | 'burn' | 'chain'): Modifier =>
   tag === undefined
     ? { stat: 'damage', kind: 'increased', value }
@@ -92,12 +95,12 @@ export const TALENTS: readonly TalentNode[] = [
   }),
 
   // Generic twigs next to the start. Might's first rank fits in the first two or three runs;
-  // its ×1.35 price per rank keeps it a sink for spare shards, not the main engine.
+  // its ×1.4 price per rank keeps it a sink for spare shards, not the main engine.
   node('might', {
     kind: 'repeatable',
     pos: at(DOT_CHAIN, 120),
     links: ['start', 'glassCannon'],
-    repeat: { baseShards: 300, growth: 1.35 },
+    repeat: { baseShards: 300, growth: 1.4 },
     modifiers: [{ stat: 'damage', kind: 'more', value: 0.1 }],
     archetype: 'none',
   }),
@@ -162,7 +165,7 @@ export const TALENTS: readonly TalentNode[] = [
   node('deadlyAim', {
     pos: at(CRIT - 10, 600),
     links: ['precision', 'assassin'],
-    modifiers: [flat('critMultiplier', 1), flat('critChance', 0.1)],
+    modifiers: [flat('critMultiplier', 1.5)],
     archetype: 'crit',
   }),
   node('splitShot', {
@@ -174,21 +177,23 @@ export const TALENTS: readonly TalentNode[] = [
   node('assassin', {
     pos: at(CRIT - 10, 720),
     links: ['deadlyAim', 'steadyAim'],
-    modifiers: [moreDmg(0.6, 'crit')],
+    modifiers: [moreDmg(0.3, 'crit')],
     archetype: 'crit',
   }),
   node('volley', {
     ...NOTABLE_2,
     pos: at(CRIT + 10, 720),
     links: ['splitShot', 'steadyAim'],
-    modifiers: [flat('projectileCount', 2), inc('attackSpeed', 0.25)],
+    modifiers: [flat('projectileCount', 2)],
     archetype: 'crit',
   }),
   node('steadyAim', {
     ...KEYSTONE,
     pos: at(CRIT, 840),
     links: ['assassin', 'volley'],
-    modifiers: [moreDmg(0.8, 'crit')],
+    // The crit sector's last big multiplier lives here, not on assassin and volley (§4.2).
+    shardCostFactor: 3,
+    modifiers: [moreDmg(1.2, 'crit'), more('attackSpeed', 0.25)],
     rules: [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }],
     archetype: 'crit',
   }),
@@ -241,16 +246,17 @@ export const TALENTS: readonly TalentNode[] = [
     ...NOTABLE_2,
     pos: at(DOT + 10, 720),
     links: ['scorch', 'pandemic'],
-    modifiers: [flat('igniteChance', 0.25), flat('burnDamage', 0.5), moreDmg(0.3, 'burn')],
+    modifiers: [flat('igniteChance', 0.25), flat('burnDamage', 0.5)],
     archetype: 'dot',
   }),
   node('pandemic', {
     ...KEYSTONE,
     pos: at(DOT, 840),
     links: ['heat', 'wildfire'],
-    // Half the keystone price: it adds no damage of its own (hit damage −30%) until burns spread.
-    shardCostFactor: 2,
-    rules: [{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.25, hitMore: -0.3 }],
+    // Cheaper than the other keystones: it adds no damage of its own (hit damage −30%) until
+    // burns spread, and spreading needs a burn on the dying enemy.
+    shardCostFactor: 2.5,
+    rules: [{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 }],
     archetype: 'dot',
   }),
 
@@ -289,27 +295,30 @@ export const TALENTS: readonly TalentNode[] = [
   node('fork', {
     pos: at(CHAIN + 10, 600),
     links: ['arcStorm', 'tempest'],
-    modifiers: [flat('chainCount', 1)],
+    modifiers: [flat('chainCount', 0.6)],
     archetype: 'chain',
   }),
   node('voltage', {
     pos: at(CHAIN - 10, 720),
     links: ['reach', 'overload'],
-    modifiers: [dmg(0.4, 'chain'), moreDmg(0.4)],
+    modifiers: [dmg(0.4, 'chain')],
     archetype: 'chain',
   }),
   node('tempest', {
     ...NOTABLE_2,
     pos: at(CHAIN + 10, 720),
     links: ['fork', 'overload'],
-    modifiers: [flat('chainCount', 1), moreDmg(0.8)],
+    modifiers: [flat('chainCount', 0.6)],
     archetype: 'chain',
   }),
   node('overload', {
     ...KEYSTONE,
     pos: at(CHAIN, 840),
     links: ['voltage', 'tempest'],
-    rules: [{ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.15 }],
+    // ×4 damage pays for the retention penalty; the doubled jumps alone run away late (§9.1).
+    shardCostFactor: 3,
+    modifiers: [moreDmg(3)],
+    rules: [{ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2 }],
     archetype: 'chain',
   }),
 
