@@ -96,6 +96,10 @@ function validateWaves(data: GameData): string[] {
     if (!isNonNegativeInt(rule.maxCount)) {
       issues.push(`${at}: maxCount must be a non-negative integer (got ${rule.maxCount})`);
     }
+    const minCount = rule.minCount ?? 0;
+    if (!isNonNegativeInt(minCount) || minCount > rule.maxCount) {
+      issues.push(`${at}: minCount must be an integer in 0..maxCount (got ${rule.minCount})`);
+    }
   });
 
   for (const key of ['eliteEvery', 'bossEvery'] as const) {

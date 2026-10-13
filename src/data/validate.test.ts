@@ -329,6 +329,31 @@ describe('validateGameData: waves', () => {
     ]);
   });
 
+  it('rejects a minCount that is fractional or above maxCount', () => {
+    const issues = issuesAfter((d) => {
+      d.waves.rules[0] = {
+        enemy: 'triangle',
+        fromWave: 1,
+        base: 1,
+        perWave: 1,
+        minCount: 1.5,
+        maxCount: 5,
+      };
+      d.waves.rules[1] = {
+        enemy: 'square',
+        fromWave: 1,
+        base: 1,
+        perWave: 1,
+        minCount: 6,
+        maxCount: 5,
+      };
+    });
+    expect(issues).toEqual([
+      'waves.rules[0] (triangle): minCount must be an integer in 0..maxCount (got 1.5)',
+      'waves.rules[1] (square): minCount must be an integer in 0..maxCount (got 6)',
+    ]);
+  });
+
   it('rejects non-positive or fractional wave settings', () => {
     const issues = issuesAfter((d) => {
       d.waves.eliteEvery = 0;

@@ -20,7 +20,7 @@ export function composeWave(wave: number, table: WaveTable): WaveEntry[] {
     if (wave < rule.fromWave) continue;
     const count = Math.min(
       rule.maxCount,
-      Math.floor(rule.base + rule.perWave * (wave - rule.fromWave)),
+      Math.max(rule.minCount ?? 0, Math.floor(rule.base + rule.perWave * (wave - rule.fromWave))),
     );
     if (count > 0) entries.push({ enemy: rule.enemy, count });
   }

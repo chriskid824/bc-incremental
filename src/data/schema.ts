@@ -145,6 +145,7 @@ export const SpawnRuleSchema = exact<SpawnRule>()(
       fromWave: finite,
       base: finite,
       perWave: finite,
+      minCount: finite.exactOptional(),
       maxCount: finite,
     })
     .readonly(),

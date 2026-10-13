@@ -1,21 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { composeWave, isBossWave, isEliteWave } from './compose';
 import type { WaveEntry } from './compose';
-import type { EnemyId } from './types';
+import type { EnemyId, WaveTable } from './types';
 import { WAVES } from './waves';
 
 const countOf = (entries: readonly WaveEntry[], enemy: EnemyId): number =>
   entries.find((entry) => entry.enemy === enemy)?.count ?? 0;
 
 describe('composeWave', () => {
-  it('spawns only 20 triangles on wave 1', () => {
-    expect(composeWave(1, WAVES)).toEqual([{ enemy: 'triangle', count: 20 }]);
+  it('spawns only triangles on wave 1, at their minimum count', () => {
+    expect(composeWave(1, WAVES)).toEqual([{ enemy: 'triangle', count: 45 }]);
+  });
+
+  it('grows triangles past their minimum from wave 18', () => {
+    expect(countOf(composeWave(16, WAVES), 'triangle')).toBe(45);
+    expect(countOf(composeWave(17, WAVES), 'triangle')).toBe(45);
+    expect(countOf(composeWave(18, WAVES), 'triangle')).toBe(47);
   });
 
   it('adds squares from wave 3', () => {
     expect(countOf(composeWave(2, WAVES), 'square')).toBe(0);
     expect(composeWave(3, WAVES)).toEqual([
-      { enemy: 'triangle', count: 23 },
+      { enemy: 'triangle', count: 45 },
       { enemy: 'square', count: 8 },
     ]);
   });
@@ -41,6 +47,17 @@ describe('composeWave', () => {
       expect(countOf(entries, 'hexagon')).toBe(0);
       expect(entries.at(-1)).toEqual({ enemy: 'boss', count: 1 });
     }
+  });
+
+  it('floors a rule at its minCount until its growth passes it', () => {
+    const table: WaveTable = {
+      ...WAVES,
+      rules: [{ enemy: 'square', fromWave: 1, base: 10, perWave: 2, minCount: 15, maxCount: 30 }],
+    };
+    expect(countOf(composeWave(1, table), 'square')).toBe(15);
+    expect(countOf(composeWave(3, table), 'square')).toBe(15);
+    expect(countOf(composeWave(4, table), 'square')).toBe(16);
+    expect(countOf(composeWave(50, table), 'square')).toBe(30);
   });
 
   it('caps every rule at its maxCount on very high waves', () => {
