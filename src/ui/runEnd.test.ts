@@ -91,7 +91,7 @@ describe('describeRunEnd', () => {
     expect(text.tip).toMatch(/^Glass Cannon sets your life to 1/);
     expect(text.tip).toContain('damage and attack speed');
     // Respec is free, so dropping the keystone is the other lever.
-    expect(text.tip).toContain('refund it for free');
+    expect(text.tip).toContain('Refund all');
     expect(text.tip).not.toContain('Vitality');
   });
 
@@ -119,7 +119,7 @@ describe('describeRunEnd', () => {
       SPEEDS,
     );
     expect(text.lowerStart).toBe(
-      'This run did not clear its start wave 18, so it earned no skip bonus. ' +
+      'This run did not clear its start wave 18, so it earned no skip compensation. ' +
         'The next run starts lower on its own, at wave 12.',
     );
     // The usual advice still follows.

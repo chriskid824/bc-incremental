@@ -152,10 +152,10 @@
   "result.tip.fast": "{enemies} are fast and reach you before they die. Kill them sooner with damage and attack speed, or take more hits with Life nodes like {vitality}.",
   "result.tip.heavy": "One {enemy} hit takes {damage} of your {life} life. Kill it before it arrives with damage and attack speed, or raise your life with nodes like {vitality}.",
   "result.tip.swarm": "{enemies} kept getting through. Kill faster with damage and attack speed, or survive longer with Life nodes like {vitality}.",
-  "result.tip.glassCannon": "{glassCannon} sets your life to 1, so any enemy that reaches you ends the run. Kill faster with damage and attack speed, or refund it for free in the talent web.",
+  "result.tip.glassCannon": "{glassCannon} sets your life to 1, so any enemy that reaches you ends the run. Kill faster with damage and attack speed, or respec for free with \"Refund all\" in the talent web.",
   "hud.shardsRun": "Shards this run",
   "hud.coresRun": "Cores this run",
-  "hud.timeLeft": "Time limit {time}",
+  "hud.timeLeft": "Time left {time}",
   "hud.hintAuto": "Fighting is automatic — your choices happen between runs.",
   "toast.talentsQueued": "When this run ends, its results lead to the talent web",
   "intro.title": "How to play",
@@ -165,9 +165,10 @@
   "intro.start": "Start · Space",
   "build.critEveryNth": "Every {n} shots",
   "talents.priceGrowth": "Each talent you own raises the next one's price ×{growth} (repeatable talents don't count).",
-  "talents.startWaveAbove": "Your build should clear up to wave {reach}. A start wave it does not clear earns no skip bonus.",
+  "talents.startWaveAbove": "Your build should clear up to wave {reach}. A start wave it does not clear earns no skip compensation.",
   "talents.startWaveLoweredBuild": "Lowered automatically: your build should clear up to wave {reach}.",
   "talents.startWaveLoweredRun": "Lowered automatically: the last run did not clear its start wave.",
   "result.toTalentsHint": "Click to open the talent web",
-  "result.tip.lowerStart": "This run did not clear its start wave {wave}, so it earned no skip bonus. The next run starts lower on its own, at wave {next}."
+  "result.tip.lowerStart": "This run did not clear its start wave {wave}, so it earned no skip compensation. The next run starts lower on its own, at wave {next}.",
+  "talents.startWaveClimbing": "Lowered earlier: it rises again as your runs clear it."
 }

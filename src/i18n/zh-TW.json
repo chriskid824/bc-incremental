@@ -80,7 +80,7 @@
   "talents.title": "天賦網",
   "talents.help": "點發光的節點購買。拖曳平移，滾輪縮放。",
   "talents.startWave": "起始波次",
-  "talents.startWaveValue": "第 {wave} 波（最高 {max}）",
+  "talents.startWaveValue": "第 {wave} 波（最高 {max}）",
   "talents.refund": "全部退回（免費）",
   "talents.start": "開始下一局 · Space",
   "talents.build": "目前配置",
@@ -152,7 +152,7 @@
   "result.tip.fast": "{enemies}速度快，常在你打死它們之前就撞上來。用傷害和攻擊速度更快清掉它們，或點「{vitality}」這類生命節點多撐幾下。",
   "result.tip.heavy": "{enemy}撞一下就扣 {damage} 生命，你的生命上限是 {life}。用傷害和攻擊速度在它靠近前打死它，或點「{vitality}」這類生命節點撐過這一下。",
   "result.tip.swarm": "{enemies}一直衝到你身邊。用傷害和攻擊速度清得更快，或點「{vitality}」這類生命節點撐得更久。",
-  "result.tip.glassCannon": "「{glassCannon}」讓你的生命變成 1，任何敵人碰到你這局就結束。用傷害和攻擊速度清得更快，或到天賦網免費退回它。",
+  "result.tip.glassCannon": "「{glassCannon}」讓你的生命變成 1，任何敵人碰到你這局就結束。用傷害和攻擊速度清得更快，或到天賦網用「全部退回」免費洗點。",
   "hud.shardsRun": "本局碎片",
   "hud.coresRun": "本局核心",
   "hud.timeLeft": "時限倒數 {time}",
@@ -165,9 +165,10 @@
   "intro.start": "開始 · Space",
   "build.critEveryNth": "每 {n} 發一次",
   "talents.priceGrowth": "每點一個天賦，下一個的價格就 ×{growth}（可重複升級的天賦不算）。",
-  "talents.startWaveAbove": "目前配置應該能清到第 {reach} 波。清不掉起始波次就拿不到跳波補償。",
-  "talents.startWaveLoweredBuild": "已自動調降：目前配置應該能清到第 {reach} 波。",
+  "talents.startWaveAbove": "目前配置應該能清到第 {reach} 波。清不掉起始波次就拿不到跳波補償。",
+  "talents.startWaveLoweredBuild": "已自動調降：目前配置應該能清到第 {reach} 波。",
   "talents.startWaveLoweredRun": "已自動調降：上一局沒有清掉起始波次。",
   "result.toTalentsHint": "點擊開啟天賦網",
-  "result.tip.lowerStart": "這局沒有清掉起始的第 {wave} 波，所以沒有跳波補償。下一局會自動從比較低的第 {next} 波開始。"
+  "result.tip.lowerStart": "這局沒有清掉起始的第 {wave} 波，所以沒有跳波補償。下一局會自動從比較低的第 {next} 波開始。",
+  "talents.startWaveClimbing": "先前已自動調降：之後每局清掉起始波次，就會再往上調。"
 }

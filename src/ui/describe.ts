@@ -1,5 +1,7 @@
 /** Player-facing text for talent modifiers and build stats. */
 
+import { formatNum } from '../core/format';
+import { num } from '../core/num';
 import type { RuleSpec } from '../data/rules';
 import type { DamageTag, Modifier, StatBlock, StatId } from '../data/stats';
 import { DAMAGE_TAG_BIT } from '../data/stats';
@@ -78,7 +80,7 @@ export function describeBuild(stats: StatBlock, rules: readonly RuleSpec[] = [])
       ? t('build.critEveryNth', { n: fx.steadyAimEvery })
       : pct(Math.min(1, values.critChance));
   return [
-    { label: t('stat.damage.hit'), value: trim(hit) },
+    { label: t('stat.damage.hit'), value: formatNum(num(hit), { format: 'short' }) },
     { label: t('stat.attackSpeed'), value: `${trim(values.attackSpeed)}/s` },
     { label: t('stat.projectileCount'), value: trim(values.projectileCount) },
     { label: t('stat.critChance'), value: crit },

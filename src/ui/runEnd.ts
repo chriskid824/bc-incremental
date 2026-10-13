@@ -1,6 +1,6 @@
 /**
  * Wording of the result screen's "why the run ended" section: the cause, which enemies got
- * through, a note when the start wave was not cleared (no skip bonus, the next run starts
+ * through, a note when the start wave was not cleared (no skip compensation, the next run starts
  * lower), and on death one tip naming the two levers (kill faster, or survive longer), picked
  * from the run's contact damage. DOM-free so tests can run it.
  */
@@ -46,7 +46,7 @@ export interface RunEndText {
   readonly cause: string | null;
   /** How many enemies got through, for how much damage. */
   readonly leaks: string;
-  /** The start wave was not cleared: no skip bonus, and the next run starts lower. */
+  /** The start wave was not cleared: no skip compensation, and the next run starts lower. */
   readonly lowerStart: string | null;
   /** Death only: what to change before the next run. */
   readonly tip: string | null;
