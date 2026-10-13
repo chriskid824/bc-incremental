@@ -15,7 +15,13 @@ import {
 } from '../meta';
 import type { MetaState } from '../meta';
 import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
-import { FAILED_START_RATIO, RESULT_SCREEN_MS, Session, leadsToTalents } from './session';
+import {
+  FAILED_START_RATIO,
+  RESULT_FRAME_MAX_MS,
+  RESULT_SCREEN_MS,
+  Session,
+  leadsToTalents,
+} from './session';
 import type { ActiveRun, RunReport, SessionOptions } from './session';
 
 const data = loadGameData();
@@ -67,7 +73,7 @@ function nothingAffordable(session: Session, meta: MetaState): void {
   (session.report as { affordable: boolean }).affordable = false;
 }
 
-/** Frames of 20 ms. */
+/** Frames of 20 ms, well under RESULT_FRAME_MAX_MS. */
 function waitMs(session: Session, ms: number): void {
   for (let elapsed = 0; elapsed < ms; elapsed += 20) session.update(20);
 }
@@ -125,6 +131,21 @@ describe('Session', () => {
     // The highest allowed wave, unless the build does not clear it.
     const allowed = allowedStartWave(meta, DEFAULT_ECONOMY);
     expect(session.run.config.startWave).toBe(highestClearedStartWave(meta, data, allowed));
+  });
+
+  it('holds the countdown while paused and never skips it in one long frame', () => {
+    const { session, meta } = createSession();
+    session.start();
+    playRun(session);
+    nothingAffordable(session, meta);
+    // The first frame after a hidden tab spans all the time it was hidden.
+    session.update(60_000);
+    expect(session.phase).toBe('results');
+    expect(session.resultTimeLeftMs).toBe(RESULT_SCREEN_MS - RESULT_FRAME_MAX_MS);
+    for (let i = 0; i < 1000; i++) session.update(16, true);
+    expect(session.resultTimeLeftMs).toBe(RESULT_SCREEN_MS - RESULT_FRAME_MAX_MS);
+    waitMs(session, RESULT_SCREEN_MS);
+    expect(session.phase).toBe('running');
   });
 
   it('waits on the result screen and leads to the talent web when something is affordable', () => {

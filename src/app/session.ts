@@ -28,7 +28,13 @@ import { NO_INPUT, createSimulation } from '../sim';
 import type { RunConfig, RunResult, SimEvent, Simulation } from '../sim';
 
 /** How long the result screen stays up before the next run starts (a click skips it). */
-export const RESULT_SCREEN_MS = 3000;
+export const RESULT_SCREEN_MS = 6000;
+
+/**
+ * The countdown takes at most this much of one frame, so the first frame after a hidden tab
+ * (where the browser stops drawing frames) does not skip the result screen.
+ */
+export const RESULT_FRAME_MAX_MS = 100;
 
 /** Seeds derive from the run counter so a fresh profile replays the same runs. */
 const SEED_BASE = 1000;
@@ -249,10 +255,13 @@ export class Session {
     return events;
   }
 
-  /** Counts down the result screen by wall-clock time while it counts down at all. */
-  update(frameMs: number): void {
-    if (this.resultTimeLeftMs <= 0) return;
-    this.resultMsLeft -= frameMs;
+  /**
+   * Counts down the result screen by wall-clock time while it counts down at all. `paused`
+   * holds it (the pointer is on the result card, or the page is hidden).
+   */
+  update(frameMs: number, paused = false): void {
+    if (this.resultTimeLeftMs <= 0 || paused) return;
+    this.resultMsLeft -= Math.min(Math.max(0, frameMs), RESULT_FRAME_MAX_MS);
     if (this.resultMsLeft <= 0) this.nextRun();
   }
 

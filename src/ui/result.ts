@@ -51,6 +51,7 @@ export class ResultPanel {
 
   private readonly actions: HTMLElement;
   private readonly talentsButton: HTMLButtonElement;
+  private pointerOnCard = false;
 
   constructor(
     private readonly doc: Document,
@@ -75,6 +76,17 @@ export class ResultPanel {
     this.actions.append(this.talentsButton, nextButton);
     this.root.append(this.card);
     this.root.addEventListener('click', () => handlers.continue());
+    this.card.addEventListener('pointerenter', () => {
+      this.pointerOnCard = true;
+    });
+    this.card.addEventListener('pointerleave', () => {
+      this.pointerOnCard = false;
+    });
+  }
+
+  /** The pointer is on the card: the player is reading it, so the countdown holds. */
+  get hovered(): boolean {
+    return !this.root.hidden && this.pointerOnCard;
   }
 
   show(info: ResultInfo): void {

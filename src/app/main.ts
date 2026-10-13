@@ -212,7 +212,8 @@ async function main(root: HTMLElement): Promise<void> {
       step: () => renderer.handleEvents(session.step()),
       frame: (alpha, elapsedMs, speed) => {
         if (document.visibilityState === 'visible') profile.playSeconds += elapsedMs / 1000;
-        session.update(elapsedMs);
+        // The countdown holds while the result card is read or the page is hidden.
+        session.update(elapsedMs, results.hovered || document.visibilityState === 'hidden');
         if (session.phase !== 'running' && performance.now() - lastSaveMs > AUTOSAVE_MS) save();
         const run = session.currentRun;
         if (run === null) return;
