@@ -105,7 +105,8 @@ export function keepClear(
 ): Point {
   const cx = Math.min(Math.max(x, halfW + EDGE), area.width - halfW - EDGE);
   let cy = y;
-  for (const zone of area.zones) {
+  for (let i = 0; i < area.zones.length; i++) {
+    const zone = area.zones[i] as Zone;
     if (cx + halfW <= zone.left || cx - halfW >= zone.right) continue;
     const top = cy - rise - halfH;
     const bottom = cy + halfH;
@@ -130,12 +131,17 @@ export interface NumberBox {
 }
 
 /**
- * Offsets tried for a new number, in box widths and heights (x, y pairs): in place, above,
- * below, two above, then to either side.
+ * Offsets tried for a new number (x, y pairs): in place, above, below, two above, then to
+ * either side. y is in box heights; x is in box widths plus the side gap (GAP_X).
  */
 const CANDIDATES = [0, 0, 0, -1, 0, 1, 0, -2, 1, 0, -1, 0] as const;
-/** Boxes may overlap by this fraction of their size before they count as covering each other. */
-const SLACK = 0.15;
+/** Stacked rows may overlap by this fraction of their heights (outlines may touch). */
+const SLACK_Y = 0.15;
+/**
+ * Side by side, two numbers need a gap of this fraction of their summed half heights (about a
+ * fifth of their height) on top of their outlines, or they read as one ("84.384.3").
+ */
+export const GAP_X = 0.25;
 
 function overlaps(
   x: number,
@@ -149,8 +155,8 @@ function overlaps(
     for (let i = 0; i < boxes.length; i++) {
       const b = boxes[i] as NumberBox;
       if (!b.solid) continue;
-      const reachX = (halfW + b.halfW) * (1 - SLACK);
-      const reachY = (halfH + b.halfH) * (1 - SLACK);
+      const reachX = halfW + b.halfW + GAP_X * (halfH + b.halfH);
+      const reachY = (halfH + b.halfH) * (1 - SLACK_Y);
       if (Math.abs(b.x - x) < reachX && Math.abs(b.y - y) < reachY) return true;
     }
   }
@@ -174,8 +180,10 @@ export function findSpot(
 ): boolean {
   let firstX = x;
   let firstY = y;
+  // A step to the side clears a neighbor of the same size, gap included, with a little to spare.
+  const stepX = (halfW + GAP_X * halfH) * 2.2;
   for (let i = 0; i < CANDIDATES.length; i += 2) {
-    const cx = x + (CANDIDATES[i] as number) * halfW * 2;
+    const cx = x + (CANDIDATES[i] as number) * stepX;
     const cy = y + (CANDIDATES[i + 1] as number) * halfH * 2;
     keepClear(out, area, cx, cy, halfW, halfH, rise);
     if (i === 0) {

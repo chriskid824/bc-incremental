@@ -345,11 +345,6 @@ export class DamageNumbers {
     return style === 'crit' ? 'big' : 'shown';
   }
 
-  /** Live numbers on screen, big crit pops included. */
-  get count(): number {
-    return this.normal.live.length + this.crits.live.length;
-  }
-
   clear(): void {
     this.normal.clear();
     this.crits.clear();

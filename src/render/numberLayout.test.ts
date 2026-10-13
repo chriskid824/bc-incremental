@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findSpot,
+  GAP_X,
   halfHeight,
   halfWidth,
   hudSafeArea,
@@ -135,6 +136,25 @@ describe('findSpot', () => {
       Math.abs(out.x - b.x) >= (halfW + b.halfW) * 0.85 ||
       Math.abs(out.y - b.y) >= (halfH + b.halfH) * 0.85;
     expect(apart).toBe(true);
+  });
+
+  it('never sets two numbers flush side by side, where they would read as one', () => {
+    // A number right against another one's side counts as covering it: this one moves up.
+    const flush: NumberBox[] = [{ x: 500 + halfW * 2, y: 500, halfW, halfH, solid: true }];
+    expect(findSpot(out, area, [flush], 500, 500, halfW, halfH, 40)).toBe(true);
+    expect(out.x).toBe(500);
+    expect(out.y).toBeLessThan(500);
+    // With the rows above and below taken, the side step leaves a visible gap.
+    const column: NumberBox[] = [-2, -1, 0, 1].map((row) => ({
+      x: 500,
+      y: 500 + row * halfH * 2,
+      halfW,
+      halfH,
+      solid: true,
+    }));
+    expect(findSpot(out, area, [column], 500, 500, halfW, halfH, 40)).toBe(true);
+    expect(out.y).toBe(500);
+    expect(Math.abs(out.x - 500) - halfW * 2).toBeGreaterThanOrEqual(GAP_X * halfH * 2);
   });
 
   it('may cover a number that has mostly faded out', () => {
