@@ -61,6 +61,87 @@ export function sectorKeystone(data: GameData, sector: Sector): TalentNode {
   return node;
 }
 
+/**
+ * Breadth-first search over talent links from `from` (in link order, so ties go to the
+ * first-listed link). Returns each reached node's predecessor; the `from` nodes map to null.
+ */
+function searchFrom(data: GameData, from: readonly string[]): Map<string, string | null> {
+  const byId = new Map(data.talents.map((node) => [node.id, node]));
+  const previous = new Map<string, string | null>(from.map((id) => [id, null]));
+  const queue = [...from];
+  for (let i = 0; i < queue.length; i++) {
+    const id = queue[i] as string;
+    for (const next of byId.get(id)?.links ?? []) {
+      if (previous.has(next)) continue;
+      previous.set(next, id);
+      queue.push(next);
+    }
+  }
+  return previous;
+}
+
+/**
+ * The sector's spine up to and including its first notable, i.e. what a player of that
+ * archetype buys first (keenEye, sharpen, quickDraw, precision for crit): every sector node no
+ * farther from the start than the sector's nearest notable.
+ */
+export function sectorSpine(data: GameData, sector: Sector): string[] {
+  const start = data.talents.find((node) => node.kind === 'start');
+  if (start === undefined) throw new Error('The talent web has no start node');
+  const previous = searchFrom(data, [start.id]);
+  const depth = (id: string): number => {
+    let steps = 0;
+    for (let at = previous.get(id); at !== null && at !== undefined; at = previous.get(at)) {
+      steps++;
+    }
+    return previous.has(id) ? steps : Infinity;
+  };
+  const own = data.talents.filter((node) => node.archetype === sector);
+  const notable = Math.min(...own.filter((n) => n.kind === 'notable').map((n) => depth(n.id)));
+  return own.filter((n) => n.kind !== 'keystone' && depth(n.id) <= notable).map((n) => n.id);
+}
+
+/** Node ids on a shortest link path from any of `from` to `to`, `to` included, `from` not. */
+export function shortestPath(data: GameData, from: readonly string[], to: string): string[] {
+  const previous = searchFrom(data, from);
+  if (!previous.has(to)) throw new Error(`No path to ${to}`);
+  const path: string[] = [];
+  let at: string | null | undefined = to;
+  while (at !== null && at !== undefined && !from.includes(at)) {
+    path.unshift(at);
+    at = previous.get(at);
+  }
+  return path;
+}
+
+/**
+ * A player of `sector` who buys the sector's spine (sectorSpine) and then the shortest path
+ * into `keystone`, usually another sector's keystone, with the generic small nodes and `might`
+ * ranks as in sectorBuild. About as many nodes as the full sector plus its own keystone.
+ */
+export function beelineBuild(
+  data: GameData,
+  sector: Sector,
+  keystone: string,
+  might: number,
+): MetaState {
+  const meta = sectorBuild(data, sector, { keystone: false, might });
+  for (const node of data.talents) {
+    if (node.archetype === sector) meta.allocated.delete(node.id);
+  }
+  const spine = sectorSpine(data, sector);
+  for (const id of [...spine, ...shortestPath(data, spine, keystone)]) {
+    // The start node is always owned; a path may run through it.
+    if (data.talents.find((node) => node.id === id)?.kind !== 'start') meta.allocated.add(id);
+  }
+  return meta;
+}
+
+/** Talent nodes a build allocated, repeatable ranks not counted. */
+export function allocatedNodes(meta: Readonly<MetaState>, data: GameData): number {
+  return data.talents.filter((node) => !isRepeatable(node) && meta.allocated.has(node.id)).length;
+}
+
 export interface RunReach {
   /** Highest wave the run reached. */
   readonly wave: number;

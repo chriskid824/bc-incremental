@@ -5,19 +5,33 @@
  * measured on every sector too; it is meant to stay a gamble (life 1).
  *
  *   npx tsx tools/balance/keystones.ts [--seeds 16] [--start-wave 8] [--might 0-30:5]
- *     [--sectors crit,dot,chain] [--no-glass]
+ *     [--sectors crit,dot,chain] [--no-glass] [--beelines]
  *
  * Gain is median(with keystone) − median(without) over the seeds, as the round-2 judge
  * measured it; "paired" is the mean of the per-seed differences and "worst" the lowest one.
  * The summary checks the round-3 target for the archetype keystones: +4 to +6 waves at
  * Might 0 and 15, and never negative at any measured Might level.
+ *
+ * --beelines adds the keystone identity table: for each archetype, its full sector plus its
+ * own keystone next to a build that buys only the sector's spine and then the shortest path
+ * into each other archetype keystone (tools/balance/builds.ts beelineBuild), about as many
+ * nodes. A foreign keystone far ahead of the own one means that keystone is the better pick
+ * for this archetype too, which is not what a keystone of another archetype should be.
  */
 
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadGameData } from '../../src/data';
 import type { GameData } from '../../src/data';
-import { isSector, runFrom, SECTORS, sectorBuild, sectorKeystone } from './builds';
+import {
+  allocatedNodes,
+  beelineBuild,
+  isSector,
+  runFrom,
+  SECTORS,
+  sectorBuild,
+  sectorKeystone,
+} from './builds';
 import type { Sector } from './builds';
 import { median } from './probe';
 import { formatTable } from './report';
@@ -167,6 +181,66 @@ export function formatKeystoneChecks(checks: readonly KeystoneCheck[]): string {
   ]);
 }
 
+/** One archetype at one Might level: own sector + keystone vs beelines into the others. */
+export interface BeelineValue {
+  readonly sector: Sector;
+  readonly might: number;
+  /** Highest wave per seed of the full sector plus its own keystone. */
+  readonly own: readonly number[];
+  readonly ownNodes: number;
+  readonly beelines: readonly {
+    readonly keystone: string;
+    readonly nodes: number;
+    readonly waves: readonly number[];
+  }[];
+}
+
+/** Runs each sector's own build and its beeline into every other sector's keystone. */
+export function measureBeelines(
+  data: GameData,
+  options: Omit<KeystoneProbeOptions, 'gamble'>,
+): BeelineValue[] {
+  const values: BeelineValue[] = [];
+  const waves = (meta: ReturnType<typeof sectorBuild>): number[] =>
+    options.seeds.map((seed) => runFrom(meta, data, options.startWave, seed).wave);
+  for (const sector of options.sectors) {
+    for (const might of options.might) {
+      const own = sectorBuild(data, sector, { keystone: true, might });
+      const beelines = SECTORS.filter((other) => other !== sector).map((other) => {
+        const keystone = sectorKeystone(data, other).id;
+        const meta = beelineBuild(data, sector, keystone, might);
+        return { keystone, nodes: allocatedNodes(meta, data), waves: waves(meta) };
+      });
+      values.push({
+        sector,
+        might,
+        own: waves(own),
+        ownNodes: allocatedNodes(own, data),
+        beelines,
+      });
+    }
+  }
+  return values;
+}
+
+/** median(own) − the best median of the beelines. */
+export const ownMargin = (value: BeelineValue): number =>
+  median(value.own) - Math.max(...value.beelines.map((beeline) => median(beeline.waves)));
+
+export function beelineReport(values: readonly BeelineValue[]): string {
+  const rows: string[][] = [['sector', 'might', 'own (nodes)', 'beelines (nodes)', 'own − best']];
+  for (const value of values) {
+    rows.push([
+      value.sector,
+      String(value.might),
+      `${show(median(value.own))} (${value.ownNodes})`,
+      value.beelines.map((b) => `${b.keystone} ${show(median(b.waves))} (${b.nodes})`).join(', '),
+      signed(ownMargin(value)),
+    ]);
+  }
+  return formatTable(rows);
+}
+
 /** "0,15", "0-30" or "0-30:5" (inclusive range with a step). */
 export function parseLevels(text: string): number[] {
   const levels: number[] = [];
@@ -195,6 +269,7 @@ function main(): void {
       might: { type: 'string', default: '0-30:5' },
       sectors: { type: 'string', default: SECTORS.join(',') },
       'no-glass': { type: 'boolean', default: false },
+      beelines: { type: 'boolean', default: false },
     },
   });
   const seedCount = Number(values.seeds);
@@ -225,6 +300,13 @@ function main(): void {
       `${TARGET_GAIN.atMight.join(' and ')}, never negative`,
   );
   console.log(formatKeystoneChecks(keystoneChecks(results)));
+  if (values.beelines) {
+    console.log(
+      '\nKeystone identity: full sector + own keystone vs the sector spine + the shortest ' +
+        'path into another archetype keystone (highest wave, median)\n',
+    );
+    console.log(beelineReport(measureBeelines(loadGameData(), options)));
+  }
   console.log(`\nWall time ${((performance.now() - started) / 1000).toFixed(1)} s`);
 }
 

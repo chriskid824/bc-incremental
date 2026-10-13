@@ -1,18 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import { loadGameData } from '../../src/data';
 import { collectRules } from '../../src/meta';
-import { isSector, runFrom, sectorBuild, sectorKeystone } from './builds';
 import {
+  allocatedNodes,
+  beelineBuild,
+  isSector,
+  runFrom,
+  sectorBuild,
+  sectorKeystone,
+  sectorSpine,
+  shortestPath,
+} from './builds';
+import {
+  beelineReport,
   GAMBLE_KEYSTONE,
   keystoneChecks,
   keystoneReport,
+  measureBeelines,
   measureKeystones,
   medianGain,
+  ownMargin,
   pairedGain,
   parseLevels,
   worstGain,
 } from './keystones';
-import type { KeystoneValue } from './keystones';
+import type { BeelineValue, KeystoneValue } from './keystones';
 
 const data = loadGameData();
 
@@ -53,6 +65,40 @@ describe('sectorBuild', () => {
       'overload',
     ]);
     expect(isSector('hybrid')).toBe(false);
+  });
+});
+
+describe('beelineBuild', () => {
+  it('finds each sector spine up to its first notable', () => {
+    expect(sectorSpine(data, 'crit')).toEqual(['keenEye', 'sharpen', 'quickDraw', 'precision']);
+    expect(sectorSpine(data, 'dot')).toEqual(['kindling', 'fuel', 'slowBurn', 'inferno']);
+    expect(sectorSpine(data, 'chain')).toEqual(['spark', 'conductor', 'charge', 'arcStorm']);
+  });
+
+  it('takes the shortest link path, through a bridge rather than the start', () => {
+    expect(shortestPath(data, sectorSpine(data, 'dot'), 'overload')).toEqual([
+      'staticHeat',
+      'charge',
+      'arcStorm',
+      'reach',
+      'voltage',
+      'overload',
+    ]);
+    expect(shortestPath(data, ['keenEye'], 'kindling')).toEqual(['start', 'kindling']);
+    expect(() => shortestPath(data, ['keenEye'], 'nowhere')).toThrow();
+  });
+
+  it('buys the spine and the path instead of the rest of the sector', () => {
+    const meta = beelineBuild(data, 'crit', 'overload', 3);
+    expect(meta.allocated.has('precision')).toBe(true);
+    expect(meta.allocated.has('stormEye')).toBe(true);
+    expect(meta.allocated.has('overload')).toBe(true);
+    expect(meta.allocated.has('deadlyAim')).toBe(false);
+    expect(meta.allocated.has('steadyAim')).toBe(false);
+    expect(meta.allocated.has('swiftness')).toBe(true);
+    expect(meta.ranks.get('might')).toBe(3);
+    const own = sectorBuild(data, 'crit', { keystone: true, might: 3 });
+    expect(allocatedNodes(meta, data)).toBe(allocatedNodes(own, data) + 1);
   });
 });
 
@@ -107,5 +153,34 @@ describe('keystone gains', () => {
     expect(values.map((v) => v.keystone)).toEqual(['steadyAim', GAMBLE_KEYSTONE]);
     expect(values[1]?.without).toBe(values[0]?.without);
     expect(keystoneReport(values)).toMatch(/\ncrit\s+steadyAim\s+0\s/);
+  });
+});
+
+describe('keystone identity', () => {
+  const beeline = (own: number[], ...others: number[][]): BeelineValue => ({
+    sector: 'dot',
+    might: 0,
+    own,
+    ownNodes: 13,
+    beelines: others.map((waves, i) => ({ keystone: `k${i}`, nodes: 14, waves })),
+  });
+
+  it('compares the own keystone with the best beeline', () => {
+    expect(ownMargin(beeline([21, 21, 22], [20, 20, 20], [23, 24, 24]))).toBe(-3);
+    expect(ownMargin(beeline([25], [20], [22]))).toBe(3);
+  });
+
+  it('measures the own build and a beeline into each other keystone', () => {
+    const values = measureBeelines(data, {
+      seeds: [1],
+      startWave: 8,
+      might: [0],
+      sectors: ['chain'],
+    });
+    expect(values).toHaveLength(1);
+    expect(values[0]?.beelines.map((b) => b.keystone)).toEqual(['steadyAim', 'pandemic']);
+    expect(values[0]?.ownNodes).toBe(13);
+    expect(values[0]?.beelines.map((b) => b.nodes)).toEqual([14, 14]);
+    expect(beelineReport(values)).toMatch(/\nchain\s+0\s+\d+ \(13\)\s+steadyAim \d+ \(14\)/);
   });
 });
