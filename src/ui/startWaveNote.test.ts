@@ -8,7 +8,7 @@ describe('startWaveNote', () => {
   it('warns when the start wave is above what the build clears', () => {
     expect(startWaveNote({ startWave: 15, reach: 12, lowering: null })).toEqual({
       warn: true,
-      text: 'Your build should clear up to wave 12. A start wave it does not clear earns no skip bonus.',
+      text: 'Your build should clear up to wave 12. A start wave it does not clear earns no skip compensation.',
     });
   });
 
@@ -21,9 +21,14 @@ describe('startWaveNote', () => {
       warn: false,
       text: 'Lowered automatically: the last run did not clear its start wave.',
     });
+    expect(startWaveNote({ startWave: 9, reach: 12, lowering: 'climbing' })).toEqual({
+      warn: false,
+      text: 'Lowered earlier: it rises again as your runs clear it.',
+    });
     setLocale('zh-TW');
     expect(startWaveNote({ startWave: 12, reach: 12, lowering: 'build' })?.text).toBe(
-      '已自動調降：目前配置應該能清到第 12 波。',
+      // Non-breaking spaces keep the wave number on one line in the narrow card.
+      '已自動調降：目前配置應該能清到第\u00a012\u00a0波。',
     );
   });
 

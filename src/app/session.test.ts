@@ -495,6 +495,8 @@ describe('Session start wave', () => {
       }
       if (++guard > 20) throw new Error('never cleared a start wave');
     }
+    // Once a run clears its start wave, a failed run is no longer given as the reason.
+    expect(session.startWaveLowering).not.toBe('failedRun');
 
     // A much stronger build clears its start wave and the start wave climbs back.
     giveStrongBuild(meta, 20);

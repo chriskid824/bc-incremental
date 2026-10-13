@@ -50,7 +50,9 @@ export type StartWaveLowering =
   /** The talents do not clear it (after a respec, on load, or after talents changed). */
   | 'build'
   /** The last run did not clear its start wave. */
-  | 'failedRun';
+  | 'failedRun'
+  /** Lowered earlier; it rises again as runs clear it. */
+  | 'climbing';
 
 export interface ActiveRun {
   /** 1-based. */
@@ -437,6 +439,8 @@ export class Session {
           : Infinity;
       const frontier = Math.floor(result.highestWaveReached * this.economy.startWaveRatio);
       this.raiseLowered(Math.min(ceiling, Math.max(this.startWave, frontier)));
+      // This run cleared its start wave, so a failed run is no longer the reason.
+      if (this.loweredBy === 'failedRun') this.loweredBy = 'climbing';
     }
   }
 

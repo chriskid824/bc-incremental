@@ -10,7 +10,7 @@ export interface StartWaveFacts {
   /** Highest start wave the build clears (src/meta/startWave.ts); null while not measured. */
   readonly reach: number | null;
   /** Why the start wave sits below the player's pick, if it does. */
-  readonly lowering: 'build' | 'failedRun' | null;
+  readonly lowering: 'build' | 'failedRun' | 'climbing' | null;
 }
 
 export interface StartWaveNote {
@@ -28,5 +28,6 @@ export function startWaveNote(facts: StartWaveFacts): StartWaveNote | null {
     return { warn: false, text: t('talents.startWaveLoweredBuild', { reach }) };
   }
   if (lowering === 'failedRun') return { warn: false, text: t('talents.startWaveLoweredRun') };
+  if (lowering === 'climbing') return { warn: false, text: t('talents.startWaveClimbing') };
   return null;
 }
