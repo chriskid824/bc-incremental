@@ -42,11 +42,16 @@ const ratio = (value: number): string => (Number.isFinite(value) ? value.toFixed
 const pct = (part: number, whole: number): string =>
   whole > 0 ? `${Math.round((100 * part) / whole)}% (${part}/${whole})` : '-';
 
-/** Elites and bosses near the run's frontier: killed / (killed + reached the player). */
+/**
+ * Elites and bosses near the run's frontier, by outcome. Two rates come from it: killed ÷
+ * (killed + reached the player), which T7 checks because a tough enemy that reaches the player
+ * is what the target is about, and killed ÷ all of them, which also counts the ones still alive
+ * when the swarm ended the run.
+ */
 export interface NearFrontierRate {
   readonly killed: number;
   readonly reached: number;
-  /** Still alive when the run ended; not part of the rate. */
+  /** Still alive when the run ended (usually the swarm killed the player first). */
   readonly alive: number;
   readonly killSeconds: readonly number[];
 }
@@ -173,7 +178,15 @@ export function probeReport(
 
   // Elites and bosses near the frontier.
   const tough: string[][] = [
-    ['strategy', 'elites killed', 'bosses killed', 'boss kill s', 'alive at end e/b'],
+    [
+      'strategy',
+      'elites killed',
+      'bosses killed',
+      'elites of all',
+      'bosses of all',
+      'boss kill s',
+      'alive at end e/b',
+    ],
   ];
   for (const strategy of strategies) {
     const targets = of(all, strategy).flatMap((result) => result.toughTargets ?? []);
@@ -183,6 +196,8 @@ export function probeReport(
       strategy,
       pct(elites.killed, elites.killed + elites.reached),
       pct(bosses.killed, bosses.killed + bosses.reached),
+      pct(elites.killed, elites.killed + elites.reached + elites.alive),
+      pct(bosses.killed, bosses.killed + bosses.reached + bosses.alive),
       show(median(bosses.killSeconds)),
       `${elites.alive}/${bosses.alive}`,
     ]);
@@ -190,7 +205,8 @@ export function probeReport(
   out.push(
     '',
     `Elites and bosses within ±${NEAR_FRONTIER_WAVES} waves of the run's frontier ` +
-      '(maxWave when the run started): killed ÷ (killed + reached the player)',
+      '(maxWave when the run started). "killed": killed ÷ (killed + reached the player); ' +
+      '"of all" also counts the ones still alive at run end',
   );
   out.push(formatTable(tough));
 
@@ -386,7 +402,7 @@ export function probeChecks(
     });
     checks.push({
       id: 'T7',
-      label: `elites / bosses near the frontier killed ≥ 50%`,
+      label: `elites / bosses near the frontier killed ≥ 50% of those killed or reaching you`,
       value: rates.map((r) => `${pctOf(r.elites)}/${pctOf(r.bosses)}`).join(' · '),
       pass: rates.every((r) => r.elites >= 0.5 && r.bosses >= 0.5),
     });
