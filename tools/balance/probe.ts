@@ -6,10 +6,15 @@
  * then pass/FAIL for each round-2 target (probeChecks).
  *
  *   npx tsx tools/balance/probe.ts [--seeds 1,2,3] [--sessions 12] [--minutes 60]
- *     [--strategy crit-greedy,dot-greedy,chain-greedy | all] [--workers 4]
+ *     [--strategy crit-greedy,dot-greedy,chain-greedy | all] [--workers 4] [--json <file>]
+ *
+ * --json also writes the numbers (probeSummary) to a file, which tools/balance/probeDiff.ts
+ * compares with an earlier one.
  */
 
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
+import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { DEFAULT_ECONOMY } from '../../src/meta';
@@ -442,6 +447,135 @@ export function formatChecks(checks: readonly ProbeCheck[]): string {
   ]);
 }
 
+/** A median pooled over every seed's sessions, and the median of each seed in seed order. */
+export interface SeedMedians {
+  readonly pooled: number;
+  readonly perSeed: readonly number[];
+}
+
+/** One strategy's numbers behind the probeReport tables. */
+export interface StrategySummary {
+  /** Median maxWave at each FRONTIER_MINUTES, keyed `F@<minutes>`. */
+  readonly frontier: Readonly<Record<string, SeedMedians>>;
+  /** Median minutes to each PARITY_WAVES wave (∞ when a session never gets there), by wave. */
+  readonly minutesToWave: Readonly<Record<string, SeedMedians>>;
+  readonly firstNotableMinutes: number;
+  readonly firstKeystoneMinutes: number;
+  readonly firstRepeatableRun: number;
+  readonly elites: Omit<NearFrontierRate, 'killSeconds'>;
+  readonly bosses: Omit<NearFrontierRate, 'killSeconds'>;
+  readonly bossKillSeconds: number;
+  /** Medians over the builds playing at MULTIPLIER_MINUTES. */
+  readonly multipliers: {
+    readonly ranks: number;
+    readonly repeatableMultD: number;
+    readonly sectorMultD: number;
+    readonly sectorMultAttack: number;
+    readonly sectorMultCrowd: number;
+  };
+  readonly overkill: {
+    readonly maxShare: number;
+    readonly runsOver: number;
+    readonly runs: number;
+  };
+}
+
+/** What `--json` writes: the run parameters, every strategy's numbers and the checks. */
+export interface ProbeSummary {
+  readonly seeds: readonly number[];
+  readonly sessions: number;
+  readonly minutes: number;
+  readonly strategies: Readonly<Partial<Record<StrategyId, StrategySummary>>>;
+  readonly checks: readonly ProbeCheck[];
+}
+
+const outcomes = ({ killed, reached, alive }: NearFrontierRate) => ({ killed, reached, alive });
+
+/** The probe's numbers unformatted, for tools/balance/probeDiff.ts. */
+export function probeSummary(
+  bySeed: ReadonlyMap<number, readonly SessionResult[]>,
+  strategies: readonly StrategyId[],
+  repeatableIds: ReadonlySet<string>,
+  run: { readonly sessions: number; readonly minutes: number },
+): ProbeSummary {
+  const seeds = [...bySeed.keys()];
+  const all = [...bySeed.values()].flat();
+  const of = (results: readonly SessionResult[], strategy: StrategyId): SessionResult[] =>
+    results.filter((result) => result.strategy === strategy);
+  const perStrategy: Partial<Record<StrategyId, StrategySummary>> = {};
+  for (const strategy of strategies) {
+    const sessions = of(all, strategy);
+    const medians = (measure: (results: readonly SessionResult[]) => number): SeedMedians => ({
+      pooled: measure(sessions),
+      perSeed: seeds.map((seed) => measure(of(bySeed.get(seed) ?? [], strategy))),
+    });
+    const frontier: Record<string, SeedMedians> = {};
+    for (const minutes of FRONTIER_MINUTES) {
+      frontier[`F@${minutes}`] = medians((results) => frontierAt(results, minutes));
+    }
+    const minutesToWave: Record<string, SeedMedians> = {};
+    for (const wave of PARITY_WAVES) {
+      minutesToWave[wave] = medians((results) => medianMinutesToWave(results, wave));
+    }
+    const minutes = (pick: (result: SessionResult) => number | null): number =>
+      median(sessions.map((result) => pick(result) ?? Infinity));
+    const targets = sessions.flatMap((result) => result.toughTargets ?? []);
+    const bosses = nearFrontierRate(targets, 'boss');
+    const rows = sessions
+      .map((result) => rowAt(result, MULTIPLIER_MINUTES))
+      .filter((row): row is RunRow => row !== null);
+    const med = (pick: (row: RunRow) => number): number => median(rows.map(pick));
+    const shares = sessions.flatMap((result) => result.rows.map((row) => row.overkillShare));
+    perStrategy[strategy] = {
+      frontier,
+      minutesToWave,
+      firstNotableMinutes: minutes((result) => result.firstNotableMinutes),
+      firstKeystoneMinutes: minutes((result) => result.firstKeystoneMinutes),
+      firstRepeatableRun: median(
+        sessions.map((result) => firstRepeatableRun(result, repeatableIds) ?? Infinity),
+      ),
+      elites: outcomes(nearFrontierRate(targets, 'hexagon')),
+      bosses: outcomes(bosses),
+      bossKillSeconds: median(bosses.killSeconds),
+      multipliers: {
+        ranks: med((row) => row.repeatableRanks),
+        repeatableMultD: med((row) => row.repeatableMultD),
+        sectorMultD: med((row) => row.sectorMultD),
+        sectorMultAttack: med((row) => row.sectorMultAttack),
+        sectorMultCrowd: med((row) => row.sectorMultCrowd),
+      },
+      overkill: {
+        maxShare: Math.max(0, ...shares),
+        runsOver: shares.filter((share) => share > OVERKILL_LIMIT).length,
+        runs: shares.length,
+      },
+    };
+  }
+  return {
+    seeds,
+    sessions: run.sessions,
+    minutes: run.minutes,
+    strategies: perStrategy,
+    checks: probeChecks(bySeed, strategies, repeatableIds),
+  };
+}
+
+const NON_FINITE = new Set(['Infinity', '-Infinity', 'NaN']);
+
+/** JSON keeps ∞ and NaN as the strings 'Infinity', '-Infinity' and 'NaN'. */
+export const probeToJson = (summary: ProbeSummary): string =>
+  JSON.stringify(
+    summary,
+    (_key, value: unknown) =>
+      typeof value === 'number' && !Number.isFinite(value) ? String(value) : value,
+    2,
+  );
+
+export const probeFromJson = (text: string): ProbeSummary =>
+  JSON.parse(text, (_key, value: unknown) =>
+    typeof value === 'string' && NON_FINITE.has(value) ? Number(value) : value,
+  ) as ProbeSummary;
+
 function parseList(name: string, text: string): number[] {
   const values = text.split(',').map((part) => Number(part.trim()));
   if (values.length === 0 || !values.every(Number.isInteger)) {
@@ -460,6 +594,7 @@ async function main(): Promise<void> {
       minutes: { type: 'string', default: '60' },
       strategy: { type: 'string', default: PURE_STRATEGIES.join(',') },
       workers: { type: 'string' },
+      json: { type: 'string' },
     },
   });
   const seeds = parseList('seeds', values.seeds);
@@ -516,6 +651,12 @@ async function main(): Promise<void> {
   console.log('\nTargets (round 2, docs/GDD.md §7.5, §9.1)');
   console.log(formatChecks(probeChecks(bySeed, strategies, repeatableIds)));
   console.log(`\nWall time ${((performance.now() - started) / 1000).toFixed(1)} s`);
+  if (values.json !== undefined) {
+    const summary = probeSummary(bySeed, strategies, repeatableIds, { sessions, minutes });
+    mkdirSync(dirname(values.json), { recursive: true });
+    writeFileSync(values.json, `${probeToJson(summary)}\n`);
+    console.warn(`wrote ${values.json}`);
+  }
 }
 
 const entry = process.argv[1];

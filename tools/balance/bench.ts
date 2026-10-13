@@ -1,9 +1,18 @@
 /**
- * Simulation benchmark (docs/ARCHITECTURE.md §12: a 3-minute run should simulate in under
- * 100 ms). Runs full 180 s runs on the real game data with a build that cannot die and starts
- * below its frontier, so it kills quickly at first and ends with enemies piling up.
+ * Simulation benchmark. Scenarios:
  *
- *   npm run bench -- [--runs 50] [--warmup 5] [--seed 1] [--start-wave 30]
+ * - normal (default): full 180 s runs on the real game data with a build that cannot die and
+ *   starts below its frontier, so it kills quickly at first and ends with enemies piling up
+ *   (docs/ARCHITECTURE.md §12: under 100 ms per run).
+ * - ailments: the ailment stress case of docs/v3/implementation-plan-v3.md §6, 30 s at wave 30
+ *   with Pandemic, Eternal Flame and a longer burn on a build that clears wave 30. M1 keeps
+ *   one record per burn stack, which takes seconds per run here; the budget is 50 ms. Slow, so
+ *   it runs only when asked for and with few runs.
+ *
+ *   npm run bench -- [--scenario normal|ailments] [--runs 50] [--warmup 5] [--seed 1]
+ *     [--start-wave 30]
+ *
+ * --runs and --warmup default to the scenario's own counts.
  */
 
 import { parseArgs } from 'node:util';
@@ -13,7 +22,73 @@ import type { RunConfig } from '../../src/sim';
 import { makeStats } from '../../src/sim/testing';
 import { quantile } from './report';
 
-const TARGET_MS = 100;
+const SCENARIO_IDS = ['normal', 'ailments'] as const;
+/** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
+const STRESS_SECONDS = 30;
+type ScenarioId = (typeof SCENARIO_IDS)[number];
+
+const isScenarioId = (value: string): value is ScenarioId =>
+  (SCENARIO_IDS as readonly string[]).includes(value);
+
+interface Scenario {
+  readonly runs: number;
+  readonly warmup: number;
+  /** Simulated seconds per run. */
+  readonly seconds: number;
+  /** Budget for the p95 run time. */
+  readonly targetMs: number;
+  /** Config of one run; runs differ only in their seed. */
+  config(seed: number, startWave: number): RunConfig;
+}
+
+const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
+  normal: {
+    runs: 50,
+    warmup: 5,
+    seconds: MAX_RUN_SECONDS,
+    targetMs: 100,
+    // Strong enough to one-shot the start wave, about 10 waves short of its frontier, immortal.
+    config: (seed, startWave) => ({
+      seed,
+      stats: makeStats({
+        damage: targetDamage(startWave + 10) / 2.5,
+        attackSpeed: 4,
+        critChance: 0.25,
+        critMultiplier: 2,
+        igniteChance: 0.4,
+        chainCount: 2,
+        maxLife: 1e12,
+      }),
+      rules: [],
+      startWave,
+      mode: 'auto',
+    }),
+  },
+  ailments: {
+    runs: 3,
+    warmup: 0,
+    seconds: STRESS_SECONDS,
+    targetMs: 50,
+    // The start wave's frontier damage, every hit ignites, burns last 1.2 s + 0.4 s (slowBurn),
+    // then Eternal Flame (no stack cap, half duration) and Pandemic (spread on death). Immortal.
+    config: (seed, startWave) => ({
+      seed,
+      stats: makeStats({
+        damage: targetDamage(startWave),
+        igniteChance: 1,
+        burnDuration: 1.6,
+        maxLife: 1e12,
+      }),
+      rules: [
+        { id: 'eternalFlame', durationMore: -0.5 },
+        { id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 },
+      ],
+      startWave,
+      mode: 'auto',
+      maxTicks: STRESS_SECONDS * TICK_RATE,
+    }),
+  },
+};
 
 function positiveInt(name: string, text: string, min = 1): number {
   const value = Number(text);
@@ -57,34 +132,23 @@ function main(): void {
     args: process.argv.slice(2),
     strict: true,
     options: {
-      runs: { type: 'string', default: '50' },
-      warmup: { type: 'string', default: '5' },
+      scenario: { type: 'string', default: 'normal' },
+      runs: { type: 'string' },
+      warmup: { type: 'string' },
       seed: { type: 'string', default: '1' },
       'start-wave': { type: 'string', default: '30' },
     },
   });
-  const runs = positiveInt('runs', values.runs);
-  const warmup = positiveInt('warmup', values.warmup, 0);
+  const id = values.scenario;
+  if (!isScenarioId(id)) {
+    throw new Error(`--scenario must be one of ${SCENARIO_IDS.join(', ')}, got '${id}'`);
+  }
+  const scenario = SCENARIOS[id];
+  const runs = positiveInt('runs', values.runs ?? String(scenario.runs));
+  const warmup = positiveInt('warmup', values.warmup ?? String(scenario.warmup), 0);
   const seed = positiveInt('seed', values.seed, 0);
   const startWave = positiveInt('start-wave', values['start-wave']);
-
-  // Strong enough to one-shot the start wave, about 10 waves short of its frontier, immortal.
-  const stats = makeStats({
-    damage: targetDamage(startWave + 10) / 2.5,
-    attackSpeed: 4,
-    critChance: 0.25,
-    critMultiplier: 2,
-    igniteChance: 0.4,
-    chainCount: 2,
-    maxLife: 1e12,
-  });
-  const configFor = (i: number): RunConfig => ({
-    seed: seed + i,
-    stats,
-    rules: [],
-    startWave,
-    mode: 'auto',
-  });
+  const configFor = (i: number): RunConfig => scenario.config(seed + i, startWave);
 
   loadGameData();
   for (let i = 0; i < warmup; i++) runOnce(configFor(runs + i));
@@ -97,19 +161,21 @@ function main(): void {
   const mean = (pick: (s: Sample) => number): number =>
     samples.reduce((sum, s) => sum + pick(s), 0) / samples.length;
   const p95 = quantile(ms, 0.95);
+  const { seconds, targetMs } = scenario;
 
   console.log(
-    `bench: ${runs} runs × ${MAX_RUN_SECONDS} s (${MAX_RUN_SECONDS * TICK_RATE} ticks), ` +
-      `start wave ${startWave}, ${warmup} warm-up runs, real game data`,
+    `bench${id === 'normal' ? '' : ` ${id}`}: ${runs} runs × ${seconds} s ` +
+      `(${seconds * TICK_RATE} ticks), start wave ${startWave}, ${warmup} warm-up runs, ` +
+      'real game data',
   );
   console.log(
     `per run: mean ${(totalMs / runs).toFixed(1)} ms, p50 ${quantile(ms, 0.5).toFixed(1)} ms, ` +
       `p95 ${p95.toFixed(1)} ms, max ${(ms.at(-1) ?? 0).toFixed(1)} ms ` +
-      `(target < ${TARGET_MS} ms: ${p95 < TARGET_MS ? 'ok' : 'MISSED'})`,
+      `(target < ${targetMs} ms: ${p95 < targetMs ? 'ok' : 'MISSED'})`,
   );
   console.log(
     `throughput: ${Math.round(totalTicks / (totalMs / 1000)).toLocaleString('en-US')} ticks/s, ` +
-      `${((MAX_RUN_SECONDS * 1000 * runs) / totalMs).toFixed(0)}x real time`,
+      `${((seconds * 1000 * runs) / totalMs).toFixed(0)}x real time`,
   );
   console.log(
     `workload: mean ${mean((s) => s.kills).toFixed(0)} kills, ` +

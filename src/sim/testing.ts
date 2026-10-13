@@ -3,8 +3,9 @@
  * configs built inline, so sim tests never depend on the tuned content in src/data.
  */
 
+import type { RuleSpec } from '../data/rules';
 import { BASE_STATS, DAMAGE_TAG_MASK_COUNT } from '../data/stats';
-import type { StatBlock, StatId } from '../data/stats';
+import type { Modifier, StatBlock, StatId } from '../data/stats';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyDef, EnemyId, GameData, WaveTable } from '../data/types';
 import { createSimulation } from './simulation';
@@ -142,3 +143,127 @@ export function recordRun(
   while (!sim.state.finished) ticks.push(sim.step(input).slice());
   return { ticks, result: sim.result() };
 }
+
+/**
+ * Tagged damage modifiers that give each of the 16 M1 tag masks its own damage multiplier,
+ * 1 + 0.07 × mask (bit for bit once folded in data order, as computeStatBlock does), so a
+ * damage instance that picks the wrong mask changes the result (tools/balance/fingerprint.ts;
+ * GOLDEN_BUILDS use the multipliers it folds to).
+ */
+export function maskProbeMods(): Modifier[] {
+  return [
+    { stat: 'damage', kind: 'increased', value: 0.07, tags: ['hit'] },
+    { stat: 'damage', kind: 'increased', value: 0.14, tags: ['crit'] },
+    { stat: 'damage', kind: 'increased', value: 0.28, tags: ['burn'] },
+    { stat: 'damage', kind: 'increased', value: 0.56, tags: ['chain'] },
+  ];
+}
+
+type EventOf<T extends SimEvent['type']> = Extract<SimEvent, { type: T }>;
+
+/**
+ * Keys of every M1 event type, in a fixed order. Fingerprints and the golden test hash events
+ * through projectEvent, so a key added to one of these types later leaves their hashes alone;
+ * an event type missing here is new and is hashed whole.
+ */
+export const M1_EVENT_KEYS = {
+  waveStarted: ['wave'],
+  waveCleared: ['wave'],
+  enemySpawned: ['enemyId', 'enemy'],
+  attack: ['projectileId', 'targetId'],
+  hit: ['targetId', 'x', 'y', 'amount', 'crit', 'chainIndex', 'fromX', 'fromY'],
+  ignite: ['targetId', 'stacks'],
+  burnSpread: ['enemyId', 'x', 'y', 'radius', 'targets'],
+  burnTick: ['targetId', 'x', 'y', 'amount'],
+  enemyKilled: ['enemyId', 'enemy', 'x', 'y', 'shards', 'cores'],
+  playerHit: ['enemyId', 'damage', 'lifeLeft'],
+  runEnded: ['reason'],
+} as const satisfies { readonly [T in SimEvent['type']]?: readonly (keyof EventOf<T>)[] };
+
+/** The event as [type, ...its M1 keys' values]; an event type M1 did not have, unchanged. */
+export function projectEvent(event: SimEvent): unknown {
+  const keys = (M1_EVENT_KEYS as Partial<Record<string, readonly string[]>>)[event.type];
+  if (keys === undefined) return event;
+  const fields = event as unknown as Readonly<Record<string, unknown>>;
+  return [event.type, ...keys.map((key) => fields[key])];
+}
+
+/** Enemy types of M1, in RunResult.damageTakenBy order. */
+const M1_ENEMY_IDS = [
+  'triangle',
+  'square',
+  'pentagon',
+  'shard',
+  'hexagon',
+  'boss',
+] as const satisfies readonly EnemyId[];
+
+/** The RunResult fields M1 had, in a fixed order (see projectEvent). */
+export function projectResult(result: RunResult): unknown[] {
+  const { damage } = result;
+  return [
+    result.startWave,
+    result.highestWaveReached,
+    result.highestWaveCleared,
+    result.clearedStartWave,
+    result.endReason,
+    result.ticks,
+    result.shards,
+    result.cores,
+    result.kills,
+    [damage.hit, damage.crit, damage.burn, damage.chain],
+    result.maxHit,
+    result.overkillSeconds,
+    result.leaks,
+    result.damageTaken,
+    M1_ENEMY_IDS.map((id) => [result.damageTakenBy[id].hits, result.damageTakenBy[id].damage]),
+    result.killedBy,
+  ];
+}
+
+export interface GoldenBuild {
+  readonly stats: StatBlock;
+  readonly rules: readonly RuleSpec[];
+}
+
+/** The damage multipliers maskProbeMods() folds to. */
+const probeMult = (mask: number): number => 1 + 0.07 * mask;
+const golden = (values: Partial<Record<StatId, number>>, rules: readonly RuleSpec[] = []) => ({
+  stats: makeStats(values, probeMult),
+  rules,
+});
+
+const CRIT = { critChance: 0.4, critMultiplier: 3, damage: 40 };
+const BURN = { igniteChance: 0.6, burnDamage: 2, burnMaxStacks: 8, damage: 30 };
+const CHAIN = { chainCount: 3.4, chainRetention: 0.8, chainRange: 300, damage: 30 };
+const VOLLEY = { projectileCount: 3.5, attackSpeed: 6, damage: 25 };
+const PANDEMIC: RuleSpec = { id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 };
+
+/**
+ * Builds of src/sim/golden.test.ts on makeTestData(): each M1 stat archetype, each M1 rule on
+ * the archetype it acts on, and every damage mask probed through maskProbeMods.
+ */
+export const GOLDEN_BUILDS: Readonly<Record<string, GoldenBuild>> = {
+  plain: golden({}),
+  crit: golden(CRIT),
+  burn: golden(BURN),
+  chain: golden(CHAIN),
+  volley: golden(VOLLEY),
+  steady: golden(CRIT, [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }]),
+  pandemic: golden(BURN, [PANDEMIC]),
+  // Fast, sure ignites so stacks pile past the cap that eternalFlame lifts.
+  eternalPandemic: golden({ ...BURN, igniteChance: 1, attackSpeed: 8 }, [
+    { id: 'eternalFlame', durationMore: -0.5 },
+    PANDEMIC,
+  ]),
+  overload: golden(CHAIN, [{ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2 }]),
+  glass: golden(VOLLEY, [{ id: 'glassCannon', damageMore: 1 }]),
+  searing: golden({ ...CRIT, igniteChance: 0.2 }, [
+    { id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 },
+  ]),
+  bridges: golden({ critChance: 0.3, igniteChance: 0.3, chainCount: 2.5, damage: 30 }, [
+    { id: 'critIgniteChance', chance: 0.3 },
+    { id: 'chainIgniteChance', chance: 0.25 },
+    { id: 'chainCritChance', perJump: 0.1 },
+  ]),
+};

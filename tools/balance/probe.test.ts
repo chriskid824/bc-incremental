@@ -7,7 +7,10 @@ import {
   medianMinutesToWave,
   nearFrontierRate,
   probeChecks,
+  probeFromJson,
   probeReport,
+  probeSummary,
+  probeToJson,
   spread,
 } from './probe';
 import { runSession } from './session';
@@ -211,6 +214,31 @@ describe('probeChecks', () => {
     expect(
       probeChecks(new Map([[1, results.slice(0, 1)]]), ['crit-greedy'], ids).map((c) => c.id),
     ).toEqual(['T8']);
+  });
+
+  it('summarises the numbers behind the tables, and keeps ∞ and NaN through JSON', () => {
+    const results = [
+      { ...pureSession('crit-greedy'), firstKeystoneMinutes: null },
+      pureSession('dot-greedy', 38),
+      pureSession('chain-greedy'),
+    ];
+    const bySeed = new Map([[1, results]]);
+    const summary = probeSummary(bySeed, pure, ids, { sessions: 1, minutes: 60 });
+    expect(Object.keys(summary.strategies)).toEqual(pure);
+    expect(summary).toMatchObject({ seeds: [1], sessions: 1, minutes: 60 });
+    expect(summary.checks).toEqual(probeChecks(bySeed, pure, ids));
+    const crit = summary.strategies['crit-greedy'];
+    expect(crit?.frontier['F@20']).toEqual({ pooled: 22, perSeed: [22] });
+    expect(summary.strategies['dot-greedy']?.frontier['F@60']?.pooled).toBe(38);
+    expect(crit?.minutesToWave['30']?.pooled).toBe(medianMinutesToWave(results.slice(0, 1), 30));
+    expect(crit?.firstKeystoneMinutes).toBe(Infinity);
+    expect(crit?.firstRepeatableRun).toBe(1);
+    expect(crit?.elites).toEqual({ killed: 1, reached: 1, alive: 0 });
+    expect(crit?.bossKillSeconds).toBe(9);
+    expect(crit?.overkill).toEqual({ maxShare: 0.1, runsOver: 0, runs: 7 });
+    const text = probeToJson(summary);
+    expect(text).toContain('"firstKeystoneMinutes": "Infinity"');
+    expect(probeFromJson(text)).toEqual(summary);
   });
 
   it('checks balanced, cheapest and might-only when they ran', () => {
