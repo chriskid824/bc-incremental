@@ -8,7 +8,7 @@
  * start. y grows downward; positions are in talent-web units.
  */
 
-import type { Modifier } from './stats';
+import type { DamageTag, Modifier } from './stats';
 import type { RuleSpec } from './rules';
 import type { TalentNode } from './types';
 
@@ -56,7 +56,7 @@ function node(id: string, spec: NodeSpec): TalentNode {
  * Price tiers (docs/GDD.md §4.2): a node costs talentBaseShards × talentGrowth^n × factor.
  * Bridge nodes override the factor (small 1.5, notables 6, searingCrits 8) so a build
  * finishes its own sector before the bridges, which stay a mid-game goal. The archetype
- * keystones override it too (steadyAim and overload 3, pandemic 2.5): they carry most of their
+ * keystones override it too (steadyAim 3, overload 3.5, pandemic 2.5): they carry most of their
  * sector's late "more" damage, so they come about one sector node earlier than a factor of 4.
  */
 const NOTABLE = { kind: 'notable', shardCostFactor: 2, coreCost: 1 } as const;
@@ -74,7 +74,7 @@ const dmg = (value: number, tag?: 'crit' | 'burn' | 'chain'): Modifier =>
   tag === undefined
     ? { stat: 'damage', kind: 'increased', value }
     : { stat: 'damage', kind: 'increased', value, tags: [tag] };
-const moreDmg = (value: number, tag?: 'crit' | 'burn' | 'chain'): Modifier =>
+const moreDmg = (value: number, tag?: DamageTag): Modifier =>
   tag === undefined
     ? { stat: 'damage', kind: 'more', value }
     : { stat: 'damage', kind: 'more', value, tags: [tag] };
@@ -315,9 +315,10 @@ export const TALENTS: readonly TalentNode[] = [
     ...KEYSTONE,
     pos: at(CHAIN, 840),
     links: ['voltage', 'tempest'],
-    // ×4 damage pays for the retention penalty; the doubled jumps alone run away late (§9.1).
-    shardCostFactor: 3,
-    modifiers: [moreDmg(3)],
+    // ×4.5 hit damage pays for the retention penalty; the doubled jumps alone run away late
+    // (§9.1). Hits only, so it does not multiply burns: a burn build should not reach for it.
+    shardCostFactor: 3.5,
+    modifiers: [moreDmg(3.5, 'hit')],
     rules: [{ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2 }],
     archetype: 'chain',
   }),

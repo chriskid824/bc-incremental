@@ -68,7 +68,7 @@
   "talent.staticFocus.name": "靜電聚焦",
   "talent.glassCannon.desc": "所有傷害 ×2。生命變成 1。",
   "talent.steadyAim.desc": "每第 3 發必定暴擊，暴擊倍率 ×1.5。不再隨機暴擊。",
-  "talent.pandemic.desc": "燃燒中的敵人死亡時，把燃燒擴散給附近的敵人。擊中傷害 −30%。",
+  "talent.pandemic.desc": "燃燒中的敵人死亡時，把燃燒擴散給附近的敵人，強度是原本的 40%。擊中傷害 −30%。",
   "talent.overload.desc": "連鎖次數 ×2。連鎖保留率 −20 個百分點。",
   "talent.searingCrits.desc": "暴擊必定點燃。非暴擊的擊中傷害 −50%。",
   "talent.flashpoint.desc": "暴擊時點燃機率 +30%。",
