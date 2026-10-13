@@ -19,6 +19,7 @@ import { ArcLayer } from './arcs';
 import { createBackdrop } from './backdrop';
 import { BurnTally } from './burnTally';
 import { Bursts, TIER_BOSS, TIER_ELITE, TIER_NORMAL } from './bursts';
+import { CritStopGate } from './critStop';
 import { DamageNumbers } from './damageNumbers';
 import { EnemyLayer, HIT_PUNCH } from './enemies';
 import { FxParticles } from './fx';
@@ -47,12 +48,9 @@ const CRIT_SHAKE_COOLDOWN_MS = 300;
 const ELITE_SHAKE = 0.55;
 const ELITE_SHAKE_CEILING = 0.75;
 const BOSS_SHAKE = 1;
-/** Hit-stop on elite and boss kills, and on crits at least this far above the typical hit. */
+/** Hit-stop on elite and boss kills; crits go through CritStopGate (src/render/critStop.ts). */
 const ELITE_HIT_STOP_MS = 55;
 const BOSS_HIT_STOP_MS = 80;
-const CRIT_HIT_STOP_DECADES = 0.6;
-const CRIT_HIT_STOP_MS = 28;
-const CRIT_HIT_STOP_COOLDOWN_MS = 700;
 /** Kill debris thins out as more enemies die in the same frame. */
 const CROWD_KILLS = 6;
 /** pandemic embers per nova, and novas whose embers are resolved per frame. */
@@ -79,8 +77,8 @@ export class Renderer {
   private readonly burnTally = new BurnTally();
   private readonly shake: ScreenShake;
   private readonly hitStop: (ms: number) => void;
+  private readonly critStop = new CritStopGate();
   private critShakeCooldownMs = 0;
-  private critStopCooldownMs = 0;
   private killsThisFrame = 0;
   /** pandemic spreads waiting for render() to aim their embers: x, y, radius triples. */
   private readonly pendingNovas = new Float64Array(MAX_PENDING_NOVAS * 3);
@@ -138,8 +136,8 @@ export class Renderer {
     this.burnTally.clear();
     this.player.reset();
     this.shake.reset();
+    this.critStop.reset();
     this.critShakeCooldownMs = 0;
-    this.critStopCooldownMs = 0;
     this.killsThisFrame = 0;
     this.pendingNovaCount = 0;
     this.numbers.setTypicalHit(typicalHit);
@@ -183,7 +181,7 @@ export class Renderer {
   render(state: Readonly<SimState>, alpha: number, frameMs: number): void {
     const dt = Math.min(Math.max(0, frameMs), MAX_EFFECT_DT_MS);
     this.critShakeCooldownMs = Math.max(0, this.critShakeCooldownMs - dt);
-    this.critStopCooldownMs = Math.max(0, this.critStopCooldownMs - dt);
+    this.critStop.update(dt);
     this.shake.update(dt);
     this.world.position.set(
       this.worldX + this.shake.offsetX * this.worldScale,
@@ -230,10 +228,8 @@ export class Renderer {
       );
       this.critShakeCooldownMs = CRIT_SHAKE_COOLDOWN_MS;
     }
-    if (decades >= CRIT_HIT_STOP_DECADES && this.critStopCooldownMs <= 0) {
-      this.hitStop(CRIT_HIT_STOP_MS * (1 + (decades - CRIT_HIT_STOP_DECADES)));
-      this.critStopCooldownMs = CRIT_HIT_STOP_COOLDOWN_MS;
-    }
+    const stopMs = this.critStop.crit(decades);
+    if (stopMs > 0) this.hitStop(stopMs);
   }
 
   private onKill(event: Extract<SimEvent, { type: 'enemyKilled' }>): void {
