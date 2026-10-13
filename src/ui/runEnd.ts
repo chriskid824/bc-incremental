@@ -1,7 +1,8 @@
 /**
  * Wording of the result screen's "why the run ended" section: the cause, which enemies got
- * through, and on death one tip naming the two levers (kill faster, or survive longer),
- * picked from the run's contact damage. DOM-free so tests can run it.
+ * through, a note when the start wave was not cleared (no skip bonus, the next run starts
+ * lower), and on death one tip naming the two levers (kill faster, or survive longer), picked
+ * from the run's contact damage. DOM-free so tests can run it.
  */
 
 import { formatNum } from '../core/format';
@@ -21,6 +22,11 @@ export const HEAVY_HIT_SHARE = 0.25;
 
 export interface RunEndFacts {
   readonly endReason: EndReason;
+  readonly startWave: number;
+  /** Whether the start wave was cleared, which skip compensation requires. */
+  readonly clearedStartWave: boolean;
+  /** Start wave of the next run; the session lowers it after a start wave that was not cleared. */
+  readonly nextStartWave: number;
   readonly highestWave: number;
   /** Run time limit in seconds. */
   readonly limitSec: number;
@@ -40,6 +46,8 @@ export interface RunEndText {
   readonly cause: string | null;
   /** How many enemies got through, for how much damage. */
   readonly leaks: string;
+  /** The start wave was not cleared: no skip bonus, and the next run starts lower. */
+  readonly lowerStart: string | null;
   /** Death only: what to change before the next run. */
   readonly tip: string | null;
 }
@@ -76,8 +84,15 @@ export function describeRunEnd(facts: RunEndFacts, enemies: EnemySpeeds): RunEnd
   return {
     cause: causeText(facts),
     leaks: leaksText(facts),
+    lowerStart: lowerStartText(facts),
     tip: facts.endReason === 'death' ? tipText(facts, enemies) : null,
   };
+}
+
+function lowerStartText(facts: RunEndFacts): string | null {
+  const { startWave, nextStartWave } = facts;
+  if (startWave <= 1 || facts.clearedStartWave || nextStartWave >= startWave) return null;
+  return t('result.tip.lowerStart', { wave: startWave, next: nextStartWave });
 }
 
 function causeText(facts: RunEndFacts): string | null {

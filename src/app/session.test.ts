@@ -109,6 +109,7 @@ describe('Session', () => {
     expect(report.bankShards).toBe(meta.shards);
     expect(report.affordable).toBe(session.canAffordAny());
     expect(report.talentsQueued).toBe(false);
+    expect(report.nextStartWave).toBe(session.startWave);
     expect(changed()).toBe(1);
     expect(() => session.step()).toThrow();
   });
@@ -480,6 +481,7 @@ describe('Session start wave', () => {
       Math.floor(failed.result.highestWaveReached * FAILED_START_RATIO),
     );
     expect(session.startWave).toBe(Math.max(1, lowered));
+    expect(failed.nextStartWave).toBe(session.startWave);
     expect(session.startWaveLowering).toBe('failedRun');
 
     // Keep failing until a start wave is cleared; each failure lowers it.

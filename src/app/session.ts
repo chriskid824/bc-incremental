@@ -72,6 +72,8 @@ export interface RunReport {
   readonly affordable: boolean;
   /** T was pressed during the run, so the result screen leads to the talent web. */
   readonly talentsQueued: boolean;
+  /** Start wave of the next run, after any step down for a start wave the run did not clear. */
+  readonly nextStartWave: number;
 }
 
 /** The result screen waits for the player and leads to the talent web instead of counting down. */
@@ -349,6 +351,7 @@ export class Session {
       bankCores: this.meta.cores,
       affordable: this.canAffordAny(),
       talentsQueued: queued,
+      nextStartWave: this.startWave,
     };
     this.listener.profileChanged();
     this.listener.runFinished(this.lastReport);

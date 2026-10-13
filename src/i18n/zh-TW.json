@@ -168,5 +168,6 @@
   "talents.startWaveAbove": "目前配置應該能清到第 {reach} 波。清不掉起始波次就拿不到跳波補償。",
   "talents.startWaveLoweredBuild": "已自動調降：目前配置應該能清到第 {reach} 波。",
   "talents.startWaveLoweredRun": "已自動調降：上一局沒有清掉起始波次。",
-  "result.toTalentsHint": "點擊開啟天賦網"
+  "result.toTalentsHint": "點擊開啟天賦網",
+  "result.tip.lowerStart": "這局沒有清掉起始的第 {wave} 波，所以沒有跳波補償。下一局會自動從比較低的第 {next} 波開始。"
 }

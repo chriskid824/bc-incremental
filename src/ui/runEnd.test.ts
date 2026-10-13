@@ -34,6 +34,9 @@ function facts(
   const all = Object.values(by);
   return {
     endReason: 'death',
+    startWave: 1,
+    clearedStartWave: true,
+    nextStartWave: 1,
     highestWave: 7,
     limitSec: 180,
     maxLife: 100,
@@ -97,6 +100,7 @@ describe('describeRunEnd', () => {
     expect(timeout).toEqual({
       cause: 'You lasted the full 3:00',
       leaks: 'No enemy reached you',
+      lowerStart: null,
       tip: null,
     });
     const capped = describeRunEnd(
@@ -106,6 +110,36 @@ describe('describeRunEnd', () => {
     expect(capped.cause).toBe('Wave 40 cleared, the last wave of this prototype');
     expect(capped.leaks).toBe('1 enemy reached you for 30 damage');
     expect(capped.tip).toBeNull();
+  });
+
+  it('says the next run starts lower when the start wave was not cleared', () => {
+    const failed = { startWave: 18, clearedStartWave: false, nextStartWave: 12 } as const;
+    const text = describeRunEnd(
+      facts({ ...failed, killedBy: 'triangle' }, { triangle: [9, 18] }),
+      SPEEDS,
+    );
+    expect(text.lowerStart).toBe(
+      'This run did not clear its start wave 18, so it earned no skip bonus. ' +
+        'The next run starts lower on its own, at wave 12.',
+    );
+    // The usual advice still follows.
+    expect(text.tip).toMatch(/^Triangles are fast/);
+    // Also when the run did not end in death.
+    expect(describeRunEnd(facts({ ...failed, endReason: 'timeout' }), SPEEDS).lowerStart).toBe(
+      text.lowerStart,
+    );
+    setLocale('zh-TW');
+    expect(describeRunEnd(facts(failed), SPEEDS).lowerStart).toBe(
+      '這局沒有清掉起始的第 18 波，所以沒有跳波補償。下一局會自動從比較低的第 12 波開始。',
+    );
+  });
+
+  it('says nothing about the start wave when it was cleared or could not go lower', () => {
+    const lowerStart = (overrides: Partial<RunEndFacts>) =>
+      describeRunEnd(facts(overrides), SPEEDS).lowerStart;
+    expect(lowerStart({ startWave: 18, clearedStartWave: true, nextStartWave: 18 })).toBeNull();
+    expect(lowerStart({ startWave: 1, clearedStartWave: false, nextStartWave: 1 })).toBeNull();
+    expect(lowerStart({ startWave: 6, clearedStartWave: false, nextStartWave: 6 })).toBeNull();
   });
 
   it('formats big damage like the rest of the panel', () => {

@@ -12,14 +12,11 @@ import { el } from './style';
 
 export interface ResultInfo extends RunEndFacts {
   readonly runNumber: number;
-  readonly startWave: number;
   readonly kills: number;
   /** Damage dealt per second over the whole run, all sources. */
   readonly averageDps: Num;
   readonly shardsFromRun: Num;
   readonly coresFromRun: number;
-  /** Whether the start wave was cleared, which skip compensation requires. */
-  readonly clearedStartWave: boolean;
   readonly skipShards: Num;
   readonly skipCores: number;
   /** A talent is affordable. */
@@ -133,9 +130,11 @@ export class ResultPanel {
     this.shownSeconds = '';
     this.next.textContent = '';
     const parts: HTMLElement[] = [run, title, cause, rows];
-    if (text.tip !== null) {
+    const tips = [text.lowerStart, text.tip].filter((line): line is string => line !== null);
+    if (tips.length > 0) {
       const tip = el(doc, 'div', 'bc-result-tip');
-      tip.append(el(doc, 'span', 'bc-result-tip-label', t('result.tipLabel')), text.tip);
+      tip.append(...tips.map((line) => el(doc, 'div', 'bc-result-tip-line', line)));
+      tip.firstElementChild?.prepend(el(doc, 'span', 'bc-result-tip-label', t('result.tipLabel')));
       parts.push(tip);
     }
     parts.push(this.actions, info.toTalents ? hint : this.next);

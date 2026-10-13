@@ -283,6 +283,7 @@ function toResultInfo(report: RunReport): ResultInfo {
     shardsFromRun: settlement.shardsFromRun,
     coresFromRun: settlement.coresFromRun,
     clearedStartWave: result.clearedStartWave,
+    nextStartWave: report.nextStartWave,
     skipShards: settlement.skipShards,
     skipCores: settlement.skipCores,
     affordable: report.affordable,

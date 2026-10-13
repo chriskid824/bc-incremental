@@ -168,5 +168,6 @@
   "talents.startWaveAbove": "Your build should clear up to wave {reach}. A start wave it does not clear earns no skip bonus.",
   "talents.startWaveLoweredBuild": "Lowered automatically: your build should clear up to wave {reach}.",
   "talents.startWaveLoweredRun": "Lowered automatically: the last run did not clear its start wave.",
-  "result.toTalentsHint": "Click to open the talent web"
+  "result.toTalentsHint": "Click to open the talent web",
+  "result.tip.lowerStart": "This run did not clear its start wave {wave}, so it earned no skip bonus. The next run starts lower on its own, at wave {next}."
 }
