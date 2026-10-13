@@ -15,7 +15,7 @@ import {
 } from '../meta';
 import type { MetaState } from '../meta';
 import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
-import { FAILED_START_RATIO, RESULT_SCREEN_MS, Session } from './session';
+import { FAILED_START_RATIO, RESULT_SCREEN_MS, Session, leadsToTalents } from './session';
 import type { ActiveRun, RunReport, SessionOptions } from './session';
 
 const data = loadGameData();
@@ -102,6 +102,7 @@ describe('Session', () => {
     expect(meta.allocated.size).toBe(0);
     expect(report.bankShards).toBe(meta.shards);
     expect(report.affordable).toBe(session.canAffordAny());
+    expect(report.talentsQueued).toBe(false);
     expect(changed()).toBe(1);
     expect(() => session.step()).toThrow();
   });
@@ -111,6 +112,7 @@ describe('Session', () => {
     session.start();
     playRun(session);
     nothingAffordable(session, meta);
+    expect(session.report !== null && leadsToTalents(session.report)).toBe(false);
     expect(session.resultTimeLeftMs).toBe(RESULT_SCREEN_MS);
     waitMs(session, RESULT_SCREEN_MS - 20);
     expect(session.phase).toBe('results');
@@ -190,22 +192,33 @@ describe('Session', () => {
     expect(session.currentRun).toBe(session.run);
   });
 
-  it('opens the talent web when a run ends if T was pressed during it', () => {
-    const { session, finished, opened } = createSession();
+  it('shows the result screen without a countdown when T was pressed during the run', () => {
+    const { session, meta, finished, opened } = createSession();
     expect(session.queueTalents()).toBe(false);
     session.start();
     expect(session.queueTalents()).toBe(true);
     expect(session.talentsQueued).toBe(true);
     playRun(session);
     expect(finished).toHaveLength(1);
+    expect(session.phase).toBe('results');
+    const report = finished[0] as RunReport;
+    expect(report.talentsQueued).toBe(true);
+    expect(session.talentsQueued).toBe(false);
+    // It waits for the player even with nothing to buy, and leads to the talent web.
+    nothingAffordable(session, meta);
+    expect(leadsToTalents(report)).toBe(true);
+    expect(session.resultTimeLeftMs).toBe(0);
+    waitMs(session, RESULT_SCREEN_MS * 2);
+    expect(session.phase).toBe('results');
+    expect(opened()).toBe(0);
+    session.continueFromResults();
     expect(session.phase).toBe('talents');
     expect(opened()).toBe(1);
-    expect(session.talentsQueued).toBe(false);
-    expect(session.resultTimeLeftMs).toBe(0);
     expect(session.queueTalents()).toBe(false);
     session.startNextRun();
     playRun(session);
     expect(session.phase).toBe('results');
+    expect(session.report?.talentsQueued).toBe(false);
   });
 });
 

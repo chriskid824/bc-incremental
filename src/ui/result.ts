@@ -22,12 +22,14 @@ export interface ResultInfo extends RunEndFacts {
   readonly clearedStartWave: boolean;
   readonly skipShards: Num;
   readonly skipCores: number;
-  /** A talent is affordable: the panel leads to the talent web instead of counting down. */
+  /** A talent is affordable. */
   readonly affordable: boolean;
+  /** The panel leads to the talent web instead of counting down (affordable, or T pressed). */
+  readonly toTalents: boolean;
 }
 
 export interface ResultActions {
-  /** Click anywhere: talent web if affordable, else the next run. */
+  /** Click anywhere: the talent web if the panel leads there, else the next run. */
   continue(): void;
   openTalents(): void;
   nextRun(): void;
@@ -107,9 +109,14 @@ export class ResultPanel {
     }
     row(t('result.skipCompensation'), skip);
 
-    this.talentsButton.classList.toggle('bc-button-glow', info.affordable);
-    this.talentsButton.classList.toggle('bc-button-primary', info.affordable);
-    const hint = el(doc, 'div', 'bc-result-hint', info.affordable ? t('result.affordable') : '');
+    this.talentsButton.classList.toggle('bc-button-glow', info.toTalents);
+    this.talentsButton.classList.toggle('bc-button-primary', info.toTalents);
+    const hint = el(
+      doc,
+      'div',
+      'bc-result-hint',
+      info.affordable ? t('result.affordable') : t('result.toTalentsHint'),
+    );
 
     this.shownSeconds = '';
     this.next.textContent = '';
@@ -119,7 +126,7 @@ export class ResultPanel {
       tip.append(el(doc, 'span', 'bc-result-tip-label', t('result.tipLabel')), text.tip);
       parts.push(tip);
     }
-    parts.push(this.actions, info.affordable ? hint : this.next);
+    parts.push(this.actions, info.toTalents ? hint : this.next);
     this.card.replaceChildren(...parts);
     this.root.hidden = false;
     // Next frame, so the opacity transition runs.

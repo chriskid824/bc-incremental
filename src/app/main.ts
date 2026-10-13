@@ -36,7 +36,7 @@ import { Toast } from '../ui/toast';
 import { bindMenuKeys, bindSpeedKeys } from './input';
 import { GameLoop, SPEEDS } from './loop';
 import type { Speed } from './loop';
-import { Session } from './session';
+import { Session, leadsToTalents } from './session';
 import type { ActiveRun, RunReport } from './session';
 
 /** Becomes a settings toggle later (docs/ARCHITECTURE.md §10). */
@@ -283,6 +283,7 @@ function toResultInfo(report: RunReport): ResultInfo {
     skipShards: settlement.skipShards,
     skipCores: settlement.skipCores,
     affordable: report.affordable,
+    toTalents: leadsToTalents(report),
   };
 }
 

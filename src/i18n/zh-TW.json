@@ -157,7 +157,7 @@
   "hud.coresRun": "本局核心",
   "hud.timeLeft": "時限倒數 {time}",
   "hud.hintAuto": "戰鬥全自動，你要做的選擇都在兩局之間。",
-  "toast.talentsQueued": "本局結束後會開啟天賦網",
+  "toast.talentsQueued": "本局結束後，結算畫面會帶你到天賦網",
   "intro.title": "玩法",
   "intro.auto": "角色會自動戰鬥。",
   "intro.goal": "撐過一波波敵人，收集碎片。",
@@ -167,5 +167,6 @@
   "talents.priceGrowth": "每點一個天賦，下一個的價格就 ×{growth}（可重複升級的天賦不算）。",
   "talents.startWaveAbove": "目前配置應該能清到第 {reach} 波。清不掉起始波次就拿不到跳波補償。",
   "talents.startWaveLoweredBuild": "已自動調降：目前配置應該能清到第 {reach} 波。",
-  "talents.startWaveLoweredRun": "已自動調降：上一局沒有清掉起始波次。"
+  "talents.startWaveLoweredRun": "已自動調降：上一局沒有清掉起始波次。",
+  "result.toTalentsHint": "點擊開啟天賦網"
 }

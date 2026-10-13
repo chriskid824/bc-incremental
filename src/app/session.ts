@@ -1,11 +1,11 @@
 /**
  * Run lifecycle of the browser build: run → result screen → talent web → next run.
- * The talent web opens on its own when something is affordable; otherwise the result screen
- * counts down and the next run starts, so a player who only watches still progresses.
- * The start wave follows the highest allowed wave unless the player picks a lower one. The
- * session lowers it on its own to the highest start wave the talents clear (src/meta/
- * startWave.ts) on load, after a respec and when the talents or the allowed start wave
- * change, and steps it down after a run that does not clear it.
+ * The result screen leads to the talent web when something is affordable or T was pressed
+ * during the run; otherwise it counts down and the next run starts, so a player who only
+ * watches still progresses. The start wave follows the highest allowed wave unless the player
+ * picks a lower one. The session lowers it on its own to the highest start wave the talents
+ * clear (src/meta/startWave.ts) on load, after a respec and when the talents or the allowed
+ * start wave change, and steps it down after a run that does not clear it.
  */
 
 import type { Num } from '../core/num';
@@ -64,7 +64,13 @@ export interface RunReport {
   readonly bankCores: number;
   /** A talent can be bought now, so the result screen leads to the talent web. */
   readonly affordable: boolean;
+  /** T was pressed during the run, so the result screen leads to the talent web. */
+  readonly talentsQueued: boolean;
 }
+
+/** The result screen waits for the player and leads to the talent web instead of counting down. */
+export const leadsToTalents = (report: RunReport): boolean =>
+  report.affordable || report.talentsQueued;
 
 export interface SessionListener {
   runStarted(run: ActiveRun): void;
@@ -115,7 +121,7 @@ export class Session {
   private reachCache: Reach | null = null;
   /** Reach of the talents the start wave was last aimed for; null before the first aim. */
   private aimed: Reach | null = null;
-  /** T was pressed during the run: open the talent web when it ends. */
+  /** T was pressed during the run: the result screen leads to the talent web. */
   private talentsQueuedValue = false;
   private readonly economy: EconomyConfig;
   private readonly waveCap: number | undefined;
@@ -155,7 +161,7 @@ export class Session {
     return this.active;
   }
 
-  /** Whether the talent web will open when the current run ends. */
+  /** Whether the result screen of the current run will lead to the talent web. */
   get talentsQueued(): boolean {
     return this.talentsQueuedValue;
   }
@@ -166,7 +172,9 @@ export class Session {
 
   /** Remaining time on the result screen while it counts down, 0 otherwise. */
   get resultTimeLeftMs(): number {
-    return this.phaseValue === 'results' && !this.lastReport?.affordable
+    return this.phaseValue === 'results' &&
+      this.lastReport !== null &&
+      !leadsToTalents(this.lastReport)
       ? Math.max(0, this.resultMsLeft)
       : 0;
   }
@@ -241,23 +249,24 @@ export class Session {
     return events;
   }
 
-  /** Counts down the result screen by wall-clock time when nothing is affordable. */
+  /** Counts down the result screen by wall-clock time while it counts down at all. */
   update(frameMs: number): void {
-    if (this.phaseValue !== 'results' || this.lastReport?.affordable !== false) return;
+    if (this.resultTimeLeftMs <= 0) return;
     this.resultMsLeft -= frameMs;
     if (this.resultMsLeft <= 0) this.nextRun();
   }
 
-  /** Leaves the result screen: to the talent web if something is affordable, else a new run. */
+  /** Leaves the result screen: to the talent web if it leads there, else a new run. */
   continueFromResults(): void {
     if (this.phaseValue !== 'results') return;
-    if (this.lastReport?.affordable === true) this.openTalents();
+    if (this.lastReport !== null && leadsToTalents(this.lastReport)) this.openTalents();
     else this.nextRun();
   }
 
   /**
-   * Asks for the talent web during a run: it opens when the run ends, instead of the result
-   * screen and its countdown to the next run. Returns whether it was queued.
+   * Asks for the talent web during a run: the run's result screen then waits for the player
+   * instead of counting down to the next run, and leads to the talent web. Returns whether it
+   * was queued.
    */
   queueTalents(): boolean {
     if (this.phaseValue !== 'running') return false;
@@ -330,10 +339,10 @@ export class Session {
       bankShards: this.meta.shards,
       bankCores: this.meta.cores,
       affordable: this.canAffordAny(),
+      talentsQueued: queued,
     };
     this.listener.profileChanged();
     this.listener.runFinished(this.lastReport);
-    if (queued) this.openTalents();
   }
 
   /** Identifies the talents (ids and ranks) that the stats and rules come from. */
