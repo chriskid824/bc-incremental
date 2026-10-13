@@ -2,18 +2,41 @@
  * Hits (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2–3): a shared function, not a
  * phase. A projectile that arrives resolves its attack at once: the primary hit, then
  * instant chain jumps; each hit rolls crit and ignite, deals damage, and kills or ignites.
+ * Every damage instance, hits and burn ticks alike, goes into the run's tallies through tally.
  */
 
+import type { Num } from '../../core/num';
 import { add, assertFinite, gt, lte, mul, sub, ZERO } from '../../core/num';
 import { DAMAGE_TAG_BIT } from '../../data/stats';
+import { DOT_MASK } from '../../data/tags';
+import type { TagMask } from '../../data/tags';
+import { rowKey } from '../build/sources';
 import { addBurn } from './burn';
-import { clamp01, rollCount } from './context';
+import { ATTACK_SOURCE, clamp01, rollCount } from './context';
 import type { Enemy, RunContext } from './context';
 import { killEnemy } from './death';
 
 const HIT = DAMAGE_TAG_BIT.hit;
 const CRIT = DAMAGE_TAG_BIT.crit;
+const BURN = DAMAGE_TAG_BIT.burn;
 const CHAIN = DAMAGE_TAG_BIT.chain;
+const POISON = DAMAGE_TAG_BIT.poison;
+
+/**
+ * Adds a damage instance with these tags, credited to `source`, to the run's tallies: the
+ * damage breakdown (burn, poison or bleed by kind; otherwise crit, then chain, then hit) and
+ * the source's total.
+ */
+export function tally(ctx: RunContext, tags: TagMask, source: number, amount: Num): void {
+  if ((tags & DOT_MASK) !== 0) {
+    if ((tags & BURN) !== 0) ctx.damageBurn = add(ctx.damageBurn, amount);
+    else if ((tags & POISON) !== 0) ctx.damagePoison = add(ctx.damagePoison, amount);
+    else ctx.damageBleed = add(ctx.damageBleed, amount);
+  } else if ((tags & CRIT) !== 0) ctx.damageCrit = add(ctx.damageCrit, amount);
+  else if ((tags & CHAIN) !== 0) ctx.damageChain = add(ctx.damageChain, amount);
+  else ctx.damageHit = add(ctx.damageHit, amount);
+  ctx.bySource[source] = add(ctx.bySource[source] as Num, amount);
+}
 
 /**
  * Alive enemy closest to (x, y) within chain range (inclusive) not hit by the current attack;
@@ -82,14 +105,15 @@ function hitEnemy(
   const baseHit = mul(ctx.damage, (crit ? ctx.critMultiplier : 1) * retention);
   const mask = HIT | (crit ? CRIT : 0) | (chainIndex > 0 ? CHAIN : 0);
   const amount = assertFinite(
-    mul(baseHit, ctx.table.damage(mask) * (crit ? ctx.critHitMult : ctx.plainHitMult)),
+    mul(
+      baseHit,
+      ctx.table.damage(rowKey(mask, ATTACK_SOURCE)) * (crit ? ctx.critHitMult : ctx.plainHitMult),
+    ),
     'hit damage',
   );
   enemy.hp = sub(enemy.hp, amount);
   enemy.hitMark = ctx.attackSerial;
-  if (crit) ctx.damageCrit = add(ctx.damageCrit, amount);
-  else if (chainIndex > 0) ctx.damageChain = add(ctx.damageChain, amount);
-  else ctx.damageHit = add(ctx.damageHit, amount);
+  tally(ctx, mask, ATTACK_SOURCE, amount);
   if (gt(amount, ctx.maxHit)) ctx.maxHit = amount;
   ctx.events.push({
     type: 'hit',
@@ -97,6 +121,8 @@ function hitEnemy(
     x: enemy.x,
     y: enemy.y,
     amount,
+    tags: mask,
+    source: ATTACK_SOURCE,
     crit,
     chainIndex,
     fromX,

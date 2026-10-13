@@ -1,12 +1,14 @@
 /**
  * ModTable: the value of every scoped stat (SCOPED_STATS) for one damage-instance key, built
  * from the build's scoped modifiers on first use of the key and cached for the run
- * (docs/v3/implementation-plan-v3.md §2.1). A key is the instance's tag mask; 17 tags make
- * 131,072 masks, too many to fold up front as M1's damageMult did. Rows are structure of
- * arrays: scoped stat s of row r sits at index r × S + s.
+ * (docs/v3/implementation-plan-v3.md §2.1). A key is the instance's tag mask with its source
+ * index above the tags (rowKey in src/sim/build/sources.ts); 17 tags make 131,072 masks per
+ * source, too many to fold up front as M1's damageMult did. Rows are structure of arrays:
+ * scoped stat s of row r sits at index r × S + s.
  *
  * Every scoped stat folds (base + Σflat) × (1 + Σincreased) × Π(1 + more) over the modifiers
- * that match the key (all of their tags present, none of their notTags), in a fixed order:
+ * that match the key (all of their tags present, none of their notTags, the source in their
+ * scope), in a fixed order:
  * - flat: base + (Σ untagged flats in data order), then += each matching tagged flat in data
  *   order;
  * - increased: Σ of every matching modifier in data order, tagged and untagged interleaved;
@@ -20,6 +22,8 @@ import { SCOPED_STATS } from '../../data/stats';
 import type { Modifier, ModifierKind, StatBlock } from '../../data/stats';
 import { tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
+import { CENTER, createSourceTable, rowKey, SOURCE_SHIFT } from './sources';
+import type { SourceTable } from './sources';
 
 /** Values per row: one per scoped stat. */
 const S = SCOPED_STATS.length;
@@ -46,27 +50,37 @@ export interface CompiledMod {
   readonly all: TagMask;
   /** Tags a key must not carry. */
   readonly none: TagMask;
-  /** Neither tags nor notTags: an untagged flat is summed before the tagged ones. */
+  /** Per source index, 1 when the modifier's scope selects it; null without a scope. */
+  readonly scopeOk: Uint8Array | null;
+  /** No tags, notTags or scope: an untagged flat is summed before the tagged ones. */
   readonly untagged: boolean;
 }
 
-/** Compiles StatBlock.scoped, keeping data order. Throws on a stat that is not scoped. */
-export function compileMods(scoped: readonly Modifier[]): CompiledMod[] {
+/**
+ * Compiles StatBlock.scoped, keeping data order; scopes resolve against `sources`, which keeps
+ * them current as it numbers more sources. Throws on a stat that is not scoped.
+ */
+export function compileMods(scoped: readonly Modifier[], sources: SourceTable): CompiledMod[] {
   return scoped.map((mod) => {
     const stat = (SCOPED_STATS as readonly string[]).indexOf(mod.stat);
     if (stat < 0) throw new Error(`Not a scoped stat: ${JSON.stringify(mod)}`);
     const all = tagMask(mod.tags ?? []);
     const none = tagMask(mod.notTags ?? []);
+    const scopeOk = mod.scope === undefined ? null : sources.scopeMask(mod.scope);
     return {
       stat,
       kind: KIND_CODE[mod.kind],
       value: mod.value,
       all,
       none,
-      untagged: all === 0 && none === 0,
+      scopeOk,
+      untagged: all === 0 && none === 0 && scopeOk === null,
     };
   });
 }
+
+/** The tag bits of a key. */
+const TAG_BITS = (1 << SOURCE_SHIFT) - 1;
 
 /** Hash slots of a new table. The table keeps at most half its slots in use (load ≤ 0.5). */
 const INITIAL_SLOTS = 16;
@@ -181,13 +195,19 @@ export class ModTable {
   private fill(row: number, key: number): void {
     const { mods, base, untaggedFlat, flatV, inc, more, final } = this;
     const at = row * S;
+    const tags = key & TAG_BITS;
+    const source = key >>> SOURCE_SHIFT;
+    const matches = (mod: CompiledMod): boolean =>
+      (mod.all & ~tags) === 0 &&
+      (mod.none & tags) === 0 &&
+      (mod.scopeOk === null || mod.scopeOk[source] === 1);
     for (let s = 0; s < S; s++) {
       untaggedFlat[s] = 0;
       inc[at + s] = 0;
       more[at + s] = 1;
     }
     for (const mod of mods) {
-      if ((mod.all & ~key) !== 0 || (mod.none & key) !== 0) continue;
+      if (!matches(mod)) continue;
       if (mod.kind === FLAT) {
         if (mod.untagged) untaggedFlat[mod.stat] = (untaggedFlat[mod.stat] as number) + mod.value;
       } else if (mod.kind === INCREASED) {
@@ -198,8 +218,7 @@ export class ModTable {
     }
     for (let s = 0; s < S; s++) flatV[at + s] = (base[s] as number) + (untaggedFlat[s] as number);
     for (const mod of mods) {
-      if (mod.kind !== FLAT || mod.untagged) continue;
-      if ((mod.all & ~key) !== 0 || (mod.none & key) !== 0) continue;
+      if (mod.kind !== FLAT || mod.untagged || !matches(mod)) continue;
       flatV[at + mod.stat] = (flatV[at + mod.stat] as number) + mod.value;
     }
     for (let s = 0; s < S; s++) {
@@ -211,18 +230,21 @@ export class ModTable {
   }
 }
 
-/** A fresh table for one run of `stats`. */
-export function modTableFor(stats: StatBlock): ModTable {
+/** A fresh table for one run of `stats`, whose scopes resolve against `sources`. */
+export function modTableFor(
+  stats: StatBlock,
+  sources: SourceTable = createSourceTable(),
+): ModTable {
   const base = Float64Array.from(SCOPED_STATS, (stat) => stats.base[stat]);
-  return new ModTable(compileMods(stats.scoped), base);
+  return new ModTable(compileMods(stats.scoped, sources), base);
 }
 
 const blockTables = new WeakMap<StatBlock, ModTable>();
 
 /**
- * Damage multiplier of `mask` for a stat block outside a run (talent screen, estimators): an
- * instance with these tags deals values.damage × damageRow(stats, mask). The table of each
- * block is built once and kept while the block lives.
+ * Damage multiplier of `mask` for a center instance of a stat block outside a run (talent
+ * screen, estimators): an instance with these tags deals values.damage × damageRow(stats, mask).
+ * The table of each block is built once and kept while the block lives.
  */
 export function damageRow(stats: StatBlock, mask: TagMask): number {
   let table = blockTables.get(stats);
@@ -230,5 +252,5 @@ export function damageRow(stats: StatBlock, mask: TagMask): number {
     table = modTableFor(stats);
     blockTables.set(stats, table);
   }
-  return table.damage(mask);
+  return table.damage(rowKey(mask, CENTER));
 }

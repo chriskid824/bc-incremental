@@ -98,12 +98,27 @@ describe('computeStatBlock', () => {
     expect(stats.values.critChance).toBeCloseTo(0.15, 12);
   });
 
-  it('throws on tags or notTags outside scoped stats and on flat damage', () => {
+  it('keeps scoped damage modifiers out of values and applies them to center rows', () => {
+    const modifiers: Modifier[] = [
+      { stat: 'damage', kind: 'more', value: 1, scope: 'center' },
+      { stat: 'damage', kind: 'increased', value: 0.5, scope: 'outer.poison' },
+      { stat: 'damage', kind: 'flat', value: 2 },
+    ];
+    const stats = block(modifiers);
+    expect(stats.values.damage).toBe(BASE_STATS.damage + 2);
+    expect(stats.scoped).toEqual(modifiers);
+    // damageRow reads center rows: the center scope applies, the outer one does not.
+    expect(rows(stats)).toEqual(ALL_MASKS.map(() => 2));
+  });
+
+  it('throws on tags, notTags or a scope outside scoped stats and on flat damage', () => {
     const rejected: Modifier[] = [
       { stat: 'critChance', kind: 'increased', value: 1, tags: ['crit'] },
       { stat: 'damage', kind: 'flat', value: 5, tags: ['burn'] },
       { stat: 'critChance', kind: 'flat', value: 0.1, notTags: ['chain'] },
       { stat: 'damage', kind: 'flat', value: 5, notTags: ['burn'] },
+      { stat: 'critChance', kind: 'flat', value: 0.1, scope: 'outer.crit' },
+      { stat: 'damage', kind: 'flat', value: 5, scope: 'center' },
     ];
     for (const mod of rejected) expect(() => block([mod]), JSON.stringify(mod)).toThrow(/Tags/);
   });

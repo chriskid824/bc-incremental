@@ -45,6 +45,10 @@ describe('ModifierSchema', () => {
     { stat: 'damage', kind: 'increased', value: 0.5, tags: ['minion', 'poison'] },
     { stat: 'damage', kind: 'more', value: -0.5, tags: ['hit'], notTags: ['crit'] },
     { stat: 'damage', kind: 'increased', value: 0.1, notTags: ['projectile', 'lightning'] },
+    { stat: 'damage', kind: 'more', value: 0.04, scope: 'fusion.fire.poison' },
+    { stat: 'damage', kind: 'increased', value: 0.2, scope: 'center', tags: ['hit'] },
+    { stat: 'damage', kind: 'increased', value: 0.3, scope: 'outer.barrage' },
+    { stat: 'damage', kind: 'more', value: 0.1, scope: 'outer' },
   ])('accepts %o', (modifier) => {
     expect(ModifierSchema.parse(modifier)).toEqual(modifier);
   });
@@ -69,6 +73,15 @@ describe('ModifierSchema', () => {
       'a tag in both tags and notTags',
       { stat: 'damage', kind: 'more', value: 0.1, tags: ['hit', 'crit'], notTags: ['crit'] },
     ],
+    ['a scope on a non-damage stat', { stat: 'critChance', kind: 'flat', value: 1, scope: 'hub' }],
+    ['a scope on a flat modifier', { stat: 'damage', kind: 'flat', value: 5, scope: 'center' }],
+    ['an unknown outer board', { stat: 'damage', kind: 'more', value: 1, scope: 'outer.water' }],
+    ['a node id as scope', { stat: 'damage', kind: 'more', value: 1, scope: 'outer.fire.a.b' }],
+    [
+      'a fusion without its board',
+      { stat: 'damage', kind: 'more', value: 1, scope: 'fusion.fire' },
+    ],
+    ['a non-string scope', { stat: 'damage', kind: 'more', value: 1, scope: 0 }],
     ['an unknown stat', { stat: 'armour', kind: 'flat', value: 1 }],
     ['an unknown kind', { stat: 'damage', kind: 'added', value: 1 }],
     ['an infinite value', { stat: 'damage', kind: 'flat', value: Infinity }],
@@ -78,7 +91,7 @@ describe('ModifierSchema', () => {
     expect(ModifierSchema.safeParse(modifier).success).toBe(false);
   });
 
-  it('reports tag errors on the tags field', () => {
+  it('reports tag and scope errors on their fields', () => {
     const result = ModifierSchema.safeParse({
       stat: 'chainCount',
       kind: 'more',
@@ -94,6 +107,20 @@ describe('ModifierSchema', () => {
       notTags: ['chain'],
     });
     expect(not.error?.issues.map((issue) => issue.path)).toEqual([['notTags']]);
+    const scope = ModifierSchema.safeParse({
+      stat: 'chainCount',
+      kind: 'more',
+      value: 1,
+      scope: 'outer.lightning',
+    });
+    expect(scope.error?.issues.map((issue) => issue.path)).toEqual([['scope']]);
+    const unknown = ModifierSchema.safeParse({
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      scope: 'x',
+    });
+    expect(unknown.error?.issues.map((issue) => issue.path)).toEqual([['scope']]);
   });
 });
 

@@ -3,6 +3,7 @@
  * (death, wave cap, timeout) and the RunResult.
  */
 
+import type { Num } from '../../core/num';
 import type { EnemyId } from '../../data/types';
 import { ENEMY_IDS } from '../../data/types';
 import { TICK_RATE } from '../types';
@@ -39,6 +40,10 @@ function end(ctx: RunContext, reason: EndReason): void {
     leaks += tally.hits;
     damageTaken += tally.damage;
   }
+  const bySource: Record<string, Num> = {};
+  ctx.sources.names.forEach((name, ix) => {
+    bySource[name] = ctx.bySource[ix] as Num;
+  });
   const startRec = ctx.startRec;
   ctx.runResult = {
     startWave: ctx.startWaveNumber,
@@ -55,7 +60,11 @@ function end(ctx: RunContext, reason: EndReason): void {
       crit: ctx.damageCrit,
       burn: ctx.damageBurn,
       chain: ctx.damageChain,
+      poison: ctx.damagePoison,
+      bleed: ctx.damageBleed,
     },
+    damageBySource: bySource,
+    counters: { ...ctx.counters },
     maxHit: ctx.maxHit,
     overkillSeconds: ctx.overkillTicks / TICK_RATE,
     leaks,

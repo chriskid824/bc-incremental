@@ -3,6 +3,7 @@ import { num, toNumber, ZERO } from '../core/num';
 import { shardsPerStdEnemy } from '../data/curve';
 import { NO_EXTRAS } from '../data/stats';
 import { ENEMY_IDS } from '../data/types';
+import { COUNTER_IDS } from '../sim/types';
 import type { RunResult } from '../sim/types';
 import { allowedStartWave, expectedWaveDrops, settleRun, settleUnfinishedRun } from './settle';
 import { createMetaState } from './state';
@@ -31,7 +32,9 @@ function runResult(overrides: Partial<RunResult> = {}): RunResult {
     shards: num(50),
     cores: 2,
     kills: 30,
-    damage: { hit: ZERO, crit: ZERO, burn: ZERO, chain: ZERO },
+    damage: { hit: ZERO, crit: ZERO, burn: ZERO, chain: ZERO, poison: ZERO, bleed: ZERO },
+    damageBySource: { center: ZERO },
+    counters: Object.fromEntries(COUNTER_IDS.map((id) => [id, 0])) as RunResult['counters'],
     maxHit: num(10),
     overkillSeconds: 0,
     leaks: 0,

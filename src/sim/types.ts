@@ -110,6 +110,11 @@ export interface SimState {
   shards: Num;
   cores: number;
   finished: boolean;
+  /**
+   * Damage source ids by index (src/sim/build/sources.ts), as hit events' `source` refers to
+   * them; index 0 is 'center'. A run may number more sources as it goes.
+   */
+  readonly sources: readonly string[];
 }
 
 export type EndReason = 'death' | 'timeout' | 'waveCap';
@@ -127,6 +132,10 @@ export type SimEvent =
       readonly x: number;
       readonly y: number;
       readonly amount: Num;
+      /** The instance's damage tags (src/data/tags.ts). */
+      readonly tags: number;
+      /** Index of the source it is credited to, in SimState.sources. */
+      readonly source: number;
       readonly crit: boolean;
       /** 0 for the primary hit, n for the nth chain jump. */
       readonly chainIndex: number;
@@ -168,13 +177,40 @@ export type SimEvent =
     }
   | { readonly type: 'runEnded'; readonly reason: EndReason };
 
-/** Damage totals by source, for balance reporting. */
+/**
+ * Damage totals by kind of instance, for balance reporting: burn, poison and bleed by their
+ * kind tag; any other instance is crit if it crit, else chain if it is a chain jump, else hit.
+ */
 export interface DamageBreakdown {
   readonly hit: Num;
   readonly crit: Num;
   readonly burn: Num;
   readonly chain: Num;
+  readonly poison: Num;
+  readonly bleed: Num;
 }
+
+/**
+ * Run counters for the effect and freeze budgets (RunResult.counters). They stay 0 until the
+ * systems that count them exist (docs/v3/implementation-plan-v3.md §2.5, §2.6, §6).
+ */
+export const COUNTER_IDS = [
+  /** Effects run from the effect queue. */
+  'effectsRun',
+  /** Most entries the effect queue held at once. */
+  'effectQueuePeak',
+  /** Ticks that ended with effects still queued past the per-tick budget. */
+  'effectBudgetTicks',
+  /** Σ entries carried over to the next tick by the budget. */
+  'effectsDeferred',
+  /** Entries dropped at the queue's hard cap. */
+  'effectsDropped',
+  /** Trigger events not dispatched because they came at the maximum depth. */
+  'triggerDepthCapped',
+  /** Freezes past the rate limit, which froze without running their triggers. */
+  'freezePayloadsLimited',
+] as const;
+export type CounterId = (typeof COUNTER_IDS)[number];
 
 /** Enemies of one type that reached the player, and their contact damage. */
 export interface ContactTally {
@@ -199,8 +235,15 @@ export interface RunResult {
   readonly shards: Num;
   readonly cores: number;
   readonly kills: number;
-  /** Damage dealt, split by source. `hit` counts non-crit primary hits only. */
+  /** Damage dealt, split by kind of instance. `hit` counts non-crit primary hits only. */
   readonly damage: DamageBreakdown;
+  /**
+   * Damage dealt per source id, in SimState.sources order, every numbered source present. Its
+   * total is the breakdown's, summed in another order.
+   */
+  readonly damageBySource: Readonly<Record<string, Num>>;
+  /** Budget and cap counters, every id present. */
+  readonly counters: Readonly<Record<CounterId, number>>;
   /** Largest single damage instance this run. */
   readonly maxHit: Num;
   /** Seconds spent in waves where the enemies' standard HP was ≤ 1/10 of the average hit. */

@@ -3,6 +3,7 @@
  * See docs/GDD.md §3 for the meaning of each stat.
  */
 
+import type { SourceSelector } from './sources';
 import { TAG } from './tags';
 import type { DamageTag } from './tags';
 
@@ -70,9 +71,9 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
 export const DAMAGE_TAG_BIT = TAG;
 
 /**
- * Stats whose modifiers may carry tags and notTags: their value depends on the damage instance,
- * so the simulation reads them from ModTable rows keyed by the instance's tags
- * (src/sim/build/modTable.ts). A row holds them in this order.
+ * Stats whose modifiers may carry tags, notTags and a scope: their value depends on the damage
+ * instance, so the simulation reads them from ModTable rows keyed by the instance's tags and
+ * source (src/sim/build/modTable.ts). A row holds them in this order.
  */
 export const SCOPED_STATS = ['damage'] as const satisfies readonly StatId[];
 export type ScopedStat = (typeof SCOPED_STATS)[number];
@@ -86,8 +87,8 @@ export type ModifierKind = 'flat' | 'increased' | 'more';
  * `flat` adds to the base, `increased` values add together, `more` values multiply:
  * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more).
  * `value` is a fraction for increased/more (0.2 = 20%).
- * Only modifiers of SCOPED_STATS may carry tags or notTags, and flat damage never does: it stays
- * in StatBlock.values.damage. An empty list counts as no list.
+ * Only modifiers of SCOPED_STATS may carry tags, notTags or a scope, and flat damage never does:
+ * it stays in StatBlock.values.damage. An empty list counts as no list.
  */
 export interface Modifier {
   readonly stat: StatId;
@@ -97,6 +98,8 @@ export interface Modifier {
   readonly tags?: readonly DamageTag[];
   /** Tags the damage instance must not carry. */
   readonly notTags?: readonly DamageTag[];
+  /** Sources the damage instance must be credited to (src/data/sources.ts). */
+  readonly scope?: SourceSelector;
 }
 
 /**
@@ -115,13 +118,14 @@ export interface StatBlock {
   /** Every stat before modifiers: BASE_STATS, or a test's overridden values. */
   readonly base: Readonly<Record<StatId, number>>;
   /**
-   * Final value of every stat from its untagged modifiers. For `damage` this is the untagged
-   * base (base + Σflat); damage increased/more modifiers count per damage instance.
+   * Final value of every stat from its untagged, unscoped modifiers. For `damage` this is the
+   * untagged base (base + Σflat); damage increased/more modifiers count per damage instance.
    */
   readonly values: Readonly<Record<StatId, number>>;
   /**
    * Every modifier of a scoped stat, untagged ones included, in data order. The simulation folds
-   * them per tag mask into ModTable rows: damage of an instance = values.damage × its damage row.
+   * them per tag mask and source into ModTable rows: damage of an instance = values.damage × its
+   * damage row.
    */
   readonly scoped: readonly Modifier[];
   readonly triggers: StatExtras['triggers'];

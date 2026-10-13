@@ -3,6 +3,7 @@ import { num } from '../../src/core/num';
 import { NO_EXTRAS } from '../../src/data';
 import { computeStatBlock } from '../../src/meta';
 import { damageRow } from '../../src/sim';
+import { COUNTER_IDS } from '../../src/sim';
 import type { RunResult, SimEvent } from '../../src/sim';
 import { maskProbeMods, projectEvent, projectResult } from '../../src/sim/testing';
 import {
@@ -78,6 +79,7 @@ describe('M1 projection', () => {
     const hit = {
       type: 'hit',
       tags: 9,
+      source: 2,
       targetId: 3,
       x: 1,
       y: 2,
@@ -107,7 +109,16 @@ describe('M1 projection', () => {
       shards: num(3),
       cores: 0,
       kills: 4,
-      damage: { hit: num(1), crit: num(2), burn: num(3), chain: num(4) },
+      damage: {
+        hit: num(1),
+        crit: num(2),
+        burn: num(3),
+        chain: num(4),
+        poison: num(0),
+        bleed: num(0),
+      },
+      damageBySource: { center: num(10) },
+      counters: Object.fromEntries(COUNTER_IDS.map((id) => [id, 0])) as RunResult['counters'],
       maxHit: num(2),
       overkillSeconds: 0,
       leaks: 1,
@@ -122,10 +133,11 @@ describe('M1 projection', () => {
       },
       killedBy: 'triangle',
     } satisfies RunResult;
-    const later = {
+    const later: RunResult = {
       ...result,
-      damage: { ...result.damage, poison: num(7) },
-      damageBySource: { center: num(10) },
+      damage: { ...result.damage, poison: num(7), bleed: num(1) },
+      damageBySource: { center: num(10), 'outer.poison': num(8) },
+      counters: { ...result.counters, effectsRun: 12 },
     };
     expect(projectResult(later)).toEqual(projectResult(result));
   });

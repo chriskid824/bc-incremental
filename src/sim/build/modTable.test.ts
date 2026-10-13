@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createRng } from '../../core/rng';
 import type { Rng } from '../../core/rng';
 import { loadGameData } from '../../data';
+import type { SourceSelector } from '../../data/sources';
 import { BASE_STATS, NO_EXTRAS, SCOPED_STATS, STAT_IDS } from '../../data/stats';
 import type { Modifier, ModifierKind, StatId } from '../../data/stats';
 import { DAMAGE_TAGS, TAG, tagMask } from '../../data/tags';
@@ -9,6 +10,8 @@ import type { DamageTag } from '../../data/tags';
 import { computeStatBlock } from '../../meta/stats';
 import { makeStats } from '../testing';
 import { compileMods, damageRow, ModTable, modTableFor } from './modTable';
+import { createSourceTable, rowKey, SOURCE_SHIFT } from './sources';
+import type { SourceTable } from './sources';
 
 const S = SCOPED_STATS.length;
 const DAMAGE = SCOPED_STATS.indexOf('damage');
@@ -134,12 +137,22 @@ interface Reference {
   readonly more: number;
 }
 
-/** The ModTable formula for damage, written out per key. */
-function reference(modifiers: readonly Modifier[], base: number, key: number): Reference {
+/** The ModTable formula for damage, written out per key (tags, and the source above them). */
+function reference(
+  modifiers: readonly Modifier[],
+  base: number,
+  key: number,
+  sources: SourceTable = createSourceTable(),
+): Reference {
+  const tags = key & ((1 << SOURCE_SHIFT) - 1);
+  const source = key >>> SOURCE_SHIFT;
   const untagged = (m: Modifier): boolean =>
-    (m.tags?.length ?? 0) === 0 && (m.notTags?.length ?? 0) === 0;
+    (m.tags?.length ?? 0) === 0 && (m.notTags?.length ?? 0) === 0 && m.scope === undefined;
   const matching = modifiers.filter(
-    (m) => (tagMask(m.tags ?? []) & ~key) === 0 && (tagMask(m.notTags ?? []) & key) === 0,
+    (m) =>
+      (tagMask(m.tags ?? []) & ~tags) === 0 &&
+      (tagMask(m.notTags ?? []) & tags) === 0 &&
+      (m.scope === undefined || sources.matches(m.scope, source)),
   );
   const of = (kind: ModifierKind): Modifier[] => matching.filter((m) => m.kind === kind);
   const untaggedFlat = of('flat')
@@ -153,7 +166,30 @@ function reference(modifiers: readonly Modifier[], base: number, key: number): R
   return { final: (1 + inc) * more, flat, inc, more };
 }
 
-/** Damage modifiers over all 17 tags: tags, notTags, both or neither, tagged flats included. */
+/** Sources of the random keys; SELECTORS pick them by class and by exact id. */
+const SOURCE_NAMES = ['center', 'outer.poison', 'fusion.fire.poison', 'hub', 'outer.fire', 'asc'];
+const SELECTORS: readonly SourceSelector[] = [
+  'center',
+  'outer',
+  'fusion',
+  'hub',
+  'asc',
+  'outer.poison',
+  'outer.greed',
+  'fusion.fire.poison',
+  'fusion.ice.poison',
+];
+
+function sourcesOf(names: readonly string[]): SourceTable {
+  const sources = createSourceTable();
+  for (const name of names) sources.index(name);
+  return sources;
+}
+
+/**
+ * Damage modifiers over all 17 tags: tags, notTags, both or neither, tagged flats included,
+ * some scoped to a source class or id.
+ */
 function randomScopedModifier(rng: Rng): Modifier {
   const kind = rng.pick(KINDS);
   const value = randomValue(rng);
@@ -165,12 +201,19 @@ function randomScopedModifier(rng: Rng): Modifier {
     value,
     ...(tags.length > 0 ? { tags } : {}),
     ...(notTags.length > 0 ? { notTags } : {}),
+    ...(rng.chance(0.2) ? { scope: rng.pick(SELECTORS) } : {}),
   };
 }
 
-function expectRow(table: ModTable, modifiers: readonly Modifier[], base: number, key: number) {
+function expectRow(
+  table: ModTable,
+  modifiers: readonly Modifier[],
+  base: number,
+  key: number,
+  sources?: SourceTable,
+) {
   const row = table.row(key);
-  const ref = reference(modifiers, base, key);
+  const ref = reference(modifiers, base, key, sources);
   const at = row * S + DAMAGE;
   expect(table.final[at], `key ${key}`).toBe(ref.final);
   expect(table.flatV[at], `key ${key}`).toBe(ref.flat);
@@ -179,16 +222,87 @@ function expectRow(table: ModTable, modifiers: readonly Modifier[], base: number
 }
 
 describe('ModTable', () => {
-  it('matches the formula written out per key for random 17-bit keys', () => {
+  it('matches the formula written out per key for random 17-bit tags and sources', () => {
     const rng = createRng(23);
     for (let n = 0; n < 200; n++) {
+      const sources = sourcesOf(SOURCE_NAMES);
       const modifiers = Array.from({ length: rng.int(25) }, () => randomScopedModifier(rng));
       const base = rng.range(0, 100);
-      const table = new ModTable(compileMods(modifiers), Float64Array.of(base));
-      for (let k = 0; k < 200; k++) expectRow(table, modifiers, base, rng.int(1 << 17));
+      const table = new ModTable(compileMods(modifiers, sources), Float64Array.of(base));
+      const randomSource = (): number => rng.int(SOURCE_NAMES.length);
+      for (let k = 0; k < 200; k++) {
+        expectRow(table, modifiers, base, rowKey(rng.int(1 << 17), randomSource()), sources);
+      }
       // Keys with every tag of one modifier, so tagged modifiers match often.
-      for (const mod of modifiers) expectRow(table, modifiers, base, tagMask(mod.tags ?? []));
+      for (const mod of modifiers) {
+        const key = rowKey(tagMask(mod.tags ?? []), randomSource());
+        expectRow(table, modifiers, base, key, sources);
+      }
     }
+  });
+
+  it('applies a scoped modifier only to the sources its class or exact id selects', () => {
+    const sources = sourcesOf(['outer.poison', 'outer.fire', 'fusion.fire.poison', 'hub']);
+    const [center, poison, fire, fusion, hub] = [0, 1, 2, 3, 4];
+    const stats = makeStats({}, [
+      { stat: 'damage', kind: 'more', value: 1, scope: 'outer' },
+      { stat: 'damage', kind: 'increased', value: 0.5, scope: 'outer.poison' },
+      { stat: 'damage', kind: 'more', value: 2, tags: ['hit'], scope: 'fusion.fire.poison' },
+      { stat: 'damage', kind: 'increased', value: 1, scope: 'center' },
+      { stat: 'damage', kind: 'more', value: 9, scope: 'outer.greed' },
+    ]);
+    const table = modTableFor(stats, sources);
+    const at = (tags: number, source: number): number => table.damage(rowKey(tags, source));
+    expect(at(TAG.hit, center)).toBe(2);
+    expect(at(TAG.burn, center)).toBe(2);
+    expect(at(TAG.hit, poison)).toBe(1.5 * 2);
+    expect(at(TAG.hit, fire)).toBe(2);
+    expect(at(TAG.hit, fusion)).toBe(3);
+    expect(at(TAG.burn, fusion)).toBe(1);
+    expect(at(TAG.hit, hub)).toBe(1);
+    // The same tags under another source are another row.
+    expect(table.row(rowKey(TAG.hit, center))).not.toBe(table.row(rowKey(TAG.hit, poison)));
+    expect(damageRow(stats, TAG.hit)).toBe(2);
+  });
+
+  it('keeps scopes current for sources numbered after the table was built', () => {
+    const sources = createSourceTable();
+    const table = new ModTable(
+      compileMods(
+        [
+          { stat: 'damage', kind: 'more', value: 1, scope: 'outer' },
+          { stat: 'damage', kind: 'more', value: 2, scope: 'outer.bleed' },
+        ],
+        sources,
+      ),
+      Float64Array.of(1),
+    );
+    const fire = sources.index('outer.fire');
+    const bleed = sources.index('outer.bleed');
+    expect(table.damage(rowKey(TAG.hit, 0))).toBe(1);
+    expect(table.damage(rowKey(TAG.hit, fire))).toBe(2);
+    expect(table.damage(rowKey(TAG.hit, bleed))).toBe(6);
+  });
+
+  it('adds a scoped flat after the untagged sum, like a tagged one', () => {
+    const sources = sourcesOf(['hub']);
+    const modifiers: Modifier[] = [
+      { stat: 'damage', kind: 'flat', value: 0.1, scope: 'hub' },
+      { stat: 'damage', kind: 'flat', value: 0.2 },
+      { stat: 'damage', kind: 'flat', value: 0.3 },
+    ];
+    const mods = compileMods(modifiers, sources);
+    expect(mods.map((mod) => mod.untagged)).toEqual([false, true, true]);
+    const table = new ModTable(mods, Float64Array.of(1));
+    expect(table.flatV[table.row(rowKey(0, 1)) * S + DAMAGE]).toBe(1 + (0.2 + 0.3) + 0.1);
+    expect(table.flatV[table.row(rowKey(0, 0)) * S + DAMAGE]).toBe(1 + (0.2 + 0.3));
+  });
+
+  it('rejects a scope that is not a source class or id', () => {
+    const scope = 'outer.water' as SourceSelector;
+    expect(() =>
+      compileMods([{ stat: 'damage', kind: 'more', value: 1, scope }], createSourceTable()),
+    ).toThrow(/source selector/);
   });
 
   it('skips modifiers whose notTags the key carries', () => {
@@ -212,7 +326,7 @@ describe('ModTable', () => {
       { stat: 'damage', kind: 'flat', value: 0.7, tags: ['hit'] },
       { stat: 'damage', kind: 'flat', value: 0.3 },
     ];
-    const table = new ModTable(compileMods(modifiers), Float64Array.of(1));
+    const table = new ModTable(compileMods(modifiers, createSourceTable()), Float64Array.of(1));
     const row = table.row(TAG.hit | TAG.crit);
     expect(table.flatV[row * S + DAMAGE]).toBe(1 + (0.2 + 0.3) + 0.1 + 0.7);
     expect(table.flatV[table.row(0) * S + DAMAGE]).toBe(1 + (0.2 + 0.3));
@@ -235,7 +349,7 @@ describe('ModTable', () => {
   it('grows past its first slots, keeping every row and its number', () => {
     const rng = createRng(31);
     const modifiers = Array.from({ length: 12 }, () => randomScopedModifier(rng));
-    const table = new ModTable(compileMods(modifiers), Float64Array.of(10));
+    const table = new ModTable(compileMods(modifiers, createSourceTable()), Float64Array.of(10));
     const keys: number[] = [];
     const seen = new Set<number>();
     while (keys.length < 3000) {
@@ -254,6 +368,8 @@ describe('ModTable', () => {
   });
 
   it('rejects a modifier of a stat that is not scoped', () => {
-    expect(() => compileMods([{ stat: 'critChance', kind: 'flat', value: 0.1 }])).toThrow(/scoped/);
+    expect(() =>
+      compileMods([{ stat: 'critChance', kind: 'flat', value: 0.1 }], createSourceTable()),
+    ).toThrow(/scoped/);
   });
 });

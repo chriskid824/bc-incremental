@@ -395,7 +395,7 @@ function toHudInfo(run: ActiveRun, speed: number): HudInfo {
 
 function toResultInfo(report: RunReport, feedbackUrl: string | null): ResultInfo {
   const { run, result, settlement } = report;
-  const { hit, crit, burn, chain } = result.damage;
+  const { hit, crit, burn, chain, poison, bleed } = result.damage;
   const seconds = result.ticks / TICK_RATE;
   return {
     runNumber: run.number,
@@ -406,7 +406,10 @@ function toResultInfo(report: RunReport, feedbackUrl: string | null): ResultInfo
     maxLife: run.sim.state.player.maxLife,
     glassCannon: run.config.rules.some((rule) => rule.id === 'glassCannon'),
     kills: result.kills,
-    averageDps: seconds > 0 ? div(add(add(hit, crit), add(burn, chain)), seconds) : ZERO,
+    averageDps:
+      seconds > 0
+        ? div(add(add(add(hit, crit), add(burn, chain)), add(poison, bleed)), seconds)
+        : ZERO,
     leaks: result.leaks,
     damageTaken: result.damageTaken,
     damageTakenBy: result.damageTakenBy,

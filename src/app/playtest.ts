@@ -99,8 +99,8 @@ export function runEndFields(
 ): EventFields {
   const { result, settlement, run } = report;
   const seconds = result.ticks / TICK_RATE;
-  const { hit, crit, burn, chain } = result.damage;
-  const dealt = add(add(hit, crit), add(burn, chain));
+  const { hit, crit, burn, chain, poison, bleed } = result.damage;
+  const dealt = add(add(add(hit, crit), add(burn, chain)), add(poison, bleed));
   return {
     run: run.number,
     startWave: result.startWave,

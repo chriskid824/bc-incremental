@@ -39,12 +39,12 @@ interface Accumulator {
 }
 
 /**
- * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more) over the untagged modifiers of every
- * stat except damage, whose `values` entry keeps only base + Σflat. Every modifier of a scoped
- * stat (SCOPED_STATS) also goes to `scoped`, in data order; tagged ones go only there, and the
- * simulation folds them per damage instance (src/sim/build/modTable.ts). An empty tag list is
- * untagged. Throws on tags or notTags outside scoped stats or on flat damage, which data
- * validation should prevent.
+ * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more) over the untagged, unscoped modifiers
+ * of every stat except damage, whose `values` entry keeps only base + Σflat. Every modifier of a
+ * scoped stat (SCOPED_STATS) also goes to `scoped`, in data order; tagged and scoped ones go only
+ * there, and the simulation folds them per damage instance (src/sim/build/modTable.ts). An empty
+ * tag list is untagged. Throws on tags, notTags or a scope outside scoped stats or on flat
+ * damage, which data validation should prevent.
  */
 export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExtras): StatBlock {
   const acc = {} as Record<StatId, Accumulator>;
@@ -52,11 +52,12 @@ export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExt
   const scoped: Modifier[] = [];
 
   for (const mod of modifiers) {
-    const tagged = (mod.tags?.length ?? 0) > 0 || (mod.notTags?.length ?? 0) > 0;
+    const tagged =
+      (mod.tags?.length ?? 0) > 0 || (mod.notTags?.length ?? 0) > 0 || mod.scope !== undefined;
     const isScoped = isScopedStat(mod.stat);
     if (tagged && (!isScoped || (mod.stat === 'damage' && mod.kind === 'flat'))) {
       throw new Error(
-        `Tags are only allowed on scoped stats, and not on flat damage: ${JSON.stringify(mod)}`,
+        `Tags and scopes are only allowed on scoped stats, not flat damage: ${JSON.stringify(mod)}`,
       );
     }
     if (isScoped) scoped.push(mod);

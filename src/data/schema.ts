@@ -7,6 +7,8 @@
 
 import { z } from 'zod';
 import type { RuleSpec } from './rules';
+import { isSourceSelector } from './sources';
+import type { SourceSelector } from './sources';
 import { isScopedStat, STAT_IDS } from './stats';
 import type { Modifier, ModifierKind, StatId } from './stats';
 import { DAMAGE_TAGS } from './tags';
@@ -67,9 +69,14 @@ export const TALENT_ARCHETYPES = [
 /** z.number() rejects NaN and ±Infinity in zod v4. */
 const finite = z.number();
 
-/** Scoped stats take tags and notTags; flat damage stays untagged in StatBlock.values. */
+/** Scoped stats take tags, notTags and a scope; flat damage stays untagged in StatBlock.values. */
 const taggable = (m: { readonly stat: StatId; readonly kind: ModifierKind }): boolean =>
   isScopedStat(m.stat) && !(m.stat === 'damage' && m.kind === 'flat');
+
+export const SourceSelectorSchema = z.custom<SourceSelector>(
+  (value) => typeof value === 'string' && isSourceSelector(value),
+  { message: 'must be a source class or a source id (src/data/sources.ts)' },
+);
 
 export const ModifierSchema = exact<Modifier>()(
   z
@@ -79,6 +86,7 @@ export const ModifierSchema = exact<Modifier>()(
       value: finite,
       tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
       notTags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
+      scope: SourceSelectorSchema.exactOptional(),
     })
     .refine((m) => m.tags === undefined || taggable(m), {
       message: 'tags are only allowed on scoped stats, and not on flat damage',
@@ -107,6 +115,10 @@ export const ModifierSchema = exact<Modifier>()(
     .refine((m) => !(m.notTags ?? []).some((tag) => m.tags?.includes(tag) === true), {
       message: 'notTags must not repeat a tag from tags',
       path: ['notTags'],
+    })
+    .refine((m) => m.scope === undefined || taggable(m), {
+      message: 'scope is only allowed on scoped stats, and not on flat damage',
+      path: ['scope'],
     })
     .readonly(),
 );

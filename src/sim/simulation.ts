@@ -12,7 +12,8 @@
  * (src/sim/targeting.ts). Target queries read a spatial grid rebuilt every tick
  * (src/sim/grid.ts), with exactly the results of a linear scan.
  * Keystone and notable rules (config.rules) are compiled once per run (src/sim/rules.ts);
- * damage multipliers per tag mask fill a ModTable on first use (src/sim/build/modTable.ts).
+ * damage multipliers per tag mask and damage source fill a ModTable on first use
+ * (src/sim/build/modTable.ts, src/sim/build/sources.ts).
  */
 
 import { STAT_IDS } from '../data/stats';

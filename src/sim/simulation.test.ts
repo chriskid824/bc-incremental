@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { shardsPerStdEnemy, stdHp } from '../data/curve';
+import type { SourceSelector } from '../data/sources';
 import { BASE_STATS } from '../data/stats';
+import type { Modifier } from '../data/stats';
+import { TAG } from '../data/tags';
 import type { EnemyId, GameData, WaveTable } from '../data/types';
 import { BURN_TICK_INTERVAL, createSimulation } from './simulation';
 import { FOCUS_RANGE } from './targeting';
 import {
+  GOLDEN_BUILDS,
   makeConfig,
   makeStats,
   makeTestData,
@@ -14,7 +18,7 @@ import {
   TEST_WAVES,
 } from './testing';
 import type { TestDataOverrides } from './testing';
-import { ARENA_HEIGHT, ARENA_WIDTH, DT, NO_INPUT, TICK_RATE } from './types';
+import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, NO_INPUT, TICK_RATE } from './types';
 import type { RunConfig, RunResult, SimEvent, Simulation } from './types';
 
 type Ticks = readonly (readonly SimEvent[])[];
@@ -296,6 +300,90 @@ describe('determinism', () => {
       Math.max(...hits.map((h) => h.amount), ...burns.map((b) => b.amount)),
     );
     expect(result.kills).toBe(eventsOf(ticks, 'enemyKilled').length);
+  });
+});
+
+describe('damage sources', () => {
+  const data = makeTestData();
+  const MIXED = {
+    damage: 7.5,
+    attackSpeed: 3,
+    projectileCount: 1,
+    critChance: 0.3,
+    igniteChance: 0.5,
+    chainCount: 1.5,
+    maxLife: 80,
+  };
+  const config = makeConfig({
+    seed: 42,
+    stats: makeStats(MIXED, maskProbeMods()),
+    maxTicks: 60 * TICK_RATE,
+  });
+
+  it('credits every M1 damage instance to the center, with its tags on each hit', () => {
+    const sim = createSimulation(config, data);
+    expect(sim.state.sources).toEqual(['center']);
+    let total = 0;
+    let hits = 0;
+    while (!sim.state.finished) {
+      for (const event of sim.step(NO_INPUT)) {
+        if (event.type === 'burnTick') total += event.amount;
+        if (event.type !== 'hit') continue;
+        hits++;
+        total += event.amount;
+        expect(event.source).toBe(0);
+        const tags = TAG.hit | (event.crit ? TAG.crit : 0) | (event.chainIndex > 0 ? TAG.chain : 0);
+        expect(event.tags).toBe(tags);
+      }
+    }
+    expect(hits).toBeGreaterThan(100);
+    const result = sim.result();
+    expect(sim.state.sources).toEqual(['center']);
+    expect(Object.keys(result.damageBySource)).toEqual(['center']);
+    // One running sum in event order: the center's total, bit for bit.
+    expect(result.damageBySource.center).toBe(total);
+    expect(result.damage.poison).toBe(0);
+    expect(result.damage.bleed).toBe(0);
+  });
+
+  it.each(Object.keys(GOLDEN_BUILDS))(
+    'sums damageBySource to the damage breakdown total (%s)',
+    (name) => {
+      const build = GOLDEN_BUILDS[name];
+      if (build === undefined) throw new Error(name);
+      const { result } = recordRun(
+        makeConfig({ seed: 3, startWave: 8, ...build, maxTicks: 1200 }),
+        data,
+      );
+      const bySource = sum(Object.values(result.damageBySource));
+      const breakdown = sum(Object.values(result.damage));
+      expect(breakdown).toBeGreaterThan(0);
+      expectClose(bySource, breakdown, 1e-12);
+    },
+  );
+
+  it('applies a center-scoped modifier like an unscoped one, other scopes not at all', () => {
+    const recordWith = (extra: readonly Modifier[]) =>
+      recordRun({ ...config, stats: makeStats(MIXED, [...maskProbeMods(), ...extra]) }, data);
+    const more = (scope?: SourceSelector): Modifier => ({
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      ...(scope === undefined ? {} : { scope }),
+    });
+    const plain = recordWith([]);
+    const doubled = recordWith([more()]);
+    expect(doubled.result.damageBySource.center).not.toBe(plain.result.damageBySource.center);
+    expect(recordWith([more('center')])).toEqual(doubled);
+    for (const scope of ['outer', 'outer.fire', 'fusion', 'fusion.fire.poison', 'hub'] as const) {
+      expect(recordWith([more(scope)]), scope).toEqual(plain);
+    }
+  });
+
+  it('reports every counter, all 0 while nothing counts them', () => {
+    const { result } = recordRun(config, data);
+    expect(Object.keys(result.counters)).toEqual([...COUNTER_IDS]);
+    for (const id of COUNTER_IDS) expect(result.counters[id], id).toBe(0);
   });
 });
 

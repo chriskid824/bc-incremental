@@ -14,12 +14,23 @@ import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
 import { modTableFor } from '../build/modTable';
 import type { ModTable } from '../build/modTable';
+import {
+  ailmentCredit,
+  CENTER,
+  createAttribution,
+  createSourceTable,
+  M1_CENTER_AILMENTS,
+  MAX_SOURCES,
+  rowKey,
+} from '../build/sources';
+import type { AttributionPolicy, SourceTable } from '../build/sources';
 import type { SpatialGrid } from '../grid';
 import { compileRules } from '../rules';
 import type { RuleEffects } from '../rules';
 import { FOCUS_RANGE, isCovered } from '../targeting';
-import { ARENA_HEIGHT, ARENA_WIDTH, DT, MAX_RUN_SECONDS, TICK_RATE } from '../types';
+import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, MAX_RUN_SECONDS, TICK_RATE } from '../types';
 import type {
+  CounterId,
   EnemyState,
   PlayerState,
   ProjectileState,
@@ -37,6 +48,9 @@ const BURN = DAMAGE_TAG_BIT.burn;
 
 const HALF_WIDTH = ARENA_WIDTH / 2;
 const HALF_HEIGHT = ARENA_HEIGHT / 2;
+
+/** Source of the attack's hits: the M1 attack is the center's own (src/sim/build/sources.ts). */
+export const ATTACK_SOURCE = CENTER;
 
 export interface WaveRecord {
   readonly wave: number;
@@ -106,8 +120,19 @@ export interface RunContext {
   readonly spawnTicks: number;
   readonly waveTimerTicks: number;
 
+  // ---- Damage sources (src/sim/build/sources.ts) ----
+  /** The run's source ids; index 0 is 'center'. */
+  readonly sources: SourceTable;
+  /** Who ailment damage is credited to; in M1 every ailment is the center's own. */
+  readonly attribution: AttributionPolicy;
+  /** Source credited with burn damage: every burn comes from the attack's hits. */
+  readonly burnCredit: number;
+
   // ---- Derived stats, clamped as documented in src/data/stats.ts ----
-  /** Damage multiplier per tag mask, from the build's scoped modifiers, filled on first use. */
+  /**
+   * Damage multiplier per tag mask and source (rowKey), from the build's scoped modifiers,
+   * filled on first use.
+   */
   readonly table: ModTable;
   readonly damage: Num;
   /** Random crit chance; steadyAim turns random crits off. */
@@ -181,10 +206,16 @@ export interface RunContext {
   damageCrit: Num;
   damageChain: Num;
   damageBurn: Num;
+  damagePoison: Num;
+  damageBleed: Num;
+  /** Damage dealt per source index (RunResult.damageBySource); see tally in hits.ts. */
+  readonly bySource: Num[];
   maxHit: Num;
   /** Contact hits and damage per enemy type (RunResult.damageTakenBy). */
   readonly taken: Record<EnemyId, { hits: number; damage: number }>;
   killedBy: EnemyId | null;
+  /** RunResult.counters. */
+  readonly counters: Record<CounterId, number>;
   runResult: RunResult | null;
 
   // ---- Target predicates for grid queries (src/sim/targeting.ts), bound once per run ----
@@ -225,9 +256,14 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
+  const sources = createSourceTable();
+  const attribution = createAttribution(M1_CENTER_AILMENTS);
+  const burnCredit = ailmentCredit(sources, attribution, 'burn', ATTACK_SOURCE);
+
   // Derived stats, clamped as documented in src/data/stats.ts.
-  const table = modTableFor(config.stats);
-  const multAt = (mask: number): number => table.damage(mask);
+  const table = modTableFor(config.stats, sources);
+  const multAt = (mask: number, source = ATTACK_SOURCE): number =>
+    table.damage(rowKey(mask, source));
   const damage = num(values.damage);
   const critChance = fx.steadyAimEvery > 0 ? 0 : clamp01(values.critChance);
   const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
@@ -262,9 +298,12 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     shards: ZERO,
     cores: 0,
     finished: false,
+    sources: sources.names,
   };
   const taken = {} as Record<EnemyId, { hits: number; damage: number }>;
   for (const id of ENEMY_IDS) taken[id] = { hits: 0, damage: 0 };
+  const counters = {} as Record<CounterId, number>;
+  for (const id of COUNTER_IDS) counters[id] = 0;
 
   const ctx: RunContext = {
     data,
@@ -279,6 +318,10 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     spawnTicks: data.waves.spawnDurationSec * TICK_RATE,
     waveTimerTicks: data.waves.waveTimerSec * TICK_RATE,
 
+    sources,
+    attribution,
+    burnCredit,
+
     table,
     damage,
     critChance,
@@ -287,8 +330,8 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     burnDamage: values.burnDamage,
     burnTicks: Math.max(0, values.burnDuration * fx.burnDurationMult * TICK_RATE),
     burnCap: fx.burnUncapped ? UNCAPPED_BURN_STACKS : Math.max(1, Math.floor(values.burnMaxStacks)),
-    burnMult: multAt(BURN) * allMult,
-    burnCritMult: multAt(BURN | CRIT) * allMult,
+    burnMult: multAt(BURN, burnCredit) * allMult,
+    burnCritMult: multAt(BURN | CRIT, burnCredit) * allMult,
     plainHitMult,
     critHitMult,
     chainCount: Math.max(0, values.chainCount * fx.chainCountMult),
@@ -332,9 +375,13 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     damageCrit: ZERO,
     damageChain: ZERO,
     damageBurn: ZERO,
+    damagePoison: ZERO,
+    damageBleed: ZERO,
+    bySource: new Array<Num>(MAX_SOURCES).fill(ZERO),
     maxHit: ZERO,
     taken,
     killedBy: null,
+    counters,
     runResult: null,
 
     shootable: (enemy) => !isCovered(enemy, projectileEstimate) && !doomed(ctx, enemy),

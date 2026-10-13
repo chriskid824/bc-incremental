@@ -4,9 +4,13 @@
  */
 
 import { add, assertFinite, gt, lte, sub, ZERO } from '../../core/num';
+import { DAMAGE_TAG_BIT } from '../../data/stats';
 import { accrued, BURN_TICK_INTERVAL, expireBurns } from './burn';
 import type { BurnStack, Enemy, RunContext } from './context';
 import { killEnemy } from './death';
+import { tally } from './hits';
+
+const BURN = DAMAGE_TAG_BIT.burn;
 
 /** Expires stacks every tick; deals accrued burn damage every BURN_TICK_INTERVAL ticks. */
 export function updateBurns(ctx: RunContext): void {
@@ -28,7 +32,7 @@ export function updateBurns(ctx: RunContext): void {
     if (!gt(amount, ZERO)) continue;
     assertFinite(amount, 'burn damage');
     enemy.hp = sub(enemy.hp, amount);
-    ctx.damageBurn = add(ctx.damageBurn, amount);
+    tally(ctx, BURN, ctx.burnCredit, amount);
     if (gt(amount, ctx.maxHit)) ctx.maxHit = amount;
     ctx.events.push({ type: 'burnTick', targetId: enemy.id, x: enemy.x, y: enemy.y, amount });
     if (lte(enemy.hp, ZERO)) killEnemy(ctx, enemy);
