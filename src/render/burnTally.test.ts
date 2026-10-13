@@ -66,6 +66,19 @@ describe('BurnTally', () => {
     expect(shown.reduce((sum, s) => sum + s.amount, 0)).toBeLessThanOrEqual(ticks);
   });
 
+  it('names the enemy each total belongs to, so its number can merge with others for it', () => {
+    const tally = new BurnTally();
+    const ids: number[] = [];
+    const emit = (_amount: Num, _x: number, _y: number, enemyId: number): void => {
+      ids.push(enemyId);
+    };
+    tally.add(3, num(1), 0, 0);
+    tally.add(8, num(1), 0, 0);
+    tally.flush(8, emit);
+    tally.update(BURN_TALLY_MS, emit);
+    expect(ids).toEqual([8, 3]);
+  });
+
   it('clears without showing anything', () => {
     const tally = new BurnTally();
     const { shown, emit } = collector();

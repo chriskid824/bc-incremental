@@ -24,6 +24,9 @@ const TAU = Math.PI * 2;
 
 const rand = (min: number, max: number): number => min + Math.random() * (max - min);
 
+/** Crit flares stop growing at this many orders of magnitude above the typical hit. */
+const CRIT_FLARE_DECADES = 1.5;
+
 export class Bursts {
   constructor(
     private readonly fx: FxParticles,
@@ -78,13 +81,24 @@ export class Bursts {
     this.sparks(x, y, dirX, dirY, 3, 0xffffff, COLORS.spark, 0.8);
   }
 
-  /** A crit: a star flare and crit-colored sparks, bigger for bigger crits (decades ≥ 0). */
-  crit(x: number, y: number, decades: number): void {
-    const d = Math.max(0, decades);
-    this.star(x, y, 1.1 + 0.9 * d, COLORS.critHot, COLORS.crit, 200 + 60 * d);
-    this.glow(FX_FLASH, x, y, 70 + 50 * d, COLORS.critHot, COLORS.crit, 0.9, 150);
-    this.rings.shock(x, y, 48 + 40 * d, COLORS.crit, 5 + 3 * d, 220 + 60 * d);
-    this.sparks(x, y, 0, 0, Math.round(6 + 6 * d), COLORS.critHot, COLORS.crit, 1.2 + 0.4 * d);
+  /**
+   * A crit: a star flare and crit-colored sparks, a little bigger for bigger crits (decades
+   * above the typical hit, with a low ceiling). `big` is the full flare with a shockwave, for
+   * crits shown as a big number pop; the others get a small flare so a volley of crits does not
+   * bury the crowd under stars.
+   */
+  crit(x: number, y: number, decades: number, big: boolean): void {
+    const d = Math.min(CRIT_FLARE_DECADES, Math.max(0, decades));
+    if (!big) {
+      this.star(x, y, 0.55 + 0.15 * d, COLORS.critHot, COLORS.crit, 150);
+      this.glow(FX_FLASH, x, y, 40 + 10 * d, COLORS.critHot, COLORS.crit, 0.7, 110);
+      this.sparks(x, y, 0, 0, 3, COLORS.critHot, COLORS.crit, 1);
+      return;
+    }
+    this.star(x, y, 0.9 + 0.4 * d, COLORS.critHot, COLORS.crit, 200 + 40 * d);
+    this.glow(FX_FLASH, x, y, 56 + 22 * d, COLORS.critHot, COLORS.crit, 0.85, 150);
+    this.rings.shock(x, y, 40 + 18 * d, COLORS.crit, 4 + 2 * d, 220 + 40 * d);
+    this.sparks(x, y, 0, 0, Math.round(5 + 3 * d), COLORS.critHot, COLORS.crit, 1.1 + 0.2 * d);
   }
 
   /** A chain jump landed: an electric pop at the target. */

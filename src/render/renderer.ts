@@ -24,6 +24,7 @@ import { DamageNumbers } from './damageNumbers';
 import { EnemyLayer, HIT_PUNCH } from './enemies';
 import { FxParticles } from './fx';
 import { createFxTextures } from './fxTextures';
+import { hudSafeArea } from './numberLayout';
 import { COLORS } from './palette';
 import { ShardParticles } from './particles';
 import { PlayerView } from './player';
@@ -87,8 +88,8 @@ export class Renderer {
   private worldX = 0;
   private worldY = 0;
   private readonly onResize = (): void => this.fit();
-  private readonly showBurn = (amount: Num, x: number, y: number): void => {
-    this.numbers.spawn('burn', amount, x, y);
+  private readonly showBurn = (amount: Num, x: number, y: number, enemyId: number): void => {
+    this.numbers.spawn('burn', amount, x, y, enemyId);
   };
   private readonly flamePuff = (x: number, y: number): void => this.bursts.flamePuff(x, y);
 
@@ -216,11 +217,12 @@ export class Renderer {
     } else if (!crit) {
       this.bursts.hit(x, y, x - CENTER_X, y - CENTER_Y);
     }
-    this.numbers.spawn(crit ? 'crit' : chain ? 'chain' : 'hit', event.amount, x, y);
+    const kind = crit ? 'crit' : chain ? 'chain' : 'hit';
+    const shown = this.numbers.spawn(kind, event.amount, x, y, event.targetId);
     if (!crit) return;
 
     const decades = this.numbers.decades(event.amount);
-    this.bursts.crit(x, y, decades);
+    this.bursts.crit(x, y, decades, shown === 'big');
     if (decades >= SHAKE_MIN_DECADES && this.critShakeCooldownMs <= 0) {
       this.shake.add(
         SHAKE_BASE + SHAKE_PER_DECADE * (decades - SHAKE_MIN_DECADES),
@@ -282,6 +284,9 @@ export class Renderer {
     this.worldY = (height - ARENA_HEIGHT * scale) / 2;
     this.world.scale.set(scale);
     this.world.position.set(this.worldX, this.worldY);
+    this.numbers.setSafeArea(
+      hudSafeArea(ARENA_WIDTH, ARENA_HEIGHT, width, height, scale, this.worldX, this.worldY),
+    );
 
     const g = this.letterbox;
     g.clear();
