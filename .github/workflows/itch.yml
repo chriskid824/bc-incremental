@@ -1,0 +1,67 @@
+name: Publish to itch
+
+# Uploads the web build to the itch.io playtest page. Runs on a playtest-v* tag
+# (git tag playtest-v1 && git push origin playtest-v1) or by hand from the Actions tab.
+# Needs the repository secret BUTLER_API_KEY (itch.io → Settings → API keys).
+
+on:
+  push:
+    tags: ['playtest-v*']
+  workflow_dispatch:
+
+concurrency:
+  group: itch
+  cancel-in-progress: false
+
+env:
+  # <itch user>/<game> from the page URL https://<user>.itch.io/<game>.
+  ITCH_TARGET: ''
+  ITCH_CHANNEL: html5
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check settings
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          if [ -z "$ITCH_TARGET" ]; then
+            echo "::error::ITCH_TARGET is empty in .github/workflows/itch.yml"
+            exit 1
+          fi
+          if [ -z "$BUTLER_API_KEY" ]; then
+            echo "::error::The repository secret BUTLER_API_KEY is missing"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - name: Drop source maps
+        run: find dist -name '*.map' -delete
+      - name: Install butler
+        run: |
+          for host in broth.itch.zone broth.itch.ovh; do
+            rm -f butler.zip
+            if curl -fsSL --retry 3 -o butler.zip "https://$host/butler/linux-amd64/LATEST/archive/default"; then
+              break
+            fi
+          done
+          if [ ! -s butler.zip ]; then
+            echo "::error::Could not download butler from broth.itch.zone or broth.itch.ovh"
+            exit 1
+          fi
+          unzip -q butler.zip -d "$RUNNER_TEMP/butler"
+          chmod +x "$RUNNER_TEMP/butler/butler"
+          echo "$RUNNER_TEMP/butler" >> "$GITHUB_PATH"
+      - name: Push
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          butler -V
+          butler push dist "$ITCH_TARGET:$ITCH_CHANNEL" --userversion "$GITHUB_REF_NAME+${GITHUB_SHA::7}"

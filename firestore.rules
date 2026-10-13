@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// Anonymous playtest events (docs/ARCHITECTURE.md §9). Anyone may add a batch the shape
+// src/platform/analytics.ts writes; nobody may read, change or delete one. Paste this file
+// into Firebase console → Firestore Database → Rules and press Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isBatch(data) {
+      return data.keys().hasOnly(['v', 'installId', 'sessionId', 'seq', 'build', 'locale', 'sentAt', 'events'])
+        && data.keys().hasAll(['v', 'installId', 'sessionId', 'seq', 'build', 'locale', 'sentAt', 'events'])
+        && data.v == 1
+        && data.installId is string && data.installId.size() <= 64
+        && data.sessionId is string && data.sessionId.size() <= 64
+        && data.seq is int && data.seq >= 1 && data.seq <= 100000
+        && data.build is string && data.build.size() <= 64
+        && data.locale is string && data.locale.size() <= 16
+        && data.sentAt is timestamp
+        && data.events is list && data.events.size() >= 1 && data.events.size() <= 200;
+    }
+
+    match /playtest/{batchId} {
+      allow create: if batchId.size() <= 140 && isBatch(request.resource.data);
+      allow read, update, delete: if false;
+    }
+  }
+}
