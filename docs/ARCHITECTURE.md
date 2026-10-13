@@ -159,11 +159,17 @@ interface Platform {
 
 ## 9. 試玩數據
 
-- 匿名安裝 ID（隨機 UUID，存在本機），不收任何個資。
-- 事件：`session_start`、`run_end`（起始波次、最遠波次、時長、各流派投入點數、keystone、最高傷害）、`talent_allocate`、`respec`、`prestige`、`session_end`（最後停留的畫面 = 退出點）。
+- 匿名安裝 ID（隨機 UUID，存在本機），每次開頁面另有一個 session ID，不收任何個資。每批事件帶 build（`版本+git sha`，`vite.config.ts` 注入）與語言。
+- 事件（`src/app/playtest.ts`）：
+  - `session_start`：局數、最遠波次、累計遊玩時間、視窗大小、目前配置。
+  - `run_end`：第幾局、起始與最遠波次、時長、結束原因與死因、擊殺、漏怪、平均 DPS、最高一擊、碎片與跳波補償、累計遊玩時間、目前配置。
+  - `talent_allocate`（節點、等級、流派）、`respec`（洗掉前的配置）、`feedback_open`（從哪個畫面開問卷）、`session_end`（最後停留的畫面 = 退出點、當時的局與波次）。
+  - 「目前配置」= 各流派投入點數（力量的等級另計）、keystone 清單。`prestige` 等轉生做了再加。
 - M1 閘門看每位玩家的總遊玩時間中位數（GDD 2.3：只有模式 A）。
-- 本機先緩衝，再批次寫入 Firestore（一個 session 一份文件），減少寫入次數：
-  - 網頁試玩版：每 5 分鐘、結算畫面、關閉頁面時寫入。
+- 實作：`src/platform/analytics.ts`。不用 Firebase SDK，直接打 Firestore REST API（bundle 不變大、沒有新相依）。所有事件都進本機記錄（上限 3,000 筆），開著傳送時另外排隊、批次寫入 Firestore：
+  - 一批一份文件，ID 是 `{sessionId}-{序號}`。安全規則只允許新增，所以不能往同一份文件追加；寫入次數和「一個 session 一份文件」一樣是每次送出算一次。
+  - 網頁試玩版：每局結束（結算畫面）、每 5 分鐘、頁面隱藏或關閉時寫入。關閉時用 `fetch` 的 `keepalive`，一次最多 40 筆事件（瀏覽器限制 64 KiB）。送失敗的批次放回佇列，下次再送。
+  - 開發伺服器（`npm run dev`）不送，免得污染試玩數據。
   - Steam demo：每 10 分鐘與關閉遊戲時寫入（Electron main process 可以在結束前確實送出）。
 - 各 build 的預設值：
 
@@ -173,9 +179,10 @@ interface Platform {
 | Steam demo | 預設開，可關閉 | 設定頁、商店頁 demo 說明 |
 | Steam 正式版 | 預設關，可開啟 | 設定頁 |
 
-- 免費額度是每天 2 萬次寫入，超過只會寫入失敗、不會收費。估算公式：`每日寫入 ≈ 每日玩家數 × 每人 session 數 × 每 session 寫入次數`。例：Next Fest 每天 5,000 名玩家 × 1.2 session × 約 4 次 = 2.4 萬，會超過。M3 要依實際 demo 的 session 長度重算，必要時改成抽樣（例如只送一半的安裝 ID）或拉長寫入間隔。這項列在 `MILESTONES.md` M3。
-- Firestore 安全規則：只允許新增、限制文件大小、不允許讀取。
-- 設定頁有「匯出試玩數據」按鈕當備案。
+- 免費額度是每天 2 萬次寫入，超過只會寫入失敗、不會收費。估算公式：`每日寫入 ≈ 每日玩家數 × 每人 session 數 × 每 session 寫入次數`。M1 每局結束都寫一次（一局 1–3 分鐘），一個 30 分鐘的 session 約 15–25 次；陌生試玩幾十人沒問題，Next Fest 規模要先改。例：Next Fest 每天 5,000 名玩家 × 1.2 session × 約 4 次 = 2.4 萬，會超過。M3 要依實際 demo 的 session 長度重算，必要時改成抽樣（例如只送一半的安裝 ID）或拉長寫入間隔。這項列在 `MILESTONES.md` M3。
+- Firestore 安全規則（`firestore.rules`，貼到 Firebase 主控台）：`playtest` 集合只允許新增，欄位固定、字串長度與每批事件數（≤ 200）有上限；不允許讀取、修改、刪除。Firebase 網頁 API key 與專案 ID 本來就公開，寫在 `src/app/playtest.ts` 的 `FIREBASE`。
+- 第一局前的說明寫明會送匿名數據、可在天賦網關閉。M1 沒有設定頁，所以「傳送匿名試玩數據」開關與「匯出數據」（本機記錄的 JSON，備案）放在天賦網右側卡片；之後搬到設定頁。
+- 回饋問卷：Google 表單的預先填入連結（`FEEDBACK_URL`，裡面的 `INSTALL_ID` 換成安裝 ID，問卷答案就能和事件對起來）。天賦網一直有連結；結算畫面在累計遊玩 15 分鐘後才出現。
 
 ## 10. 渲染與展示模式
 
@@ -268,5 +275,6 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 ## 14. CI 與發布
 
 - GitHub Actions：`lint` → `typecheck` → `test` → `build:web`，build 結果存成 artifact。
-- 試玩版發布到 itch.io（免費，可以設成限制存取的頁面），M1 加上用 butler 從 CI 上傳。
+- 試玩版發布到 itch.io（免費，可以設成限制存取的頁面）：`.github/workflows/itch.yml`，推 `playtest-v*` tag（或在 Actions 頁手動執行）時跑 `npm run check`、`npm run build`、刪掉 source map，再用 butler 推到 `ITCH_TARGET` 的 `html5` channel，userversion 是 `tag+sha`。需要 repo secret `BUTLER_API_KEY`（itch API key，只放 GitHub，不貼在任何地方）。第一次上傳後要在 itch 編輯頁勾「This file will be played in the browser」。
+- 試玩版從 tag 之後只修 bug：修好的 commit 打下一個 tag（`playtest-v2`…），CI 自動上傳。
 - Steam 版在本機用 `npm run build:steam` 產出，用 SteamPipe 上傳（M3）。

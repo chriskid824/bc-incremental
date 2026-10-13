@@ -50,10 +50,10 @@
   - [x] 洗點後起始波次不降：起始波次用模擬算新 build 推得動的位置，洗點、讀檔、局失敗都會自動調降並說明原因
   - [x] 新手引導：第一局前的說明、第一局的提示、重新整理回到天賦網、局中按 T 會排隊並提示
   - [x] 小 bug：HUD 寫「本局碎片」、冷靜狙擊的 Build 面板、價格成長寫在 tooltip、時限只在最後 30 秒顯示
-- [ ] `Analytics` 介面、Firebase 實作、本機匯出、Firestore 安全規則
-- [ ] 試玩事件記錄遊玩時間、局數、最遠波次、各流派投入點數、keystone 選擇與退出點
-- [ ] 試玩版發布到 itch.io（限制存取頁面），CI 用 butler 上傳
-- [ ] 簡短的遊戲內回饋問卷連結（Google 表單，免費）
+- [x] `Analytics` 介面、Firebase 實作、本機匯出、Firestore 安全規則（ARCHITECTURE §9；專案 ID 與 API key 等 Hoshi 開好 Firebase 專案再填）
+- [x] 試玩事件記錄遊玩時間、局數、最遠波次、各流派投入點數、keystone 選擇與退出點
+- [ ] 試玩版發布到 itch.io（限制存取頁面），CI 用 butler 上傳（CI 已寫好，ARCHITECTURE §14；等 itch 頁面）
+- [x] 簡短的遊戲內回饋問卷連結（Google 表單，免費；連結等 Hoshi 做好表單再填）
 
 試玩（11/03 ～ 11/09）：
 
