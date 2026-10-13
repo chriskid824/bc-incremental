@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DAMAGE_TAG_BIT, loadGameData } from '../../src/data';
 import { createMetaState, DEFAULT_ECONOMY, statBlockFor } from '../../src/meta';
+import { damageRow } from '../../src/sim';
 import { makeStats } from '../../src/sim/testing';
 import {
   attackDamage,
@@ -67,7 +68,7 @@ describe('effectiveHit', () => {
   });
 
   it('adds the expected burn, computed from the crit hit on crits', () => {
-    const { hit, crit, burn } = DAMAGE_TAG_BIT;
+    const { hit } = DAMAGE_TAG_BIT;
     const stats = makeStats(
       {
         damage: 100,
@@ -77,17 +78,19 @@ describe('effectiveHit', () => {
         burnDamage: 0.4,
         burnDuration: 4,
       },
-      (mask) => ((mask & burn) !== 0 ? 2 : 1) * ((mask & crit) !== 0 ? 1.5 : 1),
+      [
+        { stat: 'damage', kind: 'more', value: 1, tags: ['burn'] },
+        { stat: 'damage', kind: 'more', value: 0.5, tags: ['crit'] },
+      ],
     );
     const hitPart = 0.5 * 1 + 0.5 * 3 * 1.5;
     const burnPart = 0.4 * 0.4 * 4 * (0.5 * 2 + 0.5 * 3 * 3);
-    expect(stats.damageMult[hit]).toBe(1);
+    expect(damageRow(stats, hit)).toBe(1);
     expect(effectiveHit(stats)).toBeCloseTo(100 * (hitPart + burnPart), 9);
   });
 });
 
 describe('attackDamage and crowdDps', () => {
-  const { chain } = DAMAGE_TAG_BIT;
   const noCrit = { critChance: 0, igniteChance: 0 };
 
   it('equal D without chain jumps, times attacks and projectiles for crowdDps', () => {
@@ -97,7 +100,7 @@ describe('attackDamage and crowdDps', () => {
   });
 
   it('adds each jump at its retention with the chain tag, the fraction as a chance', () => {
-    const chainDouble = (mask: number): number => ((mask & chain) !== 0 ? 2 : 1);
+    const chainDouble = [{ stat: 'damage', kind: 'more', value: 1, tags: ['chain'] }] as const;
     const two = makeStats({ ...noCrit, chainCount: 2, chainRetention: 0.5 }, chainDouble);
     expect(attackDamage(two)).toBeCloseTo(10 * (1 + 0.5 * 2 + 0.25 * 2), 12);
     const oneAndHalf = makeStats({ ...noCrit, chainCount: 1.5, chainRetention: 0.5 }, chainDouble);

@@ -23,7 +23,7 @@ import { parseArgs } from 'node:util';
 import { toNumber } from '../../src/core/num';
 import { loadGameData } from '../../src/data';
 import type { GameData, Modifier, RuleSpec, StatBlock, StatId } from '../../src/data';
-import { collectRules, computeStatBlock, statBlockFor } from '../../src/meta';
+import { collectRules, statBlockFor } from '../../src/meta';
 import { createSimulation, NO_INPUT } from '../../src/sim';
 import type { RunConfig, RunResult } from '../../src/sim';
 import {
@@ -55,7 +55,7 @@ export const STAT_PROFILES: Readonly<Record<string, Partial<Record<StatId, numbe
  */
 export interface RuleSet {
   readonly rules: readonly RuleSpec[];
-  /** Appended to the profile's maskProbeMods(). */
+  /** Scoped modifiers appended to the profile's maskProbeMods(). */
   readonly modifiers: readonly Modifier[];
   /** Data-form triggers; the rule vocabulary has none yet. */
   readonly triggers: readonly never[];
@@ -96,8 +96,7 @@ export interface FingerprintCase {
 
 /** The profile's values with the damage table of maskProbeMods() plus the set's modifiers. */
 function syntheticStats(profile: Partial<Record<StatId, number>>, set: RuleSet): StatBlock {
-  const { damageMult } = computeStatBlock([...maskProbeMods(), ...set.modifiers]);
-  return makeStats(profile, (mask) => damageMult[mask] as number);
+  return makeStats(profile, [...maskProbeMods(), ...set.modifiers]);
 }
 
 /**

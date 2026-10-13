@@ -8,7 +8,8 @@
  * start. y grows downward; positions are in talent-web units.
  */
 
-import type { DamageTag, Modifier } from './stats';
+import type { Modifier } from './stats';
+import type { DamageTag } from './tags';
 import type { RuleSpec } from './rules';
 import type { TalentNode } from './types';
 

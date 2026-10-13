@@ -12,6 +12,8 @@ import { createStreams } from '../../core/rng';
 import { DAMAGE_TAG_BIT } from '../../data/stats';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
+import { modTableFor } from '../build/modTable';
+import type { ModTable } from '../build/modTable';
 import type { SpatialGrid } from '../grid';
 import { compileRules } from '../rules';
 import type { RuleEffects } from '../rules';
@@ -105,7 +107,8 @@ export interface RunContext {
   readonly waveTimerTicks: number;
 
   // ---- Derived stats, clamped as documented in src/data/stats.ts ----
-  readonly damageMult: readonly number[];
+  /** Damage multiplier per tag mask, from the build's scoped modifiers, filled on first use. */
+  readonly table: ModTable;
   readonly damage: Num;
   /** Random crit chance; steadyAim turns random crits off. */
   readonly critChance: number;
@@ -116,7 +119,7 @@ export interface RunContext {
   readonly burnCap: number;
   readonly burnMult: number;
   readonly burnCritMult: number;
-  /** Hit multipliers on top of damageMult: non-crit and crit. */
+  /** Hit multipliers on top of the damage row: non-crit and crit. */
   readonly plainHitMult: number;
   readonly critHitMult: number;
   readonly chainCount: number;
@@ -212,7 +215,7 @@ export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= F
 
 /** Builds the context of one run; the config must already be validated. */
 export function createRunContext(config: RunConfig, data: GameData): RunContext {
-  const { values, damageMult } = config.stats;
+  const { values } = config.stats;
   const fx = compileRules(config.rules);
   const {
     spawn: spawnRng,
@@ -223,7 +226,8 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
   const startWaveNumber = config.startWave;
 
   // Derived stats, clamped as documented in src/data/stats.ts.
-  const multAt = (mask: number): number => damageMult[mask] as number;
+  const table = modTableFor(config.stats);
+  const multAt = (mask: number): number => table.damage(mask);
   const damage = num(values.damage);
   const critChance = fx.steadyAimEvery > 0 ? 0 : clamp01(values.critChance);
   const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
@@ -275,7 +279,7 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     spawnTicks: data.waves.spawnDurationSec * TICK_RATE,
     waveTimerTicks: data.waves.waveTimerSec * TICK_RATE,
 
-    damageMult,
+    table,
     damage,
     critChance,
     critMultiplier,

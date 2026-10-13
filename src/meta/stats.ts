@@ -4,8 +4,8 @@
  */
 
 import type { RuleSpec } from '../data/rules';
-import { BASE_STATS, DAMAGE_TAG_MASK_COUNT, STAT_IDS, tagMask } from '../data/stats';
-import type { Modifier, StatBlock, StatId } from '../data/stats';
+import { BASE_STATS, isScopedStat, NO_EXTRAS, STAT_IDS } from '../data/stats';
+import type { Modifier, StatBlock, StatExtras, StatId } from '../data/stats';
 import type { GameData } from '../data/types';
 import { nodeRank } from './talents';
 import type { MetaState } from './types';
@@ -39,35 +39,29 @@ interface Accumulator {
 }
 
 /**
- * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more) for every stat except damage.
- * Damage keeps only base + Σflat in `values`; its increased/more modifiers go into
- * `damageMult`, where a modifier counts toward mask m when its tags are a subset of m
- * (untagged modifiers count toward every mask). An empty tag list is untagged.
- * Throws on tags outside increased/more damage, which data validation should prevent.
+ * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more) over the untagged modifiers of every
+ * stat except damage, whose `values` entry keeps only base + Σflat. Every modifier of a scoped
+ * stat (SCOPED_STATS) also goes to `scoped`, in data order; tagged ones go only there, and the
+ * simulation folds them per damage instance (src/sim/build/modTable.ts). An empty tag list is
+ * untagged. Throws on tags or notTags outside scoped stats or on flat damage, which data
+ * validation should prevent.
  */
-export function computeStatBlock(modifiers: readonly Modifier[]): StatBlock {
+export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExtras): StatBlock {
   const acc = {} as Record<StatId, Accumulator>;
   for (const stat of STAT_IDS) acc[stat] = { flat: 0, increased: 0, more: 1 };
-  const damageIncreased = new Array<number>(DAMAGE_TAG_MASK_COUNT).fill(0);
-  const damageMore = new Array<number>(DAMAGE_TAG_MASK_COUNT).fill(1);
+  const scoped: Modifier[] = [];
 
   for (const mod of modifiers) {
-    const mask = mod.tags ? tagMask(mod.tags) : 0;
-    const scaling = mod.stat === 'damage' && mod.kind !== 'flat';
-    if (mask !== 0 && !scaling) {
-      throw new Error(`Tags are only allowed on increased/more damage: ${JSON.stringify(mod)}`);
+    const tagged = (mod.tags?.length ?? 0) > 0 || (mod.notTags?.length ?? 0) > 0;
+    const isScoped = isScopedStat(mod.stat);
+    if (tagged && (!isScoped || (mod.stat === 'damage' && mod.kind === 'flat'))) {
+      throw new Error(
+        `Tags are only allowed on scoped stats, and not on flat damage: ${JSON.stringify(mod)}`,
+      );
     }
-    if (scaling) {
-      for (let m = 0; m < DAMAGE_TAG_MASK_COUNT; m++) {
-        if ((mask & m) !== mask) continue;
-        if (mod.kind === 'increased') {
-          damageIncreased[m] = (damageIncreased[m] as number) + mod.value;
-        } else {
-          damageMore[m] = (damageMore[m] as number) * (1 + mod.value);
-        }
-      }
-      continue;
-    }
+    if (isScoped) scoped.push(mod);
+    // Damage increased/more apply per damage instance, like tagged modifiers.
+    if (tagged || (mod.stat === 'damage' && mod.kind !== 'flat')) continue;
     const a = acc[mod.stat];
     if (mod.kind === 'flat') a.flat += mod.value;
     else if (mod.kind === 'increased') a.increased += mod.value;
@@ -79,11 +73,16 @@ export function computeStatBlock(modifiers: readonly Modifier[]): StatBlock {
     const a = acc[stat];
     values[stat] = (BASE_STATS[stat] + a.flat) * (1 + a.increased) * a.more;
   }
-  const damageMult = damageIncreased.map((inc, m) => (1 + inc) * (damageMore[m] as number));
-  return { values, damageMult };
+  return {
+    base: BASE_STATS,
+    values,
+    scoped,
+    triggers: extras.triggers,
+    conversions: extras.conversions,
+  };
 }
 
 /** StatBlock of the current talent allocation. */
 export function statBlockFor(meta: Readonly<MetaState>, data: GameData): StatBlock {
-  return computeStatBlock(collectModifiers(meta, data));
+  return computeStatBlock(collectModifiers(meta, data), NO_EXTRAS);
 }

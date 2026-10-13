@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuleSpec } from '../data/rules';
-import { BASE_STATS, DAMAGE_TAG_BIT } from '../data/stats';
+import { BASE_STATS } from '../data/stats';
+import { DAMAGE_TAGS } from '../data/tags';
 import { setLocale, t } from '../i18n';
 import { makeStats } from '../sim/testing';
 import { describeBuild, describeModifier } from './describe';
@@ -32,11 +33,13 @@ describe('describeBuild', () => {
   });
 
   it('shows what crit, burn and chain damage nodes do, each on its own line', () => {
-    const { crit, burn, chain } = DAMAGE_TAG_BIT;
     // ×2 on every crit mask, ×3 on every burn mask, ×5 on every chain mask.
-    const mult = (mask: number): number =>
-      (mask & crit ? 2 : 1) * (mask & burn ? 3 : 1) * (mask & chain ? 5 : 1);
-    const lines = build([], makeStats({}, mult));
+    const stats = makeStats({}, [
+      { stat: 'damage', kind: 'more', value: 1, tags: ['crit'] },
+      { stat: 'damage', kind: 'more', value: 2, tags: ['burn'] },
+      { stat: 'damage', kind: 'more', value: 4, tags: ['chain'] },
+    ]);
+    const lines = build([], stats);
     expect(lines[t('stat.damage.hit')]).toBe('10');
     expect(lines[t('build.critHit')]).toBe('30');
     expect(lines[t('build.burnPerStack')]).toBe('45/s');
@@ -88,6 +91,8 @@ describe('describeBuild', () => {
 });
 
 describe('describeModifier', () => {
+  afterEach(() => setLocale('en'));
+
   it('formats flat, increased and more modifiers', () => {
     expect(describeModifier({ stat: 'critChance', kind: 'flat', value: 0.03 })).toBe(
       '+3% Crit chance',
@@ -96,5 +101,20 @@ describe('describeModifier', () => {
       describeModifier({ stat: 'damage', kind: 'increased', value: 0.2, tags: ['burn'] }),
     ).toBe('20% increased Burn damage');
     expect(describeModifier({ stat: 'damage', kind: 'more', value: 0.1 })).toBe('10% more Damage');
+  });
+
+  it('names the damage of every tag, each differently, in both locales', () => {
+    const poison = { stat: 'damage', kind: 'more', value: 0.3, tags: ['poison'] } as const;
+    expect(describeModifier(poison)).toBe('30% more Poison damage');
+    const texts = (): Set<string> =>
+      new Set(
+        DAMAGE_TAGS.map((tag) =>
+          describeModifier({ stat: 'damage', kind: 'increased', value: 0.1, tags: [tag] }),
+        ),
+      );
+    expect(texts().size).toBe(DAMAGE_TAGS.length);
+    setLocale('zh-TW');
+    expect(describeModifier(poison)).toBe('毒傷害總增 30%');
+    expect(texts().size).toBe(DAMAGE_TAGS.length);
   });
 });

@@ -7,8 +7,9 @@
 
 import { z } from 'zod';
 import type { RuleSpec } from './rules';
-import { DAMAGE_TAGS, STAT_IDS } from './stats';
-import type { Modifier, ModifierKind } from './stats';
+import { isScopedStat, STAT_IDS } from './stats';
+import type { Modifier, ModifierKind, StatId } from './stats';
+import { DAMAGE_TAGS } from './tags';
 import { ENEMY_IDS } from './types';
 import type {
   EnemyDef,
@@ -66,6 +67,10 @@ export const TALENT_ARCHETYPES = [
 /** z.number() rejects NaN and ±Infinity in zod v4. */
 const finite = z.number();
 
+/** Scoped stats take tags and notTags; flat damage stays untagged in StatBlock.values. */
+const taggable = (m: { readonly stat: StatId; readonly kind: ModifierKind }): boolean =>
+  isScopedStat(m.stat) && !(m.stat === 'damage' && m.kind === 'flat');
+
 export const ModifierSchema = exact<Modifier>()(
   z
     .strictObject({
@@ -73,9 +78,10 @@ export const ModifierSchema = exact<Modifier>()(
       kind: z.enum(MODIFIER_KINDS),
       value: finite,
       tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
+      notTags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
     })
-    .refine((m) => m.tags === undefined || (m.stat === 'damage' && m.kind !== 'flat'), {
-      message: 'tags are only allowed on increased/more damage modifiers',
+    .refine((m) => m.tags === undefined || taggable(m), {
+      message: 'tags are only allowed on scoped stats, and not on flat damage',
       path: ['tags'],
     })
     .refine((m) => m.tags === undefined || m.tags.length > 0, {
@@ -85,6 +91,22 @@ export const ModifierSchema = exact<Modifier>()(
     .refine((m) => m.tags === undefined || new Set(m.tags).size === m.tags.length, {
       message: 'tags must be unique',
       path: ['tags'],
+    })
+    .refine((m) => m.notTags === undefined || taggable(m), {
+      message: 'notTags are only allowed on scoped stats, and not on flat damage',
+      path: ['notTags'],
+    })
+    .refine((m) => m.notTags === undefined || m.notTags.length > 0, {
+      message: 'notTags must not be empty; omit the field instead',
+      path: ['notTags'],
+    })
+    .refine((m) => m.notTags === undefined || new Set(m.notTags).size === m.notTags.length, {
+      message: 'notTags must be unique',
+      path: ['notTags'],
+    })
+    .refine((m) => !(m.notTags ?? []).some((tag) => m.tags?.includes(tag) === true), {
+      message: 'notTags must not repeat a tag from tags',
+      path: ['notTags'],
     })
     .readonly(),
 );

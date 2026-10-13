@@ -1,6 +1,6 @@
 /**
  * Entry point of the data module: validated game data plus the shared vocabulary
- * (types, stats, rules, master curve, wave composition).
+ * (types, stats, damage tags, rules, master curve, wave composition).
  */
 
 import { ENEMIES } from './enemies';
@@ -12,6 +12,7 @@ import { WAVES } from './waves';
 
 export * from './types';
 export * from './stats';
+export * from './tags';
 export * from './rules';
 export * from './curve';
 export * from './compose';

@@ -42,6 +42,9 @@ describe('ModifierSchema', () => {
     { stat: 'damage', kind: 'flat', value: 5 },
     { stat: 'damage', kind: 'increased', value: 0.2, tags: ['burn'] },
     { stat: 'damage', kind: 'more', value: -0.3, tags: ['hit', 'crit'] },
+    { stat: 'damage', kind: 'increased', value: 0.5, tags: ['minion', 'poison'] },
+    { stat: 'damage', kind: 'more', value: -0.5, tags: ['hit'], notTags: ['crit'] },
+    { stat: 'damage', kind: 'increased', value: 0.1, notTags: ['projectile', 'lightning'] },
   ])('accepts %o', (modifier) => {
     expect(ModifierSchema.parse(modifier)).toEqual(modifier);
   });
@@ -55,6 +58,17 @@ describe('ModifierSchema', () => {
     ['empty tags', { stat: 'damage', kind: 'increased', value: 0.1, tags: [] }],
     ['duplicate tags', { stat: 'damage', kind: 'more', value: 0.1, tags: ['burn', 'burn'] }],
     ['an unknown tag', { stat: 'damage', kind: 'more', value: 0.1, tags: ['all'] }],
+    [
+      'notTags on a non-damage stat',
+      { stat: 'critChance', kind: 'increased', value: 1, notTags: ['crit'] },
+    ],
+    ['notTags on a flat modifier', { stat: 'damage', kind: 'flat', value: 5, notTags: ['burn'] }],
+    ['empty notTags', { stat: 'damage', kind: 'increased', value: 0.1, notTags: [] }],
+    ['duplicate notTags', { stat: 'damage', kind: 'more', value: 0.1, notTags: ['crit', 'crit'] }],
+    [
+      'a tag in both tags and notTags',
+      { stat: 'damage', kind: 'more', value: 0.1, tags: ['hit', 'crit'], notTags: ['crit'] },
+    ],
     ['an unknown stat', { stat: 'armour', kind: 'flat', value: 1 }],
     ['an unknown kind', { stat: 'damage', kind: 'added', value: 1 }],
     ['an infinite value', { stat: 'damage', kind: 'flat', value: Infinity }],
@@ -72,6 +86,14 @@ describe('ModifierSchema', () => {
       tags: ['chain'],
     });
     expect(result.error?.issues.map((issue) => issue.path)).toEqual([['tags']]);
+    const not = ModifierSchema.safeParse({
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      tags: ['chain'],
+      notTags: ['chain'],
+    });
+    expect(not.error?.issues.map((issue) => issue.path)).toEqual([['notTags']]);
   });
 });
 
@@ -122,13 +144,13 @@ describe('GameDataSchema', () => {
 });
 
 describe('parseGameData schema errors', () => {
-  it('rejects a tag on a non-damage stat, naming the path', () => {
+  it('rejects a tag on a stat that is not scoped, naming the path', () => {
     const data = content();
     const [i, node] = talentAt(data, 'keenEye');
     const m = node.modifiers.length;
     node.modifiers.push({ stat: 'critChance', kind: 'more', value: 0.1, tags: ['crit'] });
     expect(() => parseGameData(data)).toThrow(
-      `talents.${i}.modifiers.${m}.tags: tags are only allowed on increased/more damage modifiers`,
+      `talents.${i}.modifiers.${m}.tags: tags are only allowed on scoped stats, and not on flat damage`,
     );
   });
 

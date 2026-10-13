@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { num, toNumber, ZERO } from '../core/num';
 import { shardsPerStdEnemy } from '../data/curve';
+import { NO_EXTRAS } from '../data/stats';
 import { ENEMY_IDS } from '../data/types';
 import type { RunResult } from '../sim/types';
 import { allowedStartWave, expectedWaveDrops, settleRun, settleUnfinishedRun } from './settle';
@@ -10,11 +11,14 @@ import { FIXTURE_ENEMIES, fixtureData } from './testing';
 import { DEFAULT_ECONOMY } from './types';
 
 const data = fixtureData();
-const baseStats = computeStatBlock([]);
-const boostedStats = computeStatBlock([
-  { stat: 'shardGain', kind: 'increased', value: 1 },
-  { stat: 'coreGain', kind: 'increased', value: 0.5 },
-]);
+const baseStats = computeStatBlock([], NO_EXTRAS);
+const boostedStats = computeStatBlock(
+  [
+    { stat: 'shardGain', kind: 'increased', value: 1 },
+    { stat: 'coreGain', kind: 'increased', value: 0.5 },
+  ],
+  NO_EXTRAS,
+);
 
 function runResult(overrides: Partial<RunResult> = {}): RunResult {
   return {

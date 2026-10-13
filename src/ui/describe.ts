@@ -3,10 +3,12 @@
 import { formatNum } from '../core/format';
 import { num } from '../core/num';
 import type { RuleSpec } from '../data/rules';
-import type { DamageTag, Modifier, StatBlock, StatId } from '../data/stats';
+import type { Modifier, StatBlock, StatId } from '../data/stats';
 import { DAMAGE_TAG_BIT } from '../data/stats';
+import type { DamageTag } from '../data/tags';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
+import { damageRow } from '../sim/build/modTable';
 import { compileRules } from '../sim/rules';
 
 /** Flat values of these stats are fractions shown as percentages (0.05 → 5%). */
@@ -23,6 +25,19 @@ const TAGGED_DAMAGE: Readonly<Record<DamageTag, MessageKey>> = {
   crit: 'stat.damage.crit',
   burn: 'stat.damage.burn',
   chain: 'stat.damage.chain',
+  projectile: 'stat.damage.projectile',
+  area: 'stat.damage.area',
+  zone: 'stat.damage.zone',
+  aura: 'stat.damage.aura',
+  orbit: 'stat.damage.orbit',
+  strike: 'stat.damage.strike',
+  minion: 'stat.damage.minion',
+  thorns: 'stat.damage.thorns',
+  trigger: 'stat.damage.trigger',
+  poison: 'stat.damage.poison',
+  bleed: 'stat.damage.bleed',
+  cold: 'stat.damage.cold',
+  lightning: 'stat.damage.lightning',
 };
 
 function statName(mod: Modifier): string {
@@ -69,8 +84,8 @@ const pct = (value: number): string => `${trim(value * 100)}%`;
  * chance with its every-Nth-shot rhythm. Each archetype's nodes move at least one line.
  */
 export function describeBuild(stats: StatBlock, rules: readonly RuleSpec[] = []): BuildLine[] {
-  const { values, damageMult } = stats;
-  const multAt = (mask: number): number => damageMult[mask] as number;
+  const { values } = stats;
+  const multAt = (mask: number): number => damageRow(stats, mask);
   const { hit: HIT, crit: CRIT, burn: BURN, chain: CHAIN } = DAMAGE_TAG_BIT;
   const fx = compileRules(rules);
   const plainHitMult = fx.hitMult * fx.nonCritHitMult * fx.allDamageMult;

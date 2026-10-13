@@ -4,7 +4,7 @@
  */
 
 import type { RuleSpec } from '../data/rules';
-import { BASE_STATS, DAMAGE_TAG_MASK_COUNT } from '../data/stats';
+import { BASE_STATS } from '../data/stats';
 import type { Modifier, StatBlock, StatId } from '../data/stats';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyDef, EnemyId, GameData, WaveTable } from '../data/types';
@@ -108,18 +108,16 @@ export function makeTestData(overrides: TestDataOverrides = {}): GameData {
 }
 
 /**
- * Stat block from BASE_STATS plus overrides. `damageMult` is either one multiplier for every
- * tag mask or a function of the mask.
+ * Stat block from BASE_STATS plus overrides, which are both its base and its values, with the
+ * given scoped modifiers: tagged or untagged increased/more damage, e.g. maskProbeMods(). Flat
+ * changes belong in the overrides.
  */
 export function makeStats(
   values: Partial<Record<StatId, number>> = {},
-  damageMult: number | ((mask: number) => number) = 1,
+  scoped: readonly Modifier[] = [],
 ): StatBlock {
-  const mults: number[] = [];
-  for (let mask = 0; mask < DAMAGE_TAG_MASK_COUNT; mask++) {
-    mults.push(typeof damageMult === 'number' ? damageMult : damageMult(mask));
-  }
-  return { values: { ...BASE_STATS, ...values }, damageMult: mults };
+  const stats = { ...BASE_STATS, ...values };
+  return { base: stats, values: stats, scoped, triggers: [], conversions: [] };
 }
 
 export function makeConfig(overrides: Partial<RunConfig> = {}): RunConfig {
@@ -146,9 +144,9 @@ export function recordRun(
 
 /**
  * Tagged damage modifiers that give each of the 16 M1 tag masks its own damage multiplier,
- * 1 + 0.07 × mask (bit for bit once folded in data order, as computeStatBlock does), so a
- * damage instance that picks the wrong mask changes the result (tools/balance/fingerprint.ts;
- * GOLDEN_BUILDS use the multipliers it folds to).
+ * 1 + 0.07 × mask (bit for bit once folded in data order, as ModTable rows do), so a damage
+ * instance that picks the wrong mask changes the result (tools/balance/fingerprint.ts and
+ * GOLDEN_BUILDS).
  */
 export function maskProbeMods(): Modifier[] {
   return [
@@ -226,10 +224,8 @@ export interface GoldenBuild {
   readonly rules: readonly RuleSpec[];
 }
 
-/** The damage multipliers maskProbeMods() folds to. */
-const probeMult = (mask: number): number => 1 + 0.07 * mask;
 const golden = (values: Partial<Record<StatId, number>>, rules: readonly RuleSpec[] = []) => ({
-  stats: makeStats(values, probeMult),
+  stats: makeStats(values, maskProbeMods()),
   rules,
 });
 

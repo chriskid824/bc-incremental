@@ -14,7 +14,7 @@ import {
   statBlockFor,
 } from '../meta';
 import type { MetaState } from '../meta';
-import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
+import { damageRow, MAX_RUN_SECONDS, TICK_RATE } from '../sim';
 import {
   FAILED_START_RATIO,
   RESULT_FRAME_MAX_MS,
@@ -90,8 +90,8 @@ describe('Session', () => {
     expect(run.config.seed).toBe(1000);
     expect(run.config.startWave).toBe(1);
     expect(run.config.mode).toBe('auto');
-    const { values, damageMult } = run.config.stats;
-    expect(run.typicalHit).toBe(values.damage * (damageMult[DAMAGE_TAG_BIT.hit] as number));
+    const { stats } = run.config;
+    expect(run.typicalHit).toBe(stats.values.damage * damageRow(stats, DAMAGE_TAG_BIT.hit));
     expect(() => session.start()).toThrow();
   });
 

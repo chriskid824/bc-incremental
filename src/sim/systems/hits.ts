@@ -82,7 +82,7 @@ function hitEnemy(
   const baseHit = mul(ctx.damage, (crit ? ctx.critMultiplier : 1) * retention);
   const mask = HIT | (crit ? CRIT : 0) | (chainIndex > 0 ? CHAIN : 0);
   const amount = assertFinite(
-    mul(baseHit, (ctx.damageMult[mask] as number) * (crit ? ctx.critHitMult : ctx.plainHitMult)),
+    mul(baseHit, ctx.table.damage(mask) * (crit ? ctx.critHitMult : ctx.plainHitMult)),
     'hit damage',
   );
   enemy.hp = sub(enemy.hp, amount);

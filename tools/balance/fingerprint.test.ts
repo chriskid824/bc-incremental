@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { num } from '../../src/core/num';
+import { NO_EXTRAS } from '../../src/data';
 import { computeStatBlock } from '../../src/meta';
+import { damageRow } from '../../src/sim';
 import type { RunResult, SimEvent } from '../../src/sim';
 import { maskProbeMods, projectEvent, projectResult } from '../../src/sim/testing';
 import {
@@ -43,8 +45,9 @@ describe('fingerprint cases', () => {
 
   it('gives the synthetic builds the damage table of maskProbeMods', () => {
     const stats = cases.find((c) => c.id === 'test/crit/none/s1/w1')?.config.stats;
-    expect(stats?.values.critChance).toBe(0.4);
-    expect(stats?.damageMult).toEqual(computeStatBlock(maskProbeMods()).damageMult);
+    if (stats === undefined) throw new Error('missing case');
+    expect(stats.values.critChance).toBe(0.4);
+    expect(stats.scoped).toEqual(maskProbeMods());
   });
 
   it('runs a case to the same digest twice, and its line reads back', () => {
@@ -65,8 +68,8 @@ describe('fingerprint cases', () => {
 
 describe('maskProbeMods', () => {
   it('folds to 1 + 0.07 × mask, bit for bit, for every M1 tag mask', () => {
-    const { damageMult } = computeStatBlock(maskProbeMods());
-    damageMult.forEach((mult, mask) => expect(mult).toBe(1 + 0.07 * mask));
+    const stats = computeStatBlock(maskProbeMods(), NO_EXTRAS);
+    for (let mask = 0; mask < 16; mask++) expect(damageRow(stats, mask)).toBe(1 + 0.07 * mask);
   });
 });
 

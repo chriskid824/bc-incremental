@@ -16,7 +16,7 @@ import {
   statBlockFor,
 } from '../../src/meta';
 import type { EconomyConfig, MetaState } from '../../src/meta';
-import { compileRules, createSimulation, NO_INPUT, TICK_RATE } from '../../src/sim';
+import { compileRules, createSimulation, damageRow, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { EndReason, RuleEffects, RunConfig, SimEvent, SimState } from '../../src/sim';
 import { spend } from './strategies';
 import type { StrategyId } from './strategies';
@@ -91,14 +91,14 @@ const CHAIN = DAMAGE_TAG_BIT.chain;
 /**
  * Expected damage, per point of base damage before retention, of one hit `jump` chain jumps
  * after the primary target (0 = the primary): the hit with its crit expectation plus the
- * burn it is expected to cause. Mirrors the simulation: crits use damageMult[hit|crit], jumps
+ * burn it is expected to cause. Mirrors the simulation: crits use the hit|crit damage row, jumps
  * add the chain tag to the hit (not to its burn), a crit's burn is computed from the crit hit
- * with damageMult[burn|crit], a steady shot crits on every jump, and rules apply as compiled
- * by src/sim/rules.ts.
+ * with the burn|crit row, a steady shot crits on every jump, and rules apply as compiled by
+ * src/sim/rules.ts.
  */
 function hitValue(stats: StatBlock, fx: RuleEffects, jump: number): number {
-  const { values, damageMult } = stats;
-  const mult = (mask: number): number => damageMult[mask] as number;
+  const { values } = stats;
+  const mult = (mask: number): number => damageRow(stats, mask);
   const chain = jump > 0 ? CHAIN : 0;
   const critChance =
     fx.steadyAimEvery > 0

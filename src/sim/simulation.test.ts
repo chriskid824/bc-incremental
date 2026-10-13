@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shardsPerStdEnemy, stdHp } from '../data/curve';
 import { BASE_STATS } from '../data/stats';
-import type { StatBlock } from '../data/stats';
 import type { EnemyId, GameData, WaveTable } from '../data/types';
 import { BURN_TICK_INTERVAL, createSimulation } from './simulation';
 import { FOCUS_RANGE } from './targeting';
@@ -9,6 +8,7 @@ import {
   makeConfig,
   makeStats,
   makeTestData,
+  maskProbeMods,
   recordRun,
   TEST_ENEMIES,
   TEST_WAVES,
@@ -169,8 +169,8 @@ describe('createSimulation', () => {
       RangeError,
     );
     expect(() => createSimulation(makeConfig({ maxTicks: 0 }), data)).toThrow(RangeError);
-    const shortMults: StatBlock = { ...makeStats(), damageMult: [1, 1] };
-    expect(() => createSimulation(makeConfig({ stats: shortMults }), data)).toThrow(RangeError);
+    const nanMore = makeStats({}, [{ stat: 'damage', kind: 'more', value: Number.NaN }]);
+    expect(() => createSimulation(makeConfig({ stats: nanMore }), data)).toThrow(RangeError);
     expect(() =>
       createSimulation(makeConfig({ stats: makeStats({ damage: Number.NaN }) }), data),
     ).toThrow(RangeError);
@@ -886,8 +886,8 @@ describe('attacks', () => {
 
 describe('hits and crits', () => {
   const data = dummyData(4, { spawnDurationSec: 0 });
-  /** A distinct multiplier per tag mask, to check which mask each instance uses. */
-  const byMask = (mask: number): number => 1 + mask / 10;
+  /** maskProbeMods' distinct multiplier per tag mask, to check which mask each instance uses. */
+  const byMask = (mask: number): number => 1 + 0.07 * mask;
 
   it('crits every hit at critChance 1, with the crit masks', () => {
     const stats = makeStats(
@@ -899,7 +899,7 @@ describe('hits and crits', () => {
         chainRetention: 0.5,
         chainRange: 5000,
       },
-      byMask,
+      maskProbeMods(),
     );
     const { ticks, result } = recordRun(makeConfig({ stats, maxTicks: 300 }), data);
     const hits = eventsOf(ticks, 'hit');
@@ -916,7 +916,7 @@ describe('hits and crits', () => {
   });
 
   it('never crits at critChance 0', () => {
-    const stats = makeStats({ damage: 7, critChance: 0 }, byMask);
+    const stats = makeStats({ damage: 7, critChance: 0 }, maskProbeMods());
     const { ticks, result } = recordRun(makeConfig({ stats, maxTicks: 300 }), data);
     const hits = eventsOf(ticks, 'hit');
     expect(hits.length).toBeGreaterThan(4);
@@ -932,7 +932,7 @@ describe('hits and crits', () => {
     const average = 0.5 * byMask(1) + 0.5 * 2 * byMask(1 | 2);
     const threshold = (stdHp(1) * 10) / average;
     const overkillSeconds = (damage: number): number => {
-      const stats = makeStats({ damage, critChance: 0.5, critMultiplier: 2 }, byMask);
+      const stats = makeStats({ damage, critChance: 0.5, critMultiplier: 2 }, maskProbeMods());
       return recordRun(makeConfig({ stats, maxTicks: 120 }), data).result.overkillSeconds;
     };
     expect(overkillSeconds(threshold * 1.01)).toBe(2);
@@ -1019,7 +1019,7 @@ describe('chains', () => {
 });
 
 describe('burning', () => {
-  const byMask = (mask: number): number => 1 + mask / 10;
+  const byMask = (mask: number): number => 1 + 0.07 * mask;
 
   it.each([
     { crit: false, mask: 4 },
@@ -1037,7 +1037,7 @@ describe('burning', () => {
         burnDamage: 0.5,
         burnDuration: 1,
       },
-      byMask,
+      maskProbeMods(),
     );
     const sim = createSimulation(makeConfig({ stats, maxTicks: 239 }), dummyData(1));
     const ticks: SimEvent[][] = [];

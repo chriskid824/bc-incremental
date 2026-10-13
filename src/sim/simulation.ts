@@ -11,10 +11,11 @@
  * elites and bosses that come close, and retarget when their target dies first
  * (src/sim/targeting.ts). Target queries read a spatial grid rebuilt every tick
  * (src/sim/grid.ts), with exactly the results of a linear scan.
- * Keystone and notable rules (config.rules) are compiled once per run (src/sim/rules.ts).
+ * Keystone and notable rules (config.rules) are compiled once per run (src/sim/rules.ts);
+ * damage multipliers per tag mask fill a ModTable on first use (src/sim/build/modTable.ts).
  */
 
-import { DAMAGE_TAG_MASK_COUNT, STAT_IDS } from '../data/stats';
+import { STAT_IDS } from '../data/stats';
 import type { GameData } from '../data/types';
 import { updateBurns } from './systems/ailments';
 import { resolveContacts } from './systems/contact';
@@ -50,14 +51,15 @@ function validateConfig(config: RunConfig): void {
   ) {
     throw new RangeError(`maxTicks must be an integer >= 1, got ${config.maxTicks}`);
   }
-  const { values, damageMult } = config.stats;
+  const { base, values, scoped } = config.stats;
   for (const id of STAT_IDS) {
     if (!Number.isFinite(values[id])) throw new RangeError(`Stat ${id} is not finite`);
+    if (!Number.isFinite(base[id])) throw new RangeError(`Base stat ${id} is not finite`);
   }
   if (values.maxLife <= 0) throw new RangeError('maxLife must be positive');
   if (values.projectileSpeed <= 0) throw new RangeError('projectileSpeed must be positive');
-  if (damageMult.length !== DAMAGE_TAG_MASK_COUNT || !damageMult.every(Number.isFinite)) {
-    throw new RangeError(`damageMult must hold ${DAMAGE_TAG_MASK_COUNT} finite numbers`);
+  for (const mod of scoped) {
+    if (!Number.isFinite(mod.value)) throw new RangeError(`A ${mod.stat} modifier is not finite`);
   }
 }
 
