@@ -73,7 +73,8 @@ export interface ProjectileState {
   prevY: number;
   /**
    * Enemy id the projectile homes on. An attack picks the alive enemy nearest to the player
-   * that projectiles already in flight are not expected to kill, else the nearest alive one.
+   * that projectiles already in flight are not expected to kill, an elite or boss within
+   * FOCUS_RANGE first (src/sim/targeting.ts), else the nearest alive one.
    * If the target dies first, the projectile retargets by the same rule measured from its own
    * position; it fizzles only when no enemy is alive.
    */

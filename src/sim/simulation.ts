@@ -6,8 +6,9 @@
  * kills, drops) → burn → compaction → wave clears → overkill → run end.
  * Randomness comes only from the seeded spawn, split, combat and drops streams, and entity
  * arrays stay ordered by increasing id, so a seed fully determines the run.
- * Projectiles spread over enemies that projectiles already in flight will not kill, and
- * retarget when their target dies first (src/sim/targeting.ts).
+ * Projectiles spread over enemies that projectiles already in flight will not kill, focus
+ * elites and bosses that come close, and retarget when their target dies first
+ * (src/sim/targeting.ts).
  * Keystone and notable rules (config.rules) are compiled once per run (src/sim/rules.ts).
  */
 
@@ -20,7 +21,7 @@ import { DAMAGE_TAG_BIT, DAMAGE_TAG_MASK_COUNT, STAT_IDS } from '../data/stats';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../data/types';
 import { compileRules } from './rules';
-import { pickTarget } from './targeting';
+import { FOCUS_RANGE, pickTarget } from './targeting';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, MAX_RUN_SECONDS, PLAYER_RADIUS, TICK_RATE } from './types';
 import type {
   ContactTally,
@@ -96,6 +97,8 @@ interface Enemy extends EnemyState {
   inbound: number;
   /** Serial of the last volley that targeted this enemy. */
   volleyMark: number;
+  /** An elite or boss: a focus target once within FOCUS_RANGE (src/sim/targeting.ts). */
+  readonly tough: boolean;
 }
 
 interface Projectile extends ProjectileState {
@@ -240,7 +243,11 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     }
     return lte(enemy.hp, left);
   };
-  const doomedOrInVolley = (enemy: Enemy): boolean => enemy.volleyMark === volley || doomed(enemy);
+  /** Elites and bosses close to the player draw every shot until covered. */
+  const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
+  /** Later projectiles of a volley spread over other enemies, except onto a focus target. */
+  const doomedOrInVolley = (enemy: Enemy): boolean =>
+    (enemy.volleyMark === volley && !focused(enemy)) || doomed(enemy);
   let lastBurnTick = 0;
   let enemiesDirty = false;
   let projectilesDirty = false;
@@ -360,6 +367,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       hitMark: 0,
       inbound: 0,
       volleyMark: 0,
+      tough: def.id === 'hexagon' || def.id === 'boss',
     };
     enemies.push(enemy);
     rec.alive++;
@@ -446,7 +454,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
   function attack(): void {
     attackTicks += 1;
     while (attackTicks >= attackInterval) {
-      let target = pickTarget(enemies, player.x, player.y, projectileEstimate, doomed);
+      let target = pickTarget(enemies, player.x, player.y, projectileEstimate, doomed, focused);
       if (target === null) {
         // Stay ready without banking attacks: fire on the tick a target appears.
         attackTicks = attackInterval - 1;
@@ -459,7 +467,14 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
         target.volleyMark = volley;
         fire(target);
         if (n + 1 < count) {
-          target = pickTarget(enemies, player.x, player.y, projectileEstimate, doomedOrInVolley);
+          target = pickTarget(
+            enemies,
+            player.x,
+            player.y,
+            projectileEstimate,
+            doomedOrInVolley,
+            focused,
+          );
         }
       }
     }
@@ -510,7 +525,14 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
       let target = projectile.target;
       if (!target.alive) {
         target.inbound--;
-        const next = pickTarget(enemies, projectile.x, projectile.y, projectileEstimate, doomed);
+        const next = pickTarget(
+          enemies,
+          projectile.x,
+          projectile.y,
+          projectileEstimate,
+          doomed,
+          focused,
+        );
         if (next === null) {
           projectile.alive = false;
           projectilesDirty = true;

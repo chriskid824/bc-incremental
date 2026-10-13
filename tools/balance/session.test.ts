@@ -146,6 +146,10 @@ describe('buildMultipliers', () => {
       9,
     );
     expect(mults.sectorMultD).toBeGreaterThan(1);
+    expect(mults.sectorMultAttack).toBeCloseTo(
+      attackDamage(statBlockFor(meta, data)) / attackDamage(statBlockFor(without, data)),
+      9,
+    );
     expect(mults.sectorMultCrowd).toBeGreaterThan(1);
   });
 
@@ -153,6 +157,7 @@ describe('buildMultipliers', () => {
     expect(buildMultipliers(createMetaState(), data)).toEqual({
       repeatableMultD: 1,
       sectorMultD: 1,
+      sectorMultAttack: 1,
       sectorMultCrowd: 1,
     });
   });

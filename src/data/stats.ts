@@ -48,8 +48,9 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   critChance: 0.05,
   critMultiplier: 1.5,
   igniteChance: 0.1,
-  burnDamage: 0.6,
-  burnDuration: 3,
+  // 1.5/s for 1.2 s: 180% of the hit, as before, but dealt before the swarm walks in.
+  burnDamage: 1.5,
+  burnDuration: 1.2,
   burnMaxStacks: 5,
   chainCount: 0,
   chainRetention: 0.7,

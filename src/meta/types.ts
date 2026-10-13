@@ -37,9 +37,13 @@ export interface EconomyConfig {
   readonly skipRewardRate: number;
 }
 
+/**
+ * Tuned with the balance simulator (docs/GDD.md §4.2, §9.1): the first node fits in the
+ * ~200 shards of the first run; ×1.31 per node spreads a sector over the first ~15 minutes.
+ */
 export const DEFAULT_ECONOMY: EconomyConfig = {
-  talentBaseShards: 5,
-  talentGrowth: 1.6,
+  talentBaseShards: 180,
+  talentGrowth: 1.31,
   startWaveRatio: 0.5,
   skipRewardRate: 1,
 };

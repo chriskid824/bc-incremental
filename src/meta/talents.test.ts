@@ -39,18 +39,20 @@ describe('createMetaState', () => {
 });
 
 describe('nodePrice', () => {
+  const base = DEFAULT_ECONOMY.talentBaseShards;
+
   it('grows with the number of allocated non-repeatable nodes', () => {
     const meta = createMetaState();
-    expect(toNumber(nodePrice(meta, node('b'), DEFAULT_ECONOMY).shards)).toBe(5);
+    expect(toNumber(nodePrice(meta, node('b'), DEFAULT_ECONOMY).shards)).toBe(base);
     meta.allocated.add('a');
     expect(toNumber(nodePrice(meta, node('b'), DEFAULT_ECONOMY).shards)).toBeCloseTo(
-      5 * DEFAULT_ECONOMY.talentGrowth,
-      12,
+      base * DEFAULT_ECONOMY.talentGrowth,
+      9,
     );
     meta.allocated.add('b');
     expect(toNumber(nodePrice(meta, node('far'), DEFAULT_ECONOMY).shards)).toBeCloseTo(
-      5 * DEFAULT_ECONOMY.talentGrowth ** 2,
-      12,
+      base * DEFAULT_ECONOMY.talentGrowth ** 2,
+      9,
     );
   });
 
@@ -58,13 +60,13 @@ describe('nodePrice', () => {
     const meta = createMetaState();
     meta.allocated.add('r');
     meta.ranks.set('r', 4);
-    expect(toNumber(nodePrice(meta, node('a'), DEFAULT_ECONOMY).shards)).toBe(5);
+    expect(toNumber(nodePrice(meta, node('a'), DEFAULT_ECONOMY).shards)).toBe(base);
   });
 
   it('applies shardCostFactor and coreCost', () => {
     const meta = createMetaState();
-    expect(nodePrice(meta, node('a2'), DEFAULT_ECONOMY)).toEqual({ shards: 10, cores: 1 });
-    expect(nodePrice(meta, node('k'), DEFAULT_ECONOMY)).toEqual({ shards: 5, cores: 2 });
+    expect(nodePrice(meta, node('a2'), DEFAULT_ECONOMY)).toEqual({ shards: 2 * base, cores: 1 });
+    expect(nodePrice(meta, node('k'), DEFAULT_ECONOMY)).toEqual({ shards: base, cores: 2 });
     expect(nodePrice(meta, node('a'), DEFAULT_ECONOMY).cores).toBe(0);
   });
 
@@ -168,7 +170,7 @@ describe('canAllocate', () => {
   });
 
   it('allows spending exactly the available currency', () => {
-    const meta = richMeta(5, 0);
+    const meta = richMeta(DEFAULT_ECONOMY.talentBaseShards, 0);
     expect(canAllocate(meta, 'a', data, DEFAULT_ECONOMY)).toEqual({ ok: true });
   });
 });
@@ -224,10 +226,11 @@ describe('allocate / refundAll', () => {
   });
 
   it('refundAll returns the default-economy spend within float precision', () => {
-    const meta = richMeta(500, 5);
+    const start = 100 * DEFAULT_ECONOMY.talentBaseShards;
+    const meta = richMeta(start, 5);
     for (const id of ['a', 'b', 'a2', 'r']) allocate(meta, id, data, DEFAULT_ECONOMY);
     refundAll(meta);
-    expect(toNumber(meta.shards)).toBeCloseTo(500, 9);
+    expect(toNumber(meta.shards)).toBeCloseTo(start, 9);
     expect(meta.cores).toBe(5);
   });
 });

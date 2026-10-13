@@ -17,7 +17,7 @@ import {
 } from '../../src/meta';
 import type { EconomyConfig, MetaState } from '../../src/meta';
 import { compileRules, createSimulation, NO_INPUT, TICK_RATE } from '../../src/sim';
-import type { EndReason, RuleEffects, RunConfig } from '../../src/sim';
+import type { EndReason, RuleEffects, RunConfig, SimEvent, SimState } from '../../src/sim';
 import { spend } from './strategies';
 import type { StrategyId } from './strategies';
 
@@ -72,6 +72,8 @@ export interface SessionConfig {
   readonly menuSeconds: number;
   /** Optional wave cap passed to every run (demo / prototype limit). */
   readonly waveCap: number | null;
+  /** Record every elite and boss in SessionResult.toughTargets (tools/balance/probe.ts). */
+  readonly trackToughTargets?: boolean;
 }
 
 /** Seed of one run: the same for every strategy, so strategies face the same spawns. */
@@ -170,20 +172,26 @@ function buildWithout(meta: Readonly<MetaState>, drop: (id: string) => boolean):
 /**
  * How much of a build's damage comes from repeatable ranks (Might) and how much from sector
  * nodes (docs/GDD.md §9.1): each ratio is the build's value over the same build without
- * those talents. `D` ratios use effectiveHit; crowd ratios use crowdDps, which also counts
- * chain jumps, attack speed and projectiles.
+ * those talents. `D` ratios use effectiveHit; attack ratios use attackDamage, which adds the
+ * chain jumps of one projectile; crowd ratios use crowdDps, which also counts attack speed
+ * and projectiles.
  */
 export interface BuildMultipliers {
   readonly repeatableMultD: number;
   readonly sectorMultD: number;
+  readonly sectorMultAttack: number;
   readonly sectorMultCrowd: number;
 }
 
 export function buildMultipliers(meta: Readonly<MetaState>, data: GameData): BuildMultipliers {
-  const measure = (build: Readonly<MetaState>): { d: number; crowd: number } => {
+  const measure = (build: Readonly<MetaState>): { d: number; attack: number; crowd: number } => {
     const stats = statBlockFor(build, data);
     const rules = collectRules(build, data);
-    return { d: effectiveHit(stats, rules), crowd: crowdDps(stats, rules) };
+    return {
+      d: effectiveHit(stats, rules),
+      attack: attackDamage(stats, rules),
+      crowd: crowdDps(stats, rules),
+    };
   };
   const full = measure(meta);
   const noRanks = measure(buildWithout(meta, (id) => meta.ranks.has(id)));
@@ -191,7 +199,57 @@ export function buildMultipliers(meta: Readonly<MetaState>, data: GameData): Bui
   return {
     repeatableMultD: full.d / noRanks.d,
     sectorMultD: full.d / noSector.d,
+    sectorMultAttack: full.attack / noSector.attack,
     sectorMultCrowd: full.crowd / noSector.crowd,
+  };
+}
+
+/** What happened to one elite or boss of a run (SessionConfig.trackToughTargets). */
+export interface ToughTarget {
+  readonly run: number;
+  readonly enemy: 'hexagon' | 'boss';
+  /** Wave the enemy belongs to. */
+  readonly wave: number;
+  /** meta.maxWave when the run started: the frontier the run pushes against. */
+  readonly frontier: number;
+  /** Killed, reached the player, or still alive when the run ended. */
+  readonly outcome: 'killed' | 'reached' | 'alive';
+  /** Seconds from spawn to kill; null unless killed. */
+  readonly killSeconds: number | null;
+}
+
+/** Follows the elites and bosses of one run through its events. */
+function toughTargetTracker(run: number, frontier: number) {
+  const open = new Map<number, { enemy: 'hexagon' | 'boss'; wave: number; tick: number }>();
+  const done: ToughTarget[] = [];
+  const close = (id: number, outcome: ToughTarget['outcome'], tick: number): void => {
+    const entry = open.get(id);
+    if (entry === undefined) return;
+    open.delete(id);
+    const killSeconds = outcome === 'killed' ? (tick - entry.tick) / TICK_RATE : null;
+    done.push({ run, enemy: entry.enemy, wave: entry.wave, frontier, outcome, killSeconds });
+  };
+  return {
+    observe(events: readonly SimEvent[], state: Readonly<SimState>): void {
+      for (const event of events) {
+        if (
+          event.type === 'enemySpawned' &&
+          (event.enemy === 'hexagon' || event.enemy === 'boss')
+        ) {
+          const spawned = state.enemies.find((enemy) => enemy.id === event.enemyId);
+          const wave = spawned?.wave ?? state.wave;
+          open.set(event.enemyId, { enemy: event.enemy, wave, tick: state.tick });
+        } else if (event.type === 'enemyKilled') {
+          close(event.enemyId, 'killed', state.tick);
+        } else if (event.type === 'playerHit') {
+          close(event.enemyId, 'reached', state.tick);
+        }
+      }
+    },
+    finish(tick: number): ToughTarget[] {
+      for (const id of [...open.keys()]) close(id, 'alive', tick);
+      return done;
+    },
   };
 }
 
@@ -235,6 +293,7 @@ export interface RunRow {
   /** buildMultipliers of the build after this visit's purchases. */
   readonly repeatableMultD: number;
   readonly sectorMultD: number;
+  readonly sectorMultAttack: number;
   readonly sectorMultCrowd: number;
   /** Currencies left after this visit's purchases. */
   readonly shardsBank: number;
@@ -252,6 +311,8 @@ export interface SessionResult {
   /** Play time at the end of the run after which the first notable / keystone was bought. */
   readonly firstNotableMinutes: number | null;
   readonly firstKeystoneMinutes: number | null;
+  /** Every elite and boss, in run order; only with SessionConfig.trackToughTargets. */
+  readonly toughTargets?: readonly ToughTarget[];
 }
 
 /** Safety net against a zero-length loop; a 60 minute session has a few hundred runs at most. */
@@ -266,6 +327,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
   let clockSeconds = 0;
   let firstNotableMinutes: number | null = null;
   let firstKeystoneMinutes: number | null = null;
+  const toughTargets: ToughTarget[] = [];
 
   for (let run = 1; clockSeconds < budgetSeconds; run++) {
     if (run > MAX_RUNS) throw new Error(`Session exceeded ${MAX_RUNS} runs`);
@@ -284,7 +346,13 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
     let row: RunRow;
     try {
       const sim = createSimulation(runConfig, data);
-      while (!sim.state.finished) sim.step(NO_INPUT);
+      if (config.trackToughTargets === true) {
+        const tracker = toughTargetTracker(run, meta.maxWave);
+        while (!sim.state.finished) tracker.observe(sim.step(NO_INPUT), sim.state);
+        toughTargets.push(...tracker.finish(sim.state.tick));
+      } else {
+        while (!sim.state.finished) sim.step(NO_INPUT);
+      }
       const result = sim.result();
       const settlement = settleRun(meta, result, data, stats, economy);
       const runSeconds = result.ticks / TICK_RATE;
@@ -352,6 +420,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
     endMinutes: clockSeconds / 60,
     firstNotableMinutes,
     firstKeystoneMinutes,
+    ...(config.trackToughTargets === true ? { toughTargets } : {}),
   };
 }
 

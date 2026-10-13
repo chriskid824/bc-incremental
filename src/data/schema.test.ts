@@ -125,17 +125,19 @@ describe('parseGameData schema errors', () => {
   it('rejects a tag on a non-damage stat, naming the path', () => {
     const data = content();
     const [i, node] = talentAt(data, 'keenEye');
+    const m = node.modifiers.length;
     node.modifiers.push({ stat: 'critChance', kind: 'more', value: 0.1, tags: ['crit'] });
     expect(() => parseGameData(data)).toThrow(
-      `talents.${i}.modifiers.1.tags: tags are only allowed on increased/more damage modifiers`,
+      `talents.${i}.modifiers.${m}.tags: tags are only allowed on increased/more damage modifiers`,
     );
   });
 
   it('rejects a tag on a flat damage modifier', () => {
     const data = content();
     const [i, node] = talentAt(data, 'keenEye');
+    const m = node.modifiers.length;
     node.modifiers.push({ stat: 'damage', kind: 'flat', value: 2, tags: ['hit'] });
-    expect(() => parseGameData(data)).toThrow(`talents.${i}.modifiers.1.tags: tags are only`);
+    expect(() => parseGameData(data)).toThrow(`talents.${i}.modifiers.${m}.tags: tags are only`);
   });
 
   it('rejects an unknown rule id', () => {
