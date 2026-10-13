@@ -25,7 +25,7 @@ export const FRONTIER_HITS_TO_KILL = 2;
  * use the same values. Elites and bosses stay single tough targets in the swarm.
  */
 export const ELITE_HP_MULT = 14;
-export const BOSS_HP_MULT = 16;
+export const BOSS_HP_MULT = 28;
 
 const MAX_TABLE_WAVE = 2000;
 const hpTable: number[] = buildHpTable();

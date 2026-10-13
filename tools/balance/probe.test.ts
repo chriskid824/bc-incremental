@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_ECONOMY } from '../../src/meta';
 import {
   firstRepeatableRun,
+  formatChecks,
   median,
   medianMinutesToWave,
   nearFrontierRate,
+  probeChecks,
   probeReport,
   spread,
 } from './probe';
 import { runSession } from './session';
 import type { RunRow, SessionResult, ToughTarget } from './session';
+import type { StrategyId } from './strategies';
 
 const target = (overrides: Partial<ToughTarget>): ToughTarget => ({
   run: 1,
@@ -134,5 +137,92 @@ describe('probe on a short session', () => {
       expect(report).toContain(heading);
     }
     expect(report).toMatch(/\ncrit-greedy\s/);
+  });
+});
+
+describe('probeChecks', () => {
+  /** A pure session that meets every target: waves 14, 22, 30, 40 at 10, 20, 40, 60 min. */
+  const pureSession = (strategy: StrategyId, wave60 = 40): SessionResult =>
+    ({
+      strategy,
+      session: 0,
+      rows: (
+        [
+          [10, 14],
+          [15, 20],
+          [20, 22],
+          [28, 30],
+          [30, 31],
+          [40, 30],
+          [60, wave60],
+        ] as const
+      ).map(([minutes, maxWave], i) => ({
+        run: i + 1,
+        minutes,
+        maxWave,
+        bought: i === 0 ? 'might' : '',
+        overkillShare: 0.1,
+        repeatableMultD: 2,
+        sectorMultD: strategy === 'chain-greedy' ? 1 : 3,
+        sectorMultAttack: 3,
+      })),
+      endMinutes: 60,
+      firstNotableMinutes: 5,
+      firstKeystoneMinutes: 12,
+      toughTargets: [
+        target({ wave: 30, frontier: 30, enemy: 'boss', killSeconds: 9 }),
+        target({ wave: 25, frontier: 26, outcome: 'reached', killSeconds: null }),
+        target({ wave: 25, frontier: 26 }),
+      ],
+    }) as unknown as SessionResult;
+  const pure: StrategyId[] = ['crit-greedy', 'dot-greedy', 'chain-greedy'];
+  const ids = new Set(['might']);
+
+  it('passes results that meet every round-2 target', () => {
+    const results = pure.map((strategy) => pureSession(strategy));
+    const checks = probeChecks(new Map([[1, results]]), pure, ids);
+    expect(checks.map((c) => c.id)).toEqual([
+      'T1',
+      'T2',
+      'T2',
+      'T4',
+      'T4',
+      'T4',
+      'T4',
+      'T4',
+      'T6',
+      'T7',
+      'info',
+      'T8',
+    ]);
+    expect(checks.filter((c) => !c.pass)).toEqual([]);
+    expect(formatChecks(checks)).not.toContain('FAIL');
+  });
+
+  it('fails a frontier out of range and skips checks without their strategies', () => {
+    const results = [
+      pureSession('crit-greedy', 50),
+      pureSession('dot-greedy'),
+      pureSession('chain-greedy'),
+    ];
+    const checks = probeChecks(new Map([[1, results]]), pure, ids);
+    expect(checks.find((c) => c.id === 'T1')?.pass).toBe(false);
+    expect(formatChecks(checks)).toMatch(/T1 .*FAIL/);
+    expect(
+      probeChecks(new Map([[1, results.slice(0, 1)]]), ['crit-greedy'], ids).map((c) => c.id),
+    ).toEqual(['T8']);
+  });
+
+  it('checks balanced, cheapest and might-only when they ran', () => {
+    const results = [
+      ...pure.map((strategy) => pureSession(strategy)),
+      pureSession('balanced', 38),
+      pureSession('cheapest', 27),
+      pureSession('might-only', 11),
+    ];
+    const strategies: StrategyId[] = [...pure, 'balanced', 'cheapest', 'might-only'];
+    const checks = probeChecks(new Map([[1, results]]), strategies, ids);
+    expect(checks.find((c) => c.id === 'T3')?.pass).toBe(true);
+    expect(checks.find((c) => c.id === 'T5')?.pass).toBe(true);
   });
 });
