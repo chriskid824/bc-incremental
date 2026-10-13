@@ -21,6 +21,14 @@ const CSS = `
   text-transform: uppercase;
   color: #8e98b3;
 }
+.bc-hud::before {
+  /* Keeps the top readouts legible over a busy arena: kills and numbers fade under them. */
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 130px;
+  background: linear-gradient(rgba(11, 13, 18, 0.72), rgba(11, 13, 18, 0));
+}
 .bc-hud-wave { position: absolute; top: 18px; left: 24px; }
 .bc-hud-wave-number { font-size: 44px; font-weight: 800; line-height: 1.05; }
 .bc-hud-sub { font-size: 16px; color: #b6bfd6; margin-top: 2px; }
