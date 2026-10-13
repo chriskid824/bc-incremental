@@ -77,8 +77,8 @@ flowchart LR
 
 ### 4.3 狀態與系統
 
-- 不用 ECS 框架。實體是物件陣列＋物件池（避免 GC 抖動），敵人用空間雜湊格查詢附近目標（連鎖、範圍傷害需要）。
-- 每個 tick 依序跑系統：`input → spawn → movement → attack → projectiles → chain → ailments → death/drops → waveControl → runEnd`。
+- 不用 ECS 框架。實體是物件陣列＋物件池（避免 GC 抖動）。附近目標查詢目前是線性掃描；v3 改用均勻空間格（`docs/v3/implementation-plan-v3.md` §2.3）。
+- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變）：`input → spawn → movement → contact → emitters → projectiles（命中、連鎖、擊殺當下結算）→ ailments → death（壓縮陣列）→ waveControl → runEnd`。v3 的完整順序（空間格、無人機、線段、地面區域、效果佇列）見 `docs/v3/implementation-plan-v3.md` §2.15。
 
 ### 4.4 屬性與修正
 

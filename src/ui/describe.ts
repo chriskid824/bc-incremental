@@ -63,7 +63,7 @@ const pct = (value: number): string => `${trim(value * 100)}%`;
 
 /**
  * The few stats that tell builds apart, for the talent screen's summary. Values are what the
- * simulation plays with once keystone rules apply (src/sim/simulation.ts and rules.ts): hit
+ * simulation plays with once keystone rules apply (src/sim/systems/ and rules.ts): hit
  * damage is a non-crit primary hit, a crit hit is one primary crit, a burn stack is what a
  * non-crit hit ignites, the first chain jump is a non-crit jump, and steadyAim replaces the crit
  * chance with its every-Nth-shot rhythm. Each archetype's nodes move at least one line.
