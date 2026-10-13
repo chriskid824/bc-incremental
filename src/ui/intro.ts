@@ -6,7 +6,8 @@ import { el } from './style';
 export class IntroPanel {
   readonly root: HTMLElement;
 
-  constructor(doc: Document, onStart: () => void) {
+  /** `dataNotice`: say that the playtest sends anonymous data and where to turn it off. */
+  constructor(doc: Document, onStart: () => void, options: { dataNotice?: boolean } = {}) {
     this.root = el(doc, 'div', 'bc-ui bc-intro');
     this.root.hidden = true;
     const card = el(doc, 'div', 'bc-intro-card');
@@ -19,7 +20,9 @@ export class IntroPanel {
     const start = el(doc, 'button', 'bc-button bc-button-primary', t('intro.start'));
     start.type = 'button';
     start.addEventListener('click', onStart);
-    card.append(el(doc, 'div', 'bc-intro-title', t('intro.title')), lines, start);
+    card.append(el(doc, 'div', 'bc-intro-title', t('intro.title')), lines);
+    if (options.dataNotice === true) card.append(el(doc, 'div', 'bc-intro-data', t('intro.data')));
+    card.append(start);
     this.root.append(card);
   }
 

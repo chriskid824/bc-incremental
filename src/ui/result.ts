@@ -23,6 +23,8 @@ export interface ResultInfo extends RunEndFacts {
   readonly affordable: boolean;
   /** The panel leads to the talent web instead of counting down (affordable, or T pressed). */
   readonly toTalents: boolean;
+  /** The survey link to offer under the buttons, or null for none. */
+  readonly feedbackUrl: string | null;
 }
 
 export interface ResultActions {
@@ -30,6 +32,8 @@ export interface ResultActions {
   continue(): void;
   openTalents(): void;
   nextRun(): void;
+  /** The survey link was opened (it opens itself in a new tab). */
+  feedback(): void;
 }
 
 const FORMAT = { format: 'short' } as const;
@@ -48,6 +52,7 @@ export class ResultPanel {
 
   private readonly actions: HTMLElement;
   private readonly talentsButton: HTMLButtonElement;
+  private readonly feedbackLink: HTMLAnchorElement;
   private pointerOnCard = false;
 
   constructor(
@@ -71,6 +76,13 @@ export class ResultPanel {
       handlers.nextRun();
     });
     this.actions.append(this.talentsButton, nextButton);
+    this.feedbackLink = el(doc, 'a', 'bc-link bc-result-feedback', t('result.feedback'));
+    this.feedbackLink.target = '_blank';
+    this.feedbackLink.rel = 'noopener';
+    this.feedbackLink.addEventListener('click', (event) => {
+      event.stopPropagation();
+      handlers.feedback();
+    });
     this.root.append(this.card);
     this.root.addEventListener('click', () => handlers.continue());
     // Only a pointer that moves onto the card counts: one left resting where "Next run" was
@@ -143,6 +155,10 @@ export class ResultPanel {
       parts.push(tip);
     }
     parts.push(this.actions, info.toTalents ? hint : this.next);
+    if (info.feedbackUrl !== null) {
+      this.feedbackLink.href = info.feedbackUrl;
+      parts.push(this.feedbackLink);
+    }
     this.card.replaceChildren(...parts);
     this.pointerOnCard = false;
     this.root.hidden = false;

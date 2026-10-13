@@ -14,6 +14,14 @@ const CSS = `
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
 }
 .bc-ui button { pointer-events: auto; font: inherit; }
+.bc-link {
+  pointer-events: auto;
+  color: #9fe8ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.bc-link[hidden] { display: none; }
 .bc-label {
   font-size: 13px;
   font-weight: 600;
@@ -162,6 +170,7 @@ const CSS = `
 }
 .bc-intro-lines li::marker { color: #9fe8ff; font-weight: 800; }
 .bc-intro .bc-button { font-size: 18px; padding: 12px 14px; }
+.bc-intro-data { font-size: 13px; line-height: 1.4; color: #8e98b3; }
 .bc-result {
   position: absolute;
   inset: 0;
@@ -218,6 +227,7 @@ const CSS = `
 .bc-result-actions { display: flex; gap: 10px; margin-top: 18px; }
 .bc-result-actions .bc-button { flex: 1; }
 .bc-result-hint { margin-top: 14px; font-size: 15px; color: #ffe27a; text-align: center; }
+.bc-result-feedback { display: block; margin-top: 12px; font-size: 14px; text-align: center; }
 .bc-button {
   pointer-events: auto;
   padding: 10px 14px;
@@ -234,6 +244,7 @@ const CSS = `
 .bc-button-primary { background: #9fe8ff; border-color: #9fe8ff; color: #0b0d12; }
 .bc-button-primary:hover { background: #c4f2ff; }
 .bc-button-quiet { background: transparent; color: #a3adc6; font-weight: 600; }
+.bc-button-small { padding: 4px 10px; font-size: 13px; border-radius: 8px; }
 .bc-button-glow { animation: bc-glow 1.2s ease-in-out infinite alternate; }
 @keyframes bc-glow {
   from { box-shadow: 0 0 0 rgba(255, 226, 122, 0); }
@@ -310,6 +321,19 @@ const CSS = `
 }
 .bc-talents-build dt { color: #a3adc6; }
 .bc-talents-build dd { margin: 0; font-weight: 700; text-align: right; }
+.bc-talents-playtest {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  color: #a3adc6;
+}
+.bc-talents-sending { display: flex; align-items: center; gap: 8px; pointer-events: auto; cursor: pointer; }
+.bc-talents-sending[hidden] { display: none; }
+.bc-talents-sending input { margin: 0; accent-color: #9fe8ff; pointer-events: auto; }
+.bc-talents-playtest-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .bc-talent-link { stroke: #2a3248; stroke-width: 5; }
 .bc-talent-link[data-state='open'] { stroke: #4a5675; }
 .bc-talent-link[data-state='lit'] { stroke: #d9e3ff; }

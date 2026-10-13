@@ -18,6 +18,8 @@ import {
   nodeRank,
   statBlockFor,
 } from '../meta';
+import { FirestoreSink, PlaytestAnalytics } from '../platform/analytics';
+import type { Analytics, KeyValueStore } from '../platform/analytics';
 import { LocalSaveStorage, MemorySaveStorage } from '../platform/storage';
 import type { SaveStorage } from '../platform/storage';
 import { loadSave, serializeSave } from '../save';
@@ -36,6 +38,16 @@ import { Toast } from '../ui/toast';
 import { bindMenuKeys, bindSpeedKeys } from './input';
 import { GameLoop, SPEEDS } from './loop';
 import type { Speed } from './loop';
+import {
+  FEEDBACK_AFTER_SECONDS,
+  FIREBASE,
+  buildFields,
+  feedbackLink,
+  runEndFields,
+  sessionEndFields,
+  sessionStartFields,
+} from './playtest';
+import type { Screen } from './playtest';
 import { Session, leadsToTalents } from './session';
 import type { ActiveRun, RunReport } from './session';
 
@@ -54,12 +66,65 @@ const AUTOSAVE_MS = 30_000;
  */
 const REAIM_DELAY_MS = 600;
 
+/** Playtest events are batched to Firestore at least this often (docs/ARCHITECTURE.md §9). */
+const ANALYTICS_FLUSH_MS = 5 * 60_000;
+
+/** The web playtest sends anonymous events unless the player turns it off (§9). */
+const SEND_BY_DEFAULT = true;
+
 function openStorage(): SaveStorage {
   try {
     return new LocalSaveStorage(window.localStorage);
   } catch {
     return new MemorySaveStorage();
   }
+}
+
+/** A random id; randomUUID needs a secure context, which a plain-http LAN address is not. */
+function newId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function openKeyValueStore(): KeyValueStore {
+  try {
+    return window.localStorage;
+  } catch {
+    const map = new Map<string, string>();
+    return { getItem: (key) => map.get(key) ?? null, setItem: (key, value) => map.set(key, value) };
+  }
+}
+
+/**
+ * Playtest analytics. The dev server never sends (its sessions would pollute the playtest
+ * data); every build keeps the local log for the export fallback.
+ */
+function openAnalytics(locale: Locale): Analytics {
+  const sink =
+    FIREBASE !== null && !import.meta.env.DEV
+      ? new FirestoreSink(FIREBASE, (url, init) => fetch(url, init))
+      : null;
+  return new PlaytestAnalytics({
+    store: openKeyValueStore(),
+    sink,
+    clock: () => performance.now(),
+    now: () => new Date(),
+    newId,
+    build: __BUILD_ID__,
+    locale,
+    defaultSending: SEND_BY_DEFAULT,
+  });
+}
+
+/** Saves the local playtest log as a JSON file. */
+function downloadJson(text: string, fileName: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /** The main slot, else the backup, else a fresh profile. */
@@ -74,7 +139,7 @@ function loadProfile(storage: SaveStorage, data: GameData): Profile {
   return { meta: createMetaState(), playSeconds: 0, speed: 1 };
 }
 
-async function main(root: HTMLElement): Promise<void> {
+async function main(root: HTMLElement, locale: Locale): Promise<void> {
   injectStyle(document);
 
   const app = new Application();
@@ -91,6 +156,17 @@ async function main(root: HTMLElement): Promise<void> {
   const storage = openStorage();
   const profile = loadProfile(storage, data);
   const meta = profile.meta;
+  const analytics = openAnalytics(locale);
+  analytics.track(
+    'session_start',
+    sessionStartFields(meta, data, profile.playSeconds, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }),
+  );
+  /** The survey link once the player has played long enough to have an opinion. */
+  const resultFeedbackUrl = (): string | null =>
+    profile.playSeconds >= FEEDBACK_AFTER_SECONDS ? feedbackLink(analytics.installId) : null;
   const renderer = new Renderer(app, data, {
     reducedMotion: REDUCED_MOTION,
     hitStop: (ms) => loop.hitStop(ms),
@@ -116,6 +192,7 @@ async function main(root: HTMLElement): Promise<void> {
     continue: () => session.continueFromResults(),
     openTalents: () => session.openTalents(),
     nextRun: () => session.startNextRun(),
+    feedback: () => analytics.track('feedback_open', { screen: 'results' }),
   });
   let reaimTimer: ReturnType<typeof setTimeout> | null = null;
   const cancelReaim = (): void => {
@@ -134,11 +211,22 @@ async function main(root: HTMLElement): Promise<void> {
   const talentWeb = new TalentWebPanel(document, data.talents, {
     allocate: (id) => {
       if (!session.allocate(id)) return;
+      const node = data.talents.find((talent) => talent.id === id);
+      if (node !== undefined) {
+        analytics.track('talent_allocate', {
+          node: id,
+          rank: nodeRank(meta, node),
+          archetype: node.archetype,
+          runs: meta.runs,
+        });
+      }
       talentWeb.update(webView());
       scheduleReaim();
     },
     refund: () => {
       cancelReaim();
+      // The build the player gave up on, before the refund clears it.
+      analytics.track('respec', { runs: meta.runs, ...buildFields(meta, data) });
       session.refund();
       talentWeb.update(webView());
     },
@@ -147,13 +235,23 @@ async function main(root: HTMLElement): Promise<void> {
       talentWeb.update(webView());
     },
     start: () => session.startNextRun(),
+    setSending: (on) => {
+      analytics.sending = on;
+      talentWeb.update(webView());
+    },
+    exportData: () =>
+      downloadJson(
+        analytics.exportLocal(),
+        `bc-incremental-playtest-${analytics.installId.slice(0, 8)}.json`,
+      ),
+    feedback: () => analytics.track('feedback_open', { screen: 'talents' }),
   });
   const startFirstRun = (): void => {
     if (!intro.visible || session.phase !== 'idle') return;
     intro.hide();
     session.start();
   };
-  const intro = new IntroPanel(document, startFirstRun);
+  const intro = new IntroPanel(document, startFirstRun, { dataNotice: analytics.sending });
   const toast = new Toast(document);
   root.append(hud.root, results.root, talentWeb.root, intro.root, toast.root);
 
@@ -171,6 +269,11 @@ async function main(root: HTMLElement): Promise<void> {
     reach: session.reach,
     lowering: session.startWaveLowering,
     priceGrowth: DEFAULT_ECONOMY.talentGrowth,
+    playtest: {
+      canSend: analytics.canSend,
+      sending: analytics.sending,
+      feedbackUrl: feedbackLink(analytics.installId),
+    },
   });
 
   const session = new Session(
@@ -194,7 +297,9 @@ async function main(root: HTMLElement): Promise<void> {
           'bc-result-first',
           report.affordable && meta.allocated.size === 0,
         );
-        results.show(toResultInfo(report));
+        analytics.track('run_end', runEndFields(report, meta, data, profile.playSeconds));
+        analytics.flush();
+        results.show(toResultInfo(report, resultFeedbackUrl()));
         results.setTimeLeft(session.resultTimeLeftMs);
       },
       talentsOpened() {
@@ -238,12 +343,33 @@ async function main(root: HTMLElement): Promise<void> {
       else session.openTalents();
     },
   });
+  /** Where the player is, for the exit point of the playtest funnel. */
+  const screen = (): Screen => {
+    if (intro.visible) return 'intro';
+    return session.phase === 'idle' ? 'intro' : session.phase;
+  };
   window.addEventListener('pagehide', (event) => {
+    const run = session.currentRun;
+    analytics.track(
+      'session_end',
+      sessionEndFields(
+        screen(),
+        run?.number ?? null,
+        run?.sim.state.wave ?? null,
+        profile.playSeconds,
+      ),
+    );
+    analytics.flush(true);
     // A reload or a closed tab ends the running run: bank its drops so far (which saves).
     // A page kept in the back/forward cache may come back to the run, so it only saves.
     if (!event.persisted && session.abandonRun()) return;
     save();
   });
+  // A hidden tab may never come back (mobile browsers skip pagehide): send what is pending.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') analytics.flush(true);
+  });
+  setInterval(() => analytics.flush(), ANALYTICS_FLUSH_MS);
   setSpeed(profile.speed);
   // A fresh profile learns the rules first; a returning one lands on the talent web.
   if (meta.runs === 0) intro.show();
@@ -267,7 +393,7 @@ function toHudInfo(run: ActiveRun, speed: number): HudInfo {
   };
 }
 
-function toResultInfo(report: RunReport): ResultInfo {
+function toResultInfo(report: RunReport, feedbackUrl: string | null): ResultInfo {
   const { run, result, settlement } = report;
   const { hit, crit, burn, chain } = result.damage;
   const seconds = result.ticks / TICK_RATE;
@@ -293,6 +419,7 @@ function toResultInfo(report: RunReport): ResultInfo {
     skipCores: settlement.skipCores,
     affordable: report.affordable,
     toTalents: leadsToTalents(report),
+    feedbackUrl,
   };
 }
 
@@ -322,4 +449,4 @@ document.documentElement.lang = locale;
 
 const root = document.getElementById('app');
 if (root === null) throw new Error('Missing #app element');
-main(root).catch((error: unknown) => showFatal(root, error));
+main(root, locale).catch((error: unknown) => showFatal(root, error));

@@ -173,5 +173,10 @@
   "talents.startWaveClimbing": "Lowered earlier: it rises again as your runs clear it.",
   "build.critHit": "Crit hit",
   "build.burnPerStack": "Burn per stack",
-  "build.chainJump": "First chain jump"
+  "build.chainJump": "First chain jump",
+  "intro.data": "This playtest sends anonymous gameplay data, nothing personal. You can turn it off on the talent web.",
+  "playtest.sending": "Send anonymous playtest data",
+  "playtest.export": "Export data",
+  "playtest.feedback": "Feedback survey",
+  "result.feedback": "Tell us what you think: a 2-minute survey"
 }

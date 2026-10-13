@@ -173,5 +173,10 @@
   "talents.startWaveClimbing": "先前已自動調降：之後每局清掉起始波次，就會再往上調。",
   "build.critHit": "暴擊一發",
   "build.burnPerStack": "每層燃燒",
-  "build.chainJump": "連鎖第一跳"
+  "build.chainJump": "連鎖第一跳",
+  "intro.data": "試玩版會傳送匿名的遊戲數據，不含任何個人資料；可以在天賦網關閉。",
+  "playtest.sending": "傳送匿名試玩數據",
+  "playtest.export": "匯出數據",
+  "playtest.feedback": "回饋問卷",
+  "result.feedback": "花 2 分鐘填問卷，告訴我們你的想法"
 }

@@ -35,6 +35,16 @@ export interface TalentWebView extends StartWaveFacts {
   readonly maxStartWave: number;
   /** Shard price multiplier per allocated node (EconomyConfig.talentGrowth). */
   readonly priceGrowth: number;
+  readonly playtest: PlaytestView;
+}
+
+/** The playtest corner of the side card (docs/ARCHITECTURE.md §9). */
+export interface PlaytestView {
+  /** Anonymous data can be sent at all (a sink is configured). */
+  readonly canSend: boolean;
+  readonly sending: boolean;
+  /** The survey link, or null for none. */
+  readonly feedbackUrl: string | null;
 }
 
 export interface TalentWebActions {
@@ -42,6 +52,10 @@ export interface TalentWebActions {
   refund(): void;
   setStartWave(wave: number): void;
   start(): void;
+  setSending(on: boolean): void;
+  exportData(): void;
+  /** The survey link was opened (it opens itself in a new tab). */
+  feedback(): void;
 }
 
 type NodeState = 'allocated' | 'available' | 'reachable' | 'locked';
@@ -99,6 +113,9 @@ export class TalentWebPanel {
   private readonly waveValue: HTMLElement;
   private readonly waveWarning: HTMLElement;
   private readonly build: HTMLElement;
+  private readonly sendingLabel: HTMLElement;
+  private readonly sendingInput: HTMLInputElement;
+  private readonly feedbackLink: HTMLAnchorElement;
   private view: TalentWebView | null = null;
   private hovered: TalentNode | null = null;
 
@@ -167,6 +184,29 @@ export class TalentWebPanel {
     const start = el(doc, 'button', 'bc-button bc-button-primary', t('talents.start'));
     start.addEventListener('click', () => this.actions.start());
 
+    const playtest = el(doc, 'div', 'bc-talents-playtest');
+    this.sendingLabel = el(doc, 'label', 'bc-talents-sending');
+    this.sendingInput = el(doc, 'input', '');
+    this.sendingInput.type = 'checkbox';
+    this.sendingInput.addEventListener('change', () => {
+      this.actions.setSending(this.sendingInput.checked);
+    });
+    this.sendingLabel.append(this.sendingInput, el(doc, 'span', '', t('playtest.sending')));
+    const exportButton = el(
+      doc,
+      'button',
+      'bc-button bc-button-quiet bc-button-small',
+      t('playtest.export'),
+    );
+    exportButton.addEventListener('click', () => this.actions.exportData());
+    this.feedbackLink = el(doc, 'a', 'bc-link', t('playtest.feedback'));
+    this.feedbackLink.target = '_blank';
+    this.feedbackLink.rel = 'noopener';
+    this.feedbackLink.addEventListener('click', () => this.actions.feedback());
+    const row = el(doc, 'div', 'bc-talents-playtest-row');
+    row.append(this.feedbackLink, exportButton);
+    playtest.append(this.sendingLabel, row);
+
     card.append(
       currencies,
       waveBox,
@@ -174,6 +214,7 @@ export class TalentWebPanel {
       this.build,
       refund,
       start,
+      playtest,
     );
 
     this.root.append(this.svg, header, card, this.tooltip);
@@ -231,6 +272,12 @@ export class TalentWebPanel {
     this.waveWarning.hidden = note === null;
     this.waveWarning.textContent = note?.text ?? '';
     this.waveWarning.dataset['tone'] = note?.warn === false ? 'info' : 'warn';
+
+    const { playtest } = view;
+    this.sendingLabel.hidden = !playtest.canSend;
+    this.sendingInput.checked = playtest.sending;
+    this.feedbackLink.hidden = playtest.feedbackUrl === null;
+    if (playtest.feedbackUrl !== null) this.feedbackLink.href = playtest.feedbackUrl;
 
     const lines = describeBuild(view.stats, view.rules);
     this.build.replaceChildren(
