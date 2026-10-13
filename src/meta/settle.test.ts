@@ -3,7 +3,7 @@ import { num, toNumber, ZERO } from '../core/num';
 import { shardsPerStdEnemy } from '../data/curve';
 import { ENEMY_IDS } from '../data/types';
 import type { RunResult } from '../sim/types';
-import { allowedStartWave, expectedWaveDrops, settleRun } from './settle';
+import { allowedStartWave, expectedWaveDrops, settleRun, settleUnfinishedRun } from './settle';
 import { createMetaState } from './state';
 import { computeStatBlock } from './stats';
 import { FIXTURE_ENEMIES, fixtureData } from './testing';
@@ -157,6 +157,31 @@ describe('settleRun', () => {
     expect(meta.maxWave).toBe(30);
     settleRun(meta, runResult({ highestWaveReached: 33 }), data, baseStats, DEFAULT_ECONOMY);
     expect(meta.maxWave).toBe(33);
+    expect(meta.runs).toBe(2);
+  });
+});
+
+describe('settleUnfinishedRun', () => {
+  it('banks the drops so far, keeps the best maxWave and counts the run, with no skip reward', () => {
+    const meta = createMetaState();
+    meta.shards = num(100);
+    meta.cores = 1;
+    meta.maxWave = 30;
+    const settlement = settleUnfinishedRun(meta, {
+      shards: num(40),
+      cores: 2,
+      highestWaveReached: 12,
+    });
+    expect(toNumber(meta.shards)).toBe(140);
+    expect(meta.cores).toBe(3);
+    expect(meta.maxWave).toBe(30);
+    expect(meta.runs).toBe(1);
+    expect(toNumber(settlement.shardsFromRun)).toBe(40);
+    expect(settlement.coresFromRun).toBe(2);
+    expect(toNumber(settlement.skipShards)).toBe(0);
+    expect(settlement.skipCores).toBe(0);
+    settleUnfinishedRun(meta, { shards: ZERO, cores: 0, highestWaveReached: 31 });
+    expect(meta.maxWave).toBe(31);
     expect(meta.runs).toBe(2);
   });
 });

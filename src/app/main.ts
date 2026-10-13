@@ -238,7 +238,12 @@ async function main(root: HTMLElement): Promise<void> {
       else session.openTalents();
     },
   });
-  window.addEventListener('pagehide', save);
+  window.addEventListener('pagehide', (event) => {
+    // A reload or a closed tab ends the running run: bank its drops so far (which saves).
+    // A page kept in the back/forward cache may come back to the run, so it only saves.
+    if (!event.persisted && session.abandonRun()) return;
+    save();
+  });
   setSpeed(profile.speed);
   // A fresh profile learns the rules first; a returning one lands on the talent web.
   if (meta.runs === 0) intro.show();

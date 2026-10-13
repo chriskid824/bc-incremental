@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadGameData } from '../data';
 import { DAMAGE_TAG_BIT } from '../data/stats';
-import { num } from '../core/num';
+import { num, toNumber } from '../core/num';
 import {
   DEFAULT_ECONOMY,
   PROBE_SEEDS,
@@ -212,6 +212,39 @@ describe('Session', () => {
     expect(session.run.number).toBe(8);
     expect(session.run.config.startWave).toBe(6);
     expect(session.currentRun).toBe(session.run);
+  });
+
+  it('banks an abandoned run so far and goes back to idle, like a reloaded page', () => {
+    const { session, meta, finished, changed } = createSession();
+    expect(session.abandonRun()).toBe(false);
+    session.start();
+    session.queueTalents();
+    // Long enough for the first kills to drop shards.
+    for (let tick = 0; tick < 20 * TICK_RATE && session.phase === 'running'; tick++) {
+      session.step();
+    }
+    expect(session.phase).toBe('running');
+    const state = session.run.sim.state;
+    const shards = state.shards;
+    const cores = state.cores;
+    const wave = state.highestWaveReached;
+    expect(toNumber(shards)).toBeGreaterThan(0);
+    const saves = changed();
+    expect(session.abandonRun()).toBe(true);
+    expect(changed()).toBe(saves + 1);
+    expect(finished).toHaveLength(0);
+    expect(meta.shards).toEqual(shards);
+    expect(meta.cores).toBe(cores);
+    expect(meta.maxWave).toBe(wave);
+    expect(meta.runs).toBe(1);
+    expect(session.phase).toBe('idle');
+    expect(session.currentRun).toBeNull();
+    expect(session.talentsQueued).toBe(false);
+    expect(session.abandonRun()).toBe(false);
+    // The next page opens on the talent web, and the next run is run 2.
+    session.resume();
+    session.startNextRun();
+    expect(session.run.number).toBe(2);
   });
 
   it('shows the result screen without a countdown when T was pressed during the run', () => {

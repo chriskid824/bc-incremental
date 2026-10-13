@@ -21,6 +21,7 @@ import {
   nodeRank,
   refundAll,
   settleRun,
+  settleUnfinishedRun,
   statBlockFor,
 } from '../meta';
 import type { EconomyConfig, MetaState, Settlement } from '../meta';
@@ -257,6 +258,21 @@ export class Session {
     const events = run.sim.step(NO_INPUT);
     if (run.sim.state.finished) this.finishRun(run);
     return events;
+  }
+
+  /**
+   * Banks what the running run has collected so far, for a page that is closing or reloading
+   * mid-run: a refresh must not throw the run away. Returns false outside a run. The session
+   * goes back to idle, like a fresh page.
+   */
+  abandonRun(): boolean {
+    if (this.phaseValue !== 'running') return false;
+    settleUnfinishedRun(this.meta, this.run.sim.state);
+    this.active = null;
+    this.phaseValue = 'idle';
+    this.talentsQueuedValue = false;
+    this.listener.profileChanged();
+    return true;
   }
 
   /**
