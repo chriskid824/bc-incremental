@@ -12,8 +12,10 @@ import type { StatBlock } from '../data/stats';
 import type { TalentNode } from '../data/types';
 import { isMessageKey, t } from '../i18n';
 import type { MessageKey } from '../i18n';
-import type { AllocateCheck, BuildEstimate } from '../meta';
+import type { AllocateCheck } from '../meta';
 import { describeBuild, describeModifier } from './describe';
+import { startWaveNote } from './startWaveNote';
+import type { StartWaveFacts } from './startWaveNote';
 import { talentName } from './strings';
 import { el } from './style';
 
@@ -21,7 +23,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const FORMAT = { format: 'short' } as const;
 
 /** What the panel needs to draw one frame of the web. */
-export interface TalentWebView {
+export interface TalentWebView extends StartWaveFacts {
   readonly talents: readonly TalentNode[];
   readonly shards: Num;
   readonly cores: number;
@@ -30,10 +32,7 @@ export interface TalentWebView {
   readonly price: (node: TalentNode) => { readonly shards: Num; readonly cores: number };
   readonly stats: StatBlock;
   readonly rules: readonly RuleSpec[];
-  readonly startWave: number;
   readonly maxStartWave: number;
-  /** How far the current talents should get; a start wave past estimate.frontier warns. */
-  readonly estimate: Pick<BuildEstimate, 'frontier' | 'startWave'>;
   /** Shard price multiplier per allocated node (EconomyConfig.talentGrowth). */
   readonly priceGrowth: number;
 }
@@ -228,14 +227,10 @@ export class TalentWebPanel {
       wave: view.startWave,
       max: view.maxStartWave,
     });
-    const tooHigh = view.startWave > view.estimate.frontier;
-    this.waveWarning.hidden = !tooHigh;
-    this.waveWarning.textContent = tooHigh
-      ? t('talents.startWaveWarning', {
-          frontier: view.estimate.frontier,
-          wave: view.estimate.startWave,
-        })
-      : '';
+    const note = startWaveNote(view);
+    this.waveWarning.hidden = note === null;
+    this.waveWarning.textContent = note?.text ?? '';
+    this.waveWarning.dataset['tone'] = note?.warn === false ? 'info' : 'warn';
 
     const lines = describeBuild(view.stats, view.rules);
     this.build.replaceChildren(

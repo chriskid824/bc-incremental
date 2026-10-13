@@ -205,6 +205,7 @@ const CSS = `
   color: #d9deeb;
 }
 .bc-result-tip-label { margin-right: 6px; font-weight: 700; color: #ffe27a; }
+.bc-result-tip-line + .bc-result-tip-line { margin-top: 6px; }
 .bc-result-next { margin-top: 18px; font-size: 15px; color: #8e98b3; text-align: center; }
 .bc-result-actions { display: flex; gap: 10px; margin-top: 18px; }
 .bc-result-actions .bc-button { flex: 1; }
@@ -285,6 +286,11 @@ const CSS = `
   color: #ffd08a;
   font-size: 13px;
   line-height: 1.35;
+}
+.bc-talents-warning[data-tone='info'] {
+  background: rgba(159, 232, 255, 0.08);
+  border-color: rgba(159, 232, 255, 0.35);
+  color: #bfeeff;
 }
 .bc-talents-build {
   display: grid;

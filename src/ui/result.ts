@@ -12,22 +12,21 @@ import { el } from './style';
 
 export interface ResultInfo extends RunEndFacts {
   readonly runNumber: number;
-  readonly startWave: number;
   readonly kills: number;
   /** Damage dealt per second over the whole run, all sources. */
   readonly averageDps: Num;
   readonly shardsFromRun: Num;
   readonly coresFromRun: number;
-  /** Whether the start wave was cleared, which skip compensation requires. */
-  readonly clearedStartWave: boolean;
   readonly skipShards: Num;
   readonly skipCores: number;
-  /** A talent is affordable: the panel leads to the talent web instead of counting down. */
+  /** A talent is affordable. */
   readonly affordable: boolean;
+  /** The panel leads to the talent web instead of counting down (affordable, or T pressed). */
+  readonly toTalents: boolean;
 }
 
 export interface ResultActions {
-  /** Click anywhere: talent web if affordable, else the next run. */
+  /** Click anywhere: the talent web if the panel leads there, else the next run. */
   continue(): void;
   openTalents(): void;
   nextRun(): void;
@@ -49,6 +48,7 @@ export class ResultPanel {
 
   private readonly actions: HTMLElement;
   private readonly talentsButton: HTMLButtonElement;
+  private pointerOnCard = false;
 
   constructor(
     private readonly doc: Document,
@@ -73,6 +73,22 @@ export class ResultPanel {
     this.actions.append(this.talentsButton, nextButton);
     this.root.append(this.card);
     this.root.addEventListener('click', () => handlers.continue());
+    // Only a pointer that moves onto the card counts: one left resting where "Next run" was
+    // clicked must not hold every later countdown of a player who just watches.
+    this.card.addEventListener('pointermove', () => {
+      this.pointerOnCard = true;
+    });
+    this.card.addEventListener('pointerleave', () => {
+      this.pointerOnCard = false;
+    });
+  }
+
+  /**
+   * The pointer moved onto the card since it was shown and is still on it: the player is
+   * reading it, so the countdown holds.
+   */
+  get hovered(): boolean {
+    return !this.root.hidden && this.pointerOnCard;
   }
 
   show(info: ResultInfo): void {
@@ -107,20 +123,28 @@ export class ResultPanel {
     }
     row(t('result.skipCompensation'), skip);
 
-    this.talentsButton.classList.toggle('bc-button-glow', info.affordable);
-    this.talentsButton.classList.toggle('bc-button-primary', info.affordable);
-    const hint = el(doc, 'div', 'bc-result-hint', info.affordable ? t('result.affordable') : '');
+    this.talentsButton.classList.toggle('bc-button-glow', info.toTalents);
+    this.talentsButton.classList.toggle('bc-button-primary', info.toTalents);
+    const hint = el(
+      doc,
+      'div',
+      'bc-result-hint',
+      info.affordable ? t('result.affordable') : t('result.toTalentsHint'),
+    );
 
     this.shownSeconds = '';
     this.next.textContent = '';
     const parts: HTMLElement[] = [run, title, cause, rows];
-    if (text.tip !== null) {
+    const tips = [text.lowerStart, text.tip].filter((line): line is string => line !== null);
+    if (tips.length > 0) {
       const tip = el(doc, 'div', 'bc-result-tip');
-      tip.append(el(doc, 'span', 'bc-result-tip-label', t('result.tipLabel')), text.tip);
+      tip.append(...tips.map((line) => el(doc, 'div', 'bc-result-tip-line', line)));
+      tip.firstElementChild?.prepend(el(doc, 'span', 'bc-result-tip-label', t('result.tipLabel')));
       parts.push(tip);
     }
-    parts.push(this.actions, info.affordable ? hint : this.next);
+    parts.push(this.actions, info.toTalents ? hint : this.next);
     this.card.replaceChildren(...parts);
+    this.pointerOnCard = false;
     this.root.hidden = false;
     // Next frame, so the opacity transition runs.
     requestAnimationFrame(() => {
@@ -140,5 +164,6 @@ export class ResultPanel {
   hide(): void {
     this.root.classList.remove('bc-visible');
     this.root.hidden = true;
+    this.pointerOnCard = false;
   }
 }

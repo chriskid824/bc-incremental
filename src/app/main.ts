@@ -36,7 +36,7 @@ import { Toast } from '../ui/toast';
 import { bindMenuKeys, bindSpeedKeys } from './input';
 import { GameLoop, SPEEDS } from './loop';
 import type { Speed } from './loop';
-import { Session } from './session';
+import { Session, leadsToTalents } from './session';
 import type { ActiveRun, RunReport } from './session';
 
 /** Becomes a settings toggle later (docs/ARCHITECTURE.md §10). */
@@ -47,6 +47,12 @@ const WAVE_CAP = 40;
 
 /** Autosave interval outside runs (docs/ARCHITECTURE.md §8). */
 const AUTOSAVE_MS = 30_000;
+
+/**
+ * Quiet time after the last talent purchase before the start wave is re-aimed for the new
+ * build (Session.refreshStartWave simulates a few short runs, so not on every click).
+ */
+const REAIM_DELAY_MS = 600;
 
 function openStorage(): SaveStorage {
   try {
@@ -111,11 +117,28 @@ async function main(root: HTMLElement): Promise<void> {
     openTalents: () => session.openTalents(),
     nextRun: () => session.startNextRun(),
   });
+  let reaimTimer: ReturnType<typeof setTimeout> | null = null;
+  const cancelReaim = (): void => {
+    if (reaimTimer !== null) clearTimeout(reaimTimer);
+    reaimTimer = null;
+  };
+  const scheduleReaim = (): void => {
+    cancelReaim();
+    reaimTimer = setTimeout(() => {
+      reaimTimer = null;
+      if (session.phase !== 'talents') return;
+      session.refreshStartWave();
+      talentWeb.update(webView());
+    }, REAIM_DELAY_MS);
+  };
   const talentWeb = new TalentWebPanel(document, data.talents, {
     allocate: (id) => {
-      if (session.allocate(id)) talentWeb.update(webView());
+      if (!session.allocate(id)) return;
+      talentWeb.update(webView());
+      scheduleReaim();
     },
     refund: () => {
+      cancelReaim();
       session.refund();
       talentWeb.update(webView());
     },
@@ -145,7 +168,8 @@ async function main(root: HTMLElement): Promise<void> {
     rules: collectRules(meta, data),
     startWave: session.startWave,
     maxStartWave: session.maxStartWave,
-    estimate: session.estimate,
+    reach: session.reach,
+    lowering: session.startWaveLowering,
     priceGrowth: DEFAULT_ECONOMY.talentGrowth,
   });
 
@@ -154,6 +178,7 @@ async function main(root: HTMLElement): Promise<void> {
     meta,
     {
       runStarted(run) {
+        cancelReaim();
         renderer.beginRun(run.typicalHit);
         app.stage.visible = true;
         results.hide();
@@ -174,6 +199,8 @@ async function main(root: HTMLElement): Promise<void> {
       },
       talentsOpened() {
         results.hide();
+        // The run's HUD would show through the web and collide with its header.
+        hud.root.hidden = true;
         talentWeb.show(webView());
       },
       profileChanged: save,
@@ -187,7 +214,8 @@ async function main(root: HTMLElement): Promise<void> {
       step: () => renderer.handleEvents(session.step()),
       frame: (alpha, elapsedMs, speed) => {
         if (document.visibilityState === 'visible') profile.playSeconds += elapsedMs / 1000;
-        session.update(elapsedMs);
+        // The countdown holds while the result card is read or the page is hidden.
+        session.update(elapsedMs, results.hovered || document.visibilityState === 'hidden');
         if (session.phase !== 'running' && performance.now() - lastSaveMs > AUTOSAVE_MS) save();
         const run = session.currentRun;
         if (run === null) return;
@@ -255,9 +283,11 @@ function toResultInfo(report: RunReport): ResultInfo {
     shardsFromRun: settlement.shardsFromRun,
     coresFromRun: settlement.coresFromRun,
     clearedStartWave: result.clearedStartWave,
+    nextStartWave: report.nextStartWave,
     skipShards: settlement.skipShards,
     skipCores: settlement.skipCores,
     affordable: report.affordable,
+    toTalents: leadsToTalents(report),
   };
 }
 
