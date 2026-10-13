@@ -1,7 +1,9 @@
 /**
  * Composite effects built from FX particles and rings: kill explosions, hit sparks, crit
  * flares, chain sparks, flames and the pandemic fire nova. Sizes are in arena units; every
- * spawn goes through the capped pools, so these can be called for every event.
+ * spawn goes through the capped pools, so these can be called for every event. Flames licking
+ * off burning enemies and the puffs of landed embers go to a separate layer under the crowd,
+ * so each burning enemy's own outline stays on top of its fire.
  */
 
 import type { FxGroup, FxParticles } from './fx';
@@ -24,9 +26,17 @@ const TAU = Math.PI * 2;
 
 const rand = (min: number, max: number): number => min + Math.random() * (max - min);
 
+/** Root color of enemy flames: orange with a little yellow, so stacked flames stay orange. */
+const FLAME_ROOT = mixColor(COLORS.burn, COLORS.burnHot, 0.35);
+
+/** Crit flares stop growing at this many orders of magnitude above the typical hit. */
+const CRIT_FLARE_DECADES = 1.5;
+
 export class Bursts {
+  /** `fx` draws above the crowd; `under` (enemy flames and ember puffs) draws below it. */
   constructor(
     private readonly fx: FxParticles,
+    private readonly under: FxParticles,
     private readonly tex: FxTextures,
     private readonly rings: RingLayer,
   ) {}
@@ -38,8 +48,10 @@ export class Bursts {
   kill(x: number, y: number, color: number, radius: number, tier: number, crowd: number): void {
     const big = tier === TIER_BOSS ? 2.2 : tier === TIER_ELITE ? 1.5 : 1;
     const light = mixColor(color, 0xffffff, 0.45);
-    // Hot white core inside a wider flash in the enemy's color.
-    this.glow(FX_FLASH, x, y, radius * 3.2 * big, 0xffffff, light, 1, 150 * big);
+    // Hot white core inside a wider flash in the enemy's color. Cores of a crowd dying in the
+    // same frame are dimmer, so they do not add up to a white blob over the survivors.
+    const core = tier === TIER_NORMAL ? 0.4 + 0.5 * crowd : 1;
+    this.glow(FX_FLASH, x, y, radius * 3.2 * big, 0xffffff, light, core, 150 * big);
     this.glow(FX_FLASH, x, y, radius * 6 * big, light, color, 0.7, 240 * big);
     this.rings.shock(x, y, radius * 5.5 * big, light, 9 * big, 320 * big, tier !== TIER_NORMAL);
     if (tier !== TIER_NORMAL) {
@@ -78,13 +90,24 @@ export class Bursts {
     this.sparks(x, y, dirX, dirY, 3, 0xffffff, COLORS.spark, 0.8);
   }
 
-  /** A crit: a star flare and crit-colored sparks, bigger for bigger crits (decades ≥ 0). */
-  crit(x: number, y: number, decades: number): void {
-    const d = Math.max(0, decades);
-    this.star(x, y, 1.1 + 0.9 * d, COLORS.critHot, COLORS.crit, 200 + 60 * d);
-    this.glow(FX_FLASH, x, y, 70 + 50 * d, COLORS.critHot, COLORS.crit, 0.9, 150);
-    this.rings.shock(x, y, 48 + 40 * d, COLORS.crit, 5 + 3 * d, 220 + 60 * d);
-    this.sparks(x, y, 0, 0, Math.round(6 + 6 * d), COLORS.critHot, COLORS.crit, 1.2 + 0.4 * d);
+  /**
+   * A crit: a star flare and crit-colored sparks, a little bigger for bigger crits (decades
+   * above the typical hit, with a low ceiling). `big` is the full flare with a shockwave, for
+   * crits shown as a big number pop; the others get a small flare so a volley of crits does not
+   * bury the crowd under stars.
+   */
+  crit(x: number, y: number, decades: number, big: boolean): void {
+    const d = Math.min(CRIT_FLARE_DECADES, Math.max(0, decades));
+    if (!big) {
+      this.star(x, y, 0.55 + 0.15 * d, COLORS.critHot, COLORS.crit, 150);
+      this.glow(FX_FLASH, x, y, 40 + 10 * d, COLORS.critHot, COLORS.crit, 0.7, 110);
+      this.sparks(x, y, 0, 0, 3, COLORS.critHot, COLORS.crit, 1);
+      return;
+    }
+    this.star(x, y, 0.9 + 0.4 * d, COLORS.critHot, COLORS.crit, 200 + 40 * d);
+    this.glow(FX_FLASH, x, y, 56 + 22 * d, COLORS.critHot, COLORS.crit, 0.85, 150);
+    this.rings.shock(x, y, 40 + 18 * d, COLORS.crit, 4 + 2 * d, 220 + 40 * d);
+    this.sparks(x, y, 0, 0, Math.round(5 + 3 * d), COLORS.critHot, COLORS.crit, 1.1 + 0.2 * d);
   }
 
   /** A chain jump landed: an electric pop at the target. */
@@ -94,28 +117,29 @@ export class Bursts {
   }
 
   /**
-   * One flame licking up from a burning enemy of `radius`; `heat` in [0, 1] grows it with
-   * the stack count.
+   * One flame licking up from behind a burning enemy of `radius` (on the layer under the
+   * crowd); `heat` in [0, 1] grows it with the stack count.
    */
   flame(x: number, y: number, radius: number, heat: number): void {
-    const p = this.fx.spawn(FX_FLAME, this.tex.flame, x, y, rand(300, 480));
+    const p = this.under.spawn(FX_FLAME, this.tex.flame, x, y, rand(300, 440));
     if (p === null) return;
-    p.sprite.x += rand(-0.7, 0.7) * radius;
-    p.sprite.y += rand(-0.4, 0.3) * radius;
+    // Rooted on the upper half, so the tongues rise out from behind the body.
+    p.sprite.x += rand(-0.65, 0.65) * radius;
+    p.sprite.y += rand(-0.55, 0.05) * radius;
     p.sprite.rotation = rand(-0.25, 0.25);
     p.spin = rand(-0.6, 0.6);
     p.vx = rand(-15, 15);
-    p.vy = -rand(30, 70) * (1 + 0.5 * heat);
+    p.vy = -rand(30, 70) * (1 + 0.4 * heat);
     p.gravity = -100;
     p.drag = 1.5;
-    const height = radius * 3 * (0.85 + 0.45 * heat) * rand(0.75, 1.25);
+    const height = radius * 2.5 * (0.8 + 0.35 * heat) * rand(0.75, 1.2);
     const s = height / FLAME_HEIGHT;
     p.scale0 = s;
     p.scale1 = s * 0.35;
-    p.color0 = COLORS.burnHot;
+    p.color0 = FLAME_ROOT;
     p.color1 = COLORS.burnDeep;
     // Overlapping flames add up, so each stays well short of white.
-    p.alpha0 = 0.55 + 0.2 * heat;
+    p.alpha0 = 0.34 + 0.18 * heat;
     p.fadeFrom = 0.35;
   }
 
@@ -125,8 +149,8 @@ export class Bursts {
    */
   nova(x: number, y: number, radius: number): void {
     const full = this.rings.nova(x, y, radius);
-    if (full) this.glow(FX_FLASH, x, y, radius * 1.2, COLORS.burnHot, COLORS.burnDeep, 0.6, 300);
-    this.glow(FX_FLASH, x, y, 110, 0xffffff, COLORS.burnHot, 1, 180);
+    if (full) this.glow(FX_FLASH, x, y, radius * 1.2, COLORS.burnHot, COLORS.burnDeep, 0.45, 300);
+    this.glow(FX_FLASH, x, y, 84, COLORS.burnHot, COLORS.burn, 0.7, 180);
     const count = full ? 26 : 10;
     for (let i = 0; i < count; i++) {
       const lifeMs = rand(380, 480);
@@ -144,8 +168,11 @@ export class Bursts {
       const s = rand(44, 60) / FLAME_HEIGHT;
       p.scale0 = s;
       p.scale1 = s * 0.6;
-      p.color0 = COLORS.burnHot;
+      // The tongues all start on the same spot and add up: orange and part-transparent, so
+      // the nova's heart is hot but not a white disc over the enemies around it.
+      p.color0 = FLAME_ROOT;
       p.color1 = COLORS.burnDeep;
+      p.alpha0 = 0.65;
       p.fadeFrom = 0.5;
     }
   }
@@ -177,9 +204,9 @@ export class Bursts {
     halo.alpha0 = 0.8;
   }
 
-  /** An ember landed: a burst of flame. */
+  /** An ember landed: a burst of flame, under the crowd like the flames of burning enemies. */
   flamePuff(x: number, y: number): void {
-    this.glow(FX_FLASH, x, y, 70, COLORS.burnHot, COLORS.burn, 1, 190);
+    this.glow(FX_FLASH, x, y, 70, COLORS.burnHot, COLORS.burn, 0.75, 190, this.under);
     for (let i = 0; i < 4; i++) this.flame(x, y, 20, 1);
   }
 
@@ -192,8 +219,9 @@ export class Bursts {
     color1: number,
     alpha: number,
     lifeMs: number,
+    layer: FxParticles = this.fx,
   ): void {
-    const p = this.fx.spawn(group, this.tex.glow, x, y, lifeMs);
+    const p = layer.spawn(group, this.tex.glow, x, y, lifeMs);
     if (p === null) return;
     const s = diameter / GLOW_SIZE;
     p.scale0 = s * 0.7;

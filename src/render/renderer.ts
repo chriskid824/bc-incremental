@@ -3,10 +3,11 @@
  * never mutates them. The arena (ARENA_WIDTH × ARENA_HEIGHT) is scaled to fit the window with
  * letterboxing; every effect runs on its own timers driven by the frame time, not the sim.
  *
- * Feel (docs/GDD.md §1, §3): kills explode in the enemy's color, crits flare and pop big
- * numbers, burning enemies glow and shed flames, pandemic spreads as a fire nova, chains arc as
- * flickering lightning. Shake and hit-stop are budgeted so they punch instead of jitter, and
- * every effect pool is capped so a crowded screen sheds detail instead of frame rate.
+ * Feel (docs/GDD.md §1, §3): kills explode in the enemy's color, crits flare and pop numbers
+ * (a few big pops at a time), burning enemies glow and shed flames behind their outlines,
+ * pandemic spreads as a fire nova, chains arc as flickering lightning. Shake and hit-stop are
+ * budgeted so they punch instead of jitter, and every effect pool is capped so a crowded screen
+ * sheds detail instead of frame rate. docs/ARCHITECTURE.md §10 lists the layers and budgets.
  */
 
 import { Container, Graphics } from 'pixi.js';
@@ -19,10 +20,12 @@ import { ArcLayer } from './arcs';
 import { createBackdrop } from './backdrop';
 import { BurnTally } from './burnTally';
 import { Bursts, TIER_BOSS, TIER_ELITE, TIER_NORMAL } from './bursts';
+import { CritStopGate } from './critStop';
 import { DamageNumbers } from './damageNumbers';
 import { EnemyLayer, HIT_PUNCH } from './enemies';
 import { FxParticles } from './fx';
 import { createFxTextures } from './fxTextures';
+import { hudSafeArea } from './numberLayout';
 import { COLORS } from './palette';
 import { ShardParticles } from './particles';
 import { PlayerView } from './player';
@@ -47,12 +50,9 @@ const CRIT_SHAKE_COOLDOWN_MS = 300;
 const ELITE_SHAKE = 0.55;
 const ELITE_SHAKE_CEILING = 0.75;
 const BOSS_SHAKE = 1;
-/** Hit-stop on elite and boss kills, and on crits at least this far above the typical hit. */
+/** Hit-stop on elite and boss kills; crits go through CritStopGate (src/render/critStop.ts). */
 const ELITE_HIT_STOP_MS = 55;
 const BOSS_HIT_STOP_MS = 80;
-const CRIT_HIT_STOP_DECADES = 0.6;
-const CRIT_HIT_STOP_MS = 28;
-const CRIT_HIT_STOP_COOLDOWN_MS = 700;
 /** Kill debris thins out as more enemies die in the same frame. */
 const CROWD_KILLS = 6;
 /** pandemic embers per nova, and novas whose embers are resolved per frame. */
@@ -72,6 +72,8 @@ export class Renderer {
   private readonly arcs = new ArcLayer();
   private readonly rings = new RingLayer();
   private readonly fx: FxParticles;
+  /** Flames of burning enemies, drawn under the crowd. */
+  private readonly flames: FxParticles;
   private readonly bursts: Bursts;
   private readonly player = new PlayerView();
   private readonly shards: ShardParticles;
@@ -79,8 +81,8 @@ export class Renderer {
   private readonly burnTally = new BurnTally();
   private readonly shake: ScreenShake;
   private readonly hitStop: (ms: number) => void;
+  private readonly critStop = new CritStopGate();
   private critShakeCooldownMs = 0;
-  private critStopCooldownMs = 0;
   private killsThisFrame = 0;
   /** pandemic spreads waiting for render() to aim their embers: x, y, radius triples. */
   private readonly pendingNovas = new Float64Array(MAX_PENDING_NOVAS * 3);
@@ -89,8 +91,8 @@ export class Renderer {
   private worldX = 0;
   private worldY = 0;
   private readonly onResize = (): void => this.fit();
-  private readonly showBurn = (amount: Num, x: number, y: number): void => {
-    this.numbers.spawn('burn', amount, x, y);
+  private readonly showBurn = (amount: Num, x: number, y: number, enemyId: number): void => {
+    this.numbers.spawn('burn', amount, x, y, enemyId);
   };
   private readonly flamePuff = (x: number, y: number): void => this.bursts.flamePuff(x, y);
 
@@ -103,7 +105,8 @@ export class Renderer {
     this.enemies = new EnemyLayer(data, textures.glow);
     this.projectiles = new ProjectileLayer(textures);
     this.fx = new FxParticles(textures);
-    this.bursts = new Bursts(this.fx, textures, this.rings);
+    this.flames = new FxParticles(textures);
+    this.bursts = new Bursts(this.fx, this.flames, textures, this.rings);
     this.shards = new ShardParticles(app.renderer);
     this.shake = new ScreenShake(options.reducedMotion);
     this.hitStop = options.hitStop ?? ((): void => undefined);
@@ -113,6 +116,7 @@ export class Renderer {
     this.world.addChild(
       backdrop,
       this.enemies.burnGlow,
+      this.flames.view,
       this.enemies.view,
       this.rings.view,
       this.player.view,
@@ -133,13 +137,14 @@ export class Renderer {
     this.arcs.clear();
     this.rings.clear();
     this.fx.clear();
+    this.flames.clear();
     this.shards.clear();
     this.numbers.clear();
     this.burnTally.clear();
     this.player.reset();
     this.shake.reset();
+    this.critStop.reset();
     this.critShakeCooldownMs = 0;
-    this.critStopCooldownMs = 0;
     this.killsThisFrame = 0;
     this.pendingNovaCount = 0;
     this.numbers.setTypicalHit(typicalHit);
@@ -183,7 +188,7 @@ export class Renderer {
   render(state: Readonly<SimState>, alpha: number, frameMs: number): void {
     const dt = Math.min(Math.max(0, frameMs), MAX_EFFECT_DT_MS);
     this.critShakeCooldownMs = Math.max(0, this.critShakeCooldownMs - dt);
-    this.critStopCooldownMs = Math.max(0, this.critStopCooldownMs - dt);
+    this.critStop.update(dt);
     this.shake.update(dt);
     this.world.position.set(
       this.worldX + this.shake.offsetX * this.worldScale,
@@ -194,6 +199,7 @@ export class Renderer {
     this.projectiles.update(state.projectiles, alpha);
     this.arcs.update(dt);
     this.rings.update(dt);
+    this.flames.update(dt);
     this.fx.update(dt);
     this.fx.drainFollowUps(this.flamePuff);
     this.player.update(state.player, dt);
@@ -218,11 +224,12 @@ export class Renderer {
     } else if (!crit) {
       this.bursts.hit(x, y, x - CENTER_X, y - CENTER_Y);
     }
-    this.numbers.spawn(crit ? 'crit' : chain ? 'chain' : 'hit', event.amount, x, y);
+    const kind = crit ? 'crit' : chain ? 'chain' : 'hit';
+    const shown = this.numbers.spawn(kind, event.amount, x, y, event.targetId);
     if (!crit) return;
 
     const decades = this.numbers.decades(event.amount);
-    this.bursts.crit(x, y, decades);
+    this.bursts.crit(x, y, decades, shown === 'big');
     if (decades >= SHAKE_MIN_DECADES && this.critShakeCooldownMs <= 0) {
       this.shake.add(
         SHAKE_BASE + SHAKE_PER_DECADE * (decades - SHAKE_MIN_DECADES),
@@ -230,10 +237,8 @@ export class Renderer {
       );
       this.critShakeCooldownMs = CRIT_SHAKE_COOLDOWN_MS;
     }
-    if (decades >= CRIT_HIT_STOP_DECADES && this.critStopCooldownMs <= 0) {
-      this.hitStop(CRIT_HIT_STOP_MS * (1 + (decades - CRIT_HIT_STOP_DECADES)));
-      this.critStopCooldownMs = CRIT_HIT_STOP_COOLDOWN_MS;
-    }
+    const stopMs = this.critStop.crit(decades);
+    if (stopMs > 0) this.hitStop(stopMs);
   }
 
   private onKill(event: Extract<SimEvent, { type: 'enemyKilled' }>): void {
@@ -286,6 +291,9 @@ export class Renderer {
     this.worldY = (height - ARENA_HEIGHT * scale) / 2;
     this.world.scale.set(scale);
     this.world.position.set(this.worldX, this.worldY);
+    this.numbers.setSafeArea(
+      hudSafeArea(ARENA_WIDTH, ARENA_HEIGHT, width, height, scale, this.worldX, this.worldY),
+    );
 
     const g = this.letterbox;
     g.clear();

@@ -188,9 +188,9 @@ function drawNova(g: Graphics, ring: Ring, t: number, full: boolean): void {
     });
   }
   g.circle(ring.x, ring.y, r).stroke({
-    width: 5 + 14 * (1 - grow),
+    width: 5 + 10 * (1 - grow),
     color: COLORS.burnHot,
     alpha: (full ? 1 : 0.7) * fade,
   });
-  g.circle(ring.x, ring.y, r).stroke({ width: 2.5, color: 0xffffff, alpha: 0.8 * fade * fade });
+  g.circle(ring.x, ring.y, r).stroke({ width: 2.5, color: 0xffffff, alpha: 0.55 * fade * fade });
 }

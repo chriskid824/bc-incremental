@@ -1,20 +1,38 @@
 /**
  * Floating damage numbers (docs/ARCHITECTURE.md §10): pooled BitmapText on dynamically
- * installed fonts, sized by log10 of the amount relative to the run's typical hit.
- * Crits use a bold glowing font on their own top layer and pop (overshoot, then settle); when
- * their pool is full the oldest crit is recycled. Hit, chain and burn numbers share a second
- * pool with a cap per kind, and new ones are dropped once their cap is reached, so a crowded
- * screen shows fewer numbers rather than a wall of them.
+ * installed fonts, sized by log10 of the amount relative to the run's typical hit, with a low
+ * ceiling (src/render/numberLayout.ts) so a big crit never covers the crowd.
+ * Crits pop on a bold glowing font on their own top layer, but only a few at a time; past that
+ * budget a crit shows as a normal-size number in the crit color. Hit, chain, burn and small crit
+ * numbers share a second pool with a cap per style. Numbers for the same enemy and kind within
+ * a short window merge into one growing number; a new number steps aside from those already on
+ * screen or is dropped, and none floats under the DOM HUD. Busy pools shorten new lifetimes.
  */
 
 import { BitmapFont, BitmapText, Container } from 'pixi.js';
 import { formatNum } from '../core/format';
-import { log10 } from '../core/num';
+import { add, log10, ZERO } from '../core/num';
 import type { Num } from '../core/num';
+import { ARENA_HEIGHT, ARENA_WIDTH } from '../sim';
+import {
+  findSpot,
+  halfHeight,
+  halfWidth,
+  lifeUnderLoad,
+  numberSize,
+  RISE_PER_MS,
+} from './numberLayout';
+import type { NumberStyle, Point, SafeArea } from './numberLayout';
 import { COLORS, mixColor } from './palette';
 import { ageStep } from './timing';
 
 export type DamageKind = 'hit' | 'crit' | 'burn' | 'chain';
+
+/**
+ * What spawn() did: dropped to stay under the caps, shown as a normal number (small crits
+ * included), shown as a big crit pop, or merged into a number already shown for that enemy.
+ */
+export type SpawnResult = 'dropped' | 'shown' | 'big' | 'merged';
 
 const FONT_NAME = 'bc-damage';
 const CRIT_FONT_NAME = 'bc-damage-crit';
@@ -22,52 +40,72 @@ const FONT_SIZE = 48;
 const CHARS = '0123456789.,-+eKMBTNa∞ ';
 const FORMAT = { format: 'short' } as const;
 
-const MAX_NUMBERS = 110;
-const MAX_CRITS = 36;
-/** Live numbers allowed per kind in the shared pool. */
-const KIND_CAP: Readonly<Record<Exclude<DamageKind, 'crit'>, number>> = {
-  hit: 70,
-  chain: 45,
-  burn: 40,
+/** Numbers on screen at once in the shared pool, and big crit pops at once. */
+const MAX_NUMBERS = 80;
+const MAX_BIG_CRITS = 6;
+/** Live numbers allowed per style in the shared pool. */
+const STYLE_CAP: Readonly<Record<Exclude<NumberStyle, 'crit'>, number>> = {
+  hit: 40,
+  chain: 30,
+  burn: 30,
+  critSmall: 18,
 };
 
-interface KindStyle {
+/** A number for the same enemy and kind younger than this absorbs the new amount. */
+const MERGE_MS = 220;
+/** Scale bump when a number absorbs another, fading over BUMP_MS. */
+const BUMP = 0.22;
+const BUMP_MS = 100;
+
+interface Look {
   readonly color: number;
-  /** Height in arena units at the typical hit. */
-  readonly size: number;
-  /** Size grows by this fraction per order of magnitude above the typical hit. */
-  readonly perDecade: number;
   readonly lifeMs: number;
-  readonly rise: number;
   readonly pop: number;
 }
 
-const STYLES: Readonly<Record<DamageKind, KindStyle>> = {
-  hit: { color: COLORS.damageHit, size: 22, perDecade: 0.3, lifeMs: 700, rise: 50, pop: 0.35 },
-  crit: { color: COLORS.damageCrit, size: 40, perDecade: 0.55, lifeMs: 820, rise: 30, pop: 0 },
-  burn: { color: COLORS.damageBurn, size: 15, perDecade: 0.25, lifeMs: 650, rise: 34, pop: 0.2 },
-  chain: { color: COLORS.damageChain, size: 20, perDecade: 0.3, lifeMs: 700, rise: 46, pop: 0.3 },
+const LOOKS: Readonly<Record<NumberStyle, Look>> = {
+  hit: { color: COLORS.damageHit, lifeMs: 650, pop: 0.3 },
+  chain: { color: COLORS.damageChain, lifeMs: 650, pop: 0.3 },
+  burn: { color: COLORS.damageBurn, lifeMs: 600, pop: 0.2 },
+  crit: { color: COLORS.damageCrit, lifeMs: 760, pop: 0 },
+  critSmall: { color: COLORS.damageCrit, lifeMs: 560, pop: 0.4 },
 };
+/** Past this fraction of its life a number is fading and no longer keeps new ones away. */
+const SOLID_UNTIL = 0.8;
 
 const MIN_DECADES = -1;
 const MAX_DECADES = 4;
 const POP_MS = 110;
 /** Crit pop: grows to CRIT_OVERSHOOT by CRIT_GROW_MS, settles to 1 by CRIT_SETTLE_MS. */
-const CRIT_START = 0.45;
-const CRIT_OVERSHOOT = 1.55;
+const CRIT_START = 0.6;
+const CRIT_OVERSHOOT = 1.12;
 const CRIT_GROW_MS = 70;
 const CRIT_SETTLE_MS = 210;
+/** Random spread of a new number around the hit, in arena units. */
+const JITTER_X = 10;
+const JITTER_Y = 6;
 
 interface FloatingNumber {
   readonly text: BitmapText;
+  style: NumberStyle;
   kind: DamageKind;
+  /** Enemy the number belongs to, -1 when unknown. */
+  targetId: number;
+  amount: Num;
   ageMs: number;
   lifeMs: number;
+  /** Where it spawned. */
+  baseX: number;
+  baseY: number;
+  /** Center now, and settled half extents, for spacing new numbers (numberLayout.NumberBox). */
   x: number;
   y: number;
-  rise: number;
+  halfW: number;
+  halfH: number;
+  solid: boolean;
   scale: number;
   pop: number;
+  bumpMs: number;
   /** Spawned since the last update (see src/render/timing.ts). */
   fresh: boolean;
 }
@@ -108,7 +146,7 @@ function installFonts(): void {
   fontsInstalled = true;
 }
 
-/** A pool of numbers on one font and layer. */
+/** A pool of numbers on one font and layer; spawns past `max` are refused. */
 class NumberPool {
   readonly layer = new Container();
   readonly live: FloatingNumber[] = [];
@@ -117,37 +155,46 @@ class NumberPool {
 
   constructor(
     private readonly font: string,
-    private readonly max: number,
+    readonly max: number,
   ) {}
 
-  /** A free slot; when none is left, the oldest live one if `recycle`, else null. */
-  acquire(recycle: boolean): FloatingNumber | null {
+  get full(): boolean {
+    return this.live.length >= this.max;
+  }
+
+  /** A free slot, or null when `max` numbers are live. */
+  acquire(): FloatingNumber | null {
     let slot = this.free.pop();
     if (slot === undefined) {
-      if (this.created < this.max) {
-        slot = this.create();
-      } else if (recycle && this.live.length > 0) {
-        slot = this.live.shift() as FloatingNumber;
-      } else {
-        return null;
-      }
+      if (this.created >= this.max) return null;
+      slot = this.create();
     }
     slot.text.visible = true;
     this.live.push(slot);
     return slot;
   }
 
+  /** The live number of `kind` for `targetId` still young enough to merge into, if any. */
+  findMergeable(kind: DamageKind, targetId: number): FloatingNumber | null {
+    for (let i = this.live.length - 1; i >= 0; i--) {
+      const slot = this.live[i] as FloatingNumber;
+      if (slot.targetId === targetId && slot.kind === kind && slot.ageMs < MERGE_MS) return slot;
+    }
+    return null;
+  }
+
   /** Ages live numbers; returns expired ones to the pool and reports them to `onExpire`. */
-  update(dtMs: number, onExpire: (kind: DamageKind) => void): void {
+  update(dtMs: number, onExpire: (style: NumberStyle) => void): void {
     let kept = 0;
     for (let i = 0; i < this.live.length; i++) {
       const slot = this.live[i] as FloatingNumber;
       slot.ageMs += ageStep(dtMs, slot.fresh);
+      slot.bumpMs = Math.max(0, slot.bumpMs - dtMs);
       slot.fresh = false;
       if (slot.ageMs >= slot.lifeMs) {
         slot.text.visible = false;
         this.free.push(slot);
-        onExpire(slot.kind);
+        onExpire(slot.style);
         continue;
       }
       this.live[kept++] = slot;
@@ -173,14 +220,22 @@ class NumberPool {
     this.layer.addChild(text);
     return {
       text,
+      style: 'hit',
       kind: 'hit',
+      targetId: -1,
+      amount: ZERO,
       ageMs: 0,
       lifeMs: 1,
+      baseX: 0,
+      baseY: 0,
       x: 0,
       y: 0,
-      rise: 0,
+      halfW: 0,
+      halfH: 0,
+      solid: true,
       scale: 1,
       pop: 0,
+      bumpMs: 0,
       fresh: true,
     };
   }
@@ -189,11 +244,21 @@ class NumberPool {
 export class DamageNumbers {
   readonly view = new Container({ label: 'damage-numbers' });
   private readonly normal = new NumberPool(FONT_NAME, MAX_NUMBERS);
-  private readonly crits = new NumberPool(CRIT_FONT_NAME, MAX_CRITS);
-  private readonly counts = { hit: 0, crit: 0, burn: 0, chain: 0 };
-  private readonly onExpire = (kind: DamageKind): void => {
-    this.counts[kind]--;
+  private readonly crits = new NumberPool(CRIT_FONT_NAME, MAX_BIG_CRITS);
+  /** Both pools, for spacing new numbers against everything on screen. */
+  private readonly onScreen: readonly FloatingNumber[][] = [this.crits.live, this.normal.live];
+  private readonly counts: Record<NumberStyle, number> = {
+    hit: 0,
+    crit: 0,
+    burn: 0,
+    chain: 0,
+    critSmall: 0,
   };
+  private readonly onExpire = (style: NumberStyle): void => {
+    this.counts[style]--;
+  };
+  private readonly spot: Point = { x: 0, y: 0 };
+  private area: SafeArea = { width: ARENA_WIDTH, height: ARENA_HEIGHT, zones: [] };
   private typicalHit = 1;
 
   constructor() {
@@ -207,6 +272,11 @@ export class DamageNumbers {
     this.typicalHit = amount > 0 && Number.isFinite(amount) ? amount : 1;
   }
 
+  /** Where numbers may float: the arena minus the HUD (numberLayout.hudSafeArea). */
+  setSafeArea(area: SafeArea): void {
+    this.area = area;
+  }
+
   /** log10(amount / typical hit), clamped to the sizing range. */
   decades(amount: Num): number {
     const d = log10(amount) - Math.log10(this.typicalHit);
@@ -214,52 +284,71 @@ export class DamageNumbers {
     return Math.min(MAX_DECADES, Math.max(MIN_DECADES, d));
   }
 
-  /** Shows a number; returns false when it was dropped to stay under the caps. */
-  spawn(kind: DamageKind, amount: Num, x: number, y: number): boolean {
-    let slot: FloatingNumber | null;
-    if (kind === 'crit') {
-      const recycled = this.crits.live.length >= MAX_CRITS;
-      slot = this.crits.acquire(true);
-      if (slot !== null && recycled) this.counts[slot.kind]--;
-    } else {
-      if (this.counts[kind] >= KIND_CAP[kind]) return false;
-      slot = this.normal.acquire(false);
-    }
-    if (slot === null) return false;
-    this.counts[kind]++;
+  /**
+   * Shows `amount` dealt to enemy `targetId` (-1 when unknown) at (x, y), merges it into a young
+   * number of the same kind for that enemy, or drops it to keep the screen readable.
+   */
+  spawn(kind: DamageKind, amount: Num, x: number, y: number, targetId = -1): SpawnResult {
+    if (targetId >= 0 && this.merge(kind, amount, targetId)) return 'merged';
 
-    const style = STYLES[kind];
-    const decades = this.decades(amount);
+    let style: NumberStyle = kind;
+    let pool = this.normal;
+    if (kind === 'crit') {
+      if (this.crits.full) style = 'critSmall';
+      else pool = this.crits;
+    }
+    if (pool === this.normal && (pool.full || this.counts[style] >= capOf(style))) {
+      return 'dropped';
+    }
+
+    const look = LOOKS[style];
+    const label = formatNum(amount, FORMAT);
+    const size = numberSize(style, this.decades(amount));
+    const halfW = halfWidth(label.length, size);
+    const halfH = halfHeight(size);
+    const lifeMs = lifeUnderLoad(look.lifeMs, pool.live.length, pool.max);
+    const rise = RISE_PER_MS * lifeMs;
+    const jx = x + (Math.random() * 2 - 1) * JITTER_X;
+    const jy = y - 10 + (Math.random() * 2 - 1) * JITTER_Y;
+    // A number that would cover another one is left out, crits included (their flare stays).
+    if (!findSpot(this.spot, this.area, this.onScreen, jx, jy, halfW, halfH, rise)) {
+      return 'dropped';
+    }
+
+    const slot = pool.acquire();
+    if (slot === null) return 'dropped';
+    this.counts[style]++;
+
     const text = slot.text;
-    text.text = formatNum(amount, FORMAT);
-    // Big crits burn whiter.
-    text.tint =
-      kind === 'crit'
-        ? mixColor(style.color, COLORS.critHot, Math.min(1, Math.max(0, decades) / 1.5))
-        : style.color;
+    text.text = label;
+    text.tint = tintOf(style, this.decades(amount));
     text.alpha = 1;
-    text.rotation = kind === 'crit' ? (Math.random() * 2 - 1) * 0.1 : 0;
+    text.rotation = style === 'crit' ? (Math.random() * 2 - 1) * 0.06 : 0;
+    slot.style = style;
     slot.kind = kind;
+    slot.targetId = targetId;
+    slot.amount = amount;
     slot.ageMs = 0;
     slot.fresh = true;
-    slot.lifeMs = style.lifeMs;
-    slot.x = x + (Math.random() * 2 - 1) * 14;
-    slot.y = y - 10 + (Math.random() * 2 - 1) * 8;
-    slot.rise = style.rise;
-    slot.pop = style.pop;
-    const size = style.size * (1 + style.perDecade * decades);
-    slot.scale = Math.max(8, size) / FONT_SIZE;
+    slot.lifeMs = lifeMs;
+    slot.baseX = this.spot.x;
+    slot.baseY = this.spot.y;
+    slot.x = this.spot.x;
+    slot.y = this.spot.y;
+    slot.halfW = halfW;
+    slot.halfH = halfH;
+    slot.solid = true;
+    slot.pop = look.pop;
+    slot.bumpMs = 0;
+    slot.scale = size / FONT_SIZE;
     place(slot);
-    return true;
+    return style === 'crit' ? 'big' : 'shown';
   }
 
   clear(): void {
     this.normal.clear();
     this.crits.clear();
-    this.counts.hit = 0;
-    this.counts.crit = 0;
-    this.counts.burn = 0;
-    this.counts.chain = 0;
+    for (const style of Object.keys(this.counts) as NumberStyle[]) this.counts[style] = 0;
   }
 
   update(dtMs: number): void {
@@ -268,12 +357,50 @@ export class DamageNumbers {
     for (const slot of this.normal.live) place(slot);
     for (const slot of this.crits.live) place(slot);
   }
+
+  /** Adds `amount` to a young number of `kind` for `targetId`; false when there is none. */
+  private merge(kind: DamageKind, amount: Num, targetId: number): boolean {
+    const slot =
+      (kind === 'crit' ? this.crits.findMergeable(kind, targetId) : null) ??
+      this.normal.findMergeable(kind, targetId);
+    if (slot === null) return false;
+    slot.amount = add(slot.amount, amount);
+    const label = formatNum(slot.amount, FORMAT);
+    const decades = this.decades(slot.amount);
+    const size = numberSize(slot.style, decades);
+    slot.text.text = label;
+    slot.text.tint = tintOf(slot.style, decades);
+    slot.scale = size / FONT_SIZE;
+    slot.halfW = halfWidth(label.length, size);
+    slot.halfH = halfHeight(size);
+    slot.bumpMs = BUMP_MS;
+    return true;
+  }
+}
+
+function capOf(style: NumberStyle): number {
+  return style === 'crit' ? MAX_BIG_CRITS : STYLE_CAP[style];
+}
+
+function tintOf(style: NumberStyle, decades: number): number {
+  const color = LOOKS[style].color;
+  // Big crits burn whiter.
+  return style === 'crit'
+    ? mixColor(color, COLORS.critHot, Math.min(1, Math.max(0, decades) / 1.5))
+    : color;
 }
 
 function place(slot: FloatingNumber): void {
   const t = slot.ageMs / slot.lifeMs;
   const text = slot.text;
-  if (slot.kind === 'crit') {
+  const bump = slot.bumpMs > 0 ? 1 + (BUMP * slot.bumpMs) / BUMP_MS : 1;
+  // Every number rises at the same steady speed (numberLayout.RISE_PER_MS).
+  slot.x = slot.baseX;
+  slot.y = slot.baseY - RISE_PER_MS * slot.ageMs;
+  slot.solid = t < SOLID_UNTIL;
+  text.position.set(slot.x, slot.y);
+  if (slot.style === 'crit') {
+    // Pops (grows past full size, then settles) as it rises, and fades late.
     const age = slot.ageMs;
     let pop: number;
     if (age < CRIT_GROW_MS) {
@@ -285,17 +412,11 @@ function place(slot: FloatingNumber): void {
     } else {
       pop = 1;
     }
-    // Holds still while it pops, then drifts up and fades.
-    const drift =
-      age < CRIT_SETTLE_MS ? 0 : (age - CRIT_SETTLE_MS) / (slot.lifeMs - CRIT_SETTLE_MS);
-    text.position.set(slot.x, slot.y - slot.rise * drift);
-    text.scale.set(slot.scale * pop);
+    text.scale.set(slot.scale * pop * bump);
     text.alpha = t < 0.65 ? 1 : 1 - (t - 0.65) / 0.35;
     return;
   }
-  const ease = 1 - (1 - t) * (1 - t);
   const pop = slot.ageMs < POP_MS ? 1 + slot.pop * (1 - slot.ageMs / POP_MS) : 1;
-  text.position.set(slot.x, slot.y - slot.rise * ease);
-  text.scale.set(slot.scale * pop);
+  text.scale.set(slot.scale * pop * bump);
   text.alpha = t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
 }

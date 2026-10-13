@@ -18,7 +18,7 @@ interface Entry {
   ageMs: number;
 }
 
-export type BurnEmit = (amount: Num, x: number, y: number) => void;
+export type BurnEmit = (amount: Num, x: number, y: number, enemyId: number) => void;
 
 export class BurnTally {
   private readonly entries = new Map<number, Entry>();
@@ -30,7 +30,7 @@ export class BurnTally {
     entry.ageMs += this.stepMs;
     if (entry.ageMs < this.windowMs) return;
     this.entries.delete(id);
-    this.emitTo?.(entry.amount, entry.x, entry.y);
+    this.emitTo?.(entry.amount, entry.x, entry.y, id);
     this.pool.push(entry);
   };
 
@@ -60,7 +60,7 @@ export class BurnTally {
     const entry = this.entries.get(targetId);
     if (entry === undefined) return;
     this.entries.delete(targetId);
-    emit(entry.amount, entry.x, entry.y);
+    emit(entry.amount, entry.x, entry.y, targetId);
     this.pool.push(entry);
   }
 
