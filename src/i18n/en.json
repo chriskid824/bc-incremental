@@ -67,7 +67,7 @@
   "talent.thunderclap.name": "Thunderclap",
   "talent.staticFocus.name": "Static Focus",
   "talent.glassCannon.desc": "All damage ×2. Your life becomes 1.",
-  "talent.steadyAim.desc": "Every 3rd shot is a guaranteed crit with ×1.5 crit multiplier. No random crits.",
+  "talent.steadyAim.desc": "Every 3rd shot is a guaranteed crit, and your crit multiplier is multiplied ×1.5. No random crits.",
   "talent.pandemic.desc": "Burning enemies spread their burns to enemies nearby when they die, at 40% strength. Hit damage −30%.",
   "talent.overload.desc": "Chains jump twice as many times. Chain retention −20 percentage points.",
   "talent.searingCrits.desc": "Crits always ignite. Non-crit hit damage −50%.",
