@@ -40,3 +40,50 @@ export function mixColor(a: number, b: number, t: number): number {
   const bl = (a & 0xff) + ((b & 0xff) - (a & 0xff)) * k;
   return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(bl);
 }
+
+/**
+ * Character constructs (docs/v3/game-design-v3.md §11.3, §11.6). `main` is the character color;
+ * the four main hues are at least 70° apart in OKLCH. The other shades follow the reference
+ * drawing docs/v3/characters-v3.svg.
+ */
+export const CONSTRUCT_COLORS = {
+  magmaCore: {
+    main: 0xff7a2f,
+    /** Diamond core, from the white-hot center out to `main` at the rim. */
+    coreHot: 0xfffbea,
+    coreMid: 0xffd27a,
+    coreEdge: 0xfff1d0,
+    plate: 0x3d2a20,
+    plateEdge: 0xff8a45,
+    vent: 0xffa255,
+    ember: 0xffb26b,
+  },
+  frostCrystal: {
+    main: 0x8fe3ff,
+    /** Lit and shaded facets of a spike. */
+    facetLight: 0xf0fcff,
+    facetDark: 0x6cc6ee,
+    edge: 0xffffff,
+    core: 0xffffff,
+  },
+  teslaTower: {
+    main: 0xb48cff,
+    /** The white core of every arc and the discharge tips. */
+    core: 0xffffff,
+    post: 0x24163c,
+    postEdge: 0x5b4396,
+    base: 0x2a1b45,
+    baseEdge: 0x6a4fa8,
+  },
+  hive: {
+    main: 0x9bf25c,
+    /** Center cell of the comb, the outer cells, and their dark hollows. */
+    cellCenter: 0xe2ffc4,
+    cell: 0x6fbf3a,
+    cellHollow: 0x2e6a18,
+    cellEdge: 0xe6ffd0,
+    dock: 0x4fa048,
+    droneEdge: 0xf2ffe4,
+    droneMark: 0x2a5a14,
+  },
+} as const;
