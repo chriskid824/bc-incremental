@@ -291,7 +291,8 @@ export class MagmaCoreView implements ConstructView {
     for (let k = 0; k < EMBERS; k++) {
       const e = ember(k, this.timeMs);
       if (e.alpha <= 0.01) continue;
-      g.circle(e.x, e.y, e.size * 1.8).fill({ color: C.ember, alpha: e.alpha * 0.35 });
+      // The glow fades faster than the spark, so dim embers do not read as dark specks.
+      g.circle(e.x, e.y, e.size * 1.8).fill({ color: C.ember, alpha: e.alpha * e.alpha * 0.4 });
       g.circle(e.x, e.y, e.size).fill({ color: C.ember, alpha: e.alpha });
     }
 

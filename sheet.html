@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Construct sheet</title>
+    <!-- Dev-only reference sheet of the character constructs (npm run dev, then /sheet.html).
+         It is not a build input; tools/sheets/capture.ts turns it into PNGs. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0f1115;
+        color: #e6e8ee;
+        font-family:
+          'Noto Sans', 'Segoe UI', 'Microsoft JhengHei', 'PingFang TC', 'WenQuanYi Zen Hei',
+          sans-serif;
+      }
+      #sheet {
+        position: relative;
+        width: 1340px;
+        padding: 24px 12px;
+        box-sizing: border-box;
+      }
+      #sheet > header,
+      .info,
+      figcaption {
+        position: relative;
+        z-index: 1;
+      }
+      header {
+        padding: 0 12px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 600;
+      }
+      header p {
+        margin: 6px 0 0;
+        font-size: 13px;
+        color: #8d93a1;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 236px 380px 460px 180px;
+        gap: 12px;
+        padding: 12px;
+      }
+      .row + .row {
+        border-top: 1px solid #1d2129;
+      }
+      .info h2 {
+        margin: 4px 0 0;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      .info .zh {
+        margin: 2px 0 10px;
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 2px;
+      }
+      .swatch {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+        font:
+          15px ui-monospace,
+          'DejaVu Sans Mono',
+          monospace;
+      }
+      .swatch span {
+        width: 34px;
+        height: 34px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+      }
+      .info dl {
+        margin: 0;
+        font-size: 12.5px;
+        line-height: 1.45;
+        color: #aab0bd;
+      }
+      .info dt {
+        margin-top: 6px;
+        color: #e6e8ee;
+        font-weight: 600;
+      }
+      .info dd {
+        margin: 0;
+      }
+      figure {
+        margin: 0;
+        height: 360px;
+        background: #15181e;
+        border: 1px solid #232833;
+        border-radius: 10px;
+      }
+      figcaption {
+        padding: 8px 10px;
+        font-size: 12px;
+        color: #8d93a1;
+      }
+      canvas {
+        position: absolute;
+        left: 0;
+        top: 0;
+        z-index: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="sheet"></main>
+    <script type="module" src="/src/app/sheet.ts"></script>
+  </body>
+</html>
