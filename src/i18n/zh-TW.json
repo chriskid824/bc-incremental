@@ -1,7 +1,6 @@
 {
   "hud.wave": "波次",
   "hud.run": "第 {run} 局 · 從第 {startWave} 波開始",
-  "hud.time": "{elapsed} / {limit}",
   "hud.life": "生命",
   "hud.lifeValue": "{life} / {maxLife}",
   "hud.shards": "碎片",
@@ -153,5 +152,18 @@
   "result.tip.fast": "{enemies}速度快，常在你打死它們之前就撞上來。用傷害和攻擊速度更快清掉它們，或點「{vitality}」這類生命節點多撐幾下。",
   "result.tip.heavy": "{enemy}撞一下就扣 {damage} 生命，你的生命上限是 {life}。用傷害和攻擊速度在它靠近前打死它，或點「{vitality}」這類生命節點撐過這一下。",
   "result.tip.swarm": "{enemies}一直衝到你身邊。用傷害和攻擊速度清得更快，或點「{vitality}」這類生命節點撐得更久。",
-  "result.tip.glassCannon": "「{glassCannon}」讓你的生命變成 1，任何敵人碰到你這局就結束。用傷害和攻擊速度清得更快，或到天賦網免費退回它。"
+  "result.tip.glassCannon": "「{glassCannon}」讓你的生命變成 1，任何敵人碰到你這局就結束。用傷害和攻擊速度清得更快，或到天賦網免費退回它。",
+  "hud.shardsRun": "本局碎片",
+  "hud.coresRun": "本局核心",
+  "hud.timeLeft": "時限倒數 {time}",
+  "hud.hintAuto": "戰鬥全自動，你要做的選擇都在兩局之間。",
+  "toast.talentsQueued": "本局結束後會開啟天賦網",
+  "intro.title": "玩法",
+  "intro.auto": "角色會自動戰鬥。",
+  "intro.goal": "撐過一波波敵人，收集碎片。",
+  "intro.talents": "局與局之間，用碎片點天賦網，組出暴擊、燃燒或連鎖流派。",
+  "intro.start": "開始 · Space",
+  "build.critEveryNth": "每 {n} 發一次",
+  "talents.priceGrowth": "每點一個天賦，下一個的價格就 ×{growth}（可重複升級的天賦不算）。",
+  "talents.startWaveWarning": "目前配置預估能推到第 {frontier} 波，從更高的波次開始幾乎賺不到。建議起始波次：第 {wave} 波。"
 }

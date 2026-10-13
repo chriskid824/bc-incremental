@@ -15,13 +15,13 @@ export function bindSpeedKeys(target: Window, onSpeed: (speed: Speed) => void): 
 }
 
 export interface MenuKeys {
-  /** Space or Enter: start the next run from the result screen or the talent web. */
+  /** Space or Enter: start the first run from the intro, or the next one between runs. */
   confirm(): void;
-  /** T: open the talent web from the result screen. */
+  /** T: open the talent web between runs, or queue it for the end of the current run. */
   talents(): void;
 }
 
-/** Between-run shortcuts. Returns a function that removes the listener. */
+/** Menu shortcuts. Returns a function that removes the listener. */
 export function bindMenuKeys(target: Window, keys: MenuKeys): () => void {
   const listener = (event: KeyboardEvent): void => {
     if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;

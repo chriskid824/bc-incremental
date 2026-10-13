@@ -1,7 +1,6 @@
 {
   "hud.wave": "Wave",
   "hud.run": "Run {run} · from wave {startWave}",
-  "hud.time": "{elapsed} / {limit}",
   "hud.life": "Life",
   "hud.lifeValue": "{life} / {maxLife}",
   "hud.shards": "Shards",
@@ -153,5 +152,18 @@
   "result.tip.fast": "{enemies} are fast and reach you before they die. Kill them sooner with damage and attack speed, or take more hits with Life nodes like {vitality}.",
   "result.tip.heavy": "One {enemy} hit takes {damage} of your {life} life. Kill it before it arrives with damage and attack speed, or raise your life with nodes like {vitality}.",
   "result.tip.swarm": "{enemies} kept getting through. Kill faster with damage and attack speed, or survive longer with Life nodes like {vitality}.",
-  "result.tip.glassCannon": "{glassCannon} sets your life to 1, so any enemy that reaches you ends the run. Kill faster with damage and attack speed, or refund it for free in the talent web."
+  "result.tip.glassCannon": "{glassCannon} sets your life to 1, so any enemy that reaches you ends the run. Kill faster with damage and attack speed, or refund it for free in the talent web.",
+  "hud.shardsRun": "Shards this run",
+  "hud.coresRun": "Cores this run",
+  "hud.timeLeft": "Time limit {time}",
+  "hud.hintAuto": "Fighting is automatic — your choices happen between runs.",
+  "toast.talentsQueued": "The talent web opens when this run ends",
+  "intro.title": "How to play",
+  "intro.auto": "Your character fights on its own.",
+  "intro.goal": "Survive the waves to collect shards.",
+  "intro.talents": "Between runs, spend shards on the talent web to build crit, burn or chain.",
+  "intro.start": "Start · Space",
+  "build.critEveryNth": "Every {n} shots",
+  "talents.priceGrowth": "Each talent you own raises the next one's price ×{growth} (repeatable talents don't count).",
+  "talents.startWaveWarning": "Your build is estimated to push wave {frontier} — starting higher earns little. Suggested start: wave {wave}."
 }

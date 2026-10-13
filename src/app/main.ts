@@ -12,6 +12,7 @@ import type { Locale } from '../i18n';
 import {
   DEFAULT_ECONOMY,
   canAllocate,
+  collectRules,
   createMetaState,
   nodePrice,
   nodeRank,
@@ -25,11 +26,13 @@ import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
 import { Renderer } from '../render';
 import { Hud } from '../ui/hud';
 import type { HudInfo } from '../ui/hud';
+import { IntroPanel } from '../ui/intro';
 import { ResultPanel } from '../ui/result';
 import type { ResultInfo } from '../ui/result';
 import { injectStyle } from '../ui/style';
 import { TalentWebPanel } from '../ui/talentWeb';
 import type { TalentWebView } from '../ui/talentWeb';
+import { Toast } from '../ui/toast';
 import { bindMenuKeys, bindSpeedKeys } from './input';
 import { GameLoop, SPEEDS } from './loop';
 import type { Speed } from './loop';
@@ -86,6 +89,8 @@ async function main(root: HTMLElement): Promise<void> {
     reducedMotion: REDUCED_MOTION,
     hitStop: (ms) => loop.hitStop(ms),
   });
+  // The arena has nothing to draw before the first run of this page.
+  app.stage.visible = false;
 
   let lastSaveMs = performance.now();
   const save = (): void => {
@@ -100,6 +105,7 @@ async function main(root: HTMLElement): Promise<void> {
     profile.speed = speed;
   };
   const hud = new Hud(document, SPEEDS, setSpeed);
+  hud.root.hidden = true;
   const results = new ResultPanel(document, data.enemies, {
     continue: () => session.continueFromResults(),
     openTalents: () => session.openTalents(),
@@ -119,7 +125,14 @@ async function main(root: HTMLElement): Promise<void> {
     },
     start: () => session.startNextRun(),
   });
-  root.append(hud.root, results.root, talentWeb.root);
+  const startFirstRun = (): void => {
+    if (!intro.visible || session.phase !== 'idle') return;
+    intro.hide();
+    session.start();
+  };
+  const intro = new IntroPanel(document, startFirstRun);
+  const toast = new Toast(document);
+  root.append(hud.root, results.root, talentWeb.root, intro.root, toast.root);
 
   const webView = (): TalentWebView => ({
     talents: data.talents,
@@ -129,8 +142,11 @@ async function main(root: HTMLElement): Promise<void> {
     check: (node) => canAllocate(meta, node.id, data, DEFAULT_ECONOMY),
     price: (node) => nodePrice(meta, node, DEFAULT_ECONOMY),
     stats: statBlockFor(meta, data),
+    rules: collectRules(meta, data),
     startWave: session.startWave,
     maxStartWave: session.maxStartWave,
+    estimate: session.estimate,
+    priceGrowth: DEFAULT_ECONOMY.talentGrowth,
   });
 
   const session = new Session(
@@ -139,11 +155,20 @@ async function main(root: HTMLElement): Promise<void> {
     {
       runStarted(run) {
         renderer.beginRun(run.typicalHit);
+        app.stage.visible = true;
         results.hide();
         talentWeb.hide();
+        hud.root.hidden = false;
+        hud.setHint(run.number === 1 ? t('hud.hintAuto') : null);
         loop.resetClock();
       },
       runFinished(report) {
+        hud.setHint(null);
+        // Until the first talent is bought, point at the talent web as hard as possible.
+        results.root.classList.toggle(
+          'bc-result-first',
+          report.affordable && meta.allocated.size === 0,
+        );
         results.show(toResultInfo(report));
         results.setTimeLeft(session.resultTimeLeftMs);
       },
@@ -163,12 +188,12 @@ async function main(root: HTMLElement): Promise<void> {
       frame: (alpha, elapsedMs, speed) => {
         if (document.visibilityState === 'visible') profile.playSeconds += elapsedMs / 1000;
         session.update(elapsedMs);
-        if (session.phase === 'idle') return;
-        const run = session.run;
+        if (session.phase !== 'running' && performance.now() - lastSaveMs > AUTOSAVE_MS) save();
+        const run = session.currentRun;
+        if (run === null) return;
         renderer.render(run.sim.state, alpha, elapsedMs);
         hud.update(toHudInfo(run, speed));
         if (session.phase === 'results') results.setTimeLeft(session.resultTimeLeftMs);
-        if (session.phase !== 'running' && performance.now() - lastSaveMs > AUTOSAVE_MS) save();
       },
     },
     { reducedMotion: REDUCED_MOTION },
@@ -177,13 +202,19 @@ async function main(root: HTMLElement): Promise<void> {
   bindSpeedKeys(window, setSpeed);
   bindMenuKeys(window, {
     confirm: () => {
-      if (session.phase === 'results' || session.phase === 'talents') session.startNextRun();
+      if (intro.visible) startFirstRun();
+      else if (session.phase === 'results' || session.phase === 'talents') session.startNextRun();
     },
-    talents: () => session.openTalents(),
+    talents: () => {
+      if (session.queueTalents()) toast.show(t('toast.talentsQueued'));
+      else session.openTalents();
+    },
   });
   window.addEventListener('pagehide', save);
   setSpeed(profile.speed);
-  session.start();
+  // A fresh profile learns the rules first; a returning one lands on the talent web.
+  if (meta.runs === 0) intro.show();
+  else session.resume();
   app.ticker.add((ticker) => loop.tick(ticker.elapsedMS));
 }
 

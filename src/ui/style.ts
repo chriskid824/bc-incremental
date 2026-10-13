@@ -1,4 +1,4 @@
-/** Shared stylesheet for the DOM overlay (HUD, result panel), injected once. */
+/** Shared stylesheet for the DOM overlay (HUD, panels, intro, toast), injected once. */
 
 const STYLE_ID = 'bc-ui-style';
 
@@ -24,6 +24,21 @@ const CSS = `
 .bc-hud-wave { position: absolute; top: 18px; left: 24px; }
 .bc-hud-wave-number { font-size: 44px; font-weight: 800; line-height: 1.05; }
 .bc-hud-sub { font-size: 16px; color: #b6bfd6; margin-top: 2px; }
+.bc-hud-time-left { font-size: 16px; font-weight: 700; color: #ffcf70; margin-top: 2px; }
+.bc-hud-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 420px);
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(14, 17, 26, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 15px;
+  color: #b6bfd6;
+  text-align: center;
+}
 .bc-hud-life {
   position: absolute;
   top: 22px;
@@ -89,6 +104,56 @@ const CSS = `
   color: #0b0d12;
   text-shadow: none;
 }
+.bc-toast {
+  inset: auto;
+  top: 92px;
+  left: 50%;
+  transform: translate(-50%, -6px);
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: rgba(14, 17, 26, 0.94);
+  border: 1px solid rgba(159, 232, 255, 0.45);
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    opacity 200ms ease-out,
+    transform 200ms ease-out;
+}
+.bc-toast.bc-visible { opacity: 1; transform: translate(-50%, 0); }
+.bc-intro {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 6, 10, 0.55);
+  pointer-events: auto;
+}
+.bc-intro[hidden] { display: none; }
+.bc-intro-card {
+  width: min(540px, calc(100vw - 48px));
+  padding: 28px 32px 24px;
+  border-radius: 14px;
+  background: rgba(14, 17, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.bc-intro-title { font-size: 30px; font-weight: 800; }
+.bc-intro-lines {
+  margin: 0;
+  padding-left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 18px;
+  line-height: 1.4;
+  color: #dfe5f3;
+}
+.bc-intro-lines li::marker { color: #9fe8ff; font-weight: 800; }
+.bc-intro .bc-button { font-size: 18px; padding: 12px 14px; }
 .bc-result {
   position: absolute;
   inset: 0;
@@ -165,6 +230,17 @@ const CSS = `
   from { box-shadow: 0 0 0 rgba(255, 226, 122, 0); }
   to { box-shadow: 0 0 18px rgba(255, 226, 122, 0.75); }
 }
+.bc-result-first .bc-result-actions .bc-button-glow {
+  flex: 1.6;
+  font-size: 19px;
+  border: 2px solid #ffe27a;
+  animation: bc-glow-strong 0.8s ease-in-out infinite alternate;
+}
+.bc-result-first .bc-result-hint { font-size: 17px; font-weight: 700; }
+@keyframes bc-glow-strong {
+  from { box-shadow: 0 0 6px rgba(255, 226, 122, 0.4); transform: scale(1); }
+  to { box-shadow: 0 0 30px rgba(255, 226, 122, 1); transform: scale(1.05); }
+}
 .bc-talents {
   position: absolute;
   inset: 0;
@@ -200,6 +276,16 @@ const CSS = `
 .bc-talents-currency { font-size: 24px; font-weight: 800; text-align: right; }
 .bc-talents-wave-value { font-size: 17px; font-weight: 700; margin: 2px 0 4px; }
 .bc-talents-wave-input { width: 100%; pointer-events: auto; accent-color: #9fe8ff; }
+.bc-talents-warning {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 176, 64, 0.1);
+  border: 1px solid rgba(255, 190, 90, 0.4);
+  color: #ffd08a;
+  font-size: 13px;
+  line-height: 1.35;
+}
 .bc-talents-build {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -257,6 +343,7 @@ const CSS = `
 .bc-tip-mod { color: #c9d6ff; }
 .bc-tip-rule { margin-top: 4px; color: #ffe9b0; }
 .bc-tip-foot { margin-top: 8px; font-size: 14px; color: #a3adc6; }
+.bc-tip-note { font-size: 13px; color: #8e98b3; }
 .bc-tip-status[data-ok='true'] { color: #8dffb0; font-weight: 700; }
 .bc-tip-status[data-ok='false'] { color: #ff8fa3; }
 .bc-error {

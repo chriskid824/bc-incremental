@@ -2,6 +2,8 @@
  * Run lifecycle of the browser build: run → result screen → talent web → next run.
  * The talent web opens on its own when something is affordable; otherwise the result screen
  * counts down and the next run starts, so a player who only watches still progresses.
+ * The start wave follows the highest allowed wave unless the player picks a lower one, and
+ * steps down on its own when the build gets weaker (a respec) or a run fails to clear it.
  */
 
 import type { Num } from '../core/num';
@@ -13,11 +15,12 @@ import {
   allowedStartWave,
   canAllocate,
   collectRules,
+  estimateBuild,
   refundAll,
   settleRun,
   statBlockFor,
 } from '../meta';
-import type { EconomyConfig, MetaState, Settlement } from '../meta';
+import type { BuildEstimate, EconomyConfig, MetaState, Settlement } from '../meta';
 import { NO_INPUT, createSimulation } from '../sim';
 import type { RunConfig, RunResult, SimEvent, Simulation } from '../sim';
 
@@ -26,6 +29,12 @@ export const RESULT_SCREEN_MS = 3000;
 
 /** Seeds derive from the run counter so a fresh profile replays the same runs. */
 const SEED_BASE = 1000;
+
+/**
+ * After a run that did not clear its start wave (so it earned no skip compensation), the next
+ * start wave is at most this share of the wave the run reached, and always lower than before.
+ */
+export const FAILED_START_RATIO = 0.7;
 
 export interface ActiveRun {
   /** 1-based. */
@@ -71,6 +80,13 @@ export class Session {
   private lastReport: RunReport | null = null;
   /** Start wave picked on the talent screen; null follows the highest allowed wave. */
   private startWaveChoice: number | null = null;
+  /**
+   * The choice was lowered by the session, not picked by the player, so it climbs back on its
+   * own as the build gets stronger and runs clear it.
+   */
+  private startWaveAuto = false;
+  /** T was pressed during the run: open the talent web when it ends. */
+  private talentsQueuedValue = false;
   private readonly economy: EconomyConfig;
   private readonly waveCap: number | undefined;
 
@@ -91,6 +107,16 @@ export class Session {
   get run(): ActiveRun {
     if (this.active === null) throw new Error('Session.start() has not been called');
     return this.active;
+  }
+
+  /** The run in progress or the last one played; null before the first run. */
+  get currentRun(): ActiveRun | null {
+    return this.active;
+  }
+
+  /** Whether the talent web will open when the current run ends. */
+  get talentsQueued(): boolean {
+    return this.talentsQueuedValue;
   }
 
   get report(): RunReport | null {
@@ -121,12 +147,29 @@ export class Session {
     const max = this.maxStartWave;
     const clamped = Math.max(1, Math.min(max, Math.round(wave)));
     this.startWaveChoice = clamped >= max ? null : clamped;
+    this.startWaveAuto = false;
+  }
+
+  /** How far the current talents should get (src/meta/estimate.ts). */
+  get estimate(): BuildEstimate {
+    return estimateBuild(this.meta, this.data, this.economy);
   }
 
   /** Starts the first run. */
   start(): void {
     if (this.phaseValue !== 'idle') throw new Error('Session already started');
     this.nextRun();
+  }
+
+  /**
+   * Opens on the talent web instead of a run, for a returning profile: the player sees where
+   * they are and starts the run from there.
+   */
+  resume(): void {
+    if (this.phaseValue !== 'idle') throw new Error('Session already started');
+    this.followEstimate(null);
+    this.phaseValue = 'talents';
+    this.listener.talentsOpened();
   }
 
   /**
@@ -155,6 +198,16 @@ export class Session {
     else this.nextRun();
   }
 
+  /**
+   * Asks for the talent web during a run: it opens when the run ends, instead of the result
+   * screen and its countdown to the next run. Returns whether it was queued.
+   */
+  queueTalents(): boolean {
+    if (this.phaseValue !== 'running') return false;
+    this.talentsQueuedValue = true;
+    return true;
+  }
+
   /** Opens the talent web between runs. */
   openTalents(): void {
     if (this.phaseValue !== 'results' && this.phaseValue !== 'talents') return;
@@ -171,15 +224,18 @@ export class Session {
   allocate(nodeId: string): boolean {
     if (this.phaseValue !== 'talents') return false;
     if (!canAllocate(this.meta, nodeId, this.data, this.economy).ok) return false;
+    const before = this.estimate;
     allocate(this.meta, nodeId, this.data, this.economy);
+    this.followEstimate(before);
     this.listener.profileChanged();
     return true;
   }
 
-  /** Free full respec. Only between runs. */
+  /** Free full respec. Only between runs. Lowers the start wave to what the new build can do. */
   refund(): void {
     if (this.phaseValue !== 'talents') return;
     refundAll(this.meta);
+    this.followEstimate(null);
     this.listener.profileChanged();
   }
 
@@ -193,6 +249,9 @@ export class Session {
   private finishRun(run: ActiveRun): void {
     const result = run.sim.result();
     const settlement = settleRun(this.meta, result, this.data, run.config.stats, this.economy);
+    this.followRun(result);
+    const queued = this.talentsQueuedValue;
+    this.talentsQueuedValue = false;
     this.phaseValue = 'results';
     this.resultMsLeft = RESULT_SCREEN_MS;
     this.lastReport = {
@@ -205,6 +264,61 @@ export class Session {
     };
     this.listener.profileChanged();
     this.listener.runFinished(this.lastReport);
+    if (queued) this.openTalents();
+  }
+
+  /**
+   * Re-aims the start wave for the current talents; `previous` is the estimate before an
+   * allocation, null after a respec or on load. A start wave the build is no longer expected to
+   * reach (past the estimated frontier) drops to the estimated start wave; a start wave the
+   * player already picked past the frontier stays, with the talent web's warning. A start wave
+   * the session lowered climbs toward the estimate as the build gets stronger, by no more than
+   * the estimate gained, so the step down after a failed run is not undone by the next purchase
+   * when the estimate is too kind (burn builds, docs/GDD.md §7.2 ignores stack caps).
+   */
+  private followEstimate(previous: BuildEstimate | null): void {
+    const estimate = this.estimate;
+    const current = this.startWave;
+    const fellBehind =
+      current > estimate.frontier && (previous === null || current <= previous.frontier);
+    if (fellBehind) this.setAutoStartWave(estimate.startWave);
+    else if (
+      this.startWaveAuto &&
+      previous !== null &&
+      estimate.startWave > previous.startWave &&
+      estimate.startWave > current
+    ) {
+      const gained = estimate.startWave - previous.startWave;
+      this.setAutoStartWave(Math.min(estimate.startWave, current + gained));
+    }
+  }
+
+  /**
+   * A run that did not clear its start wave lowers the next one, more so the earlier it died.
+   * A start wave the session lowered climbs back once runs clear it, to the start wave the run
+   * would allow as a frontier.
+   */
+  private followRun(result: RunResult): void {
+    if (result.startWave > 1 && !result.clearedStartWave) {
+      this.setAutoStartWave(
+        Math.min(result.startWave - 1, Math.floor(result.highestWaveReached * FAILED_START_RATIO)),
+      );
+    } else if (this.startWaveAuto) {
+      this.setAutoStartWave(
+        Math.max(
+          this.startWave,
+          Math.floor(result.highestWaveReached * this.economy.startWaveRatio),
+        ),
+      );
+    }
+  }
+
+  /** Sets a start wave chosen by the session, never above the allowed wave. */
+  private setAutoStartWave(wave: number): void {
+    const max = this.maxStartWave;
+    const clamped = Math.max(1, Math.min(max, Math.floor(wave)));
+    this.startWaveChoice = clamped >= max ? null : clamped;
+    this.startWaveAuto = this.startWaveChoice !== null;
   }
 
   private nextRun(): void {
@@ -226,6 +340,7 @@ export class Session {
     };
     this.phaseValue = 'running';
     this.resultMsLeft = 0;
+    this.talentsQueuedValue = false;
     this.listener.runStarted(this.active);
   }
 }

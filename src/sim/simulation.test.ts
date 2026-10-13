@@ -195,12 +195,13 @@ describe('determinism', () => {
   const config = makeConfig({
     seed: 42,
     stats: makeStats({
-      damage: 30,
+      damage: 7.5,
       attackSpeed: 3,
+      projectileCount: 1,
       critChance: 0.3,
       igniteChance: 0.5,
       chainCount: 1.5,
-      maxLife: 300,
+      maxLife: 80,
     }),
     maxTicks: 60 * TICK_RATE,
   });
