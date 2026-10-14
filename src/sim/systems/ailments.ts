@@ -25,6 +25,8 @@ export function updateBurns(ctx: RunContext): void {
     if (!enemy.alive) continue;
     if (now >= enemy.burnNextEnd) expireBurns(ctx, enemy);
     if (!burnTick) continue;
+    // Paid up to now: a burn kill later in this loop may still spread a stack onto it (addBurn).
+    enemy.burnSteppedAt = now;
     let amount = enemy.burnPending;
     const burns = enemy.burns;
     for (let s = 0; s < burns.length; s++) {

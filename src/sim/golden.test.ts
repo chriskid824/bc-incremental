@@ -43,8 +43,10 @@ const EXPECTED: Readonly<Record<string, string>> = {
   'volley/s2/w15': 'd32ae28fbe918de9',
   'steady/s1/w8': '92f9fd2df6386f78',
   'steady/s2/w15': '2c89074834e4b95e',
-  'pandemic/s1/w8': 'c23112de799a04d3',
-  'pandemic/s2/w15': '26b754e051e18cf6',
+  // Re-recorded in C3.7b: a capped burn stack that a spread replaces after this tick's burn
+  // step is no longer paid twice (was c23112de799a04d3 and 26b754e051e18cf6).
+  'pandemic/s1/w8': '035884c0c8646cb4',
+  'pandemic/s2/w15': '608ef1f480a3d791',
   'eternalPandemic/s1/w8': '076de6ecb082bb31',
   'eternalPandemic/s2/w15': '20e0c10296976322',
   'overload/s1/w8': 'f90ba816bd509835',

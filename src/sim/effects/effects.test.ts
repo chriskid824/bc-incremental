@@ -13,6 +13,7 @@ import type { EmitterRuntime, Payload } from '../emitters/types';
 import { enqueueModuleEffect } from '../rules';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
+import { updateBurns } from '../systems/ailments';
 import { createRunContext } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { killEnemy } from '../systems/death';
@@ -556,6 +557,8 @@ describe('kill triggers', () => {
   it('transfers burns at the kill exactly as M1 pandemic’s spread did (inline transfer)', () => {
     // Recorded from M1 pandemic ({spreadRadius 250, spreadEffect 0.4, hitMore 0}) on this seed,
     // data and stats at C3.6's parent; the data trigger below must replay it event for event.
+    // The hash was re-recorded in C3.7b (was 1327e1c24d33ed46): five burnTick amounts drop M1's
+    // second payment of a capped stack replaced after its burn step; every other event is M1's.
     const stats = makeStats(
       {
         damage: 0.01,
@@ -623,7 +626,7 @@ describe('kill triggers', () => {
       [855, 16, 1],
       [885, 14, 0],
     ]);
-    expect(hash.digest('hex').slice(0, 16)).toBe('1327e1c24d33ed46');
+    expect(hash.digest('hex').slice(0, 16)).toBe('6bb4372456fb25b6');
     // Transfers are not depth-capped and never go through the queue.
     expect(result.counters.triggerDepthCapped).toBe(0);
     expect(result.counters.effectsRun).toBe(0);
@@ -666,6 +669,39 @@ describe('kill triggers', () => {
       const capped = depth >= MAX_DEPTH;
       expect(queued(ctx).map((entry) => entry.origin)).toEqual(capped ? [] : [heal]);
       expect(ctx.counters.triggerDepthCapped).toBe(capped ? 1 : 0);
+    }
+  });
+
+  it('pays a capped stack replaced by a spread after this tick’s burn step once (A37)', () => {
+    const stats = makeStats(
+      { burnMaxStacks: 1 },
+      [],
+      center({
+        on: 'diedWithAilment',
+        when: [{ victimHas: 'burn' }],
+        do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 5000, effect: 0.4 }],
+      }),
+    );
+    // Both burn at 60/s from tick 0. The tick-15 step kills the 15 hp source, whose spread
+    // (60 × 0.4) replaces the target's only stack: over (0, 30] the target takes 60 × 0.25 +
+    // 24 × 0.25 = 21, whether the loop steps it before the source (lower id) or after.
+    for (const targetFirst of [true, false]) {
+      const ctx = spawned(stats, stationarySquares(2));
+      const [low, high] = ctx.enemies as [Enemy, Enemy];
+      const [target, source] = targetFirst ? [low, high] : [high, low];
+      ctx.now = 0;
+      addBurn(ctx, target, num(60), 120, 0);
+      addBurn(ctx, source, num(60), 120, 0);
+      source.hp = num(15);
+      for (let tick = 1; tick <= 30; tick++) {
+        ctx.now = tick;
+        updateBurns(ctx);
+      }
+      expect(source.alive).toBe(false);
+      expect(eventsOf([ctx.events], 'burnSpread')).toMatchObject([{ enemyId: source.id }]);
+      const taken = eventsOf([ctx.events], 'burnTick').filter((e) => e.targetId === target.id);
+      expect(taken.map((burn) => burn.amount)).toEqual([15, 6]);
+      expect(taken.reduce((sum, burn) => add(sum, burn.amount), ZERO)).toBe(21);
     }
   });
 });

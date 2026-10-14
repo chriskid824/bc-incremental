@@ -101,7 +101,13 @@ export function addBurn(ctx: RunContext, enemy: Enemy, dps: Num, end: number, de
         weakestLeft = left;
       }
     }
-    enemy.burnPending = add(enemy.burnPending, accrued(ctx, weakest, now));
+    // The replaced stack's damage up to now goes to burnPending, unless this tick's burn step
+    // has already dealt it: a spread from a burn kill can land on an enemy the ailments loop
+    // stepped earlier in the tick, before ctx.lastBurnTick moves to now. Its accrual then runs
+    // from max(start, lastBurnTick, now), which is nothing.
+    if (enemy.burnSteppedAt !== now) {
+      enemy.burnPending = add(enemy.burnPending, accrued(ctx, weakest, now));
+    }
     weakest.dps = dps;
     weakest.start = now;
     weakest.end = end;

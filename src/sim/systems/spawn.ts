@@ -77,6 +77,7 @@ export function addEnemy(
     burns: [],
     burnPending: ZERO,
     burnNextEnd: Infinity,
+    burnSteppedAt: -1,
     hitMark: 0,
     inbound: 0,
     volleyMark: 0,

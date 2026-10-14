@@ -104,6 +104,11 @@ export interface Enemy extends EnemyState {
   burnPending: Num;
   /** Earliest end tick among the active stacks; Infinity when there are none. */
   burnNextEnd: number;
+  /**
+   * The last burn tick the ailments system stepped this enemy on (−1 before any), stacks or
+   * not: a stack replaced later in that tick has already been paid up to now (addBurn).
+   */
+  burnSteppedAt: number;
   /** Serial of the last attack that hit this enemy, so chains skip it. */
   hitMark: number;
   /** Projectiles in flight towards this enemy (see src/sim/targeting.ts). */
