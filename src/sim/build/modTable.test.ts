@@ -26,8 +26,26 @@ const DAMAGE = SCOPED_INDEX.damage;
 const M1_TAGS = ['hit', 'crit', 'burn', 'chain'] as const satisfies readonly DamageTag[];
 const M1_MASKS = Array.from({ length: 16 }, (_, mask) => mask);
 const KINDS: readonly ModifierKind[] = ['flat', 'increased', 'more'];
-/** Stats M1 had: the *Always stats came with C3.3. */
-const M1_STAT_IDS = STAT_IDS.filter((stat) => stat !== 'critAlways' && stat !== 'igniteAlways');
+/** Stats M1 did not have: C3.3's *Always flags and C3.8's poison, bleed and shock. */
+const POST_M1_STATS: ReadonlySet<StatId> = new Set<StatId>([
+  'critAlways',
+  'igniteAlways',
+  'poisonChance',
+  'poisonDamage',
+  'poisonDuration',
+  'bleedChance',
+  'bleedDamage',
+  'bleedDuration',
+  'shockChance',
+  'shockEffect',
+  'shockMaxStacks',
+  'shockDuration',
+  'poisonAlways',
+  'bleedAlways',
+  'shockAlways',
+  'bleedStationaryMult',
+]);
+const M1_STAT_IDS = STAT_IDS.filter((stat) => !POST_M1_STATS.has(stat));
 
 /** Row base values: `damage` for damage, StatBlock.base for the other scoped stats. */
 function baseRow(damage: number): Float64Array {

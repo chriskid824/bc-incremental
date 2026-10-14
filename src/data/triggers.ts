@@ -15,8 +15,9 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
 
 /**
  * What a scaling modifier counts, read per damage instance. `chainJump`: the instance's chain
- * jump index, 0 for the primary hit. `targetBurnStacks`: the burn stacks on the instance's
- * target. `targetDistance`: how far the target is from the player, in arena units.
+ * jump index, 0 for the primary hit. `targetBurnStacks`, `targetPoisonStacks`,
+ * `targetShockStacks`: the stacks of that ailment on the instance's target. `targetDistance`:
+ * how far the target is from the player, in arena units.
  * `lifeLostPct`: the fraction of the player's max life missing, 0 to 1. A target variable reads
  * 0 without a target (estimates outside a run). The simulation reads each variable through a
  * registry typed over this list (src/sim/build/eval.ts), so a new variable lands with its reader.
@@ -26,6 +27,8 @@ export const SCALING_VARS = [
   'targetBurnStacks',
   'targetDistance',
   'lifeLostPct',
+  'targetPoisonStacks',
+  'targetShockStacks',
 ] as const;
 export type ScalingVar = (typeof SCALING_VARS)[number];
 
@@ -85,6 +88,10 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  * - waveStart, periodic (every `every` seconds): no target; effects start at the player.
  * - heroHit: an enemy reached the player and hurt it; no target, effects start at the player.
  * - contact: an enemy touched the player; the target is that enemy.
+ * - ailmentApplied: a hit or an effect applied an ailment (AppliedAilment) to its target; moving
+ *   stacks (spreadAilment) applies nothing.
+ * - ailmentTick: a damage-over-time step (every 0.25 s) of an enemy holding the ailment, every
+ *   `every` seconds, at that enemy.
  */
 export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
   'hit',
@@ -96,6 +103,8 @@ export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>
   'periodic',
   'heroHit',
   'contact',
+  'ailmentApplied',
+  'ailmentTick',
 ]);
 
 /** Events without an enemy target: their effects start at the player. */
@@ -106,16 +115,24 @@ export const TARGETLESS_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEve
 ]);
 
 /** Ailments a condition can ask an enemy about (targetHas, victimHas). */
-export const HELD_AILMENTS = ['burn'] as const;
+export const HELD_AILMENTS = ['burn', 'poison', 'bleed', 'shock'] as const;
 export type HeldAilment = (typeof HELD_AILMENTS)[number];
 
 /** Ailments whose stacks a condition can count (stacksAtLeast). */
-export const STACK_AILMENTS = ['burn'] as const;
+export const STACK_AILMENTS = ['burn', 'poison', 'shock'] as const;
 export type StackAilment = (typeof STACK_AILMENTS)[number];
 
 /** What dealt a killing blow (killedBy): a hit, or an ailment's damage over time. */
-export const KILL_KINDS = ['hit', 'burn'] as const;
+export const KILL_KINDS = ['hit', 'burn', 'poison', 'bleed'] as const;
 export type KillKind = (typeof KILL_KINDS)[number];
+
+/**
+ * Ailments a hit or an effect applies (the ailment condition of ailmentApplied); frost is not
+ * one of them. Those that deal damage over time (DOT_AILMENTS) can also tick (ailmentTick).
+ */
+export const APPLIED_AILMENTS = ['burn', 'poison', 'bleed', 'shock'] as const;
+export type AppliedAilment = (typeof APPLIED_AILMENTS)[number];
+export const DOT_AILMENTS: readonly AppliedAilment[] = ['burn', 'poison', 'bleed'];
 
 /** Bosses; elites (M1's hexagon); every other enemy. */
 export const TARGET_KINDS = ['normal', 'elite', 'boss'] as const;
@@ -131,7 +148,9 @@ export type HitKind = (typeof HIT_KINDS)[number];
 
 /**
  * A condition on the enemy an event or a damage instance targets; never met without a target.
- * targetHas: the enemy holds the ailment (burn: one of its burn stacks has not ended yet).
+ * targetHas: the enemy holds the ailment (burn: one of its burn stacks has not ended yet;
+ * poison: it has poison damage left to take; bleed: its bleed has not ended; shock: its shock
+ * has not worn off).
  * targetHpBelow: its hp is below this fraction of its max hp. stacksAtLeast: it carries at least
  * this many stacks of the ailment.
  */
@@ -145,7 +164,9 @@ export type TargetCondition =
  * A condition of a trigger. chance: the trigger fires with this probability, rolled when the
  * event happens. cooldownSec: once it fires, it cannot fire again for this long. hitIs: the
  * kind of hit the event comes from. victimHas, killedBy: what the dying enemy held when it died,
- * and what killed it.
+ * and what killed it. ailment: on ailmentApplied, the ailment applied; on ailmentTick, an
+ * ailment dealing damage over time that the ticking enemy holds. Each trigger on those two
+ * events has exactly one, so none fires for every ailment or every enemy.
  */
 export type Condition =
   | TargetCondition
@@ -153,7 +174,8 @@ export type Condition =
   | { readonly cooldownSec: number }
   | { readonly hitIs: HitKind }
   | { readonly victimHas: HeldAilment }
-  | { readonly killedBy: KillKind };
+  | { readonly killedBy: KillKind }
+  | { readonly ailment: AppliedAilment };
 
 type KeysOf<T> = T extends unknown ? keyof T : never;
 export type ConditionKey = KeysOf<Condition>;
@@ -163,7 +185,14 @@ export const conditionKey = (condition: Condition): ConditionKey =>
   Object.keys(condition)[0] as ConditionKey;
 
 /** Events with an enemy target, on which target conditions can be checked. */
-const TARGETED: readonly TriggerEventId[] = ['hit', 'crit', 'nthAttack', 'contact'];
+const TARGETED: readonly TriggerEventId[] = [
+  'hit',
+  'crit',
+  'nthAttack',
+  'contact',
+  'ailmentApplied',
+  'ailmentTick',
+];
 const KILLS: readonly TriggerEventId[] = ['kill', 'diedWithAilment'];
 
 /**
@@ -183,6 +212,7 @@ export const CONDITION_CONTEXTS: Readonly<
   hitIs: ['hit', 'crit', ...KILLS],
   victimHas: KILLS,
   killedBy: KILLS,
+  ailment: ['ailmentApplied', 'ailmentTick'],
 };
 
 /** The damage of an explode or nova: its hits are tagged hit, trigger and area. */
@@ -211,9 +241,12 @@ interface NovaSpec extends DamagePart {
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * - applyAilment: `stacks` (default 1) of the ailment on the event's enemy, or on up to
  *   `maxTargets` enemies within `radius` of the event; each stack deals what a hit of damagePct
- *   (default 1) of the damage stat would ignite.
+ *   (default 1) of the damage stat would apply. An enemy keeps only its strongest bleed, so more
+ *   bleed stacks add nothing; shock stacks only change how much damage the enemy takes.
  * - spreadAilment: copies the event enemy's stacks of the ailment, at `effect` (default 1) of
  *   their damage, to every other enemy within `radius` of it. A transfer: it deals no damage.
+ *   Poison only: `stacks` is the fraction of the stacks each enemy gets (default 1, the
+ *   longest-lasting first), and `maxTargets` caps how many enemies it reaches.
  * - explode: hits up to `maxTargets` enemies within `radius` of the event.
  * - nova: hits every enemy within `radius` of the player, or of the event with at 'event'.
  * - push: moves the enemies within `radius` of the event `distance` further from the player.
@@ -223,7 +256,7 @@ interface NovaSpec extends DamagePart {
 export type EffectSpec =
   | {
       readonly kind: 'applyAilment';
-      readonly ailment: 'burn';
+      readonly ailment: AppliedAilment;
       readonly stacks?: number;
       readonly damagePct?: number;
       readonly radius?: number;
@@ -234,6 +267,14 @@ export type EffectSpec =
       readonly ailment: 'burn';
       readonly radius: number;
       readonly effect?: number;
+    }
+  | {
+      readonly kind: 'spreadAilment';
+      readonly ailment: 'poison';
+      readonly radius: number;
+      readonly effect?: number;
+      readonly stacks?: number;
+      readonly maxTargets?: number;
     }
   | ExplodeSpec
   | NovaSpec
@@ -269,7 +310,8 @@ export interface TriggerSpec {
   readonly on: TriggerEventId;
   /**
    * nthAttack: fire on every Nth attack (a whole number ≥ 1). periodic: the period in seconds.
-   * No other event takes it.
+   * ailmentTick: the interval in seconds, a multiple of 0.25 (default 0.25, every step). No
+   * other event takes it.
    */
   readonly every?: number;
   readonly when?: readonly Condition[];

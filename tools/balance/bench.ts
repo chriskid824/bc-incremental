@@ -8,29 +8,40 @@
  *   about 8.6 hits per tick. It pins its start wave and ignores --start-wave, so it is the
  *   same workload as tools/balance/benchAB.ts's, which times it across commits.
  * - ailments: the ailment stress case of docs/v3/implementation-plan-v3.md §6, 30 s at wave 30
- *   with Pandemic, Eternal Flame and a longer burn on a build that clears wave 30. M1 keeps
- *   one record per burn stack, which takes seconds per run here; the budget is 50 ms. Slow, so
- *   it runs only when asked for and with few runs.
+ *   with Pandemic, Eternal Flame and a longer burn on a build that clears wave 30. Eternal
+ *   Flame's burns live in DoT rings (src/sim/ailments/rings.ts); M1's one record per burn
+ *   stack took seconds per run here. The budget is 50 ms per warm run.
  * - effects: the effect queue, 30 s at wave 30 with normal's build plus a trigger that
  *   explodes every kill (src/sim/effects/) but its own explosions' (rule 3). It pins its start
  *   wave like hits.
+ * - poisonBoss: DoT rings (src/sim/ailments/rings.ts) under many stacks, 30 s on one immortal,
+ *   stationary boss on fixture data, hit about 32 times a second by a build whose poison lasts
+ *   16 s. Two variants draw the same rolls: poisonChance 0.99 keeps about 500 stacks on the
+ *   boss, 0.01 about 5. A ring's step costs the same whatever its stacks, so the ratio of their
+ *   p50s must stay under 1.3 (docs/v3 C3.8). It ignores --start-wave.
  *
- *   npm run bench -- [--scenario normal|hits|ailments|effects] [--runs 50] [--warmup 5]
- *     [--seed 1] [--start-wave 30]
+ *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss] [--runs 50]
+ *     [--warmup 5] [--seed 1] [--start-wave 30]
  *
  * --runs and --warmup default to the scenario's own counts.
  */
 
 import { parseArgs } from 'node:util';
 import { loadGameData, targetDamage } from '../../src/data';
-import type { StatBlock } from '../../src/data';
+import type { GameData, StatBlock } from '../../src/data';
 import type { StatExtras } from '../../src/data/stats';
 import { createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { RunConfig } from '../../src/sim';
-import { centerTriggers, makeStats, PANDEMIC_MODS, PANDEMIC_TRIGGER } from '../../src/sim/testing';
+import {
+  centerTriggers,
+  makeStats,
+  makeTestData,
+  PANDEMIC_MODS,
+  PANDEMIC_TRIGGER,
+} from '../../src/sim/testing';
 import { quantile } from './report';
 
-const SCENARIO_IDS = ['normal', 'hits', 'ailments', 'effects'] as const;
+const SCENARIO_IDS = ['normal', 'hits', 'ailments', 'effects', 'poisonBoss'] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
 /** The hits scenario's start wave, whatever --start-wave says. */
@@ -51,9 +62,25 @@ interface Scenario {
   readonly targetMs: number;
   /** Start wave the scenario always uses, in place of --start-wave. */
   readonly startWave?: number;
+  /**
+   * Variants, each with the scenario's warm-up runs and runs: every variant's warm-up runs come
+   * first, then the timed runs take turns, the order of the variants reversed every round. Timed
+   * one variant after the other, the later one gains from the JIT's further work: about 1.3–1.8
+   * for 500 ÷ 5 poison stacks against 0.8 the other way round and 1.05 taking turns. With two,
+   * the ratio of their p50s (first ÷ second) is reported.
+   */
+  readonly variants?: readonly string[];
+  /** Game data of its runs; the real game data without it. */
+  data?(): GameData;
   /** Config of one run; runs differ only in their seed. */
-  config(seed: number, startWave: number): RunConfig;
+  config(seed: number, startWave: number, variant: string): RunConfig;
 }
+
+/** The poisonBoss scenario's poison chance per variant. */
+const POISON_BOSS_CHANCE: Readonly<Record<string, number>> = {
+  '500 stacks': 0.99,
+  '5 stacks': 0.01,
+};
 
 /** normal's build at `startWave`, with these triggers and conversions. */
 function normalStats(startWave: number, extras?: StatExtras): StatBlock {
@@ -115,8 +142,8 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     }),
   },
   ailments: {
-    runs: 3,
-    warmup: 0,
+    runs: 20,
+    warmup: 3,
     seconds: STRESS_SECONDS,
     targetMs: 50,
     // The start wave's frontier damage, every hit ignites, burns last 1.2 s + 0.4 s (slowBurn),
@@ -159,6 +186,37 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
       maxTicks: STRESS_SECONDS * TICK_RATE,
     }),
   },
+  poisonBoss: {
+    runs: 20,
+    warmup: 3,
+    seconds: STRESS_SECONDS,
+    // The gate is the variants' p50 ratio; this is §6's stress-scenario budget.
+    targetMs: 50,
+    startWave: 1,
+    variants: Object.keys(POISON_BOSS_CHANCE),
+    // Each wave is one boss that never moves or dies, and the next wave is 60 s away.
+    data: () =>
+      makeTestData({
+        waves: { rules: [], bossEvery: 1, waveTimerSec: 60 },
+        enemies: { boss: { hpMult: 1e12, speed: 0 } },
+      }),
+    // 8 attacks of 4 projectiles a second, all on the boss: about 32 poison rolls a second,
+    // each a 16 s stack.
+    config: (seed, _startWave, variant) => ({
+      seed,
+      stats: makeStats({
+        poisonChance: POISON_BOSS_CHANCE[variant] ?? 0,
+        poisonDuration: 16,
+        attackSpeed: 8,
+        projectileCount: 4,
+        maxLife: 1e12,
+      }),
+      rules: [],
+      startWave: 1,
+      mode: 'auto',
+      maxTicks: STRESS_SECONDS * TICK_RATE,
+    }),
+  },
 };
 
 function positiveInt(name: string, text: string, min = 1): number {
@@ -177,8 +235,7 @@ interface Sample {
   readonly maxAlive: number;
 }
 
-function runOnce(config: RunConfig): Sample {
-  const data = loadGameData();
+function runOnce(config: RunConfig, data: GameData): Sample {
   const start = performance.now();
   const sim = createSimulation(config, data);
   let maxAlive = 0;
@@ -196,6 +253,23 @@ function runOnce(config: RunConfig): Sample {
     highestWave: result.highestWaveReached,
     maxAlive,
   };
+}
+
+/**
+ * The most poison stacks an enemy holds in an untimed run of `config`, as its ailmentApplied
+ * events report them; scanning the events would weigh on the timed runs of the busier variant.
+ */
+function maxPoisonStacks(config: RunConfig, data: GameData): number {
+  const sim = createSimulation(config, data);
+  let most = 0;
+  while (!sim.state.finished) {
+    for (const event of sim.step(NO_INPUT)) {
+      if (event.type === 'ailmentApplied' && event.ailment === 'poison' && event.stacks > most) {
+        most = event.stacks;
+      }
+    }
+  }
+  return most;
 }
 
 function main(): void {
@@ -219,13 +293,45 @@ function main(): void {
   const warmup = positiveInt('warmup', values.warmup ?? String(scenario.warmup), 0);
   const seed = positiveInt('seed', values.seed, 0);
   const startWave = scenario.startWave ?? positiveInt('start-wave', values['start-wave']);
-  const configFor = (i: number): RunConfig => scenario.config(seed + i, startWave);
+  const data = scenario.data?.() ?? loadGameData();
+  const variants = scenario.variants ?? [''];
+  const configFor = (variant: string, i: number): RunConfig =>
+    scenario.config(seed + i, startWave, variant);
+  for (const variant of variants) {
+    for (let i = 0; i < warmup; i++) runOnce(configFor(variant, runs + i), data);
+  }
+  const samples: Sample[][] = variants.map(() => []);
+  for (let i = 0; i < runs; i++) {
+    for (let n = 0; n < variants.length; n++) {
+      const v = i % 2 === 0 ? n : variants.length - 1 - n;
+      (samples[v] as Sample[]).push(runOnce(configFor(variants[v] as string, i), data));
+    }
+  }
+  const p50s = variants.map((variant, v) => {
+    const poison =
+      scenario.variants === undefined ? 0 : maxPoisonStacks(configFor(variant, 0), data);
+    const timed = samples[v] as Sample[];
+    return report(id, variant, scenario, timed, poison, { runs, warmup, startWave });
+  });
+  if (p50s.length === 2) {
+    const [first, second] = p50s as [number, number];
+    const [a, b] = scenario.variants as [string, string];
+    console.log(`p50 ratio ${a} / ${b}: ${(first / second).toFixed(3)}`);
+  }
+}
 
-  loadGameData();
-  for (let i = 0; i < warmup; i++) runOnce(configFor(runs + i));
-  const samples: Sample[] = [];
-  for (let i = 0; i < runs; i++) samples.push(runOnce(configFor(i)));
-
+/**
+ * Prints a scenario variant's timings and workload, with the most poison stacks an enemy held
+ * when not 0; returns its p50 run time.
+ */
+function report(
+  id: ScenarioId,
+  variant: string,
+  scenario: Scenario,
+  samples: readonly Sample[],
+  poison: number,
+  { runs, warmup, startWave }: { runs: number; warmup: number; startWave: number },
+): number {
   const ms = samples.map((s) => s.ms).sort((a, b) => a - b);
   const totalMs = ms.reduce((sum, value) => sum + value, 0);
   const totalTicks = samples.reduce((sum, s) => sum + s.ticks, 0);
@@ -233,11 +339,12 @@ function main(): void {
     samples.reduce((sum, s) => sum + pick(s), 0) / samples.length;
   const p95 = quantile(ms, 0.95);
   const { seconds, targetMs } = scenario;
+  const name = `${id === 'normal' ? '' : ` ${id}`}${variant === '' ? '' : ` (${variant})`}`;
 
   console.log(
-    `bench${id === 'normal' ? '' : ` ${id}`}: ${runs} runs × ${seconds} s ` +
+    `bench${name}: ${runs} runs × ${seconds} s ` +
       `(${seconds * TICK_RATE} ticks), start wave ${startWave}, ${warmup} warm-up runs, ` +
-      'real game data',
+      (scenario.data === undefined ? 'real game data' : 'fixture data'),
   );
   console.log(
     `per run: mean ${(totalMs / runs).toFixed(1)} ms, p50 ${quantile(ms, 0.5).toFixed(1)} ms, ` +
@@ -251,8 +358,10 @@ function main(): void {
   console.log(
     `workload: mean ${mean((s) => s.kills).toFixed(0)} kills, ` +
       `highest wave ${mean((s) => s.highestWave).toFixed(1)}, ` +
-      `up to ${Math.max(...samples.map((s) => s.maxAlive))} enemies alive`,
+      `up to ${Math.max(...samples.map((s) => s.maxAlive))} enemies alive` +
+      (poison > 0 ? `, up to ${poison} poison stacks on one enemy` : ''),
   );
+  return quantile(ms, 0.5);
 }
 
 main();

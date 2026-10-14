@@ -11,7 +11,8 @@ import type { Rng } from '../../core/rng';
 import { createStreams } from '../../core/rng';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
-import { doomed, UNCAPPED_BURN_STACKS } from '../ailments/records';
+import { doomed } from '../ailments/apply';
+import { RingPool } from '../ailments/rings';
 import { compileBuild } from '../build/compile';
 import type { CompiledBuild } from '../build/compile';
 import { statAt, staticInput } from '../build/eval';
@@ -85,6 +86,9 @@ export interface BurnStack {
   end: number;
   /** Trigger depth of what applied it (src/sim/ailments/records.ts). */
   depth: number;
+  /** Source credited with its damage (ailmentCredit), and that source's class. */
+  source: number;
+  cls: number;
 }
 
 export interface Enemy extends EnemyState {
@@ -102,6 +106,16 @@ export interface Enemy extends EnemyState {
   readonly burns: BurnStack[];
   /** Damage of stacks that ended or were replaced since the last burn tick. */
   burnPending: Num;
+  /**
+   * burnPending by the source class of its stacks (center, outer, fusion), kept only when the
+   * build's burns can have more than one credit (RunContext.burnMixed); fusion's goes to
+   * burnFusionCredit.
+   */
+  burnPendC: Num;
+  burnPendO: Num;
+  burnPendF: Num;
+  /** The first fusion source whose burn record landed on it; −1 before any. */
+  burnFusionCredit: number;
   /** Earliest end tick among the active stacks; Infinity when there are none. */
   burnNextEnd: number;
   /**
@@ -109,6 +123,36 @@ export interface Enemy extends EnemyState {
    * not: a stack replaced later in that tick has already been paid up to now (addBurn).
    */
   burnSteppedAt: number;
+  /**
+   * Its DoT rings (src/sim/ailments/rings.ts) by ailment and source class: burn's center, outer
+   * and fusion rings, then poison's; −1 for none.
+   */
+  readonly rings: Int32Array;
+  /** Rings it holds; 0 skips them in the DoT step and in doomed. */
+  dotRings: number;
+  /** Live stacks of its poison rings. */
+  poisonStacks: number;
+  /**
+   * The latest tick a stack in its burn or poison rings ends at; 0 for none. The ailment is held
+   * while it is ahead of now (presence, as for burn records), though a ring lasts until its last
+   * step.
+   */
+  burnRingEnd: number;
+  poisonRingEnd: number;
+  /**
+   * Its bleed (src/sim/ailments/bleed.ts), the strongest one applied: damage per second, the
+   * tick it started and the tick it ends (0 for none), the credited source, the damage of the
+   * bleed it replaced since the last step, and its moving ticks since the last step.
+   */
+  bleedDps: Num;
+  bleedStart: number;
+  bleedUntil: number;
+  bleedSource: number;
+  bleedPending: Num;
+  bleedMovedTicks: number;
+  /** Shock stacks (src/sim/ailments/shock.ts), all of which wear off at shockUntil. */
+  shockStacks: number;
+  shockUntil: number;
   /** Serial of the last attack that hit this enemy, so chains skip it. */
   hitMark: number;
   /** Projectiles in flight towards this enemy (see src/sim/targeting.ts). */
@@ -166,8 +210,16 @@ export interface RunContext {
   readonly sources: SourceTable;
   /** Who ailment damage is credited to (build.attribution); in M1 every ailment is the center's. */
   readonly attribution: AttributionPolicy;
-  /** Source credited with burn damage: every burn comes from the signature attack's hits. */
+  /**
+   * Source credited with the damage of burn records: the one credit any burn of the build can
+   * have (in M1 the signature attack's), unless burnMixed.
+   */
   readonly burnCredit: number;
+  /**
+   * The build's burns can have more than one credit (a fusion's effect that ignites, say): burn
+   * records keep their damage per source class (src/sim/ailments/records.ts).
+   */
+  readonly burnMixed: boolean;
 
   // ---- Derived stats, clamped as documented in src/data/stats.ts ----
   /**
@@ -179,6 +231,22 @@ export interface RunContext {
   readonly burnDamage: number;
   readonly burnTicks: number;
   readonly burnCap: number;
+  /** Burns live in DoT rings (BuildFlags.burnRings, eternalFlame) rather than records. */
+  readonly burnRings: boolean;
+  readonly poisonDamage: number;
+  readonly poisonTicks: number;
+  readonly bleedDamage: number;
+  readonly bleedTicks: number;
+  readonly bleedStationaryMult: number;
+  readonly bleedMoveMult: number;
+  readonly shockEffect: number;
+  readonly shockCap: number;
+  readonly shockTicks: number;
+  /**
+   * Some hit can poison, bleed or shock: the scoped chance or always stat of one of them is not
+   * 0 somewhere. Without it, hits skip those rolls, which would draw nothing.
+   */
+  readonly rollsDots: boolean;
   readonly chainCount: number;
   readonly chainRetention: number;
   readonly projectileCount: number;
@@ -219,6 +287,8 @@ export interface RunContext {
   readonly effectPayloads: readonly (Payload | null)[];
   /** Some hit or crit trigger or onHit hook listens: the hit path dispatches. */
   readonly hitListeners: boolean;
+  /** Some ailmentApplied trigger listens: applications dispatch. */
+  readonly appliedListeners: boolean;
   /** Triggers on kill or diedWithAilment that run at the kill (transfers), in trigger order. */
   readonly killInline: Int32Array;
   /** The other triggers on kill or diedWithAilment, recorded as pending kills, in order. */
@@ -254,12 +324,22 @@ export interface RunContext {
   /** The current attack's chain budget, reset at every attack (src/sim/combat/chain.ts). */
   readonly chainBudget: ChainBudget;
   /**
-   * spreadBurns' scratch list for the targets of one spread; only spreadBurns may use it. A
-   * kill spreads burns, so a query whose targets can die needs a list of its own.
+   * The spreads' scratch list for the targets of one spread (spreadAilment,
+   * src/sim/ailments/); only spreads may use it. A kill spreads ailments, so a query whose
+   * targets can die needs a list of its own.
    */
   readonly spreadTargets: Enemy[];
   /** The effect executors' scratch list for area targets (src/sim/effects/execute.ts). */
   readonly effectTargets: Enemy[];
+  /** The DoT rings of every enemy (src/sim/ailments/rings.ts). */
+  readonly rings: RingPool;
+  /** The step's damage per credited source of one ailment (src/sim/systems/ailments.ts). */
+  readonly dotParts: DotParts;
+  /**
+   * Some bleed has taken an enemy's slot this run (src/sim/ailments/bleed.ts): until then no
+   * enemy bleeds, and movement skips counting bleeding enemies' moves.
+   */
+  bleedApplied: boolean;
 
   // ---- Waves ----
   /** Started waves that are not cleared yet, in wave order. */
@@ -312,6 +392,26 @@ export interface RunContext {
   /** Not hit by the current attack yet, so a chain jump can reach it. */
   readonly chainable: (enemy: Enemy) => boolean;
 }
+
+/**
+ * One ailment's damage of one DoT step on one enemy, split by the sources it is credited to:
+ * source[0 .. n) and amount[0 .. n).
+ */
+export interface DotParts {
+  n: number;
+  readonly source: Int32Array;
+  readonly amount: Num[];
+}
+
+/** Stats that let a hit poison, bleed or shock (RunContext.rollsDots). */
+const DOT_ROLL_STATS = [
+  'poisonChance',
+  'bleedChance',
+  'shockChance',
+  'poisonAlways',
+  'bleedAlways',
+  'shockAlways',
+] as const;
 
 /** Whole part plus a chance for one more, e.g. 2.3 → 2 or 3 (30%). */
 export function rollCount(value: number, roll: (chance: number) => boolean): number {
@@ -372,7 +472,6 @@ export function createRunContext(
   );
   const signatureEmitter = emitters[0] as EmitterRuntime;
   const signaturePayload = signatureEmitter.payload;
-  const burnCredit = ailmentCredit(sources, attribution, 'burn', signaturePayload.source);
 
   // Derived stats, clamped as documented in src/data/stats.ts. The estimates read the signature
   // payload's primary hit rows (rows first: filling one may grow the table's arrays).
@@ -427,6 +526,28 @@ export function createRunContext(
   const killInline = Int32Array.from(killTriggers.filter((t) => t.inline).map((t) => t.index));
   const killPending = Int32Array.from(killTriggers.filter((t) => !t.inline).map((t) => t.index));
   const effectPayloads = effects.map((fx) => effectPayload(fx, effectsRng));
+  // Who burn damage can be credited to: the applier of every payload whose hits ignite, and of
+  // every applyAilment burn.
+  const burnCredits = new Set<number>();
+  for (const emitter of emitters) {
+    if (emitter.payload.rollsAilments) {
+      burnCredits.add(ailmentCredit(sources, attribution, 'burn', emitter.payload.source));
+    }
+  }
+  effects.forEach((fx, i) => {
+    const p = effectPayloads[i];
+    const burns = fx.spec.kind === 'applyAilment' && fx.spec.ailment === 'burn';
+    if (p !== undefined && p !== null && (p.rollsAilments || burns)) {
+      burnCredits.add(ailmentCredit(sources, attribution, 'burn', p.source));
+    }
+  });
+  const burnCredit =
+    burnCredits.size === 1
+      ? ([...burnCredits][0] as number)
+      : ailmentCredit(sources, attribution, 'burn', signaturePayload.source);
+  const rollsDots = DOT_ROLL_STATS.some(
+    (stat) => values[stat] !== 0 || build.mods.some((mod) => mod.stat === SCOPED_INDEX[stat]),
+  );
   const hitListeners =
     (triggersOn[EVENT.hit] as Int32Array).length !== 0 ||
     (triggersOn[EVENT.crit] as Int32Array).length !== 0 ||
@@ -455,11 +576,23 @@ export function createRunContext(
     sources,
     attribution,
     burnCredit,
+    burnMixed: burnCredits.size > 1,
 
     table,
     burnDamage: values.burnDamage,
     burnTicks: Math.max(0, values.burnDuration * TICK_RATE),
-    burnCap: flags.burnRings ? UNCAPPED_BURN_STACKS : Math.max(1, Math.floor(values.burnMaxStacks)),
+    burnCap: Math.max(1, Math.floor(values.burnMaxStacks)),
+    burnRings: flags.burnRings,
+    poisonDamage: values.poisonDamage,
+    poisonTicks: Math.max(0, values.poisonDuration * TICK_RATE),
+    bleedDamage: values.bleedDamage,
+    bleedTicks: Math.max(0, values.bleedDuration * TICK_RATE),
+    bleedStationaryMult: values.bleedStationaryMult,
+    bleedMoveMult: flags.bleedMoveMult,
+    shockEffect: values.shockEffect,
+    shockCap: Math.max(0, Math.floor(values.shockMaxStacks)),
+    shockTicks: Math.max(0, values.shockDuration * TICK_RATE),
+    rollsDots,
     chainCount: Math.max(0, values.chainCount),
     chainRetention: clamp01(values.chainRetention),
     projectileCount: Math.max(1, values.projectileCount),
@@ -482,6 +615,7 @@ export function createRunContext(
     effectQueue: createEffectQueue(),
     effectPayloads,
     hitListeners,
+    appliedListeners: (triggersOn[EVENT.ailmentApplied] as Int32Array).length !== 0,
     killInline,
     killPending,
     killListeners: killInline.length !== 0 || killPending.length !== 0 || hooks.onKill.length !== 0,
@@ -516,6 +650,9 @@ export function createRunContext(
     chainBudget: { hits: 0, extraJumps: 0, centerEvents: 0 },
     spreadTargets: [],
     effectTargets: [],
+    rings: new RingPool(),
+    dotParts: { n: 0, source: new Int32Array(6), amount: new Array<Num>(6).fill(ZERO) },
+    bleedApplied: false,
 
     open: [],
     current: null,

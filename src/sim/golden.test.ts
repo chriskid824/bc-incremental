@@ -47,8 +47,11 @@ const EXPECTED: Readonly<Record<string, string>> = {
   // step is no longer paid twice (was c23112de799a04d3 and 26b754e051e18cf6).
   'pandemic/s1/w8': '035884c0c8646cb4',
   'pandemic/s2/w15': '608ef1f480a3d791',
-  'eternalPandemic/s1/w8': '076de6ecb082bb31',
-  'eternalPandemic/s2/w15': '20e0c10296976322',
+  // Re-recorded in C3.8: eternalFlame's uncapped burns moved from records to DoT rings, which
+  // drop M1's 1,000-record cap, sum a step in another order and spread the step under way at
+  // its average (was 076de6ecb082bb31 and 20e0c10296976322).
+  'eternalPandemic/s1/w8': '3d6080e5a5a8c596',
+  'eternalPandemic/s2/w15': '8fbbb7ede3bae2ac',
   'overload/s1/w8': 'f90ba816bd509835',
   'overload/s2/w15': '7ba5605f005b2670',
   'glass/s1/w8': 'f93535ad6a6715bb',

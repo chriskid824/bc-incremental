@@ -25,7 +25,7 @@ import { STAT_IDS } from '../data/stats';
 import type { GameData } from '../data/types';
 import { dispatchPendingKills } from './effects/dispatch';
 import { runEffectQueue } from './effects/execute';
-import { updateBurns } from './systems/ailments';
+import { updateAilments } from './systems/ailments';
 import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
 import type { TestModule } from './rules';
@@ -39,7 +39,7 @@ import { releaseEnemies } from './systems/spawn';
 import { startDueWave, updateClears } from './systems/waves';
 import type { InputFrame, RunConfig, RunResult, SimEvent, Simulation } from './types';
 
-export { BURN_TICK_INTERVAL, UNCAPPED_BURN_STACKS } from './ailments/records';
+export { BURN_TICK_INTERVAL } from './ailments/records';
 
 function validateConfig(config: RunConfig): void {
   if ((config.mode as string) !== 'auto') {
@@ -103,7 +103,8 @@ export function createSimulation(
    * 7. projectiles: move, retarget, and hit on arrival (projectiles.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
    *    triggers, onKill hooks, drops and splits (death.ts) resolve inline.
-   * 8. ailments: burn stacks expire; burn damage every BURN_TICK_INTERVAL (ailments.ts).
+   * 8. ailments: burn records expire; every BURN_TICK_INTERVAL, damage over time (burn, poison,
+   *    bleed) and the ailmentTick triggers (ailments.ts, src/sim/ailments/).
    * 9. effects: due periodic triggers, then up to EFFECTS_PER_TICK queued effects
    *    (src/sim/effects/execute.ts).
    * 10. death: this tick's pending kill triggers fire, sorted by victim id (their effects run
@@ -128,7 +129,7 @@ export function createSimulation(
       runEmitters(ctx);
       runTickHooks(ctx);
       moveProjectiles(ctx);
-      updateBurns(ctx);
+      updateAilments(ctx);
       runEffectQueue(ctx);
     }
     dispatchPendingKills(ctx);

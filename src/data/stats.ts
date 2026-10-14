@@ -45,6 +45,37 @@ export const STAT_IDS = [
   'critAlways',
   /** Above 0, a hit ignites whatever its ignite roll, which is drawn all the same. */
   'igniteAlways',
+  /** Probability in [0, 1] that a hit poisons. */
+  'poisonChance',
+  /** Poison damage per second, as a fraction of the poisoning hit's damage. */
+  'poisonDamage',
+  /** Poison duration in seconds. Poison stacks without a cap. */
+  'poisonDuration',
+  /** Probability in [0, 1] that a hit makes the enemy bleed. */
+  'bleedChance',
+  /** Bleed damage per second, as a fraction of the hit's damage; an enemy keeps its strongest bleed. */
+  'bleedDamage',
+  /** Bleed duration in seconds. */
+  'bleedDuration',
+  /** Probability in [0, 1] that a hit shocks. */
+  'shockChance',
+  /** Extra damage an enemy takes per shock stack, e.g. 0.1 = +10%. */
+  'shockEffect',
+  /** Maximum shock stacks on one enemy. */
+  'shockMaxStacks',
+  /** Shock duration in seconds; every new stack restarts it for all of them. */
+  'shockDuration',
+  /** Above 0, a hit poisons whatever its poison roll, which is drawn all the same. */
+  'poisonAlways',
+  /** Above 0, a hit makes the enemy bleed whatever its bleed roll, which is drawn all the same. */
+  'bleedAlways',
+  /** Above 0, a hit shocks whatever its shock roll, which is drawn all the same. */
+  'shockAlways',
+  /**
+   * Bleed damage multiplier while the enemy stands still; a moving enemy bleeds ×3
+   * (src/sim/build/compile.ts BuildFlags.bleedMoveMult).
+   */
+  'bleedStationaryMult',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -70,6 +101,20 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   coreGain: 1,
   critAlways: 0,
   igniteAlways: 0,
+  poisonChance: 0,
+  poisonDamage: 0.2,
+  poisonDuration: 4,
+  bleedChance: 0,
+  bleedDamage: 0.4,
+  bleedDuration: 4,
+  shockChance: 0,
+  shockEffect: 0.1,
+  shockMaxStacks: 3,
+  shockDuration: 2,
+  poisonAlways: 0,
+  bleedAlways: 0,
+  shockAlways: 0,
+  bleedStationaryMult: 1,
 };
 
 /**
@@ -89,6 +134,12 @@ export const SCOPED_STATS = [
   'igniteChance',
   'critAlways',
   'igniteAlways',
+  'poisonChance',
+  'bleedChance',
+  'shockChance',
+  'poisonAlways',
+  'bleedAlways',
+  'shockAlways',
 ] as const satisfies readonly StatId[];
 export type ScopedStat = (typeof SCOPED_STATS)[number];
 
@@ -96,7 +147,13 @@ export const isScopedStat = (stat: StatId): stat is ScopedStat =>
   (SCOPED_STATS as readonly StatId[]).includes(stat);
 
 /** Stats that force a roll's outcome rather than change its chance. */
-export const ALWAYS_STATS = ['critAlways', 'igniteAlways'] as const satisfies readonly ScopedStat[];
+export const ALWAYS_STATS = [
+  'critAlways',
+  'igniteAlways',
+  'poisonAlways',
+  'bleedAlways',
+  'shockAlways',
+] as const satisfies readonly ScopedStat[];
 
 export type ModifierKind = 'flat' | 'increased' | 'more';
 

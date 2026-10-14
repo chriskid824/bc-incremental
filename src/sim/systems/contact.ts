@@ -1,12 +1,14 @@
 /**
  * Contact system (docs/v3/implementation-plan-v3.md §2.15): an enemy that reaches the player
  * deals its contact damage and leaks, i.e. leaves the field without a kill or drops. Each touch
- * then raises heroHit (no target, at the player) and contact (on the touching enemy). Runs after
+ * then raises heroHit (no target, at the player) and contact (on the touching enemy), and the
+ * leaked enemy gives its DoT rings back (src/sim/ailments/apply.ts). Runs after
  * movement; every enemy is still alive here, since compaction ran last tick. Once every contact
  * is resolved, the player's life fraction is set for this tick's reads (lifeLostPct).
  */
 
 import { ZERO } from '../../core/num';
+import { releaseAilments } from '../ailments/apply';
 import { fire } from '../effects/dispatch';
 import { EVENT } from '../effects/types';
 import type { Enemy, RunContext } from './context';
@@ -36,6 +38,8 @@ export function resolveContacts(ctx: RunContext): void {
       });
       fire(ctx, EVENT.heroHit, 0, -1, null, player.x, player.y, 0, ZERO);
       fire(ctx, EVENT.contact, 0, -1, enemy, enemy.x, enemy.y, 0, ZERO);
+      // After its contact triggers, whose conditions see what it held as it touched.
+      releaseAilments(ctx, enemy);
     }
   }
   ctx.evalInput.playerLifeFrac = player.life / player.maxLife;

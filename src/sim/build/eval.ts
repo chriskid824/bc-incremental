@@ -16,9 +16,15 @@ import type {
   ScalingSpec,
   ScalingVar,
   StackAilment,
+  TriggerEventId,
 } from '../../data/triggers';
+import { holdsBleed } from '../ailments/bleed';
 import { holdsBurn, liveBurnStacks } from '../ailments/records';
+import { holdsPoison, livePoisonStacks } from '../ailments/rings';
+import { activeShockStacks, holdsShock } from '../ailments/shock';
 import {
+  AILMENT_FLAG_MASK,
+  appliedFlag,
   CHAIN_JUMP,
   CRIT_HIT,
   heldFlag,
@@ -76,6 +82,9 @@ const HELD_READERS: {
   readonly [K in HeldAilment]: (enemy: Enemy, now: number) => boolean;
 } = {
   burn: holdsBurn,
+  poison: holdsPoison,
+  bleed: holdsBleed,
+  shock: holdsShock,
 };
 
 /** The stacks the enemy carries of each ailment a condition can count, at tick `now`. */
@@ -83,6 +92,8 @@ const STACK_READERS: {
   readonly [K in StackAilment]: (enemy: Enemy, now: number) => number;
 } = {
   burn: liveBurnStacks,
+  poison: livePoisonStacks,
+  shock: activeShockStacks,
 };
 
 const heldReader = HELD_AILMENTS.map((ailment) => HELD_READERS[ailment]);
@@ -108,6 +119,8 @@ const SCALING_READERS: { readonly [K in ScalingVar]: (ev: Readonly<EvalInput>) =
   targetBurnStacks: (ev) => (ev.target === null ? 0 : liveBurnStacks(ev.target, ev.now)),
   targetDistance: (ev) => (ev.target === null ? 0 : ev.target.dist),
   lifeLostPct: (ev) => 1 - ev.playerLifeFrac,
+  targetPoisonStacks: (ev) => (ev.target === null ? 0 : livePoisonStacks(ev.target, ev.now)),
+  targetShockStacks: (ev) => (ev.target === null ? 0 : activeShockStacks(ev.target, ev.now)),
 };
 
 /** A ScalingSpec compiled for per-instance evaluation. */
@@ -170,11 +183,13 @@ const flagsCondition = (all: number, none = 0): CompiledCondition => ({
 });
 
 /**
- * Compiles a condition that is checked per event or instance. chance, cooldownSec and hitIs
- * 'signature' are properties of the trigger itself (src/sim/effects/types.ts), not conditions
- * here; they throw.
+ * Compiles a condition that is checked per event or instance; `on` is the event of a trigger's
+ * condition. chance, cooldownSec and hitIs 'signature' are properties of the trigger itself
+ * (src/sim/effects/types.ts), not conditions here; they throw. The ailment condition reads the
+ * applied ailment from the flags of ailmentApplied events, and whether the target holds it on
+ * ailmentTick events.
  */
-export function compileCondition(condition: Condition): CompiledCondition {
+export function compileCondition(condition: Condition, on?: TriggerEventId): CompiledCondition {
   if ('targetHas' in condition) {
     return { code: TARGET_HAS, a: HELD_AILMENTS.indexOf(condition.targetHas), b: 0 };
   }
@@ -187,6 +202,15 @@ export function compileCondition(condition: Condition): CompiledCondition {
   if ('stacksAtLeast' in condition) {
     const { ailment, stacks } = condition.stacksAtLeast;
     return { code: STACKS_AT_LEAST, a: STACK_AILMENTS.indexOf(ailment), b: stacks };
+  }
+  if ('ailment' in condition) {
+    if (on === 'ailmentApplied') {
+      const flag = appliedFlag(condition.ailment);
+      return flagsCondition(flag, AILMENT_FLAG_MASK & ~flag);
+    }
+    if (on === 'ailmentTick') {
+      return { code: TARGET_HAS, a: HELD_AILMENTS.indexOf(condition.ailment), b: 0 };
+    }
   }
   if ('victimHas' in condition) return flagsCondition(heldFlag(condition.victimHas));
   if ('killedBy' in condition) return flagsCondition(killKindFlag(condition.killedBy));

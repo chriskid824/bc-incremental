@@ -12,6 +12,7 @@ import { DELIVERY_MASK, TAG } from './tags';
 import {
   CONDITION_CONTEXTS,
   conditionKey,
+  DOT_AILMENTS,
   TARGETLESS_EVENTS,
   TRANSFER_EFFECTS,
   WIRED_EVENTS,
@@ -361,7 +362,32 @@ function everyIssues(trigger: TriggerSpec): string[] {
       ? []
       : [`every must be > 0 seconds on periodic (got ${every})`];
   }
-  return every === undefined ? [] : [`every is only allowed on nthAttack and periodic (on ${on})`];
+  if (on === 'ailmentTick') {
+    // Damage over time steps every 0.25 s; the interval counts whole steps.
+    return every === undefined || (every > 0 && Number.isInteger(every * 4))
+      ? []
+      : [`every must be a positive multiple of 0.25 seconds on ailmentTick (got ${every})`];
+  }
+  return every === undefined
+    ? []
+    : [`every is only allowed on nthAttack, periodic and ailmentTick (on ${on})`];
+}
+
+/**
+ * ailmentApplied and ailmentTick triggers name exactly one ailment, a damage-over-time one on
+ * ailmentTick, so that none fires for every ailment applied or every enemy stepped.
+ */
+function ailmentIssues(trigger: TriggerSpec): string[] {
+  const on = trigger.on;
+  if (on !== 'ailmentApplied' && on !== 'ailmentTick') return [];
+  const named = (trigger.when ?? []).flatMap((condition) =>
+    'ailment' in condition ? [condition.ailment] : [],
+  );
+  if (named.length !== 1) return [`needs exactly one ailment condition on '${on}' events`];
+  const ailment = named[0] as (typeof named)[number];
+  return on === 'ailmentTick' && !DOT_AILMENTS.includes(ailment)
+    ? [`ailment '${ailment}' deals no damage over time, so it never ticks`]
+    : [];
 }
 
 /**
@@ -372,7 +398,7 @@ function triggerIssues(trigger: TriggerSpec): string[] {
   const issues: string[] = [];
   const on = trigger.on;
   if (!WIRED_EVENTS.has(on)) issues.push(`event '${on}' is not raised by the simulation yet`);
-  issues.push(...everyIssues(trigger));
+  issues.push(...everyIssues(trigger), ...ailmentIssues(trigger));
   const counts = new Map<string, number>();
   (trigger.when ?? []).forEach((condition, i) => {
     const key = conditionKey(condition);
@@ -451,6 +477,12 @@ function effectIssues(effect: EffectSpec, on: TriggerEventId): string[] {
       positive('radius', effect.radius);
       if (effect.effect !== undefined && !(effect.effect >= 0 && effect.effect <= 1)) {
         issues.push(`effect must be in [0, 1] (got ${effect.effect})`);
+      }
+      if (effect.ailment === 'poison') {
+        if (effect.stacks !== undefined && !(effect.stacks > 0 && effect.stacks <= 1)) {
+          issues.push(`stacks must be in (0, 1] (got ${effect.stacks})`);
+        }
+        count('maxTargets', effect.maxTargets);
       }
       break;
     case 'explode':

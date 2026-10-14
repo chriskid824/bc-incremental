@@ -73,7 +73,17 @@ describe('ModifierSchema', () => {
     { stat: 'damage', kind: 'more', value: 0.05, scaling: { per: 'targetBurnStacks' } },
     { stat: 'critChance', kind: 'flat', value: 0.001, scaling: { per: 'targetDistance' } },
     { stat: 'damage', kind: 'increased', value: 1, scaling: { per: 'lifeLostPct', cap: 0.5 } },
+    { stat: 'damage', kind: 'more', value: 0.02, scaling: { per: 'targetPoisonStacks' } },
+    { stat: 'damage', kind: 'more', value: 0.1, scaling: { per: 'targetShockStacks' } },
     { stat: 'damage', kind: 'more', value: 0.3, when: [{ targetHas: 'burn' }] },
+    { stat: 'damage', kind: 'more', value: 0.3, when: [{ targetHas: 'poison' }] },
+    { stat: 'damage', kind: 'more', value: 0.2, when: [{ targetHas: 'bleed' }] },
+    {
+      stat: 'damage',
+      kind: 'more',
+      value: 0.2,
+      when: [{ stacksAtLeast: { ailment: 'shock', stacks: 2 } }],
+    },
     {
       stat: 'critChance',
       kind: 'flat',
@@ -152,10 +162,10 @@ describe('ModifierSchema', () => {
       'an unknown scaling key',
       { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump', step: 2 } },
     ],
-    ...['targetPoisonStacks', 'targetShockStacks', 'targetFrost'].map((per): [string, unknown] => [
-      `the scaling variable ${per}, which lands with its ailment`,
-      { stat: 'damage', kind: 'more', value: 0.1, scaling: { per } },
-    ]),
+    [
+      'the scaling variable targetFrost, which lands with frost',
+      { stat: 'damage', kind: 'more', value: 0.1, scaling: { per: 'targetFrost' } },
+    ],
     [
       'conditions on a stat that is not scoped',
       { stat: 'attackSpeed', kind: 'more', value: 0.1, when: [{ targetHas: 'burn' }] },
@@ -175,7 +185,11 @@ describe('ModifierSchema', () => {
     ],
     [
       'an ailment that has no condition reader yet',
-      { stat: 'damage', kind: 'more', value: 0.1, when: [{ targetHas: 'poison' }] },
+      { stat: 'damage', kind: 'more', value: 0.1, when: [{ targetHas: 'frost' }] },
+    ],
+    [
+      'an ailment condition on a modifier',
+      { stat: 'damage', kind: 'more', value: 0.1, when: [{ ailment: 'burn' }] },
     ],
     ['an unknown stat', { stat: 'armour', kind: 'flat', value: 1 }],
     ['an unknown kind', { stat: 'damage', kind: 'added', value: 1 }],
@@ -247,21 +261,31 @@ describe('ConditionSchema', () => {
     { victimHas: 'burn' },
     { killedBy: 'hit' },
     { killedBy: 'burn' },
+    ...['poison', 'bleed', 'shock'].flatMap((ailment) => [
+      { targetHas: ailment },
+      { victimHas: ailment },
+    ]),
+    { stacksAtLeast: { ailment: 'poison', stacks: 10 } },
+    { stacksAtLeast: { ailment: 'shock', stacks: 2 } },
+    { killedBy: 'poison' },
+    { killedBy: 'bleed' },
+    ...['burn', 'poison', 'bleed', 'shock'].map((ailment) => ({ ailment })),
   ])('accepts %o', (condition) => {
     expect(ConditionSchema.parse(condition)).toEqual(condition);
   });
 
   it.each([
-    ...['poison', 'bleed', 'shock', 'frost', 'frozen'].flatMap((ailment) => [
+    ...['frost', 'frozen'].flatMap((ailment) => [
       { targetHas: ailment },
       { victimHas: ailment },
       { stacksAtLeast: { ailment, stacks: 1 } },
     ]),
-    { killedBy: 'poison' },
-    { killedBy: 'bleed' },
+    // Bleed keeps one bleed, so it has no stacks to count; shock kills nothing.
+    { stacksAtLeast: { ailment: 'bleed', stacks: 1 } },
+    { killedBy: 'shock' },
+    { ailment: 'frost' },
     { targetKind: 'minion' },
     { hitIs: 'dot' },
-    { ailment: 'burn' },
     { chance: 0.5, cooldownSec: 1 },
     {},
   ])('rejects %o', (condition) => {
@@ -282,6 +306,17 @@ describe('EffectSpecSchema', () => {
     },
     { kind: 'spreadAilment', ailment: 'burn', radius: 250 },
     { kind: 'spreadAilment', ailment: 'burn', radius: 250, effect: 0.4 },
+    ...['poison', 'bleed', 'shock'].map((ailment) => ({ kind: 'applyAilment', ailment })),
+    { kind: 'applyAilment', ailment: 'poison', stacks: 3, damagePct: 0.5, radius: 80 },
+    { kind: 'spreadAilment', ailment: 'poison', radius: 100 },
+    {
+      kind: 'spreadAilment',
+      ailment: 'poison',
+      radius: 200,
+      effect: 0.5,
+      stacks: 0.5,
+      maxTargets: 3,
+    },
     { kind: 'explode', radius: 90, damagePct: 0.5 },
     { kind: 'explode', radius: 90, damagePct: 2, maxTargets: 5, tags: ['strike'], element: 'cold' },
     { kind: 'nova', radius: 200, damagePct: 1 },
@@ -303,11 +338,18 @@ describe('EffectSpecSchema', () => {
       'spreadAilment burn with maxTargets',
       { kind: 'spreadAilment', ailment: 'burn', radius: 250, maxTargets: 3 },
     ],
-    ...['poison', 'bleed', 'shock'].map((ailment): [string, unknown] => [
+    ...['frost', 'frozen'].map((ailment): [string, unknown] => [
       `applyAilment ${ailment}`,
       { kind: 'applyAilment', ailment },
     ]),
-    ['spreadAilment poison', { kind: 'spreadAilment', ailment: 'poison', radius: 100 }],
+    ...['bleed', 'shock', 'frost'].map((ailment): [string, unknown] => [
+      `spreadAilment ${ailment}`,
+      { kind: 'spreadAilment', ailment, radius: 100 },
+    ]),
+    [
+      'spreadAilment poison with an unknown key',
+      { kind: 'spreadAilment', ailment: 'poison', radius: 100, targets: 3 },
+    ],
     ['addFrost', { kind: 'addFrost', amount: 0.2 }],
     ['detonate', { kind: 'detonate', ailment: 'burn', radius: 100 }],
     ['explode without a radius', { kind: 'explode', damagePct: 0.5 }],

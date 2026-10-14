@@ -23,9 +23,13 @@ import type { TagMask } from '../../data/tags';
 import { COEF_FIELDS, TRANSFER_EFFECTS, TRIGGER_EVENTS, WIRED_EVENTS } from '../../data/triggers';
 import type { EffectKind, EffectSpec, TriggerEventId, TriggerSpec } from '../../data/triggers';
 import type { BurnSpread } from '../ailments/records';
+import { DOT_STEP_TICKS } from '../ailments/rings';
 import { compileCondition } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import { TICK_RATE } from '../types';
+
+/** Damage-over-time steps per second (ailmentTick's `every` counts them). */
+const STEPS_PER_SECOND = TICK_RATE / DOT_STEP_TICKS;
 
 /** Events at this depth or deeper raise no triggers but a kill's transfers. */
 export const MAX_DEPTH = 3;
@@ -71,6 +75,11 @@ export interface CompiledTrigger {
   readonly coef: number;
   /** periodic: its period in ticks; 0 for every other event. */
   readonly periodTicks: number;
+  /**
+   * ailmentTick: it fires on the DoT steps k with k % stepEvery === 0, for each enemy holding
+   * its ailment (src/sim/systems/ailments.ts); 0 for every other event.
+   */
+  readonly stepEvery: number;
   /** One of its effects reads the dying enemy's drop (gainShards): kill entries carry it. */
   readonly takesDrop: boolean;
 }
@@ -90,7 +99,7 @@ export interface CompiledEffect {
   readonly tags: TagMask;
   /** Damage of a hit or of the hit an applied ailment counts as: damage stat × damagePct. */
   readonly baseDamage: Num;
-  /** spreadAilment's spread, ready for spreadBurns; null for the other kinds. */
+  /** spreadAilment's radius and effect (src/sim/ailments/apply.ts); null for the other kinds. */
   readonly spread: BurnSpread | null;
 }
 
@@ -111,6 +120,11 @@ export function compileTrigger(
   if (spec.on === 'periodic' && !((spec.every ?? 0) > 0)) {
     throw new Error('A periodic trigger needs its period in seconds (every > 0)');
   }
+  const ailmentEvent = spec.on === 'ailmentApplied' || spec.on === 'ailmentTick';
+  const named = (spec.when ?? []).filter((condition) => 'ailment' in condition).length;
+  if (ailmentEvent && named !== 1) {
+    throw new Error(`A trigger on '${spec.on}' needs exactly one ailment condition`);
+  }
   let chance = 1;
   let cooldownSec = 0;
   let signatureOnly = false;
@@ -119,7 +133,7 @@ export function compileTrigger(
     if ('chance' in condition) chance = condition.chance;
     else if ('cooldownSec' in condition) cooldownSec = condition.cooldownSec;
     else if ('hitIs' in condition && condition.hitIs === 'signature') signatureOnly = true;
-    else conds.push(compileCondition(condition));
+    else conds.push(compileCondition(condition, spec.on));
   }
   const kill = spec.on === 'kill' || spec.on === 'diedWithAilment';
   return {
@@ -137,6 +151,10 @@ export function compileTrigger(
     coef,
     periodTicks:
       spec.on === 'periodic' ? Math.max(1, Math.round((spec.every as number) * TICK_RATE)) : 0,
+    stepEvery:
+      spec.on === 'ailmentTick'
+        ? Math.max(1, Math.round((spec.every ?? DOT_STEP_TICKS / TICK_RATE) * STEPS_PER_SECOND))
+        : 0,
     takesDrop: spec.do.some((effect) => effect.kind === 'gainShards'),
   };
 }
@@ -157,6 +175,7 @@ export function moduleTrigger(index: number, source: number): CompiledTrigger {
     inline: false,
     coef: 1,
     periodTicks: 0,
+    stepEvery: 0,
     takesDrop: false,
   };
 }

@@ -20,10 +20,11 @@
 
 import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
+import type { AppliedAilment } from '../../data/triggers';
 import { conditionsMet } from '../build/eval';
 import type { Enemy, RunContext } from '../systems/context';
 import { runEffect } from './execute';
-import { HELD_MASK, SIGNATURE } from './flags';
+import { appliedFlag, HELD_MASK, SIGNATURE } from './flags';
 import { enqueue } from './queue';
 import type { PendingKill } from './queue';
 import { EVENT, MAX_DEPTH } from './types';
@@ -54,6 +55,32 @@ export function fire(
   for (let n = 0; n < list.length; n++) {
     fireOne(ctx, list[n] as number, depth, origin, target, x, y, flags, value, -1);
   }
+}
+
+/**
+ * The ailmentApplied event of `ailment` landing on `target` at depth `depth`, from damage of
+ * trigger `origin`: a hit's (with its payload's `flags`) or an applyAilment effect's. Moving
+ * stacks (spreadAilment) raises none.
+ */
+export function fireApplied(
+  ctx: RunContext,
+  target: Enemy,
+  ailment: AppliedAilment,
+  depth: number,
+  origin: number,
+  flags: number,
+): void {
+  fire(
+    ctx,
+    EVENT.ailmentApplied,
+    depth,
+    origin,
+    target,
+    target.x,
+    target.y,
+    flags | appliedFlag(ailment),
+    ZERO,
+  );
 }
 
 /**

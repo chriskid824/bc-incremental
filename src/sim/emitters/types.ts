@@ -31,8 +31,8 @@ export interface EmitterSpec {
 }
 
 /**
- * Bits of Payload.flags. SIGNATURE marks damage of the signature attack; C3.6's trigger
- * dispatch reads it.
+ * Bits of Payload.flags. SIGNATURE marks damage of the signature attack; the dispatch flags
+ * share its bit (full layout in src/sim/effects/flags.ts).
  */
 export const SIGNATURE = 1;
 

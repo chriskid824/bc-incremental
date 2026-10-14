@@ -13,6 +13,7 @@ import { isScopedStat, STAT_IDS } from './stats';
 import type { Modifier, ModifierKind, StatId } from './stats';
 import { DAMAGE_TAGS } from './tags';
 import {
+  APPLIED_AILMENTS,
   HELD_AILMENTS,
   HIT_KINDS,
   KILL_KINDS,
@@ -131,6 +132,7 @@ export const ConditionSchema = exact<Condition>()(
     z.strictObject({ hitIs: z.enum(HIT_KINDS) }).readonly(),
     z.strictObject({ victimHas: z.enum(HELD_AILMENTS) }).readonly(),
     z.strictObject({ killedBy: z.enum(KILL_KINDS) }).readonly(),
+    z.strictObject({ ailment: z.enum(APPLIED_AILMENTS) }).readonly(),
   ]),
 );
 
@@ -205,21 +207,35 @@ export const EffectSpecSchema = exact<EffectSpec>()(
     z
       .strictObject({
         kind: z.literal('applyAilment'),
-        ailment: z.literal('burn'),
+        ailment: z.enum(APPLIED_AILMENTS),
         stacks: finite.exactOptional(),
         damagePct: finite.exactOptional(),
         radius: finite.exactOptional(),
         maxTargets: finite.exactOptional(),
       })
       .readonly(),
-    z
-      .strictObject({
-        kind: z.literal('spreadAilment'),
-        ailment: z.literal('burn'),
-        radius: finite,
-        effect: finite.exactOptional(),
-      })
-      .readonly(),
+    // A burn spread may move records, which M1's spread copies whole to every enemy in range:
+    // only a poison spread takes a stack fraction and a target cap.
+    z.discriminatedUnion('ailment', [
+      z
+        .strictObject({
+          kind: z.literal('spreadAilment'),
+          ailment: z.literal('burn'),
+          radius: finite,
+          effect: finite.exactOptional(),
+        })
+        .readonly(),
+      z
+        .strictObject({
+          kind: z.literal('spreadAilment'),
+          ailment: z.literal('poison'),
+          radius: finite,
+          effect: finite.exactOptional(),
+          stacks: finite.exactOptional(),
+          maxTargets: finite.exactOptional(),
+        })
+        .readonly(),
+    ]),
     z
       .strictObject({
         kind: z.literal('explode'),

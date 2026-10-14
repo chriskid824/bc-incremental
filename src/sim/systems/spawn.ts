@@ -6,6 +6,7 @@
 
 import { mul, num, ZERO } from '../../core/num';
 import type { EnemyDef } from '../../data/types';
+import { RING_SLOTS } from '../ailments/rings';
 import { MAX_DEPTH } from '../effects/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, PLAYER_RADIUS } from '../types';
 import type { Enemy, RunContext, WaveRecord } from './context';
@@ -76,8 +77,25 @@ export function addEnemy(
     contactDist: PLAYER_RADIUS + def.radius,
     burns: [],
     burnPending: ZERO,
+    burnPendC: ZERO,
+    burnPendO: ZERO,
+    burnPendF: ZERO,
+    burnFusionCredit: -1,
     burnNextEnd: Infinity,
     burnSteppedAt: -1,
+    rings: new Int32Array(RING_SLOTS).fill(-1),
+    dotRings: 0,
+    poisonStacks: 0,
+    burnRingEnd: 0,
+    poisonRingEnd: 0,
+    bleedDps: ZERO,
+    bleedStart: 0,
+    bleedUntil: 0,
+    bleedSource: 0,
+    bleedPending: ZERO,
+    bleedMovedTicks: 0,
+    shockStacks: 0,
+    shockUntil: 0,
     hitMark: 0,
     inbound: 0,
     volleyMark: 0,

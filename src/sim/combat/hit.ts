@@ -1,11 +1,12 @@
 /**
  * Hits (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2–3): one damage instance of a
  * payload on one enemy, shared by emitter hits and chain jumps. A hit rolls crit, then its
- * ailments, deals damage, and kills or applies the ailments it rolled. Chances, the crit
- * multiplier and the damage multiplier are the scoped stats of the hit's own ModTable row (the
- * payload's slot for its tags and source), so tagged, scoped and scaling modifiers apply per
- * hit. Every damage instance, hits and burn ticks alike, goes into the run's tallies through
- * tally.
+ * ailments (burn, poison, bleed, shock), deals damage, and kills or applies the ailments it
+ * rolled, each raising ailmentApplied. Chances, the crit multiplier and the damage multiplier
+ * are the scoped stats of the hit's own ModTable row (the payload's slot for its tags and
+ * source), so tagged, scoped and scaling modifiers apply per hit. A shocked enemy takes more
+ * (takenMult). Every damage instance, hits and damage-over-time steps alike, goes into the
+ * run's tallies through tally.
  *
  * A hit raises the hit and crit trigger events and calls the onHit hooks (src/sim/effects/): a
  * surviving hit once its ailments are applied, so their conditions see them; a lethal one right
@@ -17,18 +18,26 @@ import type { Num } from '../../core/num';
 import { add, assertFinite, gt, lte, mul, sub, ZERO } from '../../core/num';
 import { DOT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
-import { addBurn } from '../ailments/records';
+import { ailmentDps, applyBurn, applyPoison, creditOf } from '../ailments/apply';
+import { addBleed } from '../ailments/bleed';
+import { addShock, takenMult } from '../ailments/shock';
 import { statAt } from '../build/eval';
+import type { EvalInput } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
-import { fire } from '../effects/dispatch';
+import type { ModTable } from '../build/modTable';
+import { fire, fireApplied } from '../effects/dispatch';
 import { CHAIN_JUMP, CRIT_HIT, HIT_EVENT, KILL_BY_HIT, KILLED } from '../effects/flags';
 import { EVENT } from '../effects/types';
 import {
   PRESCALED,
+  SLOT_BLEED,
+  SLOT_BLEED_CRIT,
   SLOT_BURN,
   SLOT_BURN_CRIT,
   SLOT_HIT,
   SLOT_JUMP,
+  SLOT_POISON,
+  SLOT_POISON_CRIT,
   slotRow,
 } from '../emitters/types';
 import type { Payload } from '../emitters/types';
@@ -47,6 +56,17 @@ const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
 const IGNITE_CHANCE = SCOPED_INDEX.igniteChance;
 const CRIT_ALWAYS = SCOPED_INDEX.critAlways;
 const IGNITE_ALWAYS = SCOPED_INDEX.igniteAlways;
+const POISON_CHANCE = SCOPED_INDEX.poisonChance;
+const BLEED_CHANCE = SCOPED_INDEX.bleedChance;
+const SHOCK_CHANCE = SCOPED_INDEX.shockChance;
+const POISON_ALWAYS = SCOPED_INDEX.poisonAlways;
+const BLEED_ALWAYS = SCOPED_INDEX.bleedAlways;
+const SHOCK_ALWAYS = SCOPED_INDEX.shockAlways;
+
+/** Bits of rollDots' result: the ailments a hit applies besides burn. */
+const POISONS = 1;
+const BLEEDS = 2;
+const SHOCKS = 4;
 
 const EV_HIT = EVENT.hit;
 const EV_CRIT = EVENT.crit;
@@ -65,6 +85,71 @@ export function tally(ctx: RunContext, tags: TagMask, source: number, amount: Nu
   else if ((tags & CHAIN) !== 0) ctx.damageChain = add(ctx.damageChain, amount);
   else ctx.damageHit = add(ctx.damageHit, amount);
   ctx.bySource[source] = add(ctx.bySource[source] as Num, amount);
+}
+
+/**
+ * The poison, bleed and shock rolls of a hit with ModTable row `row`, in that order: each is its
+ * chance's roll (drawn even when its always stat decides) or its always stat above 0.
+ */
+function rollDots(p: Payload, table: ModTable, row: number, ev: Readonly<EvalInput>): number {
+  let rolled = 0;
+  const rng = p.rng;
+  if (
+    rng.chance(clamp01(statAt(table, row, POISON_CHANCE, ev))) ||
+    statAt(table, row, POISON_ALWAYS, ev) > 0
+  ) {
+    rolled |= POISONS;
+  }
+  if (
+    rng.chance(clamp01(statAt(table, row, BLEED_CHANCE, ev))) ||
+    statAt(table, row, BLEED_ALWAYS, ev) > 0
+  ) {
+    rolled |= BLEEDS;
+  }
+  if (
+    rng.chance(clamp01(statAt(table, row, SHOCK_CHANCE, ev))) ||
+    statAt(table, row, SHOCK_ALWAYS, ev) > 0
+  ) {
+    rolled |= SHOCKS;
+  }
+  return rolled;
+}
+
+/**
+ * Applies the poison, bleed and shock a hit of `base` (crit or not) rolled (rollDots), each
+ * credited from the payload's source, and raises ailmentApplied for each that landed.
+ */
+function applyDots(
+  ctx: RunContext,
+  enemy: Enemy,
+  p: Payload,
+  base: Num,
+  crit: boolean,
+  rolled: number,
+  depth: number,
+  origin: number,
+): void {
+  const now = ctx.now;
+  if ((rolled & POISONS) !== 0 && ctx.poisonTicks > 0) {
+    const slot = crit ? SLOT_POISON_CRIT : SLOT_POISON;
+    const dps = ailmentDps(ctx, enemy, p, slot, base, ctx.poisonDamage);
+    applyPoison(ctx, enemy, dps, now + ctx.poisonTicks, depth, creditOf(ctx, 'poison', p), 1);
+    if (ctx.appliedListeners) fireApplied(ctx, enemy, 'poison', depth, origin, p.flags);
+  }
+  if ((rolled & BLEEDS) !== 0 && ctx.bleedTicks > 0) {
+    const slot = crit ? SLOT_BLEED_CRIT : SLOT_BLEED;
+    const dps = ailmentDps(ctx, enemy, p, slot, base, ctx.bleedDamage);
+    const source = creditOf(ctx, 'bleed', p);
+    if (addBleed(ctx, enemy, dps, now + ctx.bleedTicks, depth, source)) {
+      ctx.events.push({ type: 'ailmentApplied', targetId: enemy.id, ailment: 'bleed', stacks: 1 });
+      if (ctx.appliedListeners) fireApplied(ctx, enemy, 'bleed', depth, origin, p.flags);
+    }
+  }
+  if ((rolled & SHOCKS) !== 0 && addShock(ctx, enemy, 1, depth)) {
+    const stacks = enemy.shockStacks;
+    ctx.events.push({ type: 'ailmentApplied', targetId: enemy.id, ailment: 'shock', stacks });
+    if (ctx.appliedListeners) fireApplied(ctx, enemy, 'shock', depth, origin, p.flags);
+  }
 }
 
 /**
@@ -110,12 +195,17 @@ export function hitWithPayload(
     p.rollsAilments &&
     (p.rng.chance(clamp01(statAt(table, row, IGNITE_CHANCE, ev))) ||
       statAt(table, row, IGNITE_ALWAYS, ev) > 0);
+  // Builds that cannot poison, bleed or shock skip the rolls, which would draw nothing.
+  const rolled = ctx.rollsDots && p.rollsAilments ? rollDots(p, table, row, ev) : 0;
   const critMultiplier = crit ? statAt(table, row, CRIT_MULTIPLIER, ev) : 1;
   const base = mul(p.baseDamage, critMultiplier * scale);
   const mask = crit ? plain | CRIT : plain;
   const source = jump ? p.jumpSource : p.source;
   const flags = p.flags | HIT_EVENT | (jump ? CHAIN_JUMP : 0) | (crit ? CRIT_HIT : 0);
   let amount = p.damageMode === PRESCALED ? base : mul(base, statAt(table, row, DAMAGE, ev));
+  if (enemy.shockStacks !== 0 && enemy.shockUntil > ctx.now) {
+    amount = mul(amount, takenMult(ctx, enemy));
+  }
   if (build.hooks.modifyDamage.length !== 0) {
     amount = modifyDamage(ctx, enemy, amount, mask, source, crit, k, depth, origin, flags);
   }
@@ -136,17 +226,21 @@ export function hitWithPayload(
   if (!enemy.alive) return;
   if (ignites && ctx.burnTicks > 0) {
     // The burn's damage is the hit's before its damage row: base × burnDamage × its own row,
-    // read at jump 0, since a burn is no chain instance.
+    // read at jump 0, since a burn is no chain instance. Poison and bleed do the same.
     ev.chainJump = 0;
     const burnRow = slotRow(build, p, crit ? SLOT_BURN_CRIT : SLOT_BURN);
-    addBurn(
+    applyBurn(
       ctx,
       enemy,
       mul(base, ctx.burnDamage * statAt(table, burnRow, DAMAGE, ev)),
       ctx.now + ctx.burnTicks,
       depth,
+      creditOf(ctx, 'burn', p),
+      1,
     );
+    if (ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
   }
+  if (rolled !== 0) applyDots(ctx, enemy, p, base, crit, rolled, depth, origin);
   if (ctx.hitListeners) {
     dispatchHit(ctx, enemy, amount, mask, source, crit, k, depth, origin, flags);
   }

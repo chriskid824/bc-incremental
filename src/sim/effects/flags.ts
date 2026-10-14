@@ -15,8 +15,8 @@
  * - 15–17: the kind an ailmentApplied event applied, its AilmentKind ordinal + 1 (C3.8).
  */
 
-import { HELD_AILMENTS, KILL_KINDS } from '../../data/triggers';
-import type { HeldAilment, KillKind } from '../../data/triggers';
+import { AILMENT_KINDS, HELD_AILMENTS, KILL_KINDS } from '../../data/triggers';
+import type { AppliedAilment, HeldAilment, KillKind } from '../../data/triggers';
 import { SIGNATURE } from '../emitters/types';
 
 export { SIGNATURE };
@@ -48,3 +48,13 @@ export const killKindFlag = (kind: KillKind): number =>
 /** Enemy.killKind values: KILL_KINDS ordinals. */
 export const KILL_BY_HIT = KILL_KINDS.indexOf('hit');
 export const KILL_BY_BURN = KILL_KINDS.indexOf('burn');
+export const KILL_BY_POISON = KILL_KINDS.indexOf('poison');
+export const KILL_BY_BLEED = KILL_KINDS.indexOf('bleed');
+
+export const AILMENT_FLAG_SHIFT = 15;
+/** The three bits of the applied ailment. */
+export const AILMENT_FLAG_MASK = 0b111 << AILMENT_FLAG_SHIFT;
+
+/** The flags of an ailmentApplied event that applied `ailment` (the ailment condition). */
+export const appliedFlag = (ailment: AppliedAilment): number =>
+  (AILMENT_KINDS.indexOf(ailment) + 1) << AILMENT_FLAG_SHIFT;

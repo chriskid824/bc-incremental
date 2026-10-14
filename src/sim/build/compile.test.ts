@@ -28,7 +28,12 @@ describe('compileBuild', () => {
     expect(build.values).toEqual(stats.values);
     expect(build.values).not.toBe(stats.values);
     expect(build.mods).toHaveLength(stats.scoped.length);
-    expect(build.flags).toEqual({ randomCrits: true, maxLife: null, burnRings: false });
+    expect(build.flags).toEqual({
+      randomCrits: true,
+      maxLife: null,
+      burnRings: false,
+      bleedMoveMult: 3,
+    });
     expect(build.signature).toEqual({ forceCritEvery: 0, counts: 'shot' });
     expect(build.hooks).toEqual({
       tick: [],

@@ -46,10 +46,12 @@ export interface BuildFlags {
   /** Max life override (glassCannon), or null. */
   maxLife: number | null;
   /**
-   * Burn stacks are uncapped (eternalFlame). Until burns move to rings, the records keep
-   * UNCAPPED_BURN_STACKS as their cap (src/sim/ailments/records.ts).
+   * Burn stacks are uncapped (eternalFlame): burns live in DoT rings (src/sim/ailments/rings.ts)
+   * instead of capped records.
    */
   burnRings: boolean;
+  /** Bleed damage multiplier while the bleeding enemy moves (docs/v3/game-design-v3.md §4.3). */
+  bleedMoveMult: number;
 }
 
 /** Parameters of the signature attack. */
@@ -142,7 +144,12 @@ export function compileBuild(
     }
   };
   const added: Modifier[] = [];
-  const flags: BuildFlags = { randomCrits: true, maxLife: null, burnRings: false };
+  const flags: BuildFlags = {
+    randomCrits: true,
+    maxLife: null,
+    burnRings: false,
+    bleedMoveMult: 3,
+  };
   const params: SignatureParams = { forceCritEvery: 0, counts: 'shot' };
   const hooks: { [K in HookName]: Hooks[K][] } = {
     tick: [],

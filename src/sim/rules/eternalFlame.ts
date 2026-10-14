@@ -1,7 +1,7 @@
 /**
- * eternalFlame: burn stacks are uncapped (BuildFlags.burnRings, which keeps M1's records with
- * the UNCAPPED_BURN_STACKS guard as their cap until burns move to rings), and burn duration gets
- * the product of its instances' (1 + durationMore).
+ * eternalFlame: burn stacks are uncapped (BuildFlags.burnRings: burns live in DoT rings instead
+ * of M1's capped records, src/sim/ailments/rings.ts), and burn duration gets the product of its
+ * instances' (1 + durationMore).
  */
 
 import type { RuleSpec } from '../../data/rules';

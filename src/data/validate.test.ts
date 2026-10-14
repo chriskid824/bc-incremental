@@ -500,16 +500,68 @@ describe('trigger validation', () => {
           when: [{ targetKind: 'boss' }],
           do: [{ kind: 'push', distance: 80, radius: 120 }],
         },
+        {
+          on: 'ailmentApplied',
+          when: [{ ailment: 'shock' }, { stacksAtLeast: { ailment: 'shock', stacks: 3 } }],
+          do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }],
+        },
+        {
+          on: 'ailmentTick',
+          every: 0.5,
+          when: [{ ailment: 'poison' }, { targetHas: 'bleed' }],
+          do: [{ kind: 'nova', radius: 80, damagePct: 0.2 }],
+        },
+        {
+          on: 'kill',
+          when: [{ victimHas: 'poison' }, { killedBy: 'poison' }],
+          do: [
+            {
+              kind: 'spreadAilment',
+              ailment: 'poison',
+              radius: 200,
+              effect: 0.5,
+              stacks: 0.5,
+              maxTargets: 3,
+            },
+          ],
+        },
       ),
     ).toEqual([]);
+  });
+
+  it('needs exactly one ailment condition on ailmentApplied and ailmentTick', () => {
+    expect(triggerIssues({ on: 'ailmentApplied', do: [explode] })).toEqual([
+      `${at} needs exactly one ailment condition on 'ailmentApplied' events`,
+    ]);
+    expect(
+      triggerIssues({ on: 'ailmentTick', when: [{ targetHas: 'burn' }], do: [explode] }),
+    ).toEqual([`${at} needs exactly one ailment condition on 'ailmentTick' events`]);
+    expect(
+      triggerIssues({
+        on: 'ailmentApplied',
+        when: [{ ailment: 'burn' }, { ailment: 'poison' }],
+        do: [explode],
+      }),
+    ).toEqual([`${at} needs exactly one ailment condition on 'ailmentApplied' events`]);
+    // Shock deals no damage over time, so no ailmentTick names it.
+    expect(
+      triggerIssues({ on: 'ailmentTick', when: [{ ailment: 'shock' }], do: [explode] }),
+    ).toEqual([`${at} ailment 'shock' deals no damage over time, so it never ticks`]);
+    expect(
+      triggerIssues({ on: 'ailmentApplied', when: [{ ailment: 'shock' }], do: [explode] }),
+    ).toEqual([]);
+    // The condition reads the event's ailment, so only those two events have one.
+    expect(triggerIssues({ on: 'hit', when: [{ ailment: 'burn' }], do: [explode] })).toEqual([
+      `${at} when[0] ailment does not apply to 'hit' events`,
+    ]);
   });
 
   it('rejects an event the simulation does not raise yet', () => {
     expect(triggerIssues({ on: 'freeze', do: [explode] })).toEqual([
       `${at} event 'freeze' is not raised by the simulation yet`,
     ]);
-    expect(triggerIssues({ on: 'ailmentTick', do: [heal] })).toEqual([
-      `${at} event 'ailmentTick' is not raised by the simulation yet`,
+    expect(triggerIssues({ on: 'shatter', do: [heal] })).toEqual([
+      `${at} event 'shatter' is not raised by the simulation yet`,
     ]);
   });
 
@@ -637,7 +689,21 @@ describe('trigger validation', () => {
       `${at} every must be > 0 seconds on periodic (got 0)`,
     ]);
     expect(triggerIssues({ on: 'kill', every: 2, do: [explode] })).toEqual([
-      `${at} every is only allowed on nthAttack and periodic (on kill)`,
+      `${at} every is only allowed on nthAttack, periodic and ailmentTick (on kill)`,
+    ]);
+    // ailmentTick counts damage-over-time steps of 0.25 s.
+    const tick = (every: number) => ({
+      on: 'ailmentTick' as const,
+      every,
+      when: [{ ailment: 'burn' as const }],
+      do: [explode],
+    });
+    expect(triggerIssues(tick(0.25), tick(1), tick(2.75))).toEqual([]);
+    expect(triggerIssues(tick(0.3))).toEqual([
+      `${at} every must be a positive multiple of 0.25 seconds on ailmentTick (got 0.3)`,
+    ]);
+    expect(triggerIssues(tick(0))).toEqual([
+      `${at} every must be a positive multiple of 0.25 seconds on ailmentTick (got 0)`,
     ]);
   });
 
@@ -662,6 +728,20 @@ describe('trigger validation', () => {
       `${at} do[3] distance must be > 0 (got 0)`,
     ]);
     expect(triggerIssues({ on: 'hit', do: [] })).toEqual([`${at} needs at least one effect`]);
+    expect(
+      triggerIssues({
+        on: 'kill',
+        when: [{ victimHas: 'poison' }],
+        do: [
+          { kind: 'spreadAilment', ailment: 'poison', radius: 100, stacks: 1.5, maxTargets: 0 },
+          { kind: 'spreadAilment', ailment: 'poison', radius: 100, stacks: 0 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] stacks must be in (0, 1] (got 1.5)`,
+      `${at} do[0] maxTargets must be a positive integer (got 0)`,
+      `${at} do[1] stacks must be in (0, 1] (got 0)`,
+    ]);
   });
 
   it('accepts a keystone whose behaviour is a trigger, and needs a descKey for one', () => {

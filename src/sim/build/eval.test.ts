@@ -26,7 +26,7 @@ import {
 } from './eval';
 import type { EvalInput } from './eval';
 import { compileMods, ModTable, modTableFor, SCOPED_INDEX } from './modTable';
-import { createSourceTable, rowKey } from './sources';
+import { CENTER, createSourceTable, rowKey } from './sources';
 
 const S = SCOPED_STATS.length;
 const {
@@ -242,9 +242,9 @@ describe('scaling variables', () => {
     const target = ctx.enemies[0] as Enemy;
     const read = compileScaling({ per: 'targetBurnStacks' }).read;
     expect(read(on(ctx, target))).toBe(0);
-    addBurn(ctx, target, num(1), ctx.now + 60, 0);
-    addBurn(ctx, target, num(1), ctx.now + 60, 0);
-    addBurn(ctx, target, num(1), ctx.now + 120, 0);
+    addBurn(ctx, target, num(1), ctx.now + 60, 0, CENTER);
+    addBurn(ctx, target, num(1), ctx.now + 60, 0, CENTER);
+    addBurn(ctx, target, num(1), ctx.now + 120, 0, CENTER);
     expect(read(on(ctx, target))).toBe(3);
     // A stack that ended no longer counts, before anything expires it.
     ctx.now += 60;
@@ -316,8 +316,8 @@ describe('conditions', () => {
     const ctx = spawned(stationarySquares(1, 1));
     const target = ctx.enemies[0] as Enemy;
     expect(holds({ targetHas: 'burn' }, target, ctx.now)).toBe(false);
-    addBurn(ctx, target, num(1), ctx.now + 30, 0);
-    addBurn(ctx, target, num(1), ctx.now + 60, 0);
+    addBurn(ctx, target, num(1), ctx.now + 30, 0, CENTER);
+    addBurn(ctx, target, num(1), ctx.now + 60, 0, CENTER);
     expect(holds({ targetHas: 'burn' }, target, ctx.now)).toBe(true);
     const two = { stacksAtLeast: { ailment: 'burn', stacks: 2 } } as const;
     expect(holds(two, target, ctx.now)).toBe(true);
@@ -401,7 +401,7 @@ describe('statAt with conditions (Modifier.when)', () => {
     expect(table.final[row * S + CRIT_CHANCE]).toBe(0.1);
     expect(table.damage(TAG.hit)).toBe(1.5);
     expect(statAt(table, row, DAMAGE, staticInput())).toBe(1.5);
-    addBurn(ctx, burning, num(1), ctx.now + 30, 0);
+    addBurn(ctx, burning, num(1), ctx.now + 30, 0, CENTER);
     expect(statAt(table, row, DAMAGE, on(ctx, burning))).toBe(1.5 * 2);
     expect(statAt(table, row, CRIT_CHANCE, on(ctx, burning))).toBe(0.1 + 0.2);
     expect(statAt(table, row, DAMAGE, on(ctx, clean))).toBe(1.5);
@@ -426,7 +426,7 @@ describe('statAt with conditions (Modifier.when)', () => {
       ]),
     );
     const row = table.row(TAG.hit);
-    for (let s = 0; s < 3; s++) addBurn(ctx, target, num(1), ctx.now + 30, 0);
+    for (let s = 0; s < 3; s++) addBurn(ctx, target, num(1), ctx.now + 30, 0, CENTER);
     expect(statAt(table, row, DAMAGE, on(ctx, target))).toBe(1);
     target.hp = mul(target.maxHp, 0.25);
     expect(statAt(table, row, DAMAGE, on(ctx, target))).toBe(1 + 0.1 * 3);

@@ -5,12 +5,14 @@
  *    modules' onKill hooks, while the victim still holds its ailments;
  * 2. removal, drops, the kill event and split children, so later hits of the same tick can
  *    reach the children;
- * 3. the kill's other triggers, recorded as pending kills.
+ * 3. the kill's other triggers, recorded as pending kills;
+ * 4. its DoT rings go back to the pool (src/sim/ailments/apply.ts).
  * The death step of the tick order dispatches the pending kills (their effects run next tick),
  * then compacts the entity arrays.
  */
 
 import { add, mul, num } from '../../core/num';
+import { releaseAilments } from '../ailments/apply';
 import { heldFlags } from '../build/eval';
 import { fireInlineKill, recordPendingKills } from '../effects/dispatch';
 import { HIT_BITS, KILL_KIND_SHIFT } from '../effects/flags';
@@ -73,6 +75,7 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlag
   // The children are ctx.enemies[split(...) ..]; C4's toSplitChildren transfers to them here.
   split(ctx, enemy);
   if (ctx.killPending.length !== 0) recordPendingKills(ctx, enemy, origin, flags, shards);
+  releaseAilments(ctx, enemy);
 }
 
 /** Removes dead entities in place, preserving id order. */

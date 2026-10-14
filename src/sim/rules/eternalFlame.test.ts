@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RuleSpec } from '../../data/rules';
 import { compileBuild } from '../build/compile';
-import { UNCAPPED_BURN_STACKS } from '../simulation';
 import { eventsOf, makeConfig, makeStats, recordRun, stationarySquares } from '../testing';
 import type { RunConfig, SimEvent } from '../types';
 
@@ -25,7 +24,6 @@ describe('eternalFlame', () => {
       Math.max(...eventsOf(ticks, 'ignite').map((event) => event.stacks));
     expect(maxStacks(capped.ticks)).toBe(5);
     expect(maxStacks(flame.ticks)).toBeGreaterThan(5);
-    expect(maxStacks(flame.ticks)).toBeLessThan(UNCAPPED_BURN_STACKS);
   });
 
   it('halves the burn of one stack', () => {

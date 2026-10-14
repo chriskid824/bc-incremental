@@ -145,8 +145,16 @@ export type SimEvent =
       readonly fromX: number | null;
       readonly fromY: number | null;
     }
+  /** A burn stack landed; `stacks` is the target's burn stacks now. */
   | { readonly type: 'ignite'; readonly targetId: number; readonly stacks: number }
-  /** pandemic: a burning enemy died and passed its stacks to `targets` enemies nearby. */
+  /** Poison, bleed or shock landed; `stacks` is the target's stacks of it now (bleed: 1). */
+  | {
+      readonly type: 'ailmentApplied';
+      readonly targetId: number;
+      readonly ailment: 'poison' | 'bleed' | 'shock';
+      readonly stacks: number;
+    }
+  /** A burning enemy passed its burn stacks to `targets` enemies nearby (spreadAilment). */
   | {
       readonly type: 'burnSpread';
       readonly enemyId: number;
@@ -157,6 +165,25 @@ export type SimEvent =
     }
   | {
       readonly type: 'burnTick';
+      readonly targetId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly amount: Num;
+    }
+  /** A poisoned enemy passed its poison stacks to `targets` enemies nearby (spreadAilment). */
+  | {
+      readonly type: 'ailmentSpread';
+      readonly ailment: 'poison';
+      readonly enemyId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly radius: number;
+      readonly targets: number;
+    }
+  /** A damage-over-time step of poison or bleed, as burnTick is burn's. */
+  | {
+      readonly type: 'dotTick';
+      readonly ailment: 'poison' | 'bleed';
       readonly targetId: number;
       readonly x: number;
       readonly y: number;

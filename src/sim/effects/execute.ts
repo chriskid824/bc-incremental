@@ -12,22 +12,27 @@
  */
 
 import { add, mul, num, ZERO } from '../../core/num';
-import type { EffectKind, EffectSpec } from '../../data/triggers';
-import { addBurn, spreadBurns } from '../ailments/records';
-import { statAt } from '../build/eval';
-import { SCOPED_INDEX } from '../build/modTable';
+import type { AppliedAilment, EffectKind, EffectSpec } from '../../data/triggers';
+import {
+  ailmentDps,
+  applyBurn,
+  applyPoison,
+  creditOf,
+  spreadBurn,
+  spreadPoison,
+} from '../ailments/apply';
+import { addBleed } from '../ailments/bleed';
+import { addShock } from '../ailments/shock';
 import { hitWithPayload } from '../combat/hit';
-import { SLOT_BURN, slotRow } from '../emitters/types';
+import { SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
 import { rebuildGrid } from '../systems/grid';
-import { fireOne } from './dispatch';
+import { fireApplied, fireOne } from './dispatch';
 import { dequeue } from './queue';
 import type { EffectEntry } from './queue';
 import { EFFECTS_PER_TICK, EVENT } from './types';
 import type { CompiledEffect, CompiledTrigger } from './types';
-
-const DAMAGE = SCOPED_INDEX.damage;
 
 type Executor<K extends EffectKind> = (
   ctx: RunContext,
@@ -44,17 +49,69 @@ const liveTarget = (entry: Readonly<EffectEntry>): Enemy | null =>
 const within = (ctx: RunContext, fx: CompiledEffect, x: number, y: number): number =>
   ctx.grid.within(x, y, fx.radiusSq, ctx.effectTargets);
 
-/** `stacks` burn stacks of the effect's payload on `enemy`, each as its hit would ignite. */
-function applyBurn(ctx: RunContext, enemy: Enemy, p: Payload, stacks: number, depth: number): void {
-  const ev = ctx.evalInput;
-  ev.now = ctx.now;
-  ev.target = enemy;
-  ev.chainJump = 0;
-  const row = slotRow(ctx.build, p, SLOT_BURN);
-  const dps = mul(p.baseDamage, ctx.burnDamage * statAt(ctx.table, row, DAMAGE, ev));
-  const end = ctx.now + ctx.burnTicks;
-  for (let s = 0; s < stacks; s++) addBurn(ctx, enemy, dps, end, depth);
+/**
+ * `stacks` stacks of `ailment` from the effect's payload on `enemy`, each as its hit would apply
+ * it (bleed keeps the strongest, so more stacks add nothing), then its ailmentApplied event.
+ */
+function applyStacks(
+  ctx: RunContext,
+  ailment: AppliedAilment,
+  enemy: Enemy,
+  p: Payload,
+  stacks: number,
+  entry: Readonly<EffectEntry>,
+): void {
+  const depth = entry.depth;
+  const now = ctx.now;
+  let applied = true;
+  switch (ailment) {
+    case 'burn': {
+      const dps = ailmentDps(ctx, enemy, p, SLOT_BURN, p.baseDamage, ctx.burnDamage);
+      applyBurn(ctx, enemy, dps, now + ctx.burnTicks, depth, creditOf(ctx, 'burn', p), stacks);
+      break;
+    }
+    case 'poison': {
+      const dps = ailmentDps(ctx, enemy, p, SLOT_POISON, p.baseDamage, ctx.poisonDamage);
+      applyPoison(
+        ctx,
+        enemy,
+        dps,
+        now + ctx.poisonTicks,
+        depth,
+        creditOf(ctx, 'poison', p),
+        stacks,
+      );
+      break;
+    }
+    case 'bleed': {
+      const dps = ailmentDps(ctx, enemy, p, SLOT_BLEED, p.baseDamage, ctx.bleedDamage);
+      const source = creditOf(ctx, 'bleed', p);
+      applied = addBleed(ctx, enemy, dps, now + ctx.bleedTicks, depth, source);
+      if (applied) {
+        ctx.events.push({ type: 'ailmentApplied', targetId: enemy.id, ailment, stacks: 1 });
+      }
+      break;
+    }
+    case 'shock':
+      applied = addShock(ctx, enemy, stacks, depth);
+      if (applied) {
+        const shock = enemy.shockStacks;
+        ctx.events.push({ type: 'ailmentApplied', targetId: enemy.id, ailment, stacks: shock });
+      }
+      break;
+  }
+  if (applied && ctx.appliedListeners) fireApplied(ctx, enemy, ailment, depth, entry.origin, 0);
 }
+
+/** Ticks the ailment lasts once applied; nothing is applied without any. */
+const durationOf = (ctx: RunContext, ailment: AppliedAilment): number =>
+  ailment === 'burn'
+    ? ctx.burnTicks
+    : ailment === 'poison'
+      ? ctx.poisonTicks
+      : ailment === 'bleed'
+        ? ctx.bleedTicks
+        : ctx.shockTicks;
 
 /** Every alive enemy within the effect's radius of (x, y), first `max` in id order, is hit. */
 function hitArea(
@@ -78,21 +135,29 @@ function hitArea(
 
 const EFFECTS: { readonly [K in EffectKind]: Executor<K> } = {
   applyAilment(ctx, spec, fx, entry) {
-    if (ctx.burnTicks <= 0) return;
+    const ailment = spec.ailment;
+    if (durationOf(ctx, ailment) <= 0) return;
     const p = ctx.effectPayloads[entry.effect] as Payload;
     const stacks = spec.stacks ?? 1;
     if (spec.radius === undefined) {
       const target = liveTarget(entry);
-      if (target !== null) applyBurn(ctx, target, p, stacks, entry.depth);
+      if (target !== null) applyStacks(ctx, ailment, target, p, stacks, entry);
       return;
     }
     const targets = ctx.effectTargets;
     const count = Math.min(within(ctx, fx, entry.x, entry.y), spec.maxTargets ?? Infinity);
-    for (let i = 0; i < count; i++) applyBurn(ctx, targets[i] as Enemy, p, stacks, entry.depth);
+    for (let i = 0; i < count; i++) {
+      applyStacks(ctx, ailment, targets[i] as Enemy, p, stacks, entry);
+    }
   },
-  spreadAilment(ctx, _spec, fx, entry) {
+  spreadAilment(ctx, spec, fx, entry) {
     const target = liveTarget(entry);
-    if (target !== null && fx.spread !== null) spreadBurns(ctx, target, fx.spread, entry.depth);
+    if (target === null || fx.spread === null) return;
+    if (spec.ailment === 'burn') spreadBurn(ctx, target, fx.spread, entry.depth);
+    else {
+      const sf = spec.stacks ?? 1;
+      spreadPoison(ctx, target, fx.spread, sf, spec.maxTargets ?? Infinity, entry.depth);
+    }
   },
   explode(ctx, spec, fx, entry) {
     hitArea(ctx, fx, entry, entry.x, entry.y, spec.maxTargets ?? Infinity);

@@ -100,7 +100,8 @@ export function compileMods(scoped: readonly Modifier[], sources: SourceTable): 
       scopeOk,
       untagged: all === 0 && none === 0 && scopeOk === null,
       scale: mod.scaling === undefined ? null : compileScaling(mod.scaling),
-      cond: mod.when === undefined ? null : mod.when.map(compileCondition),
+      cond:
+        mod.when === undefined ? null : mod.when.map((condition) => compileCondition(condition)),
     };
   });
 }

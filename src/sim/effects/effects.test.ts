@@ -8,12 +8,13 @@ import type { TriggerSpec } from '../../data/triggers';
 import type { GameData } from '../../data/types';
 import { addBurn, expireBurns } from '../ailments/records';
 import { compileBuild } from '../build/compile';
+import { CENTER } from '../build/sources';
 import { hitWithPayload } from '../combat/hit';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { enqueueModuleEffect } from '../rules';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
-import { updateBurns } from '../systems/ailments';
+import { updateAilments } from '../systems/ailments';
 import { createRunContext } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { killEnemy } from '../systems/death';
@@ -430,9 +431,9 @@ describe('kill triggers', () => {
     );
     const ctx = spawned(stats, stationarySquares(3, 1));
     const [ended, burning, expired] = ctx.enemies as [Enemy, Enemy, Enemy];
-    addBurn(ctx, ended, num(1), 31, 0);
-    addBurn(ctx, burning, num(1), 61, 0);
-    addBurn(ctx, expired, num(1), 31, 0);
+    addBurn(ctx, ended, num(1), 31, 0, CENTER);
+    addBurn(ctx, burning, num(1), 61, 0, CENTER);
+    addBurn(ctx, expired, num(1), 31, 0, CENTER);
     ctx.now = 31;
     // One record ended now but is still listed; the other has moved into burnPending.
     expireBurns(ctx, expired);
@@ -649,7 +650,7 @@ describe('kill triggers', () => {
       const ctx = spawned(stats, stationarySquares(2, 1));
       const [victim, neighbour] = ctx.enemies as [Enemy, Enemy];
       // A burn applied at `depth` burns the victim to death: the kill carries that depth.
-      addBurn(ctx, victim, num(1), 61, depth);
+      addBurn(ctx, victim, num(1), 61, depth, CENTER);
       victim.killKind = KILL_BY_BURN;
       victim.killDepth = victim.ailDepth;
       expect(victim.killDepth).toBe(depth);
@@ -690,12 +691,12 @@ describe('kill triggers', () => {
       const [low, high] = ctx.enemies as [Enemy, Enemy];
       const [target, source] = targetFirst ? [low, high] : [high, low];
       ctx.now = 0;
-      addBurn(ctx, target, num(60), 120, 0);
-      addBurn(ctx, source, num(60), 120, 0);
+      addBurn(ctx, target, num(60), 120, 0, CENTER);
+      addBurn(ctx, source, num(60), 120, 0, CENTER);
       source.hp = num(15);
       for (let tick = 1; tick <= 30; tick++) {
         ctx.now = tick;
-        updateBurns(ctx);
+        updateAilments(ctx);
       }
       expect(source.alive).toBe(false);
       expect(eventsOf([ctx.events], 'burnSpread')).toMatchObject([{ enemyId: source.id }]);
