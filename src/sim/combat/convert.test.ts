@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mul, toNumber } from '../../core/num';
+import { add, mul, num, toNumber } from '../../core/num';
 import type { Num } from '../../core/num';
 import type { Modifier, StatBlock, StatExtras } from '../../data/stats';
 import { TAG } from '../../data/tags';
@@ -266,6 +266,20 @@ describe('converted hits', () => {
     // 10 × 1.5 (one shock stack) × 2 (the hook), three quarters a hit and a quarter poison.
     expect(hit?.amount).toBe(30);
     expect(tallies(ctx)).toMatchObject({ hit: 22.5, poison: 7.5 });
+  });
+
+  it('tallies damage a hook adds to a converted hit of 0 on its first part, not as NaN', () => {
+    const flat: TestModule = (b) =>
+      b.hook('modifyDamage', (_ctx, _hit, amount) => add(amount, num(5)));
+    const stats = makeStats(
+      { ...NO_ROLLS, damage: 0 },
+      [],
+      converting({ to: 'poison', fraction: 0.25 }),
+    );
+    const ctx = contextOn(stats, 2, [flat]);
+    hitOnce(ctx);
+    expect(hitsOf(ctx.events)[0]?.amount).toBe(5);
+    expect(tallies(ctx)).toMatchObject({ hit: 5, poison: 0 });
   });
 
   it('leaves ailments to the hit: its burns and their rows are those of the unconverted hit', () => {

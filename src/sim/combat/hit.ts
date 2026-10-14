@@ -100,6 +100,11 @@ export function tally(ctx: RunContext, tags: TagMask, source: number, amount: Nu
  */
 function tallyParts(ctx: RunContext, source: number, amount: Num): void {
   const parts = ctx.hitParts;
+  // A hook can turn a hit of 0 into damage, which no share can scale: it goes to the first part.
+  if (toNumber(parts.total) === 0) {
+    tally(ctx, parts.mask[0] as number, source, amount);
+    return;
+  }
   // takenMult and the modifyDamage hooks scale every part alike.
   const scale = amount === parts.total ? 1 : toNumber(amount) / toNumber(parts.total);
   for (let i = 0; i < parts.n; i++) {

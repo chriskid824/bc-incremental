@@ -242,9 +242,10 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
       }
     });
     // More than the whole hit cannot convert; the simulation scales a sum over 1 from several
-    // nodes down, but one node's sum is its own mistake.
+    // nodes down, but one node's sum is its own mistake. The slack lets shares that add up to
+    // 1 in decimal (0.34 + 0.56 + 0.1) pass.
     const converted = node.conversions.reduce((sum, conversion) => sum + conversion.fraction, 0);
-    if (converted > 1) issues.push(`${at}: conversions add up to ${converted}, more than 1`);
+    if (converted > 1 + 1e-9) issues.push(`${at}: conversions add up to ${converted}, more than 1`);
 
     if (node.shardCostFactor !== undefined && !(node.shardCostFactor >= 0)) {
       issues.push(`${at}: shardCostFactor must be >= 0 (got ${node.shardCostFactor})`);

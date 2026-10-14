@@ -826,6 +826,16 @@ describe('conversion validation', () => {
     ).toEqual(["talent 'vitality': conversions add up to 1.1, more than 1"]);
   });
 
+  it('accepts shares that add up to 1 in decimal but not in binary floating point', () => {
+    expect(
+      conversionIssues(
+        { to: 'poison', fraction: 0.34 },
+        { to: 'bleed', fraction: 0.56 },
+        { to: 'cold', fraction: 0.1 },
+      ),
+    ).toEqual([]);
+  });
+
   it('rejects a share of 0 or less and tags no hit carries', () => {
     expect(
       conversionIssues(

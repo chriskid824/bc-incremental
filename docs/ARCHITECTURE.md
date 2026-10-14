@@ -105,7 +105,7 @@ type Modifier = {
 - **scoped stat**（`SCOPED_STATS`）的值隨每筆傷害變：傷害倍率、暴擊率、暴擊倍率、點燃／中毒／流血／感電機率、五個 `*Always`、`frostOnHit`。只有它們的修正可以帶 `tags`、`notTags`、`scope`、`when`、`scaling`；其他屬性（攻速、連鎖數、持續時間…）一局只有一個值。平坦傷害不能帶標籤，留在 `values.damage`。
 - `StatBlock = { base, values, scoped, triggers, conversions }`（`src/data/stats.ts`）：`values` 是不帶標籤、範圍與條件的修正合出的最終值（和 M1 一樣）；scoped stat 的所有修正（含不帶標籤的）另外依資料順序放進 `scoped`；`triggers`、`conversions` 也依資料順序收集，各帶節點換算出的來源（`sourceOfNode`）。`meta` 用 `statBlockFor` 產生，測試與工具用 `makeStats`。
 - `*Always` 在擲骰**之後**把結果改成成功（例：灼熱暴擊 = `igniteAlways flat 1 [crit]` 加 `damage more −0.5 [hit] notTags [crit]`），所以 RNG 的消耗和改成資料之前一樣。
-- 縮放：貢獻 `c = min(cap, value × g(x))`，`g` 是線性（可用 `every` 取整步）、`log10(1 + x)` 或 `x^exponent`；flat 與 increased 加上 c，more 乘 `1 + c`。變數：連鎖第幾跳、目標的燃燒／毒／感電層數、目標的冰冷量表、目標和角色的距離、失去的生命比例。
+- 縮放：貢獻 `c = min(cap, value × g(x))`，`g` 是線性、`log10(1 + x)` 或 `x^exponent`，`every` 會先把 x 取整步再套任何一種；flat 與 increased 加上 c，more 乘 `1 + c`。變數：連鎖第幾跳、目標的燃燒／毒／感電層數、目標的冰冷量表、目標和角色的距離、失去的生命比例。
 - **能寫成資料的就寫成資料**：M1 的橋接 notable 與灼熱暴擊是修正（帶標籤的機率、`*Always`、縮放、`notTags`），瘟疫是觸發（4.4.8）；只有真的改規則的才寫成規則模組（4.4.5）。
 
 #### 4.4.2 傷害標籤
@@ -236,7 +236,7 @@ type Modifier = {
   - `every`：nthAttack 要正整數、periodic 要 > 0 秒、ailmentTick 要 0.25 秒的正整數倍，其他事件不能帶。
   - ailmentApplied 與 ailmentTick 要剛好一個 `ailment` 條件（ailmentTick 的要是持續傷害種類），否則會對每次施加、每隻敵人都觸發。
   - `gainShards` 只能用在 kill 與 diedWithAilment（它讀死者的掉落）。
-  - 需要事件目標的效果（沒有半徑的 `applyAilment`、`addFrost`，以及 `spreadAilment`）：沒有目標的事件（waveStart、periodic、heroHit）不行；contact 不行（效果執行時那隻敵人已經漏掉或死了）；kill、diedWithAilment、shatter 上 `applyAilment`、`addFrost` 要有半徑，`spreadAilment` 只能用在 kill 與 diedWithAilment（它當場執行）。
+  - 需要事件目標的效果（沒有半徑的 `applyAilment`、`addFrost`，以及 `spreadAilment`）：沒有目標的事件（waveStart、periodic、heroHit）不行；contact 不行（效果執行時那隻敵人已經漏掉或死了）；kill、diedWithAilment、shatter 上 `applyAilment`、`addFrost` 要有半徑，這三個事件裡 `spreadAilment` 只能用在 kill 與 diedWithAilment（它當場執行），shatter 上不能用。
 
 #### 4.4.9 轉換
 
