@@ -10,8 +10,8 @@
  */
 
 import type { RuleSpec } from '../../data/rules';
-import { spreadBurns } from '../systems/burn';
-import type { BurnSpread } from '../systems/burn';
+import { spreadBurns } from '../ailments/records';
+import type { BurnSpread } from '../ailments/records';
 import type { RuleModule } from './module';
 
 export const pandemicLegacy: RuleModule<Extract<RuleSpec, { id: 'pandemic' }>> = {
@@ -27,6 +27,8 @@ export const pandemicLegacy: RuleModule<Extract<RuleSpec, { id: 'pandemic' }>> =
     }
     b.legacyHitMult *= hitMult;
     const spread: BurnSpread = { radius, radiusSq: radius ** 2, effect };
-    if (spread.radiusSq > 0) b.hook('onKill', (ctx, victim) => spreadBurns(ctx, victim, spread));
+    if (spread.radiusSq > 0) {
+      b.hook('onKill', (ctx, victim, kill) => spreadBurns(ctx, victim, spread, kill.depth + 1));
+    }
   },
 };

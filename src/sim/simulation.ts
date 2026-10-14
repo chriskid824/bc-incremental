@@ -5,8 +5,8 @@
  * (src/sim/systems/context.ts) and each step() advances one fixed tick, running the systems
  * in src/sim/systems/ in a fixed order (see step() and docs/v3/implementation-plan-v3.md
  * §2.15).
- * Randomness comes only from the seeded spawn, split, combat and drops streams, and entity
- * arrays stay ordered by increasing id, so a seed fully determines the run.
+ * Randomness comes only from the seeded spawn, split, combat, drops, trigger and effects
+ * streams, and entity arrays stay ordered by increasing id, so a seed fully determines the run.
  * Projectiles spread over enemies that projectiles already in flight will not kill, focus
  * elites and bosses that come close, and retarget when their target dies first
  * (src/sim/targeting.ts). Target queries read a spatial grid rebuilt every tick
@@ -16,10 +16,15 @@
  * and modifiers and may hook into the tick. The scoped stats (damage multiplier, crit and ignite
  * chances, crit multiplier) per tag mask and damage source fill a ModTable on first use
  * (src/sim/build/modTable.ts, src/sim/build/sources.ts).
+ * The build's triggers (StatBlock.triggers, and those rule modules add) listen to events of the
+ * run; the effects of those that fire wait in a queue for the tick's effect phase
+ * (src/sim/effects/).
  */
 
 import { STAT_IDS } from '../data/stats';
 import type { GameData } from '../data/types';
+import { dispatchPendingKills } from './effects/dispatch';
+import { runEffectQueue } from './effects/execute';
 import { updateBurns } from './systems/ailments';
 import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
@@ -34,7 +39,7 @@ import { releaseEnemies } from './systems/spawn';
 import { startDueWave, updateClears } from './systems/waves';
 import type { InputFrame, RunConfig, RunResult, SimEvent, Simulation } from './types';
 
-export { BURN_TICK_INTERVAL, UNCAPPED_BURN_STACKS } from './systems/burn';
+export { BURN_TICK_INTERVAL, UNCAPPED_BURN_STACKS } from './ailments/records';
 
 function validateConfig(config: RunConfig): void {
   if ((config.mode as string) !== 'auto') {
@@ -85,22 +90,29 @@ export function createSimulation(
    * docs/v3/implementation-plan-v3.md §2.15, as far as they exist yet:
    *
    * 1. input: ignored; the only control mode is 'auto'.
-   * 2. spawn: start the due wave (waveControl's wave start, waves.ts), then release queued
-   *    enemies (spawn.ts), so a new wave's first enemy appears on its start tick.
+   * 2. spawn: start the due wave (waveControl's wave start, waves.ts) with its waveStart
+   *    triggers, then release queued enemies (spawn.ts), so a new wave's first enemy appears on
+   *    its start tick.
    * 3. movement: every enemy walks towards the player (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
-   * 5. contact: enemies that reached the player hit it and leak (contact.ts).
-   * 6. emitters: each emitter's due attacks are counted, with the onAttack hooks, and fire
-   *    projectiles; then the rule modules' tick hooks run (emitters.ts, src/sim/emitters/).
+   * 5. contact: enemies that reached the player hit it and leak, raising heroHit and contact
+   *    (contact.ts).
+   * 6. emitters: each emitter's due attacks are counted, with the onAttack hooks and the
+   *    nthAttack triggers, and fire projectiles; then the rule modules' tick hooks run
+   *    (emitters.ts, src/sim/emitters/).
    * 7. projectiles: move, retarget, and hit on arrival (projectiles.ts). Hits and chains
-   *    (src/sim/combat/) and kills with their onKill hooks, drops and splits (death.ts) resolve
-   *    inline.
+   *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
+   *    triggers, onKill hooks, drops and splits (death.ts) resolve inline.
    * 8. ailments: burn stacks expire; burn damage every BURN_TICK_INTERVAL (ailments.ts).
-   * 9. death: compact dead enemies and projectiles (death.ts), after the last grid query.
-   * 10. waveControl: record cleared waves (waves.ts).
-   * 11. runEnd: overkill tracking, then the end checks (runEnd.ts).
+   * 9. effects: due periodic triggers, then up to EFFECTS_PER_TICK queued effects
+   *    (src/sim/effects/execute.ts).
+   * 10. death: this tick's pending kill triggers fire, sorted by victim id (their effects run
+   *    next tick); then compact dead enemies and projectiles (death.ts), after the last grid
+   *    query.
+   * 11. waveControl: record cleared waves (waves.ts).
+   * 12. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
-   * Steps 6–8 run only while the player is alive.
+   * Steps 6–9 run only while the player is alive.
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -117,7 +129,9 @@ export function createSimulation(
       runTickHooks(ctx);
       moveProjectiles(ctx);
       updateBurns(ctx);
+      runEffectQueue(ctx);
     }
+    dispatchPendingKills(ctx);
     compact(ctx);
     updateClears(ctx);
     trackOverkill(ctx);

@@ -5,6 +5,9 @@
  * counting as an attack of its own.
  */
 
+import { ZERO } from '../../core/num';
+import { fire as fireTriggers } from '../effects/dispatch';
+import { EVENT } from '../effects/types';
 import { pickTargetInGrid } from '../targeting';
 import { focused, rollCount } from '../systems/context';
 import type { Enemy, Projectile, RunContext } from '../systems/context';
@@ -27,16 +30,17 @@ export function runVolley(ctx: RunContext, em: EmitterRuntime): void {
       return;
     }
     em.acc -= attackInterval;
-    countAttack(ctx, em);
+    countAttack(ctx, em, target);
     fireAttack(ctx, em, target, 0, -1);
   }
 }
 
 /**
- * Counts an attack of `em`: its attack and volley serials, steadyAim's every-Nth-attack rhythm,
- * then the onAttack hooks, which may make the whole attack steady (ctx.shotScratch).
+ * Counts an attack of `em` at `target`, its first target: its attack and volley serials,
+ * steadyAim's every-Nth-attack rhythm, the onAttack hooks, which may make the whole attack
+ * steady (ctx.shotScratch), then the nthAttack triggers at the target.
  */
-export function countAttack(ctx: RunContext, em: EmitterRuntime): void {
+export function countAttack(ctx: RunContext, em: EmitterRuntime, target: Enemy): void {
   em.attacks++;
   em.volley++;
   const { forceCritEvery, counts } = ctx.build.signature;
@@ -44,7 +48,7 @@ export function countAttack(ctx: RunContext, em: EmitterRuntime): void {
   const shot = ctx.shotScratch;
   shot.forceCrit = false;
   for (const hook of ctx.build.hooks.onAttack) hook(ctx, em, shot);
-  // Dispatch position of the nthAttack triggers (C3.6).
+  fireTriggers(ctx, EVENT.nthAttack, 0, -1, target, target.x, target.y, em.payload.flags, ZERO);
 }
 
 /**

@@ -73,7 +73,7 @@ describe('payload row slots', () => {
     const stats = makeStats({ igniteChance: 1, critChance: 0, chainCount: 1, chainRange: 5000 });
     const ctx = contextOn(stats);
     const p = signaturePayload(ctx);
-    chainAttack(ctx, p, ctx.enemies[0] as Enemy, ctx.chainCount, false, -1);
+    chainAttack(ctx, p, ctx.enemies[0] as Enemy, ctx.chainCount, false, 0, -1);
     expect(hitsOf(ctx.events).map((hit) => hit.chainIndex)).toEqual([0, 1]);
     for (const slot of [SLOT_JUMP, SLOT_BURN]) expect(p.rows[slot]).toBeGreaterThanOrEqual(0);
     for (const slot of [SLOT_JUMP_CRIT, SLOT_BURN_CRIT]) expect(p.rows[slot]).toBe(-1);
@@ -143,7 +143,7 @@ describe('hitWithPayload', () => {
     const fusion = ctx.sources.index('fusion.fire.lightning');
     const p = createPayload({ ...signaturePayload(ctx), jumpSource: fusion });
     const [first, second] = ctx.enemies as [Enemy, Enemy];
-    chainAttack(ctx, p, first, 1, false, -1);
+    chainAttack(ctx, p, first, 1, false, 0, -1);
     const [primary, jump] = hitsOf(ctx.events);
     expect(primary).toMatchObject({ targetId: first.id, source: 0, amount: 10 });
     // The jump's row is keyed on jumpSource, so the fusion-scoped chain bonus reaches it.
@@ -177,6 +177,7 @@ describe('hitWithPayload', () => {
         null,
         null,
         false,
+        0,
         -1,
       );
       expect(hitsOf(ctx.events).map((hit) => hit.amount)).toEqual([expected]);
@@ -190,7 +191,7 @@ describe('hitWithPayload', () => {
     const ctx = contextOn(stats);
     const p = createPayload({ ...signaturePayload(ctx), canCrit: false });
     const before = p.rng.snapshot();
-    hitWithPayload(ctx, ctx.enemies[0] as Enemy, p, 0, 1, null, null, true, -1);
+    hitWithPayload(ctx, ctx.enemies[0] as Enemy, p, 0, 1, null, null, true, 0, -1);
     expect(hitsOf(ctx.events)).toMatchObject([
       { crit: false, amount: 10, tags: TAG.hit | TAG.projectile },
     ]);

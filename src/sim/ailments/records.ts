@@ -1,14 +1,20 @@
 /**
- * Burn stacks (docs/GDD.md §2–3): applying, expiring and spreading stacks, and the damage a
- * stack accrues between burn ticks. Shared by hits (ignite), death (pandemic spread),
- * ailments (the burn tick) and targeting (doomed). The per-tick burn update is the ailments
- * system (src/sim/systems/ailments.ts).
+ * Burn records (docs/GDD.md §2–3): applying, expiring and spreading burn stacks, one record per
+ * stack, and the damage a stack accrues between burn ticks. Shared by hits (ignite), triggered
+ * effects (applyAilment, spreadAilment; src/sim/effects/), rule modules (pandemic's spread),
+ * ailments (the burn tick), targeting (doomed) and the trigger conditions (holdsBurn,
+ * liveBurnStacks). The per-tick burn update is the ailments system
+ * (src/sim/systems/ailments.ts).
+ *
+ * Each stack keeps the trigger depth of what applied it, and the enemy keeps the lowest depth of
+ * any ailment ever applied to it (Enemy.ailDepth): a kill by damage over time carries that depth,
+ * so chains of triggers through ailments stay bounded (MAX_DEPTH in src/sim/effects/types.ts).
  */
 
 import type { Num } from '../../core/num';
 import { add, lt, lte, mul, ZERO } from '../../core/num';
+import type { BurnStack, Enemy, RunContext } from '../systems/context';
 import { DT } from '../types';
-import type { BurnStack, Enemy, RunContext } from './context';
 
 /** Burn damage is dealt on a global cadence of this many ticks (0.25 s). */
 export const BURN_TICK_INTERVAL = 15;
@@ -32,6 +38,25 @@ export function doomed(ctx: RunContext, enemy: Enemy): boolean {
   return lte(enemy.hp, left);
 }
 
+/**
+ * The enemy holds burn at tick `now`: one of its stacks has not ended yet. A stack that ended
+ * leaves only damage pending (burnPending), which does not count. This is what spreadBurns
+ * tests after expireBurns, read without expiring anything, so a condition has no side effect.
+ */
+export function holdsBurn(enemy: Enemy, now: number): boolean {
+  const burns = enemy.burns;
+  for (let s = 0; s < burns.length; s++) if ((burns[s] as BurnStack).end > now) return true;
+  return false;
+}
+
+/** The enemy's burn stacks that have not ended at tick `now`. */
+export function liveBurnStacks(enemy: Enemy, now: number): number {
+  const burns = enemy.burns;
+  let live = 0;
+  for (let s = 0; s < burns.length; s++) if ((burns[s] as BurnStack).end > now) live++;
+  return live;
+}
+
 /** Moves ended stacks into burnPending and recomputes burnNextEnd. */
 export function expireBurns(ctx: RunContext, enemy: Enemy): void {
   const now = ctx.now;
@@ -52,13 +77,17 @@ export function expireBurns(ctx: RunContext, enemy: Enemy): void {
   enemy.burnStacks = kept;
 }
 
-/** Adds a stack ending at tick `end` (spread stacks keep their source's end). */
-export function addBurn(ctx: RunContext, enemy: Enemy, dps: Num, end: number): void {
+/**
+ * Adds a stack ending at tick `end` (spread stacks keep their source's end), applied at trigger
+ * depth `depth`.
+ */
+export function addBurn(ctx: RunContext, enemy: Enemy, dps: Num, end: number, depth: number): void {
   const now = ctx.now;
   if (now >= enemy.burnNextEnd) expireBurns(ctx, enemy);
+  if (depth < enemy.ailDepth) enemy.ailDepth = depth;
   const burns = enemy.burns;
   if (burns.length < ctx.burnCap) {
-    burns.push({ dps, start: now, end });
+    burns.push({ dps, start: now, end, depth });
     if (end < enemy.burnNextEnd) enemy.burnNextEnd = end;
   } else {
     // At the cap, replace the stack with the least remaining damage (first on ties).
@@ -76,6 +105,7 @@ export function addBurn(ctx: RunContext, enemy: Enemy, dps: Num, end: number): v
     weakest.dps = dps;
     weakest.start = now;
     weakest.end = end;
+    weakest.depth = depth;
     let nextEnd = Infinity;
     for (let i = 0; i < burns.length; i++) {
       const stackEnd = (burns[i] as BurnStack).end;
@@ -96,11 +126,17 @@ export interface BurnSpread {
 }
 
 /**
- * pandemic (src/sim/rules/pandemicLegacy.ts): copies the dying enemy's active stacks (same end,
- * effect × damage) onto every alive enemy within the spread radius, in id order. Spread stacks
- * spread again, weaker each time.
+ * Copies `source`'s active stacks (same end, effect × damage) onto every alive enemy within the
+ * spread radius, in id order, at trigger depth `depth`: pandemic
+ * (src/sim/rules/pandemicLegacy.ts) and the spreadAilment effect (src/sim/effects/execute.ts).
+ * Spread stacks spread again, weaker each time.
  */
-export function spreadBurns(ctx: RunContext, source: Enemy, spread: BurnSpread): void {
+export function spreadBurns(
+  ctx: RunContext,
+  source: Enemy,
+  spread: BurnSpread,
+  depth: number,
+): void {
   if (ctx.now >= source.burnNextEnd) expireBurns(ctx, source);
   const burns = source.burns;
   if (burns.length === 0) return;
@@ -113,7 +149,7 @@ export function spreadBurns(ctx: RunContext, source: Enemy, spread: BurnSpread):
     if (enemy === source) continue;
     for (let s = 0; s < burns.length; s++) {
       const stack = burns[s] as BurnStack;
-      addBurn(ctx, enemy, mul(stack.dps, spread.effect), stack.end);
+      addBurn(ctx, enemy, mul(stack.dps, spread.effect), stack.end, depth);
     }
     spreadTo++;
   }

@@ -6,7 +6,7 @@
 import type { SourceSelector } from './sources';
 import { TAG } from './tags';
 import type { DamageTag } from './tags';
-import type { ScalingSpec } from './triggers';
+import type { ScalingSpec, TargetCondition, TriggerSpec } from './triggers';
 
 export const STAT_IDS = [
   /** Flat base damage per attack. Damage modifiers may carry tags; see src/data/tags.ts. */
@@ -78,9 +78,9 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
 export const DAMAGE_TAG_BIT = TAG;
 
 /**
- * Stats whose modifiers may carry tags, notTags, a scope and a scaling: their value depends on
- * the damage instance, so the simulation reads them from ModTable rows keyed by the instance's
- * tags and source (src/sim/build/modTable.ts). A row holds them in this order.
+ * Stats whose modifiers may carry tags, notTags, a scope, conditions and a scaling: their value
+ * depends on the damage instance, so the simulation reads them from ModTable rows keyed by the
+ * instance's tags and source (src/sim/build/modTable.ts). A row holds them in this order.
  */
 export const SCOPED_STATS = [
   'damage',
@@ -104,8 +104,8 @@ export type ModifierKind = 'flat' | 'increased' | 'more';
  * `flat` adds to the base, `increased` values add together, `more` values multiply:
  * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more).
  * `value` is a fraction for increased/more (0.2 = 20%).
- * Only modifiers of SCOPED_STATS may carry tags, notTags, a scope or a scaling, and flat damage
- * never does: it stays in StatBlock.values.damage. An empty list counts as no list.
+ * Only modifiers of SCOPED_STATS may carry tags, notTags, a scope, conditions or a scaling, and
+ * flat damage never does: it stays in StatBlock.values.damage. An empty list counts as no list.
  */
 export interface Modifier {
   readonly stat: StatId;
@@ -117,30 +117,41 @@ export interface Modifier {
   readonly notTags?: readonly DamageTag[];
   /** Sources the damage instance must be credited to (src/data/sources.ts). */
   readonly scope?: SourceSelector;
+  /** Conditions on the instance's target, all of which must hold (src/data/triggers.ts). */
+  readonly when?: readonly TargetCondition[];
   /** The value counts per damage instance, scaled by one of its variables (src/data/triggers.ts). */
   readonly scaling?: ScalingSpec;
 }
 
 /**
  * A modifier that changes how hits play out rather than a number the player reads off the
- * stat list: tags on a stat other than damage, notTags, a scaling, or an ALWAYS_STATS stat. The
- * talent screen leaves it to its node's descKey text, which data validation requires.
+ * stat list: tags on a stat other than damage, notTags, conditions, a scaling, or an
+ * ALWAYS_STATS stat. The talent screen leaves it to its node's descKey text, which data
+ * validation requires.
  */
 export function isBehaviourModifier(mod: Modifier): boolean {
   return (
     ((mod.tags?.length ?? 0) > 0 && mod.stat !== 'damage') ||
     (mod.notTags?.length ?? 0) > 0 ||
+    (mod.when?.length ?? 0) > 0 ||
     mod.scaling !== undefined ||
     (ALWAYS_STATS as readonly StatId[]).includes(mod.stat)
   );
 }
 
+/** A trigger of an allocated node, with the source its damage is credited to. */
+export interface SourcedTrigger {
+  /** Source id (src/data/sources.ts), from the node's id. */
+  readonly source: string;
+  readonly spec: TriggerSpec;
+}
+
 /**
- * Triggers and conversions of the allocated nodes, with their sources. The talent vocabulary
- * has none yet (see docs/v3/implementation-plan-v3.md §2.6–2.7).
+ * Triggers and conversions of the allocated nodes, with their sources, in data order. The
+ * talent vocabulary has no conversions yet (docs/v3/implementation-plan-v3.md §2.7).
  */
 export interface StatExtras {
-  readonly triggers: readonly never[];
+  readonly triggers: readonly SourcedTrigger[];
   readonly conversions: readonly never[];
 }
 
@@ -151,9 +162,9 @@ export interface StatBlock {
   /** Every stat before modifiers: BASE_STATS, or a test's overridden values. */
   readonly base: Readonly<Record<StatId, number>>;
   /**
-   * Final value of every stat from its untagged, unscoped modifiers without a scaling. For
-   * `damage` this is the untagged base (base + Σflat); damage increased/more modifiers count per
-   * damage instance.
+   * Final value of every stat from its untagged, unscoped modifiers without conditions or a
+   * scaling. For `damage` this is the untagged base (base + Σflat); damage increased/more
+   * modifiers count per damage instance.
    */
   readonly values: Readonly<Record<StatId, number>>;
   /**

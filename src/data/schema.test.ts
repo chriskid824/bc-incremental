@@ -3,7 +3,14 @@ import { ENEMIES } from './enemies';
 import { parseGameData } from './index';
 import type { RuleId, RuleSpec } from './rules';
 import { RULE_IDS } from './rules';
-import { GameDataSchema, ModifierSchema, RuleSpecSchema } from './schema';
+import {
+  ConditionSchema,
+  EffectSpecSchema,
+  GameDataSchema,
+  ModifierSchema,
+  RuleSpecSchema,
+  TriggerSpecSchema,
+} from './schema';
 import { TALENTS } from './talents';
 import type { GameData, TalentNode } from './types';
 import { WAVES } from './waves';
@@ -64,11 +71,29 @@ describe('ModifierSchema', () => {
       value: 0.1,
       scaling: { per: 'chainJump', curve: 'pow', exponent: 1.5 },
     },
+    { stat: 'damage', kind: 'more', value: 0.05, scaling: { per: 'targetBurnStacks' } },
+    { stat: 'critChance', kind: 'flat', value: 0.001, scaling: { per: 'targetDistance' } },
+    { stat: 'damage', kind: 'increased', value: 1, scaling: { per: 'lifeLostPct', cap: 0.5 } },
+    { stat: 'damage', kind: 'more', value: 0.3, when: [{ targetHas: 'burn' }] },
+    {
+      stat: 'critChance',
+      kind: 'flat',
+      value: 0.2,
+      tags: ['hit'],
+      when: [{ targetKind: 'boss' }, { targetHpBelow: 0.5 }],
+    },
+    {
+      stat: 'damage',
+      kind: 'increased',
+      value: 0.5,
+      when: [{ stacksAtLeast: { ailment: 'burn', stacks: 3 } }],
+      scaling: { per: 'chainJump' },
+    },
   ])('accepts %o', (modifier) => {
     expect(ModifierSchema.parse(modifier)).toEqual(modifier);
   });
 
-  it.each([
+  it.each<[string, unknown]>([
     [
       'a tag on a stat that is not scoped',
       { stat: 'attackSpeed', kind: 'increased', value: 1, tags: ['crit'] },
@@ -128,6 +153,31 @@ describe('ModifierSchema', () => {
       'an unknown scaling key',
       { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump', step: 2 } },
     ],
+    ...['targetPoisonStacks', 'targetShockStacks', 'targetFrost'].map((per): [string, unknown] => [
+      `the scaling variable ${per}, which lands with its ailment`,
+      { stat: 'damage', kind: 'more', value: 0.1, scaling: { per } },
+    ]),
+    [
+      'conditions on a stat that is not scoped',
+      { stat: 'attackSpeed', kind: 'more', value: 0.1, when: [{ targetHas: 'burn' }] },
+    ],
+    [
+      'conditions on flat damage',
+      { stat: 'damage', kind: 'flat', value: 5, when: [{ targetKind: 'elite' }] },
+    ],
+    ['empty conditions', { stat: 'damage', kind: 'more', value: 0.1, when: [] }],
+    [
+      'a trigger condition on a modifier',
+      { stat: 'damage', kind: 'more', value: 0.1, when: [{ chance: 0.5 }] },
+    ],
+    [
+      'a kill condition on a modifier',
+      { stat: 'damage', kind: 'more', value: 0.1, when: [{ victimHas: 'burn' }] },
+    ],
+    [
+      'an ailment that has no condition reader yet',
+      { stat: 'damage', kind: 'more', value: 0.1, when: [{ targetHas: 'poison' }] },
+    ],
     ['an unknown stat', { stat: 'armour', kind: 'flat', value: 1 }],
     ['an unknown kind', { stat: 'damage', kind: 'added', value: 1 }],
     ['an infinite value', { stat: 'damage', kind: 'flat', value: Infinity }],
@@ -184,6 +234,114 @@ describe('ModifierSchema', () => {
   });
 });
 
+describe('ConditionSchema', () => {
+  it.each([
+    { targetHas: 'burn' },
+    { targetKind: 'normal' },
+    { targetKind: 'elite' },
+    { targetKind: 'boss' },
+    { targetHpBelow: 0.3 },
+    { stacksAtLeast: { ailment: 'burn', stacks: 4 } },
+    { chance: 0.25 },
+    { cooldownSec: 2 },
+    ...['crit', 'nonCrit', 'primary', 'chainJump', 'signature'].map((hitIs) => ({ hitIs })),
+    { victimHas: 'burn' },
+    { killedBy: 'hit' },
+    { killedBy: 'burn' },
+  ])('accepts %o', (condition) => {
+    expect(ConditionSchema.parse(condition)).toEqual(condition);
+  });
+
+  it.each([
+    ...['poison', 'bleed', 'shock', 'frost', 'frozen'].flatMap((ailment) => [
+      { targetHas: ailment },
+      { victimHas: ailment },
+      { stacksAtLeast: { ailment, stacks: 1 } },
+    ]),
+    { killedBy: 'poison' },
+    { killedBy: 'bleed' },
+    { targetKind: 'minion' },
+    { hitIs: 'dot' },
+    { ailment: 'burn' },
+    { chance: 0.5, cooldownSec: 1 },
+    {},
+  ])('rejects %o', (condition) => {
+    expect(ConditionSchema.safeParse(condition).success).toBe(false);
+  });
+});
+
+describe('EffectSpecSchema', () => {
+  it.each([
+    { kind: 'applyAilment', ailment: 'burn' },
+    {
+      kind: 'applyAilment',
+      ailment: 'burn',
+      stacks: 2,
+      damagePct: 0.5,
+      radius: 120,
+      maxTargets: 3,
+    },
+    { kind: 'spreadAilment', ailment: 'burn', radius: 250 },
+    { kind: 'spreadAilment', ailment: 'burn', radius: 250, effect: 0.4 },
+    { kind: 'explode', radius: 90, damagePct: 0.5 },
+    { kind: 'explode', radius: 90, damagePct: 2, maxTargets: 5, tags: ['strike'], element: 'cold' },
+    { kind: 'nova', radius: 200, damagePct: 1 },
+    { kind: 'nova', radius: 200, damagePct: 1, at: 'event', element: 'lightning' },
+    { kind: 'nova', radius: 200, damagePct: 1, at: 'player' },
+    { kind: 'push', distance: 60, radius: 150 },
+    { kind: 'heal', lifePct: 0.05 },
+    { kind: 'gainShards', fraction: 0.5 },
+  ])('accepts %o', (effect) => {
+    expect(EffectSpecSchema.parse(effect)).toEqual(effect);
+  });
+
+  it.each<[string, unknown]>([
+    [
+      'spreadAilment burn with stacks',
+      { kind: 'spreadAilment', ailment: 'burn', radius: 250, stacks: 0.5 },
+    ],
+    [
+      'spreadAilment burn with maxTargets',
+      { kind: 'spreadAilment', ailment: 'burn', radius: 250, maxTargets: 3 },
+    ],
+    ...['poison', 'bleed', 'shock'].map((ailment): [string, unknown] => [
+      `applyAilment ${ailment}`,
+      { kind: 'applyAilment', ailment },
+    ]),
+    ['spreadAilment poison', { kind: 'spreadAilment', ailment: 'poison', radius: 100 }],
+    ['addFrost', { kind: 'addFrost', amount: 0.2 }],
+    ['detonate', { kind: 'detonate', ailment: 'burn', radius: 100 }],
+    ['explode without a radius', { kind: 'explode', damagePct: 0.5 }],
+    ['nova at an unknown point', { kind: 'nova', radius: 100, damagePct: 1, at: 'target' }],
+    ['an element that is not one', { kind: 'nova', radius: 100, damagePct: 1, element: 'fire' }],
+    ['an unknown key', { kind: 'heal', lifePct: 0.1, amount: 1 }],
+  ])('rejects %s', (_label, effect) => {
+    expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
+  });
+});
+
+describe('TriggerSpecSchema', () => {
+  it('accepts a trigger with conditions and effects', () => {
+    const trigger = {
+      on: 'crit',
+      when: [{ chance: 0.3 }, { targetHas: 'burn' }],
+      do: [{ kind: 'explode', radius: 90, damagePct: 0.5 }],
+    };
+    expect(TriggerSpecSchema.parse(trigger)).toEqual(trigger);
+    const periodic = { on: 'periodic', every: 8, do: [{ kind: 'heal', lifePct: 0.05 }] };
+    expect(TriggerSpecSchema.parse(periodic)).toEqual(periodic);
+  });
+
+  it.each([
+    ['an unknown event', { on: 'tick', do: [{ kind: 'heal', lifePct: 0.1 }] }],
+    ['no effect list', { on: 'kill' }],
+    ['an unknown effect', { on: 'kill', do: [{ kind: 'detonate' }] }],
+    ['an unknown key', { on: 'kill', do: [], target: 'nearest' }],
+  ])('rejects %s', (_label, trigger) => {
+    expect(TriggerSpecSchema.safeParse(trigger).success).toBe(false);
+  });
+});
+
 describe('RuleSpecSchema', () => {
   it('accepts every rule id with its parameters', () => {
     for (const id of RULE_IDS) {
@@ -230,6 +388,24 @@ describe('GameDataSchema', () => {
 
     const unknown = { ...content(), enemies: { ...ENEMIES, circle: ENEMIES.square } };
     expect(GameDataSchema.safeParse(unknown).success).toBe(false);
+  });
+
+  it('accepts triggers on a talent and rejects any conversion', () => {
+    const triggers = content();
+    Object.assign(talentAt(triggers, 'vitality')[1], {
+      triggers: [{ on: 'kill', do: [{ kind: 'gainShards', fraction: 0.2 }] }],
+    });
+    expect(GameDataSchema.safeParse(triggers).success).toBe(true);
+
+    const conversions = content();
+    Object.assign(talentAt(conversions, 'vitality')[1], {
+      conversions: [{ to: 'poison', fraction: 0.3 }],
+    });
+    expect(GameDataSchema.safeParse(conversions).success).toBe(false);
+
+    const missing = content();
+    Reflect.deleteProperty(talentAt(missing, 'vitality')[1], 'triggers');
+    expect(GameDataSchema.safeParse(missing).success).toBe(false);
   });
 
   it('rejects unknown talent kinds and archetypes', () => {

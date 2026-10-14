@@ -3,11 +3,15 @@
  * shuffling each wave's enemies into its spawn queue, and records cleared waves.
  */
 
+import { ZERO } from '../../core/num';
 import { composeWave } from '../../data/compose';
 import { shardsPerStdEnemy, stdHp } from '../../data/curve';
 import type { EnemyDef } from '../../data/types';
+import { fire } from '../effects/dispatch';
+import { EVENT } from '../effects/types';
 import type { RunContext, WaveRecord } from './context';
 
+/** Starts wave `wave`: its spawn queue, its record, and the waveStart triggers at the player. */
 export function startWave(ctx: RunContext, wave: number): void {
   const queue: EnemyDef[] = [];
   for (const entry of composeWave(wave, ctx.data.waves)) {
@@ -38,6 +42,8 @@ export function startWave(ctx: RunContext, wave: number): void {
   state.wave = wave;
   state.highestWaveReached = wave;
   ctx.events.push({ type: 'waveStarted', wave });
+  const player = ctx.player;
+  fire(ctx, EVENT.waveStart, 0, -1, null, player.x, player.y, 0, ZERO);
 }
 
 /**

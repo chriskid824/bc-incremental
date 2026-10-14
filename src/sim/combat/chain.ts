@@ -37,8 +37,8 @@ function nearestChainTarget(ctx: RunContext, x: number, y: number): Enemy | null
 /**
  * One attack of payload `p` on `primary`: the primary hit, then `count` chain jumps (its
  * fraction is the chance of one more, rolled on the payload's stream) when the payload chains.
- * A steady shot (steadyAim) crits on every hit, chain jumps included; `origin` is the trigger
- * the attack comes from (−1 for emitters).
+ * A steady shot (steadyAim) crits on every hit, chain jumps included; `depth` and `origin` are
+ * the trigger depth of its hits and the trigger the attack comes from (0 and −1 for emitters).
  */
 export function chainAttack(
   ctx: RunContext,
@@ -46,6 +46,7 @@ export function chainAttack(
   primary: Enemy,
   count: number,
   steady: boolean,
+  depth: number,
   origin: number,
 ): void {
   ctx.attackSerial++;
@@ -53,7 +54,7 @@ export function chainAttack(
   budget.hits = 1;
   budget.extraJumps = 0;
   budget.centerEvents = 0;
-  hitWithPayload(ctx, primary, p, 0, 1, null, null, steady, origin);
+  hitWithPayload(ctx, primary, p, 0, 1, null, null, steady, depth, origin);
   if (!p.chains) return;
   const rng = p.rng;
   const jumps = rollCount(count, (c) => rng.chance(c));
@@ -65,7 +66,7 @@ export function chainAttack(
     if (next === null) break;
     retention *= ctx.chainRetention;
     budget.hits++;
-    hitWithPayload(ctx, next, p, k, retention, fromX, fromY, steady, origin);
+    hitWithPayload(ctx, next, p, k, retention, fromX, fromY, steady, depth, origin);
     fromX = next.x;
     fromY = next.y;
   }

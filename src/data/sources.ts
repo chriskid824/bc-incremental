@@ -95,8 +95,11 @@ export const AILMENT_OUTER: Readonly<Record<AilmentKind, OuterId>> = {
 };
 
 /**
- * The tag each archetype's damage carries. A board's ★ damage modifier must carry it (or scope
- * itself to 'outer.<board>'); combo, barrage and greed have no tag of their own and must scope.
+ * The tags each archetype's damage carries. On an outer board's ★, every damage modifier that
+ * adds damage (value > 0, those its rules add included) must carry one of the board's tags or
+ * scope itself to 'outer.<board>'; costs (value < 0) are free (starArchetypeIssues,
+ * src/data/validate.ts). Combo, barrage and greed have no tag of their own, so their ★ bonuses
+ * must scope.
  */
 export const ARCHETYPE_TAGS: Readonly<Partial<Record<OuterId, readonly DamageTag[]>>> = {
   fire: ['burn'],

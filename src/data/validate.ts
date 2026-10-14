@@ -5,8 +5,18 @@
  */
 
 import type { RuleSpec } from './rules';
+import { ARCHETYPE_TAGS, sourceOfNode } from './sources';
 import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
+import { DELIVERY_MASK, TAG } from './tags';
+import {
+  CONDITION_CONTEXTS,
+  conditionKey,
+  TARGETLESS_EVENTS,
+  TRANSFER_EFFECTS,
+  WIRED_EVENTS,
+} from './triggers';
+import type { Condition, EffectSpec, TriggerEventId, TriggerSpec } from './triggers';
 import { ENEMY_IDS } from './types';
 import type { EnemyDef, EnemyId, GameData, TalentNode, WaveTable } from './types';
 
@@ -18,6 +28,21 @@ const SPECIAL_ENEMIES: readonly EnemyId[] = ['hexagon', 'boss'];
 
 const isPositiveInt = (n: number): boolean => Number.isInteger(n) && n > 0;
 const isNonNegativeInt = (n: number): boolean => Number.isInteger(n) && n >= 0;
+
+/**
+ * A node whose descKey text the talent screen shows: it has rules, triggers, conversions or
+ * behaviour modifiers, which the screen cannot describe from numbers alone.
+ */
+export function needsDescKey(
+  node: Pick<TalentNode, 'modifiers' | 'rules' | 'triggers' | 'conversions'>,
+): boolean {
+  return (
+    node.rules.length > 0 ||
+    node.triggers.length > 0 ||
+    node.conversions.length > 0 ||
+    node.modifiers.some(isBehaviourModifier)
+  );
+}
 
 /** Returns human-readable issues; an empty list means the data is valid. */
 export function validateGameData(data: GameData): string[] {
@@ -177,10 +202,16 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
       }
     }
 
-    // Behaviour modifiers change how hits play out, as rules do (Searing Crits is data).
+    // Triggers and behaviour modifiers change how a run plays, as rules do (Searing Crits is
+    // data).
     const behaviour = node.modifiers.some(isBehaviourModifier);
-    if (node.kind === 'keystone' && node.rules.length === 0 && !behaviour) {
-      issues.push(`${at}: keystone needs a rule or a behaviour modifier`);
+    if (
+      node.kind === 'keystone' &&
+      node.rules.length === 0 &&
+      node.triggers.length === 0 &&
+      !behaviour
+    ) {
+      issues.push(`${at}: keystone needs a rule, a trigger or a behaviour modifier`);
     }
     if (node.kind !== 'keystone' && node.kind !== 'notable' && node.rules.length > 0) {
       issues.push(`${at}: only keystones and notables may have rules`);
@@ -194,6 +225,9 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     node.modifiers.forEach((mod, i) => {
       for (const problem of modifierIssues(mod)) issues.push(`${at}: modifiers[${i}] ${problem}`);
     });
+    node.triggers.forEach((trigger, i) => {
+      for (const problem of triggerIssues(trigger)) issues.push(`${at}: triggers[${i}] ${problem}`);
+    });
 
     if (node.shardCostFactor !== undefined && !(node.shardCostFactor >= 0)) {
       issues.push(`${at}: shardCostFactor must be >= 0 (got ${node.shardCostFactor})`);
@@ -203,13 +237,15 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     }
     if (node.nameKey === '') issues.push(`${at}: empty nameKey`);
     if (node.descKey === '') issues.push(`${at}: empty descKey`);
-    // The talent screen lists plain modifiers itself; descKey covers rules and behaviour.
-    const described = node.rules.length > 0 || behaviour;
+    // The talent screen lists plain modifiers itself; descKey covers everything else.
+    const described = needsDescKey(node);
     if (described && node.descKey === undefined) {
-      issues.push(`${at}: a node with rules or behaviour modifiers needs a descKey`);
+      issues.push(`${at}: a node with rules, triggers or behaviour modifiers needs a descKey`);
     }
     if (!described && node.descKey !== undefined) {
-      issues.push(`${at}: descKey describes rules and behaviour modifiers; this node has neither`);
+      issues.push(
+        `${at}: descKey describes rules, triggers and behaviour modifiers; this node has none`,
+      );
     }
   }
 
@@ -273,9 +309,15 @@ function ruleIssues(rule: RuleSpec): string[] {
   return issues;
 }
 
-/** Ranges of a modifier's scaling (src/data/triggers.ts); the simulation relies on them. */
+/**
+ * Ranges of a modifier's conditions and scaling (src/data/triggers.ts); the simulation relies on
+ * them.
+ */
 function modifierIssues(mod: Modifier): string[] {
   const issues: string[] = [];
+  (mod.when ?? []).forEach((condition, i) => {
+    for (const problem of conditionIssues(condition)) issues.push(`when[${i}] ${problem}`);
+  });
   const scaling = mod.scaling;
   if (scaling === undefined) return issues;
   if (scaling.every !== undefined && !(scaling.every > 0)) {
@@ -286,4 +328,201 @@ function modifierIssues(mod: Modifier): string[] {
     issues.push(`scaling.exponent must be > 0 (got ${scaling.exponent})`);
   }
   return issues;
+}
+
+/** Value ranges of one condition. */
+function conditionIssues(condition: Condition): string[] {
+  const issues: string[] = [];
+  if ('chance' in condition && !(condition.chance > 0 && condition.chance <= 1)) {
+    issues.push(`chance must be in (0, 1] (got ${condition.chance})`);
+  }
+  if ('cooldownSec' in condition && !(condition.cooldownSec > 0)) {
+    issues.push(`cooldownSec must be > 0 (got ${condition.cooldownSec})`);
+  }
+  if (
+    'targetHpBelow' in condition &&
+    !(condition.targetHpBelow > 0 && condition.targetHpBelow <= 1)
+  ) {
+    issues.push(`targetHpBelow must be in (0, 1] (got ${condition.targetHpBelow})`);
+  }
+  if ('stacksAtLeast' in condition && !isPositiveInt(condition.stacksAtLeast.stacks)) {
+    issues.push(
+      `stacksAtLeast.stacks must be a positive integer (got ${condition.stacksAtLeast.stacks})`,
+    );
+  }
+  return issues;
+}
+
+const KILL_EVENTS: readonly TriggerEventId[] = ['kill', 'diedWithAilment'];
+
+/** Events whose `every` is required or allowed, and what it must be. */
+function everyIssues(trigger: TriggerSpec): string[] {
+  const { on, every } = trigger;
+  if (on === 'nthAttack') {
+    return every === undefined || isPositiveInt(every)
+      ? []
+      : [`every must be a positive integer on nthAttack (got ${every})`];
+  }
+  if (on === 'periodic') {
+    return every !== undefined && every > 0
+      ? []
+      : [`every must be > 0 seconds on periodic (got ${every})`];
+  }
+  return every === undefined ? [] : [`every is only allowed on nthAttack and periodic (on ${on})`];
+}
+
+/**
+ * Event, conditions and effects of one trigger: the simulation raises the event, each condition
+ * fits it (CONDITION_CONTEXTS), and each effect can run there.
+ */
+function triggerIssues(trigger: TriggerSpec): string[] {
+  const issues: string[] = [];
+  const on = trigger.on;
+  if (!WIRED_EVENTS.has(on)) issues.push(`event '${on}' is not raised by the simulation yet`);
+  issues.push(...everyIssues(trigger));
+  const counts = new Map<string, number>();
+  (trigger.when ?? []).forEach((condition, i) => {
+    const key = conditionKey(condition);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (!CONDITION_CONTEXTS[key].includes(on)) {
+      issues.push(`when[${i}] ${key} does not apply to '${on}' events`);
+    }
+    for (const problem of conditionIssues(condition)) issues.push(`when[${i}] ${problem}`);
+  });
+  for (const key of ['chance', 'cooldownSec']) {
+    if ((counts.get(key) ?? 0) > 1) issues.push(`at most one ${key} condition`);
+  }
+
+  if (trigger.do.length === 0) issues.push('needs at least one effect');
+  const kill = KILL_EVENTS.includes(on);
+  const transfers = trigger.do.filter((effect) => TRANSFER_EFFECTS.has(effect.kind)).length;
+  // A kill trigger runs at the kill only when all of its effects are transfers.
+  if (kill && transfers > 0 && transfers < trigger.do.length) {
+    issues.push('mixes transfer and other effects on a kill event; split it into two triggers');
+  }
+  trigger.do.forEach((effect, i) => {
+    for (const problem of effectIssues(effect, on)) issues.push(`do[${i}] ${problem}`);
+  });
+  return issues;
+}
+
+/** Parameter ranges of one effect, and whether it can run on events `on`. */
+function effectIssues(effect: EffectSpec, on: TriggerEventId): string[] {
+  const issues: string[] = [];
+  const positive = (name: string, value: number | undefined): void => {
+    if (value !== undefined && !(value > 0)) issues.push(`${name} must be > 0 (got ${value})`);
+  };
+  const nonNegative = (name: string, value: number | undefined): void => {
+    if (value !== undefined && !(value >= 0)) issues.push(`${name} must be >= 0 (got ${value})`);
+  };
+  const count = (name: string, value: number | undefined): void => {
+    if (value !== undefined && !isPositiveInt(value)) {
+      issues.push(`${name} must be a positive integer (got ${value})`);
+    }
+  };
+  const delivery = (tags: readonly string[] | undefined): void => {
+    if (tags === undefined) return;
+    if (tags.length === 0 || new Set(tags).size !== tags.length) {
+      issues.push('tags must be unique and not empty; omit the field instead');
+    }
+    for (const tag of tags) {
+      if ((TAG[tag as keyof typeof TAG] & DELIVERY_MASK) === 0) {
+        issues.push(`tag '${tag}' is not an owner or geometry tag`);
+      }
+    }
+  };
+  // The event's enemy: none on targetless events, gone once a kill trigger's effects run
+  // (transfers run at the kill, before it is gone), and gone by the time a contact trigger's
+  // effects run, since a touching enemy leaks or dies at its touch.
+  const needsTarget =
+    (effect.kind === 'applyAilment' && effect.radius === undefined) ||
+    effect.kind === 'spreadAilment';
+  if (needsTarget && TARGETLESS_EVENTS.has(on)) {
+    issues.push(`${effect.kind} needs the event's enemy, which '${on}' events have not`);
+  } else if (needsTarget && on === 'contact') {
+    issues.push(`${effect.kind} needs the event's enemy, which has left by the time it runs`);
+  } else if (needsTarget && effect.kind === 'applyAilment' && KILL_EVENTS.includes(on)) {
+    issues.push(`applyAilment needs a radius on '${on}' events, whose enemy is dead`);
+  }
+  switch (effect.kind) {
+    case 'applyAilment':
+      count('stacks', effect.stacks);
+      nonNegative('damagePct', effect.damagePct);
+      positive('radius', effect.radius);
+      count('maxTargets', effect.maxTargets);
+      if (effect.maxTargets !== undefined && effect.radius === undefined) {
+        issues.push('maxTargets needs a radius');
+      }
+      break;
+    case 'spreadAilment':
+      positive('radius', effect.radius);
+      if (effect.effect !== undefined && !(effect.effect >= 0 && effect.effect <= 1)) {
+        issues.push(`effect must be in [0, 1] (got ${effect.effect})`);
+      }
+      break;
+    case 'explode':
+      positive('radius', effect.radius);
+      nonNegative('damagePct', effect.damagePct);
+      count('maxTargets', effect.maxTargets);
+      delivery(effect.tags);
+      break;
+    case 'nova':
+      positive('radius', effect.radius);
+      nonNegative('damagePct', effect.damagePct);
+      delivery(effect.tags);
+      break;
+    case 'push':
+      positive('distance', effect.distance);
+      positive('radius', effect.radius);
+      break;
+    case 'heal':
+      positive('lifePct', effect.lifePct);
+      break;
+    case 'gainShards':
+      positive('fraction', effect.fraction);
+      // It reads the dying enemy's drop.
+      if (!KILL_EVENTS.includes(on)) issues.push(`gainShards only runs on kill events (on ${on})`);
+      break;
+  }
+  return issues;
+}
+
+/** The damage modifiers a rule's module adds (src/sim/rules/), for the ★ check below. */
+function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
+  switch (rule.id) {
+    case 'overload':
+      return rule.chainMore === undefined
+        ? []
+        : [{ stat: 'damage', kind: 'more', value: rule.chainMore, tags: ['chain', 'hit'] }];
+    case 'glassCannon':
+      return [{ stat: 'damage', kind: 'more', value: rule.damageMore }];
+    case 'pandemic':
+      return [{ stat: 'damage', kind: 'more', value: rule.hitMore, tags: ['hit'] }];
+    case 'steadyAim':
+    case 'eternalFlame':
+      return [];
+  }
+}
+
+/**
+ * The archetype rule of an outer board's ★ (docs/v3/game-design-v3.md §2.2): on a keystone of
+ * board 'outer.<o>', every damage modifier that adds damage (value > 0), those its rules add
+ * included, carries one of the board's archetype tags (ARCHETYPE_TAGS) or is scoped to
+ * 'outer.<o>'. Costs (value < 0) and every other node are exempt. Content validation runs it
+ * from the fusion generator step on; until then it is checked on fixtures only.
+ */
+export function starArchetypeIssues(node: TalentNode): string[] {
+  const source = sourceOfNode(node.id);
+  if (node.kind !== 'keystone' || !source.startsWith('outer.')) return [];
+  const board = source.slice('outer.'.length) as keyof typeof ARCHETYPE_TAGS;
+  const tags = ARCHETYPE_TAGS[board] ?? [];
+  const damage = [...node.modifiers, ...node.rules.flatMap(ruleDamageModifiers)];
+  return damage
+    .filter((mod) => mod.stat === 'damage' && mod.value > 0)
+    .filter((mod) => mod.scope !== source && !tags.some((tag) => mod.tags?.includes(tag)))
+    .map(
+      (mod) =>
+        `talent '${node.id}': ★ damage modifier ${JSON.stringify(mod)} needs a tag of ` +
+        `${source} (${tags.join(', ') || 'none'}) or scope '${source}'`,
+    );
 }

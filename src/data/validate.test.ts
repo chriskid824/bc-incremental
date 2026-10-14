@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { ENEMIES } from './enemies';
 import { loadGameData, parseGameData } from './index';
 import { TALENTS } from './talents';
+import type { Modifier } from './stats';
+import type { TriggerSpec } from './triggers';
 import type { GameData, TalentNode } from './types';
-import { MAX_KEYSTONES, validateGameData } from './validate';
+import { MAX_KEYSTONES, starArchetypeIssues, validateGameData } from './validate';
 import { WAVES } from './waves';
 
 type Mutable<T> = T extends readonly (infer U)[]
@@ -29,6 +31,8 @@ function smallNode(id: string, links: string[]): Mutable<TalentNode> {
     links,
     modifiers: [],
     rules: [],
+    triggers: [],
+    conversions: [],
     archetype: 'none',
     nameKey: `talent.${id}.name`,
   };
@@ -161,7 +165,7 @@ describe('validateGameData: talents', () => {
       issuesAfter((d) => talent(d, 'vitality').rules.push({ id: 'glassCannon', damageMore: 1 })),
     ).toEqual([
       "talent 'vitality': only keystones and notables may have rules",
-      "talent 'vitality': a node with rules or behaviour modifiers needs a descKey",
+      "talent 'vitality': a node with rules, triggers or behaviour modifiers needs a descKey",
     ]);
     expect(
       issuesAfter((d) => {
@@ -169,7 +173,7 @@ describe('validateGameData: talents', () => {
         node.rules = [];
         delete node.descKey;
       }),
-    ).toEqual(["talent 'glassCannon': keystone needs a rule or a behaviour modifier"]);
+    ).toEqual(["talent 'glassCannon': keystone needs a rule, a trigger or a behaviour modifier"]);
   });
 
   it('accepts a keystone whose behaviour is all modifiers (Searing Crits)', () => {
@@ -182,8 +186,8 @@ describe('validateGameData: talents', () => {
         talent(d, 'searingCrits').modifiers = [{ stat: 'damage', kind: 'more', value: -0.5 }];
       }),
     ).toEqual([
-      "talent 'searingCrits': keystone needs a rule or a behaviour modifier",
-      "talent 'searingCrits': descKey describes rules and behaviour modifiers; this node has neither",
+      "talent 'searingCrits': keystone needs a rule, a trigger or a behaviour modifier",
+      "talent 'searingCrits': descKey describes rules, triggers and behaviour modifiers; this node has none",
     ]);
   });
 
@@ -243,12 +247,12 @@ describe('validateGameData: talents', () => {
       });
     });
     expect(issues).toEqual([
-      "talent 'glassCannon': a node with rules or behaviour modifiers needs a descKey",
-      "talent 'vitality': descKey describes rules and behaviour modifiers; this node has neither",
-      "talent 'keenEye': a node with rules or behaviour modifiers needs a descKey",
-      "talent 'precision': a node with rules or behaviour modifiers needs a descKey",
-      "talent 'kindling': a node with rules or behaviour modifiers needs a descKey",
-      "talent 'staticFocus': a node with rules or behaviour modifiers needs a descKey",
+      "talent 'glassCannon': a node with rules, triggers or behaviour modifiers needs a descKey",
+      "talent 'vitality': descKey describes rules, triggers and behaviour modifiers; this node has none",
+      "talent 'keenEye': a node with rules, triggers or behaviour modifiers needs a descKey",
+      "talent 'precision': a node with rules, triggers or behaviour modifiers needs a descKey",
+      "talent 'kindling': a node with rules, triggers or behaviour modifiers needs a descKey",
+      "talent 'staticFocus': a node with rules, triggers or behaviour modifiers needs a descKey",
     ]);
   });
 
@@ -435,6 +439,277 @@ describe('validateGameData: waves', () => {
       'waves: spawnDurationSec must be > 0 (got 0)',
       'waves: waveTimerSec must be > 0 (got -8)',
     ]);
+  });
+});
+
+describe('trigger validation', () => {
+  /** Issues of the real content with `triggers` on 'vitality', which then has its descKey. */
+  const triggerIssues = (...triggers: TriggerSpec[]): string[] =>
+    issuesAfter((d) => {
+      const node = talent(d, 'vitality');
+      node.triggers.push(...(triggers as Mutable<TriggerSpec>[]));
+      node.descKey = 'talent.vitality.desc';
+    });
+  const at = "talent 'vitality': triggers[0]";
+  const explode = { kind: 'explode', radius: 90, damagePct: 0.5 } as const;
+  const heal = { kind: 'heal', lifePct: 0.05 } as const;
+
+  it('accepts triggers on every wired event', () => {
+    expect(
+      triggerIssues(
+        { on: 'hit', when: [{ hitIs: 'primary' }, { targetHpBelow: 0.3 }], do: [explode] },
+        { on: 'crit', when: [{ chance: 0.3 }, { cooldownSec: 1 }], do: [explode] },
+        { on: 'kill', when: [{ killedBy: 'burn' }, { hitIs: 'crit' }], do: [explode] },
+        { on: 'kill', do: [{ kind: 'gainShards', fraction: 0.5 }] },
+        {
+          on: 'diedWithAilment',
+          when: [{ victimHas: 'burn' }],
+          do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 250, effect: 0.4 }],
+        },
+        {
+          on: 'nthAttack',
+          every: 3,
+          when: [{ stacksAtLeast: { ailment: 'burn', stacks: 2 } }],
+          do: [{ kind: 'applyAilment', ailment: 'burn', stacks: 2 }],
+        },
+        { on: 'waveStart', do: [{ kind: 'nova', radius: 300, damagePct: 1 }] },
+        { on: 'periodic', every: 8, do: [heal] },
+        {
+          on: 'heroHit',
+          do: [{ kind: 'applyAilment', ailment: 'burn', radius: 200, maxTargets: 3 }],
+        },
+        {
+          on: 'contact',
+          when: [{ targetKind: 'boss' }],
+          do: [{ kind: 'push', distance: 80, radius: 120 }],
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects an event the simulation does not raise yet', () => {
+    expect(triggerIssues({ on: 'freeze', do: [explode] })).toEqual([
+      `${at} event 'freeze' is not raised by the simulation yet`,
+    ]);
+    expect(triggerIssues({ on: 'ailmentTick', do: [heal] })).toEqual([
+      `${at} event 'ailmentTick' is not raised by the simulation yet`,
+    ]);
+  });
+
+  it('rejects a condition its event cannot check', () => {
+    expect(triggerIssues({ on: 'hit', when: [{ victimHas: 'burn' }], do: [explode] })).toEqual([
+      `${at} when[0] victimHas does not apply to 'hit' events`,
+    ]);
+    // A kill's victim is gone when its triggers run: they read what it held instead.
+    expect(triggerIssues({ on: 'kill', when: [{ targetHas: 'burn' }], do: [explode] })).toEqual([
+      `${at} when[0] targetHas does not apply to 'kill' events`,
+    ]);
+    expect(
+      triggerIssues({
+        on: 'nthAttack',
+        when: [{ hitIs: 'crit' }, { killedBy: 'hit' }],
+        do: [heal],
+      }),
+    ).toEqual([
+      `${at} when[0] hitIs does not apply to 'nthAttack' events`,
+      `${at} when[1] killedBy does not apply to 'nthAttack' events`,
+    ]);
+    expect(
+      triggerIssues({ on: 'periodic', every: 5, when: [{ targetKind: 'boss' }], do: [heal] }),
+    ).toEqual([`${at} when[0] targetKind does not apply to 'periodic' events`]);
+  });
+
+  it('rejects condition values out of range and repeated chance or cooldown', () => {
+    expect(
+      triggerIssues({
+        on: 'hit',
+        when: [
+          { chance: 0 },
+          { chance: 1.5 },
+          { cooldownSec: 0 },
+          { targetHpBelow: 0 },
+          { stacksAtLeast: { ailment: 'burn', stacks: 1.5 } },
+        ],
+        do: [explode],
+      }),
+    ).toEqual([
+      `${at} when[0] chance must be in (0, 1] (got 0)`,
+      `${at} when[1] chance must be in (0, 1] (got 1.5)`,
+      `${at} when[2] cooldownSec must be > 0 (got 0)`,
+      `${at} when[3] targetHpBelow must be in (0, 1] (got 0)`,
+      `${at} when[4] stacksAtLeast.stacks must be a positive integer (got 1.5)`,
+      `${at} at most one chance condition`,
+    ]);
+  });
+
+  it('rejects a kill trigger that mixes transfers with other effects', () => {
+    const spread = { kind: 'spreadAilment', ailment: 'burn', radius: 250 } as const;
+    expect(triggerIssues({ on: 'diedWithAilment', do: [spread, explode] })).toEqual([
+      `${at} mixes transfer and other effects on a kill event; split it into two triggers`,
+    ]);
+    expect(
+      triggerIssues({ on: 'diedWithAilment', do: [spread] }, { on: 'kill', do: [explode] }),
+    ).toEqual([]);
+  });
+
+  it('allows gainShards on kill events only', () => {
+    const shards = { kind: 'gainShards', fraction: 0.5 } as const;
+    expect(triggerIssues({ on: 'hit', do: [shards] })).toEqual([
+      `${at} do[0] gainShards only runs on kill events (on hit)`,
+    ]);
+    expect(triggerIssues({ on: 'diedWithAilment', do: [shards] })).toEqual([]);
+  });
+
+  it('rejects effects that need the enemy on events without one', () => {
+    expect(
+      triggerIssues({ on: 'waveStart', do: [{ kind: 'applyAilment', ailment: 'burn' }] }),
+    ).toEqual([
+      `${at} do[0] applyAilment needs the event's enemy, which 'waveStart' events have not`,
+    ]);
+    expect(
+      triggerIssues({
+        on: 'periodic',
+        every: 2,
+        do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 100 }],
+      }),
+    ).toEqual([
+      `${at} do[0] spreadAilment needs the event's enemy, which 'periodic' events have not`,
+    ]);
+    // A kill trigger's queued effects run after the victim is gone.
+    expect(triggerIssues({ on: 'kill', do: [{ kind: 'applyAilment', ailment: 'burn' }] })).toEqual([
+      `${at} do[0] applyAilment needs a radius on 'kill' events, whose enemy is dead`,
+    ]);
+    // A touching enemy leaks (or dies) at its touch, before the contact trigger's effects run.
+    expect(
+      triggerIssues({
+        on: 'contact',
+        do: [
+          { kind: 'applyAilment', ailment: 'burn' },
+          { kind: 'spreadAilment', ailment: 'burn', radius: 100 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] applyAilment needs the event's enemy, which has left by the time it runs`,
+      `${at} do[1] spreadAilment needs the event's enemy, which has left by the time it runs`,
+    ]);
+    expect(
+      triggerIssues({
+        on: 'heroHit',
+        do: [{ kind: 'applyAilment', ailment: 'burn', radius: 150 }],
+      }),
+    ).toEqual([]);
+    expect(
+      triggerIssues({
+        on: 'contact',
+        do: [{ kind: 'applyAilment', ailment: 'burn', radius: 150 }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('checks every per event', () => {
+    expect(triggerIssues({ on: 'nthAttack', every: 1.5, do: [heal] })).toEqual([
+      `${at} every must be a positive integer on nthAttack (got 1.5)`,
+    ]);
+    expect(triggerIssues({ on: 'nthAttack', every: 0, do: [heal] })).toEqual([
+      `${at} every must be a positive integer on nthAttack (got 0)`,
+    ]);
+    expect(triggerIssues({ on: 'periodic', do: [heal] })).toEqual([
+      `${at} every must be > 0 seconds on periodic (got undefined)`,
+    ]);
+    expect(triggerIssues({ on: 'periodic', every: 0, do: [heal] })).toEqual([
+      `${at} every must be > 0 seconds on periodic (got 0)`,
+    ]);
+    expect(triggerIssues({ on: 'kill', every: 2, do: [explode] })).toEqual([
+      `${at} every is only allowed on nthAttack and periodic (on kill)`,
+    ]);
+  });
+
+  it('rejects effect parameters out of range', () => {
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { kind: 'explode', radius: 0, damagePct: -1, tags: ['burn'] },
+          { kind: 'applyAilment', ailment: 'burn', stacks: 0, maxTargets: 2 },
+          { kind: 'spreadAilment', ailment: 'burn', radius: 100, effect: 1.5 },
+          { kind: 'push', distance: 0, radius: 100 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] radius must be > 0 (got 0)`,
+      `${at} do[0] damagePct must be >= 0 (got -1)`,
+      `${at} do[0] tag 'burn' is not an owner or geometry tag`,
+      `${at} do[1] stacks must be a positive integer (got 0)`,
+      `${at} do[1] maxTargets needs a radius`,
+      `${at} do[2] effect must be in [0, 1] (got 1.5)`,
+      `${at} do[3] distance must be > 0 (got 0)`,
+    ]);
+    expect(triggerIssues({ on: 'hit', do: [] })).toEqual([`${at} needs at least one effect`]);
+  });
+
+  it('accepts a keystone whose behaviour is a trigger, and needs a descKey for one', () => {
+    expect(
+      issuesAfter((d) => {
+        const node = talent(d, 'glassCannon');
+        node.rules = [];
+        node.triggers = [{ on: 'kill', do: [explode] }];
+      }),
+    ).toEqual([]);
+    expect(
+      issuesAfter((d) => talent(d, 'vitality').triggers.push({ on: 'kill', do: [explode] })),
+    ).toEqual([
+      "talent 'vitality': a node with rules, triggers or behaviour modifiers needs a descKey",
+    ]);
+  });
+});
+
+describe('starArchetypeIssues (outer board ★, on fixtures)', () => {
+  const star = (
+    id: string,
+    modifiers: Modifier[],
+    rules: TalentNode['rules'] = [],
+  ): TalentNode => ({
+    ...smallNode(id, []),
+    kind: 'keystone',
+    modifiers,
+    rules,
+    descKey: `talent.${id}.desc`,
+  });
+
+  it('accepts a bonus carrying the board tag with an untagged cost (致死毒素)', () => {
+    const node = star('outer.poison.lethalToxin', [
+      { stat: 'damage', kind: 'more', value: 1, tags: ['poison'] },
+      { stat: 'damage', kind: 'more', value: -0.5, tags: ['hit'] },
+    ]);
+    expect(starArchetypeIssues(node)).toEqual([]);
+  });
+
+  it('accepts a center-scoped cost (聖域) and a bonus scoped to the board', () => {
+    const node = star('outer.aura.sanctuary', [
+      { stat: 'damage', kind: 'more', value: 0.8, tags: ['aura'] },
+      { stat: 'damage', kind: 'more', value: -0.5, scope: 'center' },
+    ]);
+    expect(starArchetypeIssues(node)).toEqual([]);
+    const barrage = star('outer.barrage.storm', [
+      { stat: 'damage', kind: 'more', value: 0.5, scope: 'outer.barrage' },
+    ]);
+    expect(starArchetypeIssues(barrage)).toEqual([]);
+  });
+
+  it('rejects an untagged more on an outer ★, its rules included', () => {
+    const untagged = { stat: 'damage', kind: 'more', value: 1 } as const;
+    expect(starArchetypeIssues(star('outer.fire.inferno', [untagged]))).toEqual([
+      `talent 'outer.fire.inferno': ★ damage modifier ${JSON.stringify(untagged)} needs a tag ` +
+        "of outer.fire (burn) or scope 'outer.fire'",
+    ]);
+    expect(
+      starArchetypeIssues(star('outer.crit.glass', [], [{ id: 'glassCannon', damageMore: 1 }])),
+    ).toHaveLength(1);
+    // A center keystone (every M1 node) and a board's notable are exempt.
+    expect(starArchetypeIssues(star('glassCannon', [untagged]))).toEqual([]);
+    expect(
+      starArchetypeIssues({ ...star('outer.fire.notable', [untagged]), kind: 'notable' }),
+    ).toEqual([]);
   });
 });
 

@@ -15,6 +15,8 @@ import { steadyAim } from './steadyAim';
 
 export type {
   BuildCompiler,
+  CenterEventScratch,
+  HitScratch,
   HookName,
   Hooks,
   KillScratch,
@@ -23,6 +25,8 @@ export type {
   SignatureModule,
   TestModule,
 } from './module';
+export { enqueueModuleEffect } from './api';
+export type { ModuleEvent } from './api';
 
 export const RULE_MODULES: {
   readonly [K in RuleId]: RuleModule<Extract<RuleSpec, { id: K }>>;

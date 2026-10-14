@@ -1,11 +1,19 @@
 /**
  * Death and drops (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2–3). Kills resolve
- * inline, at the hit or burn tick that kills: the rule modules' onKill hooks (pandemic's
- * spread), drops and split children happen at once, so later hits of the same tick can reach
- * the children. The death step of the tick order only compacts the entity arrays.
+ * inline, at the hit or burn tick that kills, in this order:
+ * 1. the kill's transfer triggers (src/sim/effects/dispatch.ts), then the rule modules' onKill
+ *    hooks (pandemic's spread), while the victim still holds its ailments;
+ * 2. removal, drops, the kill event and split children, so later hits of the same tick can
+ *    reach the children;
+ * 3. the kill's other triggers, recorded as pending kills.
+ * The death step of the tick order dispatches the pending kills (their effects run next tick),
+ * then compacts the entity arrays.
  */
 
 import { add, mul, num } from '../../core/num';
+import { heldFlags } from '../build/eval';
+import { fireInlineKill, recordPendingKills } from '../effects/dispatch';
+import { HIT_BITS, KILL_KIND_SHIFT } from '../effects/flags';
 import type { Enemy, Projectile, RunContext } from './context';
 import { split } from './spawn';
 
@@ -17,15 +25,28 @@ export function removeEnemy(ctx: RunContext, enemy: Enemy): void {
 }
 
 /**
- * Kills the enemy. `origin` is the trigger whose damage killed it, −1 for emitter hits and DoT
- * kills. The onKill hooks run first, while the enemy is still alive and burning.
+ * Kills the enemy, whose killDepth and killKind the killing damage has set. `origin` is the
+ * trigger whose damage killed it, −1 for emitter hits and DoT kills; `hitFlags` the killing
+ * hit's flags, 0 for a DoT kill. Its transfer triggers and the onKill hooks run first, while the
+ * enemy is still alive and burning.
  */
-export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number): void {
-  const onKill = ctx.build.hooks.onKill;
-  if (onKill.length !== 0) {
-    const kill = ctx.killScratch;
-    kill.origin = origin;
-    for (const hook of onKill) hook(ctx, enemy, kill);
+export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlags: number): void {
+  // The kill's flags: the killing hit's, what the victim held, and what killed it.
+  let flags = 0;
+  if (ctx.killListeners) {
+    flags =
+      (hitFlags & HIT_BITS) | heldFlags(enemy, ctx.now) | (1 << (KILL_KIND_SHIFT + enemy.killKind));
+    if (ctx.killInline.length !== 0) fireInlineKill(ctx, enemy, origin, flags);
+    const onKill = ctx.build.hooks.onKill;
+    if (onKill.length !== 0) {
+      const kill = ctx.killScratch;
+      kill.origin = origin;
+      kill.depth = enemy.killDepth;
+      kill.x = enemy.x;
+      kill.y = enemy.y;
+      kill.flags = flags;
+      for (const hook of onKill) hook(ctx, enemy, kill);
+    }
   }
   removeEnemy(ctx, enemy);
   ctx.kills++;
@@ -49,7 +70,9 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number): void {
     shards,
     cores,
   });
+  // The children are ctx.enemies[split(...) ..]; C4's toSplitChildren transfers to them here.
   split(ctx, enemy);
+  if (ctx.killPending.length !== 0) recordPendingKills(ctx, enemy, origin, flags, shards);
 }
 
 /** Removes dead entities in place, preserving id order. */

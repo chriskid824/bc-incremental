@@ -7,32 +7,46 @@
  */
 
 import type { EnemyDef, EnemyId, GameData, TalentKind, TalentNode } from '../data/types';
+import { needsDescKey } from '../data/validate';
 
 type TalentExtras = Partial<
   Pick<
     TalentNode,
-    'shardCostFactor' | 'coreCost' | 'repeat' | 'modifiers' | 'rules' | 'archetype' | 'pos'
+    | 'shardCostFactor'
+    | 'coreCost'
+    | 'repeat'
+    | 'modifiers'
+    | 'rules'
+    | 'triggers'
+    | 'archetype'
+    | 'pos'
   >
 >;
 
+/**
+ * A node with empty lists by default; like src/data/talents.ts node(), it gets a descKey when
+ * it has rules, triggers or behaviour modifiers (needsDescKey).
+ */
 export function talent(
   id: string,
   kind: TalentKind,
   links: readonly string[],
   extras: TalentExtras = {},
 ): TalentNode {
-  return {
+  const node: TalentNode = {
     id,
     kind,
     pos: { x: 0, y: 0 },
     links,
     modifiers: [],
     rules: [],
+    triggers: [],
+    conversions: [],
     archetype: 'none',
     nameKey: `talent.${id}.name`,
-    ...((extras.rules?.length ?? 0) > 0 ? { descKey: `talent.${id}.desc` } : {}),
     ...extras,
   };
+  return needsDescKey(node) ? { ...node, descKey: `talent.${id}.desc` } : node;
 }
 
 export const FIXTURE_TALENTS: readonly TalentNode[] = [

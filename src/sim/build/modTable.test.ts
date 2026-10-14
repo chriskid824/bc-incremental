@@ -16,7 +16,7 @@ import { DAMAGE_TAGS, TAG, tagMask } from '../../data/tags';
 import type { DamageTag } from '../../data/tags';
 import { computeStatBlock } from '../../meta/stats';
 import { BRIDGE_MODS, damageRow, makeStats, maskProbeMods, SEARING_CRITS_MODS } from '../testing';
-import { statAt } from './eval';
+import { statAt, staticInput } from './eval';
 import { compileMods, ModTable, modTableFor, SCOPED_INDEX } from './modTable';
 import { createSourceTable, rowKey, SOURCE_SHIFT } from './sources';
 import type { SourceTable } from './sources';
@@ -437,7 +437,7 @@ describe('ModTable', () => {
         const row = table.row(mask);
         for (const stat of scopedStats) {
           if (stat === 'damage') continue;
-          expect(statAt(table, row, SCOPED_INDEX[stat], 0), `${n} ${stat}`).toBe(
+          expect(statAt(table, row, SCOPED_INDEX[stat], staticInput(0)), `${n} ${stat}`).toBe(
             stats.values[stat],
           );
         }
@@ -532,7 +532,7 @@ describe('chance rows against the M1 bridge rules', () => {
         for (const crit of [false, true]) {
           const m1 = m1Chances(values, crit, jump, searing);
           const at = (mask: number, stat: ScopedStat): number =>
-            statAt(table, table.row(mask), SCOPED_INDEX[stat], jump);
+            statAt(table, table.row(mask), SCOPED_INDEX[stat], staticInput(jump));
           const label = `${JSON.stringify(values)} searing ${searing} jump ${jump} crit ${crit}`;
           const row = crit ? plain | TAG.crit : plain;
           expect(clamp01(at(plain, 'critChance')), label).toBe(m1.critChance);

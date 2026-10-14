@@ -11,25 +11,32 @@
  *   with Pandemic, Eternal Flame and a longer burn on a build that clears wave 30. M1 keeps
  *   one record per burn stack, which takes seconds per run here; the budget is 50 ms. Slow, so
  *   it runs only when asked for and with few runs.
+ * - effects: the effect queue, 30 s at wave 30 with normal's build plus a trigger that
+ *   explodes every kill (src/sim/effects/) but its own explosions' (rule 3). It pins its start
+ *   wave like hits.
  *
- *   npm run bench -- [--scenario normal|hits|ailments] [--runs 50] [--warmup 5] [--seed 1]
- *     [--start-wave 30]
+ *   npm run bench -- [--scenario normal|hits|ailments|effects] [--runs 50] [--warmup 5]
+ *     [--seed 1] [--start-wave 30]
  *
  * --runs and --warmup default to the scenario's own counts.
  */
 
 import { parseArgs } from 'node:util';
 import { loadGameData, targetDamage } from '../../src/data';
+import type { StatBlock } from '../../src/data';
+import type { StatExtras } from '../../src/data/stats';
 import { createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { RunConfig } from '../../src/sim';
 import { makeStats } from '../../src/sim/testing';
 import { quantile } from './report';
 
-const SCENARIO_IDS = ['normal', 'hits', 'ailments'] as const;
+const SCENARIO_IDS = ['normal', 'hits', 'ailments', 'effects'] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
 /** The hits scenario's start wave, whatever --start-wave says. */
 const HITS_START_WAVE = 40;
+/** The effects scenario's start wave, whatever --start-wave says: normal's default. */
+const EFFECTS_START_WAVE = 30;
 type ScenarioId = (typeof SCENARIO_IDS)[number];
 
 const isScenarioId = (value: string): value is ScenarioId =>
@@ -48,6 +55,23 @@ interface Scenario {
   config(seed: number, startWave: number): RunConfig;
 }
 
+/** normal's build at `startWave`, with these triggers and conversions. */
+function normalStats(startWave: number, extras?: StatExtras): StatBlock {
+  return makeStats(
+    {
+      damage: targetDamage(startWave + 10) / 2.5,
+      attackSpeed: 4,
+      critChance: 0.25,
+      critMultiplier: 2,
+      igniteChance: 0.4,
+      chainCount: 2,
+      maxLife: 1e12,
+    },
+    [],
+    extras,
+  );
+}
+
 const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   normal: {
     runs: 50,
@@ -57,15 +81,7 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     // Strong enough to one-shot the start wave, about 10 waves short of its frontier, immortal.
     config: (seed, startWave) => ({
       seed,
-      stats: makeStats({
-        damage: targetDamage(startWave + 10) / 2.5,
-        attackSpeed: 4,
-        critChance: 0.25,
-        critMultiplier: 2,
-        igniteChance: 0.4,
-        chainCount: 2,
-        maxLife: 1e12,
-      }),
+      stats: normalStats(startWave),
       rules: [],
       startWave,
       mode: 'auto',
@@ -118,6 +134,31 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
         { id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 },
       ],
       startWave,
+      mode: 'auto',
+      maxTicks: STRESS_SECONDS * TICK_RATE,
+    }),
+  },
+  effects: {
+    runs: 20,
+    warmup: 3,
+    seconds: STRESS_SECONDS,
+    targetMs: 50,
+    startWave: EFFECTS_START_WAVE,
+    // Every kill but an explosion's own explodes on the enemies around it, at half the damage
+    // stat.
+    config: (seed) => ({
+      seed,
+      stats: normalStats(EFFECTS_START_WAVE, {
+        triggers: [
+          {
+            source: 'center',
+            spec: { on: 'kill', do: [{ kind: 'explode', radius: 90, damagePct: 0.5 }] },
+          },
+        ],
+        conversions: [],
+      }),
+      rules: [],
+      startWave: EFFECTS_START_WAVE,
       mode: 'auto',
       maxTicks: STRESS_SECONDS * TICK_RATE,
     }),

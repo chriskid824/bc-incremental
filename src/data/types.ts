@@ -6,6 +6,7 @@
 
 import type { Modifier } from './stats';
 import type { RuleSpec } from './rules';
+import type { TriggerSpec } from './triggers';
 
 export const ENEMY_IDS = ['triangle', 'square', 'pentagon', 'shard', 'hexagon', 'boss'] as const;
 /** `shard` is the small triangle a pentagon splits into. */
@@ -80,10 +81,20 @@ export interface TalentNode {
   /** Modifiers granted once (or per rank for repeatable nodes). */
   readonly modifiers: readonly Modifier[];
   readonly rules: readonly RuleSpec[];
+  /**
+   * Triggers granted once (or per rank for repeatable nodes), credited to the node's source
+   * (sourceOfNode, src/data/sources.ts).
+   */
+  readonly triggers: readonly TriggerSpec[];
+  /** Damage conversions; none until the conversion step of the engine lands. */
+  readonly conversions: readonly never[];
   /** Archetype for UI color and balance reporting. */
   readonly archetype: 'none' | 'crit' | 'dot' | 'chain' | 'hybrid';
   readonly nameKey: string;
-  /** Text for what the node's rules do; required exactly when the node has rules. */
+  /**
+   * Text for what the node's rules, triggers, conversions and behaviour modifiers do; required
+   * exactly when it has any (needsDescKey, src/data/validate.ts).
+   */
   readonly descKey?: string;
 }
 

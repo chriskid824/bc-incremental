@@ -4,8 +4,9 @@
  */
 
 import type { RuleSpec } from '../data/rules';
-import { BASE_STATS, isScopedStat, NO_EXTRAS, STAT_IDS } from '../data/stats';
-import type { Modifier, StatBlock, StatExtras, StatId } from '../data/stats';
+import { sourceOfNode } from '../data/sources';
+import { BASE_STATS, isScopedStat, STAT_IDS } from '../data/stats';
+import type { Modifier, SourcedTrigger, StatBlock, StatExtras, StatId } from '../data/stats';
 import type { GameData } from '../data/types';
 import { nodeRank } from './talents';
 import type { MetaState } from './types';
@@ -21,6 +22,23 @@ export function collectModifiers(meta: Readonly<MetaState>, data: GameData): Mod
     for (let r = 0; r < rank; r++) modifiers.push(...node.modifiers);
   }
   return modifiers;
+}
+
+/**
+ * Triggers of the start node and every allocated node, repeated per rank like modifiers, each
+ * with its node's source (sourceOfNode), in data order; and their conversions, none yet.
+ */
+export function collectExtras(meta: Readonly<MetaState>, data: GameData): StatExtras {
+  const triggers: SourcedTrigger[] = [];
+  for (const node of data.talents) {
+    const rank = nodeRank(meta, node);
+    if (rank === 0 || node.triggers.length === 0) continue;
+    const source = sourceOfNode(node.id);
+    for (let r = 0; r < rank; r++) {
+      for (const spec of node.triggers) triggers.push({ source, spec });
+    }
+  }
+  return { triggers, conversions: [] };
 }
 
 /** Rules of the start node and every allocated node, once each. */
@@ -40,11 +58,12 @@ interface Accumulator {
 
 /**
  * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more) over the untagged, unscoped modifiers
- * without a scaling of every stat except damage, whose `values` entry keeps only base + Σflat.
- * Every modifier of a scoped stat (SCOPED_STATS) also goes to `scoped`, in data order; tagged,
- * scoped and scaling ones go only there, and the simulation folds them per damage instance
- * (src/sim/build/modTable.ts). An empty tag list is untagged. Throws on tags, notTags, a scope or
- * a scaling outside scoped stats or on flat damage, which data validation should prevent.
+ * without conditions or a scaling of every stat except damage, whose `values` entry keeps only
+ * base + Σflat. Every modifier of a scoped stat (SCOPED_STATS) also goes to `scoped`, in data
+ * order; tagged, scoped, conditional and scaling ones go only there, and the simulation folds
+ * them per damage instance (src/sim/build/modTable.ts). An empty list counts as none. Throws on
+ * tags, notTags, a scope, conditions or a scaling outside scoped stats or on flat damage, which
+ * data validation should prevent. The extras (triggers, conversions) pass through.
  */
 export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExtras): StatBlock {
   const acc = {} as Record<StatId, Accumulator>;
@@ -52,17 +71,18 @@ export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExt
   const scoped: Modifier[] = [];
 
   for (const mod of modifiers) {
-    // Tags, a scope or a scaling make the value depend on the damage instance.
+    // Tags, a scope, conditions or a scaling make the value depend on the damage instance.
     const perInstance =
       (mod.tags?.length ?? 0) > 0 ||
       (mod.notTags?.length ?? 0) > 0 ||
       mod.scope !== undefined ||
+      (mod.when?.length ?? 0) > 0 ||
       mod.scaling !== undefined;
     const isScoped = isScopedStat(mod.stat);
     if (perInstance && (!isScoped || (mod.stat === 'damage' && mod.kind === 'flat'))) {
       throw new Error(
-        'Tags, scopes and scalings are only allowed on scoped stats, not flat damage: ' +
-          JSON.stringify(mod),
+        'Tags, scopes, conditions and scalings are only allowed on scoped stats, not flat ' +
+          `damage: ${JSON.stringify(mod)}`,
       );
     }
     if (isScoped) scoped.push(mod);
@@ -90,5 +110,5 @@ export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExt
 
 /** StatBlock of the current talent allocation. */
 export function statBlockFor(meta: Readonly<MetaState>, data: GameData): StatBlock {
-  return computeStatBlock(collectModifiers(meta, data), NO_EXTRAS);
+  return computeStatBlock(collectModifiers(meta, data), collectExtras(meta, data));
 }

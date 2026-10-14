@@ -1,8 +1,13 @@
 /**
- * Trigger vocabulary (docs/v3/implementation-plan-v3.md §2.6). So far the ailment kinds, which
- * damage attribution reads (src/data/sources.ts), and the scaling of modifiers whose value
- * depends on the damage instance (Modifier.scaling).
+ * Trigger vocabulary (docs/v3/implementation-plan-v3.md §2.6): the events a talent's triggers
+ * listen to, their conditions and their effects; the ailment kinds, which damage attribution
+ * reads (src/data/sources.ts); and the scaling of modifiers whose value depends on the damage
+ * instance (Modifier.scaling). Each member lands together with the simulation code that reads it
+ * (src/sim/effects/, src/sim/build/eval.ts), so the schemas (src/data/schema.ts) accept only what
+ * the simulation can run.
  */
+
+import type { DamageTag } from './tags';
 
 /** Ailments an enemy can carry. The order is fixed: simulation bitsets index it. */
 export const AILMENT_KINDS = ['burn', 'poison', 'bleed', 'shock', 'frost'] as const;
@@ -10,10 +15,18 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
 
 /**
  * What a scaling modifier counts, read per damage instance. `chainJump`: the instance's chain
- * jump index, 0 for the primary hit. The simulation reads each variable through a registry
- * typed over this list (src/sim/build/eval.ts), so a new variable lands with its reader.
+ * jump index, 0 for the primary hit. `targetBurnStacks`: the burn stacks on the instance's
+ * target. `targetDistance`: how far the target is from the player, in arena units.
+ * `lifeLostPct`: the fraction of the player's max life missing, 0 to 1. A target variable reads
+ * 0 without a target (estimates outside a run). The simulation reads each variable through a
+ * registry typed over this list (src/sim/build/eval.ts), so a new variable lands with its reader.
  */
-export const SCALING_VARS = ['chainJump'] as const;
+export const SCALING_VARS = [
+  'chainJump',
+  'targetBurnStacks',
+  'targetDistance',
+  'lifeLostPct',
+] as const;
 export type ScalingVar = (typeof SCALING_VARS)[number];
 
 export const SCALING_CURVES = ['linear', 'log10', 'pow'] as const;
@@ -34,4 +47,231 @@ export interface ScalingSpec {
   readonly exponent?: number;
   /** Upper bound on the contribution. Uncapped without it. */
   readonly cap?: number;
+}
+
+/** Events of a character's signature attack (implementation-plan-v3 §2.11). */
+export const CENTER_EVENTS = ['explode', 'freeze', 'chainJump', 'droneImpact'] as const;
+export type CenterEvent = (typeof CENTER_EVENTS)[number];
+
+/**
+ * Every event a trigger can listen to. The order is fixed: the simulation lists the triggers of
+ * each event by its position here.
+ */
+export const TRIGGER_EVENTS = [
+  ...CENTER_EVENTS,
+  'hit',
+  'crit',
+  'kill',
+  'nthAttack',
+  'ailmentApplied',
+  'ailmentTick',
+  'diedWithAilment',
+  'shatter',
+  'heroHit',
+  'contact',
+  'waveStart',
+  'periodic',
+  'droneExpire',
+] as const;
+export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
+
+/**
+ * The events the simulation raises so far; validation rejects a trigger on any other.
+ * - hit, crit: a hit of the build (a crit hit), at its target, also when the hit kills.
+ * - kill: an enemy dies. diedWithAilment: an enemy dies holding an ailment (HeldAilment). Their
+ *   triggers run at the next tick, except those whose effects all transfer ailments
+ *   (TRANSFER_EFFECTS), which run at the kill while the victim's ailments are still on it.
+ * - nthAttack: every Nth attack (`every`) of the build's emitters, at the attack's first target.
+ * - waveStart, periodic (every `every` seconds): no target; effects start at the player.
+ * - heroHit: an enemy reached the player and hurt it; no target, effects start at the player.
+ * - contact: an enemy touched the player; the target is that enemy.
+ */
+export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
+  'hit',
+  'crit',
+  'kill',
+  'diedWithAilment',
+  'nthAttack',
+  'waveStart',
+  'periodic',
+  'heroHit',
+  'contact',
+]);
+
+/** Events without an enemy target: their effects start at the player. */
+export const TARGETLESS_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
+  'waveStart',
+  'periodic',
+  'heroHit',
+]);
+
+/** Ailments a condition can ask an enemy about (targetHas, victimHas). */
+export const HELD_AILMENTS = ['burn'] as const;
+export type HeldAilment = (typeof HELD_AILMENTS)[number];
+
+/** Ailments whose stacks a condition can count (stacksAtLeast). */
+export const STACK_AILMENTS = ['burn'] as const;
+export type StackAilment = (typeof STACK_AILMENTS)[number];
+
+/** What dealt a killing blow (killedBy): a hit, or an ailment's damage over time. */
+export const KILL_KINDS = ['hit', 'burn'] as const;
+export type KillKind = (typeof KILL_KINDS)[number];
+
+/** Bosses; elites (M1's hexagon); every other enemy. */
+export const TARGET_KINDS = ['normal', 'elite', 'boss'] as const;
+export type TargetKind = (typeof TARGET_KINDS)[number];
+
+/**
+ * Which hit an event comes from (hitIs): a crit or not, the primary hit of an attack or a chain
+ * jump, the signature attack's. On kill events it is the killing hit; a kill by damage over time
+ * is none of these.
+ */
+export const HIT_KINDS = ['crit', 'nonCrit', 'primary', 'chainJump', 'signature'] as const;
+export type HitKind = (typeof HIT_KINDS)[number];
+
+/**
+ * A condition on the enemy an event or a damage instance targets; never met without a target.
+ * targetHas: the enemy holds the ailment (burn: one of its burn stacks has not ended yet).
+ * targetHpBelow: its hp is below this fraction of its max hp. stacksAtLeast: it carries at least
+ * this many stacks of the ailment.
+ */
+export type TargetCondition =
+  | { readonly targetHas: HeldAilment }
+  | { readonly targetKind: TargetKind }
+  | { readonly targetHpBelow: number }
+  | { readonly stacksAtLeast: { readonly ailment: StackAilment; readonly stacks: number } };
+
+/**
+ * A condition of a trigger. chance: the trigger fires with this probability, rolled when the
+ * event happens. cooldownSec: once it fires, it cannot fire again for this long. hitIs: the
+ * kind of hit the event comes from. victimHas, killedBy: what the dying enemy held when it died,
+ * and what killed it.
+ */
+export type Condition =
+  | TargetCondition
+  | { readonly chance: number }
+  | { readonly cooldownSec: number }
+  | { readonly hitIs: HitKind }
+  | { readonly victimHas: HeldAilment }
+  | { readonly killedBy: KillKind };
+
+type KeysOf<T> = T extends unknown ? keyof T : never;
+export type ConditionKey = KeysOf<Condition>;
+
+/** The one key of a condition. */
+export const conditionKey = (condition: Condition): ConditionKey =>
+  Object.keys(condition)[0] as ConditionKey;
+
+/** Events with an enemy target, on which target conditions can be checked. */
+const TARGETED: readonly TriggerEventId[] = ['hit', 'crit', 'nthAttack', 'contact'];
+const KILLS: readonly TriggerEventId[] = ['kill', 'diedWithAilment'];
+
+/**
+ * Where each condition is allowed: the trigger events it can be checked on, and 'modifier' for
+ * Modifier.when, which takes target conditions only. A kill event's victim is gone by the time
+ * its triggers run, so they read what it held at its death (victimHas) instead.
+ */
+export const CONDITION_CONTEXTS: Readonly<
+  Record<ConditionKey, readonly (TriggerEventId | 'modifier')[]>
+> = {
+  targetHas: ['modifier', ...TARGETED],
+  targetKind: ['modifier', ...TARGETED],
+  targetHpBelow: ['modifier', ...TARGETED],
+  stacksAtLeast: ['modifier', ...TARGETED],
+  chance: TRIGGER_EVENTS,
+  cooldownSec: TRIGGER_EVENTS,
+  hitIs: ['hit', 'crit', ...KILLS],
+  victimHas: KILLS,
+  killedBy: KILLS,
+};
+
+/** The damage of an explode or nova: its hits are tagged hit, trigger and area. */
+interface DamagePart {
+  /** Damage of each hit as a fraction of the damage stat. */
+  readonly damagePct: number;
+  /** More delivery tags of its hits: owner or geometry tags (src/data/tags.ts). */
+  readonly tags?: readonly DamageTag[];
+  /** The element its hits carry. */
+  readonly element?: 'cold' | 'lightning';
+}
+
+interface ExplodeSpec extends DamagePart {
+  readonly kind: 'explode';
+  readonly radius: number;
+  readonly maxTargets?: number;
+}
+
+interface NovaSpec extends DamagePart {
+  readonly kind: 'nova';
+  readonly radius: number;
+  readonly at?: 'player' | 'event';
+}
+
+/**
+ * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
+ * - applyAilment: `stacks` (default 1) of the ailment on the event's enemy, or on up to
+ *   `maxTargets` enemies within `radius` of the event; each stack deals what a hit of damagePct
+ *   (default 1) of the damage stat would ignite.
+ * - spreadAilment: copies the event enemy's stacks of the ailment, at `effect` (default 1) of
+ *   their damage, to every other enemy within `radius` of it. A transfer: it deals no damage.
+ * - explode: hits up to `maxTargets` enemies within `radius` of the event.
+ * - nova: hits every enemy within `radius` of the player, or of the event with at 'event'.
+ * - push: moves the enemies within `radius` of the event `distance` further from the player.
+ * - heal: the player regains `lifePct` of max life.
+ * - gainShards: the dying enemy's shard drop again, × `fraction` (kill events only).
+ */
+export type EffectSpec =
+  | {
+      readonly kind: 'applyAilment';
+      readonly ailment: 'burn';
+      readonly stacks?: number;
+      readonly damagePct?: number;
+      readonly radius?: number;
+      readonly maxTargets?: number;
+    }
+  | {
+      readonly kind: 'spreadAilment';
+      readonly ailment: 'burn';
+      readonly radius: number;
+      readonly effect?: number;
+    }
+  | ExplodeSpec
+  | NovaSpec
+  | { readonly kind: 'push'; readonly distance: number; readonly radius: number }
+  | { readonly kind: 'heal'; readonly lifePct: number }
+  | { readonly kind: 'gainShards'; readonly fraction: number };
+export type EffectKind = EffectSpec['kind'];
+
+/**
+ * Effects that move ailments already dealt instead of dealing damage. A kill trigger made only
+ * of them runs at the kill (see WIRED_EVENTS); validation keeps them apart from other effects.
+ */
+export const TRANSFER_EFFECTS: ReadonlySet<EffectKind> = new Set<EffectKind>(['spreadAilment']);
+
+/**
+ * The fields of each effect that a calibration coefficient multiplies: damage only, never an
+ * amount, radius, stack count, distance or fraction. A field left out counts as its default, 1.
+ */
+export const COEF_FIELDS: {
+  readonly [K in EffectKind]: readonly (keyof Extract<EffectSpec, { kind: K }> & string)[];
+} = {
+  applyAilment: ['damagePct'],
+  spreadAilment: ['effect'],
+  explode: ['damagePct'],
+  nova: ['damagePct'],
+  push: [],
+  heal: [],
+  gainShards: [],
+};
+
+/** When `on` happens and every `when` condition holds, run each effect of `do` in order. */
+export interface TriggerSpec {
+  readonly on: TriggerEventId;
+  /**
+   * nthAttack: fire on every Nth attack (a whole number ≥ 1). periodic: the period in seconds.
+   * No other event takes it.
+   */
+  readonly every?: number;
+  readonly when?: readonly Condition[];
+  readonly do: readonly EffectSpec[];
 }

@@ -30,7 +30,17 @@ describe('compileBuild', () => {
     expect(build.mods).toHaveLength(stats.scoped.length);
     expect(build.flags).toEqual({ randomCrits: true, maxLife: null, burnRings: false });
     expect(build.signature).toEqual({ forceCritEvery: 0, counts: 'shot' });
-    expect(build.hooks).toEqual({ tick: [], onKill: [], onAttack: [] });
+    expect(build.hooks).toEqual({
+      tick: [],
+      onKill: [],
+      onAttack: [],
+      onHit: [],
+      modifyDamage: [],
+      onCenterEvent: [],
+    });
+    expect(build.triggers).toEqual([]);
+    expect(build.effects).toEqual([]);
+    expect(build.triggersOn.every((list) => list.length === 0)).toBe(true);
     expect(build.legacyHitMult).toBe(1);
     expect(build.sources.names).toEqual(['center']);
     const table = modTableFor(stats);

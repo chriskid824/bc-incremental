@@ -46,6 +46,7 @@ export function moveProjectiles(ctx: RunContext): void {
         target,
         ctx.chainCount,
         projectile.steady,
+        projectile.depth,
         projectile.origin,
       );
     } else {

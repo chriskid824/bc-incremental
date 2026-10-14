@@ -12,8 +12,17 @@ import type { SourceSelector } from './sources';
 import { isScopedStat, STAT_IDS } from './stats';
 import type { Modifier, ModifierKind, StatId } from './stats';
 import { DAMAGE_TAGS } from './tags';
-import { SCALING_CURVES, SCALING_VARS } from './triggers';
-import type { ScalingSpec } from './triggers';
+import {
+  HELD_AILMENTS,
+  HIT_KINDS,
+  KILL_KINDS,
+  SCALING_CURVES,
+  SCALING_VARS,
+  STACK_AILMENTS,
+  TARGET_KINDS,
+  TRIGGER_EVENTS,
+} from './triggers';
+import type { Condition, EffectSpec, ScalingSpec, TargetCondition, TriggerSpec } from './triggers';
 import { ENEMY_IDS } from './types';
 import type {
   EnemyDef,
@@ -72,8 +81,8 @@ export const TALENT_ARCHETYPES = [
 const finite = z.number();
 
 /**
- * Scoped stats take tags, notTags, a scope and a scaling; flat damage stays untagged in
- * StatBlock.values.
+ * Scoped stats take tags, notTags, a scope, conditions and a scaling; flat damage stays untagged
+ * in StatBlock.values.
  */
 const taggable = (m: { readonly stat: StatId; readonly kind: ModifierKind }): boolean =>
   isScopedStat(m.stat) && !(m.stat === 'damage' && m.kind === 'flat');
@@ -99,6 +108,32 @@ export const ScalingSpecSchema = exact<ScalingSpec>()(
     .readonly(),
 );
 
+export const TargetConditionSchema = exact<TargetCondition>()(
+  z.union([
+    z.strictObject({ targetHas: z.enum(HELD_AILMENTS) }).readonly(),
+    z.strictObject({ targetKind: z.enum(TARGET_KINDS) }).readonly(),
+    z.strictObject({ targetHpBelow: finite }).readonly(),
+    z
+      .strictObject({
+        stacksAtLeast: z
+          .strictObject({ ailment: z.enum(STACK_AILMENTS), stacks: finite })
+          .readonly(),
+      })
+      .readonly(),
+  ]),
+);
+
+export const ConditionSchema = exact<Condition>()(
+  z.union([
+    TargetConditionSchema,
+    z.strictObject({ chance: finite }).readonly(),
+    z.strictObject({ cooldownSec: finite }).readonly(),
+    z.strictObject({ hitIs: z.enum(HIT_KINDS) }).readonly(),
+    z.strictObject({ victimHas: z.enum(HELD_AILMENTS) }).readonly(),
+    z.strictObject({ killedBy: z.enum(KILL_KINDS) }).readonly(),
+  ]),
+);
+
 export const ModifierSchema = exact<Modifier>()(
   z
     .strictObject({
@@ -108,6 +143,7 @@ export const ModifierSchema = exact<Modifier>()(
       tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
       notTags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
       scope: SourceSelectorSchema.exactOptional(),
+      when: z.array(TargetConditionSchema).readonly().exactOptional(),
       scaling: ScalingSpecSchema.exactOptional(),
     })
     .refine((m) => m.tags === undefined || taggable(m), {
@@ -142,9 +178,77 @@ export const ModifierSchema = exact<Modifier>()(
       message: 'scope is only allowed on scoped stats, and not on flat damage',
       path: ['scope'],
     })
+    .refine((m) => m.when === undefined || taggable(m), {
+      message: 'conditions are only allowed on scoped stats, and not on flat damage',
+      path: ['when'],
+    })
+    .refine((m) => m.when === undefined || m.when.length > 0, {
+      message: 'when must not be empty; omit the field instead',
+      path: ['when'],
+    })
     .refine((m) => m.scaling === undefined || taggable(m), {
       message: 'scaling is only allowed on scoped stats, and not on flat damage',
       path: ['scaling'],
+    })
+    .readonly(),
+);
+
+/** Fields of an explode's or a nova's hits (src/data/triggers.ts DamagePart). */
+const damagePart = {
+  damagePct: finite,
+  tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
+  element: z.enum(['cold', 'lightning']).exactOptional(),
+};
+
+export const EffectSpecSchema = exact<EffectSpec>()(
+  z.discriminatedUnion('kind', [
+    z
+      .strictObject({
+        kind: z.literal('applyAilment'),
+        ailment: z.literal('burn'),
+        stacks: finite.exactOptional(),
+        damagePct: finite.exactOptional(),
+        radius: finite.exactOptional(),
+        maxTargets: finite.exactOptional(),
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('spreadAilment'),
+        ailment: z.literal('burn'),
+        radius: finite,
+        effect: finite.exactOptional(),
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('explode'),
+        radius: finite,
+        maxTargets: finite.exactOptional(),
+        ...damagePart,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('nova'),
+        radius: finite,
+        at: z.enum(['player', 'event']).exactOptional(),
+        ...damagePart,
+      })
+      .readonly(),
+    z.strictObject({ kind: z.literal('push'), distance: finite, radius: finite }).readonly(),
+    z.strictObject({ kind: z.literal('heal'), lifePct: finite }).readonly(),
+    z.strictObject({ kind: z.literal('gainShards'), fraction: finite }).readonly(),
+  ]),
+);
+
+export const TriggerSpecSchema = exact<TriggerSpec>()(
+  z
+    .strictObject({
+      on: z.enum(TRIGGER_EVENTS),
+      every: finite.exactOptional(),
+      when: z.array(ConditionSchema).readonly().exactOptional(),
+      do: z.array(EffectSpecSchema).readonly(),
     })
     .readonly(),
 );
@@ -237,6 +341,8 @@ export const TalentNodeSchema = exact<TalentNode>()(
       repeat: z.strictObject({ baseShards: finite, growth: finite }).readonly().exactOptional(),
       modifiers: z.array(ModifierSchema).readonly(),
       rules: z.array(RuleSpecSchema).readonly(),
+      triggers: z.array(TriggerSpecSchema).readonly(),
+      conversions: z.array(z.never()).readonly(),
       archetype: z.enum(TALENT_ARCHETYPES),
       nameKey: z.string(),
       descKey: z.string().exactOptional(),

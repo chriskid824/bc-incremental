@@ -2,10 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { BASE_STATS, NO_EXTRAS, STAT_IDS } from '../data/stats';
 import type { Modifier, StatBlock } from '../data/stats';
 import { tagMask } from '../data/tags';
+import type { TriggerSpec } from '../data/triggers';
 import { damageRow } from '../sim/testing';
 import { createMetaState } from './state';
-import { collectModifiers, collectRules, computeStatBlock, statBlockFor } from './stats';
-import { fixtureData } from './testing';
+import {
+  collectExtras,
+  collectModifiers,
+  collectRules,
+  computeStatBlock,
+  statBlockFor,
+} from './stats';
+import { FIXTURE_TALENTS, fixtureData, talent } from './testing';
 
 /** The tag masks of M1's four tags (hit, crit, burn, chain). */
 const ALL_MASKS = Array.from({ length: 16 }, (_, m) => m);
@@ -111,6 +118,18 @@ describe('computeStatBlock', () => {
     expect(rows(stats)).toEqual(ALL_MASKS.map(() => 2));
   });
 
+  it('keeps conditional modifiers out of values', () => {
+    const modifiers: Modifier[] = [
+      { stat: 'critChance', kind: 'flat', value: 0.2, when: [{ targetHpBelow: 0.5 }] },
+      { stat: 'damage', kind: 'more', value: 1, when: [{ targetHas: 'burn' }] },
+    ];
+    const stats = block(modifiers);
+    expect(stats.values.critChance).toBe(BASE_STATS.critChance);
+    expect(stats.scoped).toEqual(modifiers);
+    // Estimates have no target, so the condition never holds there.
+    expect(rows(stats)).toEqual(ALL_MASKS.map(() => 1));
+  });
+
   it('keeps chance modifiers in scoped and only the plain ones in values', () => {
     const modifiers: Modifier[] = [
       { stat: 'critChance', kind: 'flat', value: 0.1 },
@@ -128,7 +147,7 @@ describe('computeStatBlock', () => {
     expect(stats.scoped).toEqual(modifiers.filter((mod) => mod.stat !== 'attackSpeed'));
   });
 
-  it('throws on tags, notTags, a scope or a scaling outside scoped stats and on flat damage', () => {
+  it('throws on tags, notTags, a scope, conditions or a scaling outside scoped stats and on flat damage', () => {
     const rejected: Modifier[] = [
       { stat: 'attackSpeed', kind: 'increased', value: 1, tags: ['crit'] },
       { stat: 'damage', kind: 'flat', value: 5, tags: ['burn'] },
@@ -138,6 +157,8 @@ describe('computeStatBlock', () => {
       { stat: 'damage', kind: 'flat', value: 5, scope: 'center' },
       { stat: 'chainCount', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
       { stat: 'damage', kind: 'flat', value: 5, scaling: { per: 'chainJump' } },
+      { stat: 'attackSpeed', kind: 'increased', value: 1, when: [{ targetHas: 'burn' }] },
+      { stat: 'damage', kind: 'flat', value: 5, when: [{ targetKind: 'boss' }] },
     ];
     for (const mod of rejected) expect(() => block([mod]), JSON.stringify(mod)).toThrow(/Tags/);
   });
@@ -203,5 +224,55 @@ describe('collectModifiers / collectRules', () => {
     for (const id of ['a', 'b', 'a2']) first.allocated.add(id);
     for (const id of ['a2', 'b', 'a']) second.allocated.add(id);
     expect(collectModifiers(first, data)).toEqual(collectModifiers(second, data));
+  });
+});
+
+describe('collectExtras', () => {
+  const explode: TriggerSpec = {
+    on: 'kill',
+    do: [{ kind: 'explode', radius: 90, damagePct: 0.5 }],
+  };
+  const heal: TriggerSpec = { on: 'waveStart', do: [{ kind: 'heal', lifePct: 0.1 }] };
+  const shards: TriggerSpec = { on: 'kill', do: [{ kind: 'gainShards', fraction: 0.2 }] };
+  const data = fixtureData({
+    talents: [
+      ...FIXTURE_TALENTS,
+      talent('outer.fire.burst', 'small', ['start'], { triggers: [explode, heal] }),
+      talent('hub.loot', 'repeatable', ['start'], {
+        repeat: { baseShards: 10, growth: 2 },
+        triggers: [shards],
+      }),
+      talent('unbought', 'small', ['start'], { triggers: [heal] }),
+    ],
+  });
+
+  it('has no triggers on a fresh profile', () => {
+    expect(collectExtras(createMetaState(), data)).toEqual({ triggers: [], conversions: [] });
+  });
+
+  it('lists the triggers in data order, ranks repeated, with their node source', () => {
+    const meta = createMetaState();
+    for (const id of ['hub.loot', 'outer.fire.burst', 'a']) meta.allocated.add(id);
+    meta.ranks.set('hub.loot', 2);
+    const extras = collectExtras(meta, data);
+    expect(extras.triggers).toEqual([
+      { source: 'outer.fire', spec: explode },
+      { source: 'outer.fire', spec: heal },
+      { source: 'hub', spec: shards },
+      { source: 'hub', spec: shards },
+    ]);
+    expect(extras.conversions).toEqual([]);
+  });
+
+  it('reaches the stat block and leaves the values unchanged', () => {
+    const meta = createMetaState();
+    meta.allocated.add('outer.fire.burst');
+    const stats = statBlockFor(meta, data);
+    expect(stats.triggers).toEqual([
+      { source: 'outer.fire', spec: explode },
+      { source: 'outer.fire', spec: heal },
+    ]);
+    expect(stats.values).toEqual(statBlockFor(createMetaState(), data).values);
+    expect(stats.scoped).toEqual([]);
   });
 });

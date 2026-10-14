@@ -135,7 +135,7 @@ export interface EmitterRuntime {
   acc: number;
   /** Projectiles fired, for steadyAim's every-Nth shot. */
   shots: number;
-  /** Attacks made, for steadyAim's every-Nth attack and (C3.6) nthAttack triggers. */
+  /** Attacks made, for steadyAim's every-Nth attack; nthAttack triggers count in TriggerState. */
   attacks: number;
   /** Serial of the current attack's volley; enemies it already targets carry it. */
   volley: number;

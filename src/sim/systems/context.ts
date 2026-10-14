@@ -11,23 +11,37 @@ import type { Rng } from '../../core/rng';
 import { createStreams } from '../../core/rng';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
+import { doomed, UNCAPPED_BURN_STACKS } from '../ailments/records';
 import { compileBuild } from '../build/compile';
 import type { CompiledBuild } from '../build/compile';
-import { statAt } from '../build/eval';
+import { statAt, staticInput } from '../build/eval';
+import type { EvalInput } from '../build/eval';
 import type { ModTable } from '../build/modTable';
 import { SCOPED_INDEX } from '../build/modTable';
 import { ailmentCredit, MAX_SOURCES } from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
+import { createEffectEntry, createEffectQueue } from '../effects/queue';
+import type { EffectEntry, EffectQueue, PendingKill, TriggerState } from '../effects/queue';
+import { EVENT } from '../effects/types';
+import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import {
   createEmitterRuntime,
+  createPayload,
   emitterPayload,
+  ROWS,
   SLOT_HIT,
   SLOT_HIT_CRIT,
   slotRow,
 } from '../emitters/types';
 import type { ChainBudget, EmitterRuntime, Payload } from '../emitters/types';
 import type { SpatialGrid } from '../grid';
-import type { KillScratch, ShotScratch, TestModule } from '../rules';
+import type {
+  CenterEventScratch,
+  HitScratch,
+  KillScratch,
+  ShotScratch,
+  TestModule,
+} from '../rules';
 import { FOCUS_RANGE, isCovered } from '../targeting';
 import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, MAX_RUN_SECONDS, TICK_RATE } from '../types';
 import type {
@@ -40,7 +54,6 @@ import type {
   SimEvent,
   SimState,
 } from '../types';
-import { doomed, UNCAPPED_BURN_STACKS } from './burn';
 import { createEnemyGrid } from './grid';
 
 const DAMAGE = SCOPED_INDEX.damage;
@@ -70,6 +83,8 @@ export interface BurnStack {
   /** Tick the stack was applied, and the (possibly fractional) tick it ends. */
   start: number;
   end: number;
+  /** Trigger depth of what applied it (src/sim/ailments/records.ts). */
+  depth: number;
 }
 
 export interface Enemy extends EnemyState {
@@ -97,6 +112,17 @@ export interface Enemy extends EnemyState {
   volleyMark: number;
   /** An elite or boss: a focus target once within FOCUS_RANGE (src/sim/targeting.ts). */
   readonly tough: boolean;
+  /** A boss (targetKind); `tough` without it is an elite. */
+  readonly boss: boolean;
+  /**
+   * Lowest trigger depth of any ailment applied to it, MAX_DEPTH before any: the depth of its
+   * damage over time and of a kill by it.
+   */
+  ailDepth: number;
+  /** Depth of the damage that killed it: the hit's, or ailDepth for damage over time. */
+  killDepth: number;
+  /** What killed it (killedBy): a KILL_KINDS ordinal (src/sim/effects/flags.ts). */
+  killKind: number;
 }
 
 export interface Projectile extends ProjectileState {
@@ -120,6 +146,10 @@ export interface RunContext {
   readonly splitRng: Rng;
   readonly combatRng: Rng;
   readonly dropsRng: Rng;
+  /** Trigger chance conditions, rolled at dispatch. */
+  readonly triggerRng: Rng;
+  /** Rolls inside the hits of triggered effects. */
+  readonly effectsRng: Rng;
   readonly startWaveNumber: number;
   readonly waveCap: number;
   readonly maxTicks: number;
@@ -168,6 +198,37 @@ export interface RunContext {
   /** The build's emitters with their payloads and counters; index 0 is the signature attack. */
   readonly emitters: readonly EmitterRuntime[];
 
+  // ---- Triggers and effects (src/sim/effects/) ----
+  /**
+   * The input of every stat read and condition check (src/sim/build/eval.ts): hits set its
+   * target and chain jump; the contact step sets the player's life fraction once per tick.
+   */
+  readonly evalInput: EvalInput;
+  /** Per trigger index: nthAttack counts, cooldowns, periodic firings. */
+  readonly triggerState: TriggerState;
+  readonly effectQueue: EffectQueue;
+  /**
+   * Per effect index, the payload of its hits (explode, nova) or of the hit its ailments count
+   * as (applyAilment), on the effects stream; null for the others.
+   */
+  readonly effectPayloads: readonly (Payload | null)[];
+  /** Some hit or crit trigger or onHit hook listens: the hit path dispatches. */
+  readonly hitListeners: boolean;
+  /** Triggers on kill or diedWithAilment that run at the kill (transfers), in trigger order. */
+  readonly killInline: Int32Array;
+  /** The other triggers on kill or diedWithAilment, recorded as pending kills, in order. */
+  readonly killPending: Int32Array;
+  /** Kills take a snapshot of their flags: kill triggers or onKill hooks exist. */
+  readonly killListeners: boolean;
+  /** This tick's pending kills: pendingKills[0 .. pendingCount), reused objects. */
+  readonly pendingKills: PendingKill[];
+  pendingCount: number;
+  /** The entry the effect phase runs, and the one a kill's transfer triggers run. */
+  readonly effectEntry: EffectEntry;
+  readonly inlineEntry: EffectEntry;
+  /** Ticks in a row that ended with effects left past the budget. */
+  budgetStreak: number;
+
   // ---- Entities and public state ----
   readonly enemies: Enemy[];
   readonly projectiles: Projectile[];
@@ -179,6 +240,10 @@ export interface RunContext {
   readonly grid: SpatialGrid<Enemy>;
   /** The kill the onKill hooks see, refilled at every kill (killEnemy in death.ts). */
   readonly killScratch: KillScratch;
+  /** The hit modifyDamage and onHit hooks see (src/sim/combat/hit.ts). */
+  readonly hitScratch: HitScratch;
+  /** The center event onCenterEvent hooks see (src/sim/effects/centerEvents.ts). */
+  readonly centerScratch: CenterEventScratch;
   /** The attack the onAttack hooks see, reset at every attack (countAttack in volley.ts). */
   readonly shotScratch: ShotScratch;
   /** The current attack's chain budget, reset at every attack (src/sim/combat/chain.ts). */
@@ -188,6 +253,8 @@ export interface RunContext {
    * kill spreads burns, so a query whose targets can die needs a list of its own.
    */
   readonly spreadTargets: Enemy[];
+  /** The effect executors' scratch list for area targets (src/sim/effects/execute.ts). */
+  readonly effectTargets: Enemy[];
 
   // ---- Waves ----
   /** Started waves that are not cleared yet, in wave order. */
@@ -253,6 +320,27 @@ export const clamp01 = (value: number): number => Math.min(1, Math.max(0, value)
 export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
 
 /**
+ * The payload of an effect that hits (explode, nova) or applies an ailment (applyAilment), on the
+ * effects stream: its tags and source, no flags, never chaining. An applied ailment's damage is
+ * that of a hit of the payload, so only its burn row is read.
+ */
+function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
+  if (fx.tags === 0) return null;
+  const hits = fx.kind !== 'applyAilment';
+  return createPayload({
+    baseDamage: fx.baseDamage,
+    tags: fx.tags,
+    source: fx.source,
+    flags: 0,
+    rng,
+    chains: false,
+    rollsAilments: hits,
+    canCrit: hits,
+    damageMode: ROWS,
+  });
+}
+
+/**
  * Builds the context of one run; the config must already be validated. testModules are for
  * tests only (src/sim/rules/module.ts).
  */
@@ -268,6 +356,8 @@ export function createRunContext(
     split: splitRng,
     combat: combatRng,
     drops: dropsRng,
+    trigger: triggerRng,
+    effects: effectsRng,
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
@@ -283,9 +373,10 @@ export function createRunContext(
   // payload's primary hit rows (rows first: filling one may grow the table's arrays).
   const hitRow = slotRow(build, signaturePayload, SLOT_HIT);
   const critRow = slotRow(build, signaturePayload, SLOT_HIT_CRIT);
-  const hitMult = statAt(table, hitRow, DAMAGE, 0);
-  const critHitMult = statAt(table, critRow, DAMAGE, 0);
-  const critMultiplier = statAt(table, critRow, CRIT_MULTIPLIER, 0);
+  const estimate = staticInput();
+  const hitMult = statAt(table, hitRow, DAMAGE, estimate);
+  const critHitMult = statAt(table, critRow, DAMAGE, estimate);
+  const critMultiplier = statAt(table, critRow, CRIT_MULTIPLIER, estimate);
   const forceCritEvery = signature.forceCritEvery;
   const averageCrit = forceCritEvery > 0 ? 1 / forceCritEvery : clamp01(values.critChance);
   const expectedHit =
@@ -317,6 +408,26 @@ export function createRunContext(
     finished: false,
     sources: sources.names,
   };
+  // Triggers: per-trigger state, the kill lists, and the payloads of effects that hit.
+  const { triggers, triggersOn, effects, hooks } = build;
+  const nextPeriodic = new Float64Array(triggers.length);
+  for (const t of triggers) {
+    if (t.periodTicks > 0) nextPeriodic[t.index] = t.periodTicks + (t.index % t.periodTicks);
+  }
+  const killTriggers = [
+    ...(triggersOn[EVENT.kill] as Int32Array),
+    ...(triggersOn[EVENT.diedWithAilment] as Int32Array),
+  ]
+    .sort((a, b) => a - b)
+    .map((i) => triggers[i] as CompiledTrigger);
+  const killInline = Int32Array.from(killTriggers.filter((t) => t.inline).map((t) => t.index));
+  const killPending = Int32Array.from(killTriggers.filter((t) => !t.inline).map((t) => t.index));
+  const effectPayloads = effects.map((fx) => effectPayload(fx, effectsRng));
+  const hitListeners =
+    (triggersOn[EVENT.hit] as Int32Array).length !== 0 ||
+    (triggersOn[EVENT.crit] as Int32Array).length !== 0 ||
+    hooks.onHit.length !== 0;
+
   const taken = {} as Record<EnemyId, { hits: number; damage: number }>;
   for (const id of ENEMY_IDS) taken[id] = { hits: 0, damage: 0 };
   const counters = {} as Record<CounterId, number>;
@@ -329,6 +440,8 @@ export function createRunContext(
     splitRng,
     combatRng,
     dropsRng,
+    triggerRng,
+    effectsRng,
     startWaveNumber,
     waveCap: config.waveCap ?? Infinity,
     maxTicks: config.maxTicks ?? MAX_RUN_SECONDS * TICK_RATE,
@@ -356,16 +469,49 @@ export function createRunContext(
 
     emitters,
 
+    evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1 },
+    triggerState: {
+      count: new Int32Array(triggers.length),
+      readyAt: new Float64Array(triggers.length),
+      nextPeriodic,
+    },
+    effectQueue: createEffectQueue(),
+    effectPayloads,
+    hitListeners,
+    killInline,
+    killPending,
+    killListeners: killInline.length !== 0 || killPending.length !== 0 || hooks.onKill.length !== 0,
+    pendingKills: [],
+    pendingCount: 0,
+    effectEntry: createEffectEntry(),
+    inlineEntry: createEffectEntry(),
+    budgetStreak: 0,
+
     enemies,
     projectiles,
     player,
     state,
     events: [],
     grid: createEnemyGrid(),
-    killScratch: { origin: -1 },
+    killScratch: { origin: -1, depth: 0, x: 0, y: 0, flags: 0 },
+    hitScratch: {
+      target: null as unknown as Enemy,
+      x: 0,
+      y: 0,
+      mask: 0,
+      source: 0,
+      crit: false,
+      chainIndex: 0,
+      depth: 0,
+      origin: -1,
+      flags: 0,
+      amount: ZERO,
+    },
+    centerScratch: { event: 0, depth: 0, origin: -1, flags: 0, target: null, x: 0, y: 0 },
     shotScratch: { forceCrit: false },
     chainBudget: { hits: 0, extraJumps: 0, centerEvents: 0 },
     spreadTargets: [],
+    effectTargets: [],
 
     open: [],
     current: null,

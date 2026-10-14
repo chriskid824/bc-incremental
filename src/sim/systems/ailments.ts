@@ -1,12 +1,14 @@
 /**
  * Ailments system (docs/v3/implementation-plan-v3.md §2.15): the per-tick burn update. Burn
- * stacks themselves live in src/sim/systems/burn.ts.
+ * stacks themselves live in src/sim/ailments/records.ts. A kill by burn carries the enemy's
+ * ailment depth (Enemy.ailDepth) and no origin: rule 3 is about direct damage only.
  */
 
 import { add, assertFinite, gt, lte, sub, ZERO } from '../../core/num';
 import { DAMAGE_TAG_BIT } from '../../data/stats';
+import { accrued, BURN_TICK_INTERVAL, expireBurns } from '../ailments/records';
 import { tally } from '../combat/hit';
-import { accrued, BURN_TICK_INTERVAL, expireBurns } from './burn';
+import { KILL_BY_BURN } from '../effects/flags';
 import type { BurnStack, Enemy, RunContext } from './context';
 import { killEnemy } from './death';
 
@@ -35,7 +37,11 @@ export function updateBurns(ctx: RunContext): void {
     tally(ctx, BURN, ctx.burnCredit, amount);
     if (gt(amount, ctx.maxHit)) ctx.maxHit = amount;
     ctx.events.push({ type: 'burnTick', targetId: enemy.id, x: enemy.x, y: enemy.y, amount });
-    if (lte(enemy.hp, ZERO)) killEnemy(ctx, enemy, -1);
+    if (lte(enemy.hp, ZERO)) {
+      enemy.killDepth = enemy.ailDepth;
+      enemy.killKind = KILL_BY_BURN;
+      killEnemy(ctx, enemy, -1, 0);
+    }
   }
   if (burnTick) ctx.lastBurnTick = now;
 }

@@ -3,12 +3,20 @@
  * run plays rather than a number data can carry. Each RuleSpec id has one module, registered in
  * RULE_MODULES (index.ts). compileBuild (src/sim/build/compile.ts) compiles each module once per
  * run with every instance of its rule, through a BuildCompiler: the module scales or offsets
- * stats, adds modifiers, sets build flags and the signature attack's parameters, and registers
- * hooks the simulation calls at fixed points of the tick.
+ * stats, adds modifiers, sets build flags and the signature attack's parameters, adds triggers
+ * and effects, and registers hooks the simulation calls at fixed points of the tick.
+ *
+ * Each module instance (one compile call, or one TestModule) is one trigger of the build: its
+ * first hook() takes it a trigger index, which every hook of the instance shares. Hooks deal
+ * damage or apply ailments only by queueing their effects (enqueueModuleEffect in api.ts) with
+ * that index as the origin, so the instance never fires on its own damage (rule 3).
  */
 
+import type { Num } from '../../core/num';
 import type { RuleSpec, SignatureSpec } from '../../data/rules';
 import type { Modifier, StatId } from '../../data/stats';
+import type { TagMask } from '../../data/tags';
+import type { EffectSpec, TriggerSpec } from '../../data/triggers';
 import type { BuildFlags, SignatureParams } from '../build/compile';
 import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
@@ -49,8 +57,21 @@ export interface BuildCompiler {
   signature(): SignatureParams;
   /** Index of a damage source, numbering it on first use (SourceTable.index). */
   source(name: string): number;
-  /** Adds a hook; hooks of one name run in the order they were added. */
-  hook<K extends HookName>(name: K, fn: Hooks[K]): void;
+  /**
+   * Adds a hook; hooks of one name run in the order they were added. Returns the instance's
+   * trigger index, taken at its first hook() call: the origin of what its hooks queue.
+   */
+  hook<K extends HookName>(name: K, fn: Hooks[K]): number;
+  /**
+   * Adds a trigger credited to source `source`, with its chance and COEF_FIELDS × coef
+   * (default 1). It takes the next trigger index, like a data trigger.
+   */
+  addTrigger(source: string, spec: TriggerSpec, coef?: number): void;
+  /**
+   * Compiles an effect for the instance's hooks to queue (enqueueModuleEffect), credited to
+   * `source`, with its COEF_FIELDS × coef (default 1). Returns its effect index.
+   */
+  addEffect(source: string, spec: EffectSpec, coef?: number): number;
   /**
    * Multiplier on hit damage on top of the damage row (CompiledBuild.legacyHitMult). Only
    * pandemicLegacy sets it, until pandemic becomes data (C3.7).
@@ -71,6 +92,16 @@ export interface SignatureModule<P extends SignatureSpec> {
 export interface KillScratch {
   /** The trigger whose damage killed; −1 for emitter hits and DoT kills. */
   origin: number;
+  /** Depth of the killing damage (Enemy.killDepth). */
+  depth: number;
+  /** The victim's position. */
+  x: number;
+  y: number;
+  /**
+   * The kill's flags (src/sim/effects/flags.ts): the killing hit's SIGNATURE, CRIT, HIT and
+   * CHAIN_JUMP, the ailments the victim held, and the kill kind.
+   */
+  flags: number;
 }
 
 /** The attack an onAttack hook sees; one reused object per run (RunContext.shotScratch). */
@@ -82,17 +113,70 @@ export interface ShotScratch {
   forceCrit: boolean;
 }
 
+/**
+ * The hit modifyDamage and onHit hooks see; one reused object per run (RunContext.hitScratch),
+ * filled before modifyDamage and completed before onHit.
+ */
+export interface HitScratch {
+  target: Enemy;
+  /** The target's position. */
+  x: number;
+  y: number;
+  /** The instance's tags, crit included, and the source it is credited to. */
+  mask: TagMask;
+  source: number;
+  crit: boolean;
+  /** 0 for a primary hit, k for the kth chain jump. */
+  chainIndex: number;
+  depth: number;
+  /** The trigger whose effect dealt the hit; −1 for emitter hits. */
+  origin: number;
+  /** The hit's flags (src/sim/effects/flags.ts); KILLED on a lethal hit. */
+  flags: number;
+  /** The damage dealt: set for onHit, after the modifyDamage hooks. */
+  amount: Num;
+}
+
+/** The center event an onCenterEvent hook sees (RunContext.centerScratch). */
+export interface CenterEventScratch {
+  /** Its CENTER_EVENTS ordinal. */
+  event: number;
+  depth: number;
+  origin: number;
+  flags: number;
+  /** The event's enemy; null for none. */
+  target: Enemy | null;
+  x: number;
+  y: number;
+}
+
 /** Points in the tick where the simulation calls rule modules. Hooks allocate nothing. */
 export interface Hooks {
-  /** Every tick after the emitters' attacks, while the player is alive. */
+  /** Every tick after the emitters' attacks, while the player is alive. May queue effects. */
   readonly tick: (ctx: RunContext) => void;
-  /** At each kill, while the victim is still alive: before removeEnemy, drops and split. */
+  /**
+   * At each kill, while the victim is still alive: after the kill's transfer triggers, before
+   * removeEnemy, drops and split. May queue effects.
+   */
   readonly onKill: (ctx: RunContext, victim: Enemy, kill: Readonly<KillScratch>) => void;
   /**
    * At each attack of an emitter, once it is counted (em.attacks includes it) and before its
    * projectiles fire. A hook may only set shot.forceCrit.
    */
   readonly onAttack: (ctx: RunContext, em: Readonly<EmitterRuntime>, shot: ShotScratch) => void;
+  /**
+   * After each hit: a surviving hit once its ailments are applied, a lethal one before the kill
+   * (with KILLED in its flags). May queue effects.
+   */
+  readonly onHit: (ctx: RunContext, hit: Readonly<HitScratch>) => void;
+  /**
+   * A hit's damage once its multipliers are applied, before it is dealt: returns the new
+   * amount, which the next hook receives. A pure change of the number; ailments the hit
+   * applies keep its damage before the hooks.
+   */
+  readonly modifyDamage: (ctx: RunContext, hit: Readonly<HitScratch>, amount: Num) => Num;
+  /** At each center event that passes rule 8 (src/sim/effects/centerEvents.ts). May queue. */
+  readonly onCenterEvent: (ctx: RunContext, ev: Readonly<CenterEventScratch>) => void;
 }
 
 export type HookName = keyof Hooks;

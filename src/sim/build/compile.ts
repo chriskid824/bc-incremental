@@ -2,10 +2,12 @@
  * compileBuild: a build's stat block, rules and signature attack compiled into what one run
  * reads (docs/v3/implementation-plan-v3.md §2.7). The rule modules (src/sim/rules/) run once, in
  * the order their ids first appear in the rules, each with all of its instances; they scale and
- * offset stats, add modifiers, set flags and the signature attack's parameters, and add hooks.
- * The result holds the final stat values, the ModTable of the build's scoped modifiers followed
- * by the rule-added ones, the run's damage sources and ailment attribution, the hook lists and
- * the emitters, the signature's first.
+ * offset stats, add modifiers, set flags and the signature attack's parameters, and add
+ * triggers, effects and hooks. The result holds the final stat values, the ModTable of the
+ * build's scoped modifiers followed by the rule-added ones, the run's damage sources and ailment
+ * attribution, the hook lists, the emitters, the signature's first, and the triggers with their
+ * effects: the build's own (StatBlock.triggers) first, then the modules', in compile order
+ * (src/sim/effects/types.ts).
  *
  * The source table, the attribution's outer sources and the ModTable rows grow while a run
  * uses them, so createRunContext compiles a fresh build for every run. The talent screen and
@@ -18,10 +20,14 @@ import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/ru
 import { isScopedStat, SCOPED_STATS, STAT_IDS } from '../../data/stats';
 import type { Modifier, StatBlock, StatId } from '../../data/stats';
 import type { TagMask } from '../../data/tags';
+import { TRIGGER_EVENTS } from '../../data/triggers';
+import type { EffectSpec, TriggerSpec } from '../../data/triggers';
+import { compileEffect, compileTrigger, moduleTrigger } from '../effects/types';
+import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import type { EmitterSpec } from '../emitters/types';
 import { RULE_MODULES, SIGNATURES } from '../rules';
 import type { BuildCompiler, HookName, Hooks, TestModule } from '../rules';
-import { statAt } from './eval';
+import { statAt, staticInput } from './eval';
 import { compileMods, ModTable } from './modTable';
 import type { CompiledMod } from './modTable';
 import {
@@ -41,7 +47,7 @@ export interface BuildFlags {
   maxLife: number | null;
   /**
    * Burn stacks are uncapped (eternalFlame). Until burns move to rings, the records keep
-   * UNCAPPED_BURN_STACKS as their cap (src/sim/systems/burn.ts).
+   * UNCAPPED_BURN_STACKS as their cap (src/sim/ailments/records.ts).
    */
   burnRings: boolean;
 }
@@ -75,6 +81,12 @@ export interface CompiledBuild {
   readonly legacyHitMult: number;
   /** The run's emitters; index 0 is the signature attack. */
   readonly emitters: readonly EmitterSpec[];
+  /** Every trigger, by trigger index; a module instance's entry listens to no event. */
+  readonly triggers: readonly CompiledTrigger[];
+  /** Per TRIGGER_EVENTS ordinal, the indices of the triggers listening to it, in order. */
+  readonly triggersOn: readonly Int32Array[];
+  /** Every effect: the triggers' in trigger order, and the ones modules added (addEffect). */
+  readonly effects: readonly CompiledEffect[];
 }
 
 function compileRule<K extends RuleId>(
@@ -137,7 +149,31 @@ export function compileBuild(
   const added: Modifier[] = [];
   const flags: BuildFlags = { randomCrits: true, maxLife: null, burnRings: false };
   const params: SignatureParams = { forceCritEvery: 0, counts: 'shot' };
-  const hooks: { [K in HookName]: Hooks[K][] } = { tick: [], onKill: [], onAttack: [] };
+  const hooks: { [K in HookName]: Hooks[K][] } = {
+    tick: [],
+    onKill: [],
+    onAttack: [],
+    onHit: [],
+    modifyDamage: [],
+    onCenterEvent: [],
+  };
+  const triggers: CompiledTrigger[] = [];
+  const effects: CompiledEffect[] = [];
+  const addTrigger = (source: number, spec: TriggerSpec, coef: number): void => {
+    triggers.push(compileTrigger(triggers.length, spec, source, coef, effects.length));
+    for (const effect of spec.do) {
+      effects.push(compileEffect(effect, source, coef, values.damage));
+    }
+  };
+  // The module instance being compiled, its source and its trigger index (−1 until its first
+  // hook).
+  let instanceSource = CENTER;
+  let instance = -1;
+  const compileInstance = (source: number, compile: () => void): void => {
+    instanceSource = source;
+    instance = -1;
+    compile();
+  };
 
   const compiler: BuildCompiler = {
     values,
@@ -162,13 +198,31 @@ export function compileBuild(
     source: (name) => sources.index(name),
     hook(name, fn) {
       hooks[name].push(fn);
+      if (instance < 0) {
+        instance = triggers.length;
+        triggers.push(moduleTrigger(instance, instanceSource));
+      }
+      return instance;
+    },
+    addTrigger(source, spec, coef = 1) {
+      addTrigger(sources.index(source), spec, coef);
+    },
+    addEffect(source: string, spec: EffectSpec, coef = 1) {
+      effects.push(compileEffect(spec, sources.index(source), coef, values.damage));
+      return effects.length - 1;
     },
     legacyHitMult: 1,
   };
 
+  for (const { source, spec } of stats.triggers) addTrigger(sources.index(source), spec, 1);
   // Every rule is credited to the center until characters give rules their own sources.
-  for (const id of new Set(rules.map((rule) => rule.id))) compileRule(id, rules, compiler, CENTER);
-  for (const module of testModules) module(compiler, CENTER);
+  for (const id of new Set(rules.map((rule) => rule.id))) {
+    compileInstance(CENTER, () => compileRule(id, rules, compiler, CENTER));
+  }
+  for (const module of testModules) compileInstance(CENTER, () => module(compiler, CENTER));
+  const triggersOn = TRIGGER_EVENTS.map((_, event) =>
+    Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
+  );
 
   const mods = compileMods([...stats.scoped, ...added], sources);
   const scopedOf = (perStat: Readonly<Record<StatId, number>>): Float64Array =>
@@ -185,12 +239,16 @@ export function compileBuild(
     hooks,
     legacyHitMult: compiler.legacyHitMult,
     emitters: [signatureEmitter(signature.id, signature)],
+    triggers,
+    triggersOn,
+    effects,
   };
 }
 
 /**
  * Scoped stat `stat` (SCOPED_INDEX) of a center instance with tags `mask`, `chainJump` jumps
- * into its chain (0 for a primary hit), for estimates outside a run.
+ * into its chain (0 for a primary hit), for estimates outside a run: without a target, so
+ * conditional modifiers are left out.
  */
 export function centerStat(
   build: CompiledBuild,
@@ -200,7 +258,7 @@ export function centerStat(
 ): number {
   // Row first: filling it may grow, and so replace, the table's arrays.
   const row = build.table.row(rowKey(mask, CENTER));
-  return statAt(build.table, row, stat, chainJump);
+  return statAt(build.table, row, stat, staticInput(chainJump));
 }
 
 /**

@@ -211,6 +211,8 @@ export const COUNTER_IDS = [
   'triggerDepthCapped',
   /** Freezes past the rate limit, which froze without running their triggers. */
   'freezePayloadsLimited',
+  /** Most ticks in a row that ended with effects carried over (effectBudgetTicks' longest run). */
+  'effectBudgetStreakMax',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

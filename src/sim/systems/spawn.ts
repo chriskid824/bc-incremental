@@ -6,6 +6,7 @@
 
 import { mul, num, ZERO } from '../../core/num';
 import type { EnemyDef } from '../../data/types';
+import { MAX_DEPTH } from '../effects/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, PLAYER_RADIUS } from '../types';
 import type { Enemy, RunContext, WaveRecord } from './context';
 
@@ -80,6 +81,10 @@ export function addEnemy(
     inbound: 0,
     volleyMark: 0,
     tough: def.id === 'hexagon' || def.id === 'boss',
+    boss: def.id === 'boss',
+    ailDepth: MAX_DEPTH,
+    killDepth: 0,
+    killKind: 0,
   };
   ctx.enemies.push(enemy);
   rec.alive++;
@@ -88,11 +93,14 @@ export function addEnemy(
 
 /**
  * Children appear around the parent and belong to its wave. Their angles come from their
- * own stream: kills depend on combat, and must not shift later waves' spawns.
+ * own stream: kills depend on combat, and must not shift later waves' spawns. Returns where the
+ * children start in ctx.enemies: they are `ctx.enemies[start ..]` right after the call, an empty
+ * range for an enemy that does not split (kill step 2, src/sim/systems/death.ts).
  */
-export function split(ctx: RunContext, parent: Enemy): void {
+export function split(ctx: RunContext, parent: Enemy): number {
+  const start = ctx.enemies.length;
   const splitInto = parent.def.splitInto;
-  if (splitInto === undefined) return;
+  if (splitInto === undefined) return start;
   const def = ctx.data.enemies[splitInto.enemy];
   const player = ctx.player;
   for (let i = 0; i < splitInto.count; i++) {
@@ -103,4 +111,5 @@ export function split(ctx: RunContext, parent: Enemy): void {
     if (dist > 0) addEnemy(ctx, def, parent.rec, dx / dist, dy / dist, dist);
     else addEnemy(ctx, def, parent.rec, 1, 0, 0);
   }
+  return start;
 }

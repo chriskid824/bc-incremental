@@ -5,6 +5,7 @@ import type { RuleSpec } from './rules';
 import { ALWAYS_STATS, isBehaviourModifier } from './stats';
 import type { Modifier, StatId } from './stats';
 import { TALENTS } from './talents';
+import type { Condition, EffectSpec, TriggerSpec } from './triggers';
 
 const percent = (value: number): string => `${Math.round(Math.abs(value) * 100)}%`;
 const signedPercent = (value: number): string => `${value < 0 ? '−' : '+'}${percent(value)}`;
@@ -42,10 +43,59 @@ function modifierNumbers(mod: Modifier): string[][] {
   return [[signedPercent(mod.value)]];
 }
 
-/** Every number a node's descKey text must quote: its rules' and its behaviour modifiers'. */
+/** The numbers a trigger condition must quote; the event and ailment names are words. */
+function conditionNumbers(condition: Condition): string[][] {
+  if ('chance' in condition) return [[percent(condition.chance)]];
+  if ('cooldownSec' in condition) return [[String(condition.cooldownSec)]];
+  if ('targetHpBelow' in condition) return [[percent(condition.targetHpBelow)]];
+  if ('stacksAtLeast' in condition) return [[String(condition.stacksAtLeast.stacks)]];
+  return [];
+}
+
+/**
+ * The numbers an effect must quote: its damage, amounts and target counts. Radii and push
+ * distances are arena units, which the text describes in words ("nearby").
+ */
+function effectNumbers(effect: EffectSpec): string[][] {
+  switch (effect.kind) {
+    case 'applyAilment':
+      return [
+        ...(effect.stacks === undefined ? [] : [[String(effect.stacks)]]),
+        ...(effect.damagePct === undefined ? [] : [[percent(effect.damagePct)]]),
+        ...(effect.maxTargets === undefined ? [] : [[String(effect.maxTargets)]]),
+      ];
+    case 'spreadAilment':
+      return effect.effect === undefined ? [] : [[percent(effect.effect)]];
+    case 'explode':
+      return [
+        [percent(effect.damagePct)],
+        ...(effect.maxTargets === undefined ? [] : [[String(effect.maxTargets)]]),
+      ];
+    case 'nova':
+      return [[percent(effect.damagePct)]];
+    case 'push':
+      return [];
+    case 'heal':
+      return [[percent(effect.lifePct)]];
+    case 'gainShards':
+      return [[percent(effect.fraction)]];
+  }
+}
+
+/** The numbers a trigger's node text must quote: its interval, conditions and effects. */
+function triggerNumbers(trigger: TriggerSpec): string[][] {
+  return [
+    ...(trigger.every === undefined ? [] : [[String(trigger.every)]]),
+    ...(trigger.when ?? []).flatMap(conditionNumbers),
+    ...trigger.do.flatMap(effectNumbers),
+  ];
+}
+
+/** Every number a node's descKey text must quote: its rules', triggers' and behaviour modifiers'. */
 function nodeNumbers(node: (typeof TALENTS)[number]): string[][] {
   return [
     ...node.rules.flatMap(quotedNumbers),
+    ...node.triggers.flatMap(triggerNumbers),
     ...node.modifiers.filter(isBehaviourModifier).flatMap(modifierNumbers),
   ];
 }
@@ -60,7 +110,8 @@ const LOCALES = { en, 'zh-TW': zhTW } as Record<string, Record<string, string>>;
 
 describe('rule descriptions', () => {
   const described = TALENTS.filter(
-    (node) => node.rules.length > 0 || node.modifiers.some(isBehaviourModifier),
+    (node) =>
+      node.rules.length > 0 || node.triggers.length > 0 || node.modifiers.some(isBehaviourModifier),
   );
 
   it('covers the M1 rules and the bridge notables and Searing Crits as data', () => {
@@ -104,6 +155,45 @@ describe('rule descriptions', () => {
     expect(numbersOf('conduction')).toEqual([['+25%']]);
     expect(numbersOf('staticFocus')).toEqual([['+10%']]);
     expect(numbersOf('searingCrits')).toEqual([['−50%']]);
+  });
+
+  it('reads the numbers of triggers', () => {
+    expect(
+      triggerNumbers({
+        on: 'nthAttack',
+        every: 4,
+        when: [{ chance: 0.25 }, { targetHpBelow: 0.3 }, { hitIs: 'crit' }],
+        do: [
+          { kind: 'explode', radius: 90, damagePct: 0.5, maxTargets: 3 },
+          { kind: 'applyAilment', ailment: 'burn', stacks: 2, radius: 60 },
+          { kind: 'push', distance: 40, radius: 80 },
+        ],
+      }),
+    ).toEqual([['4'], ['25%'], ['30%'], ['50%'], ['3'], ['2']]);
+    expect(
+      triggerNumbers({
+        on: 'kill',
+        when: [{ cooldownSec: 2 }, { stacksAtLeast: { ailment: 'burn', stacks: 5 } }],
+        do: [{ kind: 'gainShards', fraction: 0.1 }],
+      }),
+    ).toEqual([['2'], ['5'], ['10%']]);
+    expect(
+      triggerNumbers({
+        on: 'diedWithAilment',
+        when: [{ victimHas: 'burn' }],
+        do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 250, effect: 0.4 }],
+      }),
+    ).toEqual([['40%']]);
+    expect(
+      triggerNumbers({
+        on: 'periodic',
+        every: 8,
+        do: [
+          { kind: 'nova', radius: 200, damagePct: 1.5, at: 'player' },
+          { kind: 'heal', lifePct: 0.05 },
+        ],
+      }),
+    ).toEqual([['8'], ['150%'], ['5%']]);
   });
 
   it('matches whole numbers only', () => {

@@ -65,7 +65,7 @@ function linearNearest(
   return best;
 }
 
-/** spreadBurns' target selection before the grid (src/sim/systems/burn.ts). */
+/** spreadBurns' target selection before the grid (src/sim/ailments/records.ts). */
 function linearWithin(enemies: readonly Item[], x: number, y: number, radiusSq: number): Item[] {
   const found: Item[] = [];
   for (let i = 0; i < enemies.length; i++) {

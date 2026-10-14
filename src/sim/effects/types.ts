@@ -1,0 +1,219 @@
+/**
+ * Triggers and effects compiled for a run (docs/v3/implementation-plan-v3.md §2.6). A trigger
+ * listens to one event (TRIGGER_EVENTS); when the event happens and the trigger's conditions
+ * hold, each of its effects is queued (queue.ts) and runs in the tick's effect phase
+ * (execute.ts), at one depth more than the event. The rules that bound chains of triggers:
+ * - depth: an event at depth MAX_DEPTH or more raises nothing (counted in triggerDepthCapped);
+ *   a depth-3 effect still runs. Emitter hits are depth 0;
+ * - a trigger never fires on its own direct damage: each queued effect carries the index of the
+ *   trigger that queued it as its origin, and damage it deals carries that origin;
+ * - at most EFFECTS_PER_TICK effects run per tick; the rest wait for the next tick, and past
+ *   EFFECT_QUEUE_HARD_CAP queued entries the newest are dropped.
+ *
+ * Triggers number in compile order (compileBuild): the build's data triggers, then the rule
+ * modules', where a module instance takes one index of its own at its first hook (an entry that
+ * listens to no event), then the test modules'.
+ */
+
+import type { Num } from '../../core/num';
+import { mul, num, ZERO } from '../../core/num';
+import { TAG, tagMask } from '../../data/tags';
+import type { TagMask } from '../../data/tags';
+import { COEF_FIELDS, TRANSFER_EFFECTS, TRIGGER_EVENTS, WIRED_EVENTS } from '../../data/triggers';
+import type { EffectKind, EffectSpec, TriggerEventId, TriggerSpec } from '../../data/triggers';
+import type { BurnSpread } from '../ailments/records';
+import { compileCondition } from '../build/eval';
+import type { CompiledCondition } from '../build/eval';
+import { TICK_RATE } from '../types';
+
+/** Events at this depth or deeper raise no triggers. */
+export const MAX_DEPTH = 3;
+/** Effects run per tick at most; the rest carry over. */
+export const EFFECTS_PER_TICK = 2000;
+/**
+ * Queued effects at most. The newest past it are dropped and counted (effectsDropped), against
+ * plan §2.6 rule 4 (nothing is dropped), so a runaway build cannot exhaust memory; the balance
+ * tools treat any drop as a failure.
+ */
+export const EFFECT_QUEUE_HARD_CAP = 65536;
+
+/** TRIGGER_EVENTS ordinal of each event: CompiledBuild.triggersOn's index. */
+export const EVENT = Object.fromEntries(TRIGGER_EVENTS.map((event, index) => [event, index])) as {
+  readonly [K in TriggerEventId]: number;
+};
+
+export interface CompiledTrigger {
+  readonly index: number;
+  /** TRIGGER_EVENTS ordinal; −1 for a rule module instance's entry, which listens to nothing. */
+  readonly on: number;
+  /** nthAttack: fires on every Nth event; 1 for every other event. */
+  readonly every: number;
+  /** Source index its effects are credited to. */
+  readonly source: number;
+  /** Its `when` conditions but chance, cooldownSec and hitIs 'signature'. */
+  readonly conds: readonly CompiledCondition[];
+  /** Chance to fire, × coef and at most 1; rolled on the trigger stream below 1. */
+  readonly chance: number;
+  /** Ticks after firing before it can fire again. */
+  readonly cooldownTicks: number;
+  /** Its effects: CompiledBuild.effects[effectStart .. effectEnd). */
+  readonly effectStart: number;
+  readonly effectEnd: number;
+  /** hitIs 'signature': fires only on events carrying SIGNATURE (rule 8). */
+  readonly signatureOnly: boolean;
+  /**
+   * A kill or diedWithAilment trigger whose effects all transfer ailments (TRANSFER_EFFECTS): it
+   * runs at the kill, while the victim still holds them, rather than from the queue.
+   */
+  readonly inline: boolean;
+  /** Calibration coefficient, applied at compile to the chance and COEF_FIELDS; 1 for data. */
+  readonly coef: number;
+  /** periodic: its period in ticks; 0 for every other event. */
+  readonly periodTicks: number;
+  /** One of its effects reads the dying enemy's drop (gainShards): kill entries carry it. */
+  readonly takesDrop: boolean;
+}
+
+export interface CompiledEffect {
+  readonly kind: EffectKind;
+  /** The effect's spec, its COEF_FIELDS × the trigger's coefficient (a missing field as 1). */
+  readonly spec: EffectSpec;
+  /** Source index of its damage, the source of the trigger or module that compiled it. */
+  readonly source: number;
+  /** Its radius squared; 0 without a radius. */
+  readonly radiusSq: number;
+  /**
+   * Tags of its hits (explode, nova: hit, trigger and area, plus its tags and element) or of
+   * the hit an ailment it applies counts as (applyAilment: hit and trigger); 0 for the others.
+   */
+  readonly tags: TagMask;
+  /** Damage of a hit or of the hit an applied ailment counts as: damage stat × damagePct. */
+  readonly baseDamage: Num;
+  /** spreadAilment's spread, ready for spreadBurns; null for the other kinds. */
+  readonly spread: BurnSpread | null;
+}
+
+/**
+ * Compiles a trigger at `index` whose effects start at `effectStart` in CompiledBuild.effects.
+ * Throws on an event the simulation does not raise yet.
+ */
+export function compileTrigger(
+  index: number,
+  spec: TriggerSpec,
+  source: number,
+  coef: number,
+  effectStart: number,
+): CompiledTrigger {
+  if (!WIRED_EVENTS.has(spec.on)) {
+    throw new Error(`A trigger on '${spec.on}': the simulation does not raise this event yet`);
+  }
+  if (spec.on === 'periodic' && !((spec.every ?? 0) > 0)) {
+    throw new Error('A periodic trigger needs its period in seconds (every > 0)');
+  }
+  let chance = 1;
+  let cooldownSec = 0;
+  let signatureOnly = false;
+  const conds: CompiledCondition[] = [];
+  for (const condition of spec.when ?? []) {
+    if ('chance' in condition) chance = condition.chance;
+    else if ('cooldownSec' in condition) cooldownSec = condition.cooldownSec;
+    else if ('hitIs' in condition && condition.hitIs === 'signature') signatureOnly = true;
+    else conds.push(compileCondition(condition));
+  }
+  const kill = spec.on === 'kill' || spec.on === 'diedWithAilment';
+  return {
+    index,
+    on: EVENT[spec.on],
+    every: spec.on === 'nthAttack' ? (spec.every ?? 1) : 1,
+    source,
+    conds,
+    chance: Math.min(1, chance * coef),
+    cooldownTicks: Math.round(cooldownSec * TICK_RATE),
+    effectStart,
+    effectEnd: effectStart + spec.do.length,
+    signatureOnly,
+    inline: kill && spec.do.every((effect) => TRANSFER_EFFECTS.has(effect.kind)),
+    coef,
+    periodTicks:
+      spec.on === 'periodic' ? Math.max(1, Math.round((spec.every as number) * TICK_RATE)) : 0,
+    takesDrop: spec.do.some((effect) => effect.kind === 'gainShards'),
+  };
+}
+
+/** The entry of a rule module instance at `index`: it listens to no event and has no effects. */
+export function moduleTrigger(index: number, source: number): CompiledTrigger {
+  return {
+    index,
+    on: -1,
+    every: 1,
+    source,
+    conds: [],
+    chance: 1,
+    cooldownTicks: 0,
+    effectStart: 0,
+    effectEnd: 0,
+    signatureOnly: false,
+    inline: false,
+    coef: 1,
+    periodTicks: 0,
+    takesDrop: false,
+  };
+}
+
+/** `spec` with its COEF_FIELDS × coef; a field left out counts as 1. */
+function withCoef(spec: EffectSpec, coef: number): EffectSpec {
+  const fields = COEF_FIELDS[spec.kind] as readonly string[];
+  if (fields.length === 0) return spec;
+  const scaled: Record<string, unknown> = { ...spec };
+  for (const field of fields) scaled[field] = ((scaled[field] as number | undefined) ?? 1) * coef;
+  return scaled as unknown as EffectSpec;
+}
+
+/**
+ * Compiles an effect credited to `source`, with its COEF_FIELDS × coef; `damage` is the build's
+ * damage stat.
+ */
+export function compileEffect(
+  spec: EffectSpec,
+  source: number,
+  coef: number,
+  damage: number,
+): CompiledEffect {
+  // An effect's damage is damage × (damagePct × coef): the coefficient goes into the field
+  // first. Keep that association, or a calibrated effect's damage moves by ulps.
+  const scaled = withCoef(spec, coef);
+  const radius = 'radius' in scaled ? (scaled.radius ?? 0) : 0;
+  let tags = 0;
+  let baseDamage = ZERO;
+  let spread: BurnSpread | null = null;
+  switch (scaled.kind) {
+    case 'explode':
+    case 'nova':
+      tags =
+        TAG.hit |
+        TAG.trigger |
+        TAG.area |
+        tagMask(scaled.tags ?? []) |
+        (scaled.element === undefined ? 0 : TAG[scaled.element]);
+      baseDamage = mul(num(damage), scaled.damagePct);
+      break;
+    case 'applyAilment':
+      tags = TAG.hit | TAG.trigger;
+      baseDamage = mul(num(damage), scaled.damagePct ?? 1);
+      break;
+    case 'spreadAilment':
+      spread = { radius, radiusSq: radius ** 2, effect: scaled.effect ?? 1 };
+      break;
+    default:
+      break;
+  }
+  return {
+    kind: scaled.kind,
+    spec: scaled,
+    source,
+    radiusSq: radius ** 2,
+    tags,
+    baseDamage,
+    spread,
+  };
+}

@@ -19,17 +19,17 @@
  * the rules' post-operations, × postScale + postOffset (scaleStat and offsetStat, src/sim/rules/);
  * with no tagged, scoped or scaling modifier that is CompiledBuild.values[stat] bit for bit.
  *
- * Modifiers with a scaling are dynamic entries: a row lists the matching ones per stat in data
- * order, and statAt (src/sim/build/eval.ts) adds them per damage instance after the static
- * parts.
+ * Modifiers with a scaling or conditions (Modifier.when) are dynamic entries: a row lists the
+ * matching ones per stat in data order, and statAt (src/sim/build/eval.ts) adds those whose
+ * conditions hold per damage instance, after the static parts.
  */
 
 import { SCOPED_STATS } from '../../data/stats';
 import type { Modifier, ModifierKind, ScopedStat, StatBlock } from '../../data/stats';
 import { tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
-import { compileScaling, statAt } from './eval';
-import type { CompiledScaling } from './eval';
+import { compileCondition, compileScaling, statAt, staticInput } from './eval';
+import type { CompiledCondition, CompiledScaling } from './eval';
 import { createSourceTable, SOURCE_SHIFT } from './sources';
 import type { SourceTable } from './sources';
 
@@ -70,7 +70,15 @@ export interface CompiledMod {
   readonly untagged: boolean;
   /** The modifier's scaling: a dynamic entry, evaluated per damage instance. */
   readonly scale: CompiledScaling | null;
+  /** The modifier's conditions (Modifier.when): a dynamic entry, applied where they all hold. */
+  readonly cond: readonly CompiledCondition[] | null;
 }
+
+/** Evaluated per damage instance rather than folded into the rows. */
+const isDynamic = (mod: CompiledMod): boolean => mod.scale !== null || mod.cond !== null;
+
+/** A read of a row outside any damage instance: a primary hit without a target. */
+const ESTIMATE = staticInput();
 
 /**
  * Compiles StatBlock.scoped, keeping data order; scopes resolve against `sources`, which keeps
@@ -92,6 +100,7 @@ export function compileMods(scoped: readonly Modifier[], sources: SourceTable): 
       scopeOk,
       untagged: all === 0 && none === 0 && scopeOk === null,
       scale: mod.scaling === undefined ? null : compileScaling(mod.scaling),
+      cond: mod.when === undefined ? null : mod.when.map(compileCondition),
     };
   });
 }
@@ -148,7 +157,7 @@ export class ModTable {
   private readonly base: Float64Array;
   /** Entries used in `dyn`. */
   private dynLength = 0;
-  /** Per scoped stat, the indices of its modifiers with a scaling, in data order. */
+  /** Per scoped stat, the indices of its dynamic modifiers, in data order. */
   private readonly dynamicMods: readonly (readonly number[])[];
   /** Open addressing with linear probing: key + 1 per slot (0 = empty), and that key's row. */
   private keys: Int32Array;
@@ -187,7 +196,7 @@ export class ModTable {
     this.dynStart = new Int32Array(rowValues);
     this.dynCount = new Int32Array(rowValues);
     this.dynamicMods = SCOPED_STATS.map((_, s) =>
-      mods.flatMap((mod, i) => (mod.stat === s && mod.scale !== null ? [i] : [])),
+      mods.flatMap((mod, i) => (mod.stat === s && isDynamic(mod) ? [i] : [])),
     );
     this.dyn = new Int32Array(INITIAL_DYNAMIC);
   }
@@ -205,13 +214,13 @@ export class ModTable {
   }
 
   /**
-   * Damage multiplier of `key` for a primary hit (chain jump 0): (1 + Σincreased) × Π(1 + more)
-   * of its damage modifiers.
+   * Damage multiplier of `key` for a primary hit (chain jump 0) without a target: (1 +
+   * Σincreased) × Π(1 + more) of its damage modifiers, conditional ones left out.
    */
   damage(key: number): number {
     // Row first: filling it may grow, and so replace, the arrays.
     const row = this.row(key);
-    return statAt(this, row, DAMAGE, 0);
+    return statAt(this, row, DAMAGE, ESTIMATE);
   }
 
   /** The first empty slot on `key`'s probe path. */
@@ -274,7 +283,7 @@ export class ModTable {
       more[at + s] = 1;
     }
     for (const mod of mods) {
-      if (mod.scale !== null || !matches(mod)) continue;
+      if (isDynamic(mod) || !matches(mod)) continue;
       if (mod.kind === FLAT) {
         if (mod.untagged) untaggedFlat[mod.stat] = (untaggedFlat[mod.stat] as number) + mod.value;
       } else if (mod.kind === INCREASED) {
@@ -285,7 +294,7 @@ export class ModTable {
     }
     for (let s = 0; s < S; s++) flatV[at + s] = (base[s] as number) + (untaggedFlat[s] as number);
     for (const mod of mods) {
-      if (mod.kind !== FLAT || mod.untagged || mod.scale !== null || !matches(mod)) continue;
+      if (mod.kind !== FLAT || mod.untagged || isDynamic(mod) || !matches(mod)) continue;
       flatV[at + mod.stat] = (flatV[at + mod.stat] as number) + mod.value;
     }
     for (let s = 0; s < S; s++) {

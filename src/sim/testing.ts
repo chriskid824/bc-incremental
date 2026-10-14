@@ -4,8 +4,8 @@
  */
 
 import type { RuleSpec } from '../data/rules';
-import { BASE_STATS } from '../data/stats';
-import type { Modifier, StatBlock, StatId } from '../data/stats';
+import { BASE_STATS, NO_EXTRAS } from '../data/stats';
+import type { Modifier, StatBlock, StatExtras, StatId } from '../data/stats';
 import type { TagMask } from '../data/tags';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyDef, EnemyId, GameData, WaveTable } from '../data/types';
@@ -128,15 +128,17 @@ export function stationarySquares(count: number, hpMult = 1e12): GameData {
 
 /**
  * Stat block from BASE_STATS plus overrides, which are both its base and its values, with the
- * given scoped modifiers: tagged or untagged increased/more damage, e.g. maskProbeMods(). Flat
- * changes belong in the overrides.
+ * given scoped modifiers: tagged or untagged increased/more damage, e.g. maskProbeMods(), and
+ * the given triggers (`extras`, as collectExtras gives them). Flat changes belong in the
+ * overrides.
  */
 export function makeStats(
   values: Partial<Record<StatId, number>> = {},
   scoped: readonly Modifier[] = [],
+  extras: StatExtras = NO_EXTRAS,
 ): StatBlock {
   const stats = { ...BASE_STATS, ...values };
-  return { base: stats, values: stats, scoped, triggers: [], conversions: [] };
+  return { base: stats, values: stats, scoped, ...extras };
 }
 
 /**
