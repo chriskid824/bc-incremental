@@ -25,6 +25,8 @@ import type { AttributionPolicy, SourceTable } from '../build/sources';
 import { FREEZE_PAYLOADS } from '../effects/centerEvents';
 import { createEffectEntry, createEffectQueue } from '../effects/queue';
 import type { EffectEntry, EffectQueue, PendingKill, TriggerState } from '../effects/queue';
+import { createSelectionScratch, selectable } from '../effects/select';
+import type { SelectionScratch } from '../effects/select';
 import { EVENT } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import {
@@ -367,6 +369,13 @@ export interface RunContext {
   readonly inlineEntry: EffectEntry;
   /** Ticks in a row that ended with effects left past the budget. */
   budgetStreak: number;
+  /**
+   * The enemy the last trigger selector picked (src/sim/effects/select.ts), null for 'player':
+   * written by the dispatch gates and read by the same firing right after.
+   */
+  selected: Enemy | null;
+  /** The selection in progress, which selAccept reads (src/sim/effects/select.ts). */
+  readonly selection: SelectionScratch;
 
   // ---- Entities and public state ----
   readonly enemies: Enemy[];
@@ -478,6 +487,8 @@ export interface RunContext {
   readonly shootableInVolley: (enemy: Enemy) => boolean;
   /** Not hit by the current attack yet, so a chain jump can reach it. */
   readonly chainable: (enemy: Enemy) => boolean;
+  /** Accepted by the current trigger selection (selectable in src/sim/effects/select.ts). */
+  readonly selAccept: (enemy: Enemy) => boolean;
 }
 
 /**
@@ -787,6 +798,8 @@ export function createRunContext(
     effectEntry: createEffectEntry(),
     inlineEntry: createEffectEntry(),
     budgetStreak: 0,
+    selected: null,
+    selection: createSelectionScratch(),
 
     enemies,
     projectiles,
@@ -862,6 +875,7 @@ export function createRunContext(
       !isCovered(enemy, projectileEstimate) &&
       !((enemy.volleyMark === signatureEmitter.volley && !focused(enemy)) || doomed(ctx, enemy)),
     chainable: (enemy) => enemy.hitMark !== ctx.attackSerial,
+    selAccept: (enemy) => selectable(ctx, enemy),
   };
   return ctx;
 }

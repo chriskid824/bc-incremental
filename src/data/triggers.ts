@@ -228,6 +228,57 @@ export const CONDITION_CONTEXTS: Readonly<
   ailment: ['ailmentApplied', 'ailmentTick'],
 };
 
+/**
+ * Which enemy a trigger's selector picks (TriggerSpec.target), among the alive ones it accepts
+ * (TargetSelector), ties to the lower id:
+ * - nearest: the closest to the `from` point;
+ * - farthest: the farthest from the `from` point;
+ * - highestHp: the one with the most hp left;
+ * - densest: the one closest to the center of the most crowded spot (a 3 × 3 block of grid
+ *   cells, src/sim/grid.ts densest);
+ * - outermost: the farthest from the player;
+ * - player: no enemy; area effects center on the player;
+ * - mostStacks: the one with the most live stacks of `ailment`, at least one.
+ */
+export const TARGET_PICKS = [
+  'nearest',
+  'farthest',
+  'highestHp',
+  'densest',
+  'outermost',
+  'player',
+  'mostStacks',
+] as const;
+export type TargetPick = (typeof TARGET_PICKS)[number];
+
+/** Where a selector measures `range`, nearest and farthest from. */
+export const SELECTOR_ORIGINS = ['event', 'player'] as const;
+export type SelectorOrigin = (typeof SELECTOR_ORIGINS)[number];
+
+/**
+ * The enemy a trigger's effects act on in place of the event's (TriggerSpec.target). It accepts
+ * the alive enemies within `range` of `from` (unlimited without it), but the event's own enemy
+ * with excludeEventTarget and bosses with excludeBoss. `from` is the event's point (its enemy's
+ * position, a kill's victim's) by default and on events without one the player's; mostStacks
+ * counts the stacks of `ailment`, which only it takes.
+ */
+export interface TargetSelector {
+  readonly pick: TargetPick;
+  readonly ailment?: StackAilment;
+  readonly from?: SelectorOrigin;
+  readonly range?: number;
+  readonly excludeEventTarget?: boolean;
+  readonly excludeBoss?: boolean;
+}
+
+/**
+ * Which of the enemies within its radius an effect capped by maxTargets reaches: the first in
+ * id order ('id', the default), or the nearest to the effect's center, nearest first, ties to
+ * the lower id ('nearest').
+ */
+export const TARGET_ORDERS = ['id', 'nearest'] as const;
+export type TargetOrder = (typeof TARGET_ORDERS)[number];
+
 /** The damage of an explode or nova: its hits are tagged hit, trigger and area. */
 interface DamagePart {
   /** Damage of each hit as a fraction of the damage stat. */
@@ -242,6 +293,7 @@ interface ExplodeSpec extends DamagePart {
   readonly kind: 'explode';
   readonly radius: number;
   readonly maxTargets?: number;
+  readonly order?: TargetOrder;
 }
 
 interface NovaSpec extends DamagePart {
@@ -252,19 +304,23 @@ interface NovaSpec extends DamagePart {
 
 /**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
+ * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
+ * and the event's point too: effects around the event center on it, or on the player for a
+ * 'player' pick, which leaves the effects no enemy.
  * - applyAilment: `stacks` (default 1) of the ailment on the event's enemy, or on up to
- *   `maxTargets` enemies within `radius` of the event; each stack deals what a hit of damagePct
- *   (default 1) of the damage stat would apply. An enemy keeps only its strongest bleed, so more
- *   bleed stacks add nothing; shock stacks only change how much damage the enemy takes.
+ *   `maxTargets` enemies within `radius` of the event (in `order`); each stack deals what a hit
+ *   of damagePct (default 1) of the damage stat would apply. An enemy keeps only its strongest
+ *   bleed, so more bleed stacks add nothing; shock stacks only change how much damage the enemy
+ *   takes.
  * - spreadAilment: copies the event enemy's stacks of the ailment, at `effect` (default 1) of
  *   their damage, to every other enemy within `radius` of it. A transfer: it deals no damage.
  *   Poison only: `stacks` is the fraction of the stacks each enemy gets (default 1, the
- *   longest-lasting first), and `maxTargets` caps how many enemies it reaches.
- * - explode: hits up to `maxTargets` enemies within `radius` of the event.
+ *   longest-lasting first), and `maxTargets` caps how many enemies it reaches (in `order`).
+ * - explode: hits up to `maxTargets` enemies within `radius` of the event (in `order`).
  * - nova: hits every enemy within `radius` of the player, or of the event with at 'event'.
  * - push: moves the enemies within `radius` of the event `distance` further from the player.
  * - addFrost: adds `amount` to the chill meter of the event's enemy, or of up to `maxTargets`
- *   enemies within `radius` of the event.
+ *   enemies within `radius` of the event (in `order`).
  * - heal: the player regains `lifePct` of max life.
  * - gainShards: the dying enemy's shard drop again, × `fraction` (kill events only).
  */
@@ -276,6 +332,7 @@ export type EffectSpec =
       readonly damagePct?: number;
       readonly radius?: number;
       readonly maxTargets?: number;
+      readonly order?: TargetOrder;
     }
   | {
       readonly kind: 'spreadAilment';
@@ -290,6 +347,7 @@ export type EffectSpec =
       readonly effect?: number;
       readonly stacks?: number;
       readonly maxTargets?: number;
+      readonly order?: TargetOrder;
     }
   | ExplodeSpec
   | NovaSpec
@@ -299,6 +357,7 @@ export type EffectSpec =
       readonly amount: number;
       readonly radius?: number;
       readonly maxTargets?: number;
+      readonly order?: TargetOrder;
     }
   | { readonly kind: 'heal'; readonly lifePct: number }
   | { readonly kind: 'gainShards'; readonly fraction: number };
@@ -337,6 +396,13 @@ export interface TriggerSpec {
    */
   readonly every?: number;
   readonly when?: readonly Condition[];
+  /**
+   * The enemy its effects act on instead of the event's, picked once per firing: after its
+   * conditions, which still read the event's enemy, and before its chance roll. When nothing is
+   * picked it does not fire, rolls nothing and its cooldown does not restart. Not on waveStart,
+   * nor on a kill trigger that runs at the kill (its transfers always act on the victim).
+   */
+  readonly target?: TargetSelector;
   readonly do: readonly EffectSpec[];
 }
 

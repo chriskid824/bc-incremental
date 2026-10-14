@@ -233,7 +233,7 @@ export function compileBuild(
   const addTrigger = (source: number, spec: TriggerSpec, coef: number): void => {
     triggers.push(compileTrigger(triggers.length, spec, source, coef, effects.length));
     for (const effect of spec.do) {
-      effects.push(compileEffect(effect, source, coef, values.damage));
+      effects.push(compileEffect(effect, source, coef, values.damage, spec.target));
     }
   };
   // The module instance being compiled, its source and its trigger index (−1 until its first

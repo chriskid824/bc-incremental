@@ -21,8 +21,11 @@ import {
   KILL_KINDS,
   SCALING_CURVES,
   SCALING_VARS,
+  SELECTOR_ORIGINS,
   STACK_AILMENTS,
   TARGET_KINDS,
+  TARGET_ORDERS,
+  TARGET_PICKS,
   TRIGGER_EVENTS,
 } from './triggers';
 import type {
@@ -31,6 +34,7 @@ import type {
   EffectSpec,
   ScalingSpec,
   TargetCondition,
+  TargetSelector,
   TriggerSpec,
 } from './triggers';
 import { ENEMY_IDS } from './types';
@@ -204,6 +208,9 @@ export const ModifierSchema = exact<Modifier>()(
     .readonly(),
 );
 
+/** Which of the enemies within an effect's radius its maxTargets keeps (TARGET_ORDERS). */
+const order = z.enum(TARGET_ORDERS).exactOptional();
+
 /** Fields of an explode's or a nova's hits (src/data/triggers.ts DamagePart). */
 const damagePart = {
   damagePct: finite,
@@ -221,6 +228,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         damagePct: finite.exactOptional(),
         radius: finite.exactOptional(),
         maxTargets: finite.exactOptional(),
+        order,
       })
       .readonly(),
     // A burn spread may move records, which M1's spread copies whole to every enemy in range:
@@ -242,6 +250,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
           effect: finite.exactOptional(),
           stacks: finite.exactOptional(),
           maxTargets: finite.exactOptional(),
+          order,
         })
         .readonly(),
     ]),
@@ -250,6 +259,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         kind: z.literal('explode'),
         radius: finite,
         maxTargets: finite.exactOptional(),
+        order,
         ...damagePart,
       })
       .readonly(),
@@ -268,11 +278,25 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         amount: finite,
         radius: finite.exactOptional(),
         maxTargets: finite.exactOptional(),
+        order,
       })
       .readonly(),
     z.strictObject({ kind: z.literal('heal'), lifePct: finite }).readonly(),
     z.strictObject({ kind: z.literal('gainShards'), fraction: finite }).readonly(),
   ]),
+);
+
+export const TargetSelectorSchema = exact<TargetSelector>()(
+  z
+    .strictObject({
+      pick: z.enum(TARGET_PICKS),
+      ailment: z.enum(STACK_AILMENTS).exactOptional(),
+      from: z.enum(SELECTOR_ORIGINS).exactOptional(),
+      range: finite.exactOptional(),
+      excludeEventTarget: z.boolean().exactOptional(),
+      excludeBoss: z.boolean().exactOptional(),
+    })
+    .readonly(),
 );
 
 export const TriggerSpecSchema = exact<TriggerSpec>()(
@@ -281,6 +305,7 @@ export const TriggerSpecSchema = exact<TriggerSpec>()(
       on: z.enum(TRIGGER_EVENTS),
       every: finite.exactOptional(),
       when: z.array(ConditionSchema).readonly().exactOptional(),
+      target: TargetSelectorSchema.exactOptional(),
       do: z.array(EffectSpecSchema).readonly(),
     })
     .readonly(),

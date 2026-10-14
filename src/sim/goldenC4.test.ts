@@ -173,6 +173,79 @@ const THORNS_STATS = makeStats(
   },
 );
 
+/**
+ * C4.4's target selectors: periodic triggers picking the densest spot, the most hp (bosses
+ * left out) and the most burn stacks; kill triggers picking the nearest to the victim and the
+ * outermost; a contact trigger picking the farthest from the player; heroHit centering on the
+ * player; a hit trigger picking another enemy near its target; and order 'nearest' on an
+ * explode, an applyAilment with a radius and a poison spread.
+ */
+const SELECTOR_TRIGGERS: readonly TriggerSpec[] = [
+  {
+    on: 'periodic',
+    every: 1.5,
+    target: { pick: 'densest' },
+    do: [{ kind: 'explode', radius: 110, damagePct: 1.2, maxTargets: 3, order: 'nearest' }],
+  },
+  {
+    on: 'periodic',
+    every: 2,
+    target: { pick: 'highestHp', excludeBoss: true },
+    do: [{ kind: 'applyAilment', ailment: 'burn', stacks: 2 }],
+  },
+  {
+    on: 'periodic',
+    every: 2.5,
+    target: { pick: 'mostStacks', ailment: 'burn' },
+    do: [{ kind: 'nova', radius: 140, damagePct: 0.8, at: 'event' }],
+  },
+  {
+    on: 'kill',
+    target: { pick: 'nearest', range: 250 },
+    do: [{ kind: 'applyAilment', ailment: 'shock', radius: 120, maxTargets: 3, order: 'nearest' }],
+  },
+  {
+    on: 'kill',
+    when: [{ chance: 0.3 }],
+    target: { pick: 'outermost' },
+    do: [{ kind: 'addFrost', amount: 0.6 }],
+  },
+  {
+    on: 'contact',
+    target: { pick: 'farthest', from: 'player', range: 500 },
+    do: [{ kind: 'explode', radius: 90, damagePct: 2 }],
+  },
+  { on: 'heroHit', target: { pick: 'player' }, do: [{ kind: 'push', distance: 60, radius: 160 }] },
+  {
+    on: 'hit',
+    when: [{ chance: 0.1 }],
+    target: { pick: 'nearest', excludeEventTarget: true, range: 200 },
+    do: [{ kind: 'explode', radius: 60, damagePct: 0.5, maxTargets: 2, order: 'nearest' }],
+  },
+  {
+    on: 'kill',
+    do: [
+      { kind: 'spreadAilment', ailment: 'poison', radius: 220, maxTargets: 2, order: 'nearest' },
+    ],
+  },
+];
+const SELECTOR_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.3,
+    poisonChance: 0.3,
+  },
+  maskProbeMods(),
+  {
+    triggers: SELECTOR_TRIGGERS.map((spec) => ({ source: 'center', spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -185,6 +258,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'thorns',
     config: { stats: THORNS_STATS, rules: [], startWave: 12 },
     expected: ['9a4af4a9ea58986a', 'be2d89ddac3465ef'],
+  },
+  {
+    name: 'selector',
+    config: { stats: SELECTOR_STATS, rules: [], startWave: 12 },
+    expected: ['62d9c47cf2de42fb', '04b079428053ba81'],
   },
 ];
 

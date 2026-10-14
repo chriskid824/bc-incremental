@@ -23,6 +23,8 @@ import type {
   Condition,
   ConversionSpec,
   EffectSpec,
+  TargetPick,
+  TargetSelector,
   TriggerEventId,
   TriggerSpec,
 } from './triggers';
@@ -429,9 +431,32 @@ function conditionIssues(condition: Condition): string[] {
   return issues;
 }
 
+/** An order (TARGET_ORDERS) ranks what a radius finds, so it needs one. */
+const orderIssue = (order: string): string =>
+  `order '${order}' sorts the enemies a radius finds; add a radius or drop order`;
+
 const KILL_EVENTS: readonly TriggerEventId[] = ['kill', 'diedWithAilment'];
 /** Events whose enemy is dead when their triggers run. */
 const DEAD_EVENTS: readonly TriggerEventId[] = [...KILL_EVENTS, 'shatter'];
+
+/**
+ * Selector picks that look at every enemy (or, densest, at every grid cell), and the events that
+ * come once per hit, application or damage-over-time step, too often to pay for such a scan.
+ */
+const SCANNING_PICKS: ReadonlySet<TargetPick> = new Set<TargetPick>([
+  'farthest',
+  'highestHp',
+  'densest',
+  'outermost',
+  'mostStacks',
+]);
+const FREQUENT_EVENTS: readonly TriggerEventId[] = ['hit', 'crit', 'ailmentApplied', 'ailmentTick'];
+
+/** A kill trigger made only of transfers, which runs at the kill (CompiledTrigger.inline). */
+const runsAtKill = (trigger: TriggerSpec): boolean =>
+  KILL_EVENTS.includes(trigger.on) &&
+  trigger.do.length > 0 &&
+  trigger.do.every((effect) => TRANSFER_EFFECTS.has(effect.kind));
 
 /** Events whose `every` is required or allowed, and what it must be. */
 function everyIssues(trigger: TriggerSpec): string[] {
@@ -495,6 +520,8 @@ function triggerIssues(trigger: TriggerSpec): string[] {
   for (const key of ['chance', 'cooldownSec']) {
     if ((counts.get(key) ?? 0) > 1) issues.push(`at most one ${key} condition`);
   }
+  const target = trigger.target;
+  if (target !== undefined) issues.push(...selectorIssues(trigger, target));
 
   if (trigger.do.length === 0) issues.push('needs at least one effect');
   const kill = KILL_EVENTS.includes(on);
@@ -504,8 +531,47 @@ function triggerIssues(trigger: TriggerSpec): string[] {
     issues.push('mixes transfer and other effects on a kill event; split it into two triggers');
   }
   trigger.do.forEach((effect, i) => {
-    for (const problem of effectIssues(effect, on)) issues.push(`do[${i}] ${problem}`);
+    for (const problem of effectIssues(effect, on, target)) issues.push(`do[${i}] ${problem}`);
   });
+  return issues;
+}
+
+/**
+ * Where a trigger's target selector can run and what it needs: no waveStart (nothing has
+ * spawned to pick when it fires), no kill trigger that runs at the kill (its transfers act on
+ * the victim), no pick that scans every enemy on events that come per hit, mostStacks with
+ * exactly its ailment, a range above 0, and the event's enemy to exclude.
+ */
+function selectorIssues(trigger: TriggerSpec, target: TargetSelector): string[] {
+  const on = trigger.on;
+  if (on === 'waveStart') {
+    return ["target is not allowed on 'waveStart' events; use a periodic trigger with a selector"];
+  }
+  if (runsAtKill(trigger)) {
+    return [
+      'target is not allowed on a kill trigger that runs at the kill; it always acts on the victim',
+    ];
+  }
+  const issues: string[] = [];
+  const pick = target.pick;
+  if (SCANNING_PICKS.has(pick) && FREQUENT_EVENTS.includes(on)) {
+    issues.push(
+      `target.pick '${pick}' scans every enemy on each '${on}' event; use 'nearest' here, ` +
+        'or move the effect to a periodic trigger',
+    );
+  }
+  if (pick === 'mostStacks' && target.ailment === undefined) {
+    issues.push("target.pick 'mostStacks' needs target.ailment (burn, poison or shock)");
+  }
+  if (pick !== 'mostStacks' && target.ailment !== undefined) {
+    issues.push("target.ailment only applies to pick 'mostStacks'");
+  }
+  if (target.range !== undefined && !(target.range > 0)) {
+    issues.push(`target.range must be > 0 (got ${target.range})`);
+  }
+  if (target.excludeEventTarget === true && TARGETLESS_EVENTS.has(on)) {
+    issues.push(`target.excludeEventTarget needs the event's enemy, which '${on}' events have not`);
+  }
   return issues;
 }
 
@@ -529,8 +595,15 @@ function conversionIssues(conversion: ConversionSpec): string[] {
   return issues;
 }
 
-/** Parameter ranges of one effect, and whether it can run on events `on`. */
-function effectIssues(effect: EffectSpec, on: TriggerEventId): string[] {
+/**
+ * Parameter ranges of one effect, and whether it can run on events `on` for a trigger with the
+ * target selector `target`, if any.
+ */
+function effectIssues(
+  effect: EffectSpec,
+  on: TriggerEventId,
+  target: TargetSelector | undefined,
+): string[] {
   const issues: string[] = [];
   const positive = (name: string, value: number | undefined): void => {
     if (value !== undefined && !(value > 0)) issues.push(`${name} must be > 0 (got ${value})`);
@@ -557,12 +630,17 @@ function effectIssues(effect: EffectSpec, on: TriggerEventId): string[] {
   // The event's enemy: none on targetless events, gone once a kill or shatter trigger's
   // effects run (a kill's transfers run at the kill, before it is gone; a shatter's never do),
   // and gone by the time a contact trigger's effects run, since a touching enemy leaks or dies
-  // at its touch.
+  // at its touch. A selector's enemy takes its place, alive when it is picked; a 'player' pick
+  // gives none.
   const needsTarget =
     ((effect.kind === 'applyAilment' || effect.kind === 'addFrost') &&
       effect.radius === undefined) ||
     effect.kind === 'spreadAilment';
-  if (needsTarget && TARGETLESS_EVENTS.has(on)) {
+  if (needsTarget && target !== undefined) {
+    if (target.pick === 'player') {
+      issues.push(`${effect.kind} needs an enemy, which target.pick 'player' does not give`);
+    }
+  } else if (needsTarget && TARGETLESS_EVENTS.has(on)) {
     issues.push(`${effect.kind} needs the event's enemy, which '${on}' events have not`);
   } else if (needsTarget && on === 'contact') {
     issues.push(`${effect.kind} needs the event's enemy, which has left by the time it runs`);
@@ -579,6 +657,9 @@ function effectIssues(effect: EffectSpec, on: TriggerEventId): string[] {
       count('maxTargets', effect.maxTargets);
       if (effect.maxTargets !== undefined && effect.radius === undefined) {
         issues.push('maxTargets needs a radius');
+      }
+      if (effect.order !== undefined && effect.radius === undefined) {
+        issues.push(orderIssue(effect.order));
       }
       break;
     case 'spreadAilment':
@@ -614,6 +695,9 @@ function effectIssues(effect: EffectSpec, on: TriggerEventId): string[] {
       count('maxTargets', effect.maxTargets);
       if (effect.maxTargets !== undefined && effect.radius === undefined) {
         issues.push('maxTargets needs a radius');
+      }
+      if (effect.order !== undefined && effect.radius === undefined) {
+        issues.push(orderIssue(effect.order));
       }
       break;
     case 'heal':

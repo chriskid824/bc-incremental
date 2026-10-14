@@ -3,7 +3,11 @@
  * then up to EFFECTS_PER_TICK queued effects run in queue order; effects queued meanwhile join
  * the tail. Each effect kind has its executor in EFFECTS, typed over EffectKind, so a kind added
  * to the vocabulary does not compile without one. An effect on its event's enemy does nothing
- * once that enemy is dead; area effects start at the event's position.
+ * once that enemy is dead; area effects start at the event's position. A trigger's selector
+ * (select.ts) puts the enemy it picked in the entry's target, and area effects center on that
+ * enemy instead, or on the player for a 'player' pick (CompiledEffect.atTarget, atPlayer). An
+ * area capped by maxTargets reaches the first enemies in id order, or the nearest with order
+ * 'nearest' (orderNearest).
  *
  * Effect hits go through hitWithPayload like any hit, with the effect's payload (its tags and
  * source, the effects stream, no flags) at the entry's depth and origin, so their kills and
@@ -34,6 +38,7 @@ import { raiseFreeze } from './centerEvents';
 import { fireApplied, fireOne } from './dispatch';
 import { dequeue } from './queue';
 import type { EffectEntry } from './queue';
+import { orderNearest } from './select';
 import { EFFECTS_PER_TICK, EVENT } from './types';
 import type {
   CompiledEffect,
@@ -56,6 +61,32 @@ const liveTarget = (entry: Readonly<EffectEntry>): Enemy | null =>
 /** Writes the alive enemies within the effect's radius of (x, y) to ctx.effectTargets. */
 const within = (ctx: RunContext, fx: CompiledEffect, x: number, y: number): number =>
   ctx.grid.within(x, y, fx.radiusSq, ctx.effectTargets);
+
+/**
+ * within, then at most `max` of them: the first in id order, or with `nearest` the nearest to
+ * (x, y), nearest first. Returns how many ctx.effectTargets holds.
+ */
+function inArea(
+  ctx: RunContext,
+  fx: CompiledEffect,
+  x: number,
+  y: number,
+  max: number,
+  nearest: boolean,
+): number {
+  const count = within(ctx, fx, x, y);
+  if (count <= max) return count;
+  return nearest ? orderNearest(ctx.effectTargets, count, max, x, y) : max;
+}
+
+/**
+ * Where an area effect centers: on the enemy its trigger's selector picked (atTarget), where it
+ * is now or was when it died; on the player for a 'player' pick; else at the event's point.
+ */
+const centerX = (ctx: RunContext, fx: CompiledEffect, entry: Readonly<EffectEntry>): number =>
+  fx.atTarget && entry.target !== null ? entry.target.x : fx.atPlayer ? ctx.player.x : entry.x;
+const centerY = (ctx: RunContext, fx: CompiledEffect, entry: Readonly<EffectEntry>): number =>
+  fx.atTarget && entry.target !== null ? entry.target.y : fx.atPlayer ? ctx.player.y : entry.y;
 
 /**
  * `stacks` stacks of `ailment` from the effect's payload on `enemy`, each as its hit would apply
@@ -121,7 +152,10 @@ const durationOf = (ctx: RunContext, ailment: AppliedAilment): number =>
         ? ctx.bleedTicks
         : ctx.shockTicks;
 
-/** Every alive enemy within the effect's radius of (x, y), first `max` in id order, is hit. */
+/**
+ * Every alive enemy within the effect's radius of (x, y), at most `max` (inArea), is hit, in id
+ * order or with `nearest` nearest first.
+ */
 function hitArea(
   ctx: RunContext,
   fx: CompiledEffect,
@@ -129,10 +163,11 @@ function hitArea(
   x: number,
   y: number,
   max: number,
+  nearest: boolean,
 ): void {
   const p = ctx.effectPayloads[entry.effect] as Payload;
   const targets = ctx.effectTargets;
-  const count = Math.min(within(ctx, fx, x, y), max);
+  const count = inArea(ctx, fx, x, y, max, nearest);
   for (let i = 0; i < count; i++) {
     const enemy = targets[i] as Enemy;
     if (enemy.alive) {
@@ -187,7 +222,9 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
       return;
     }
     const targets = ctx.effectTargets;
-    const count = Math.min(within(ctx, fx, entry.x, entry.y), spec.maxTargets ?? Infinity);
+    const max = spec.maxTargets ?? Infinity;
+    const nearest = spec.order === 'nearest';
+    const count = inArea(ctx, fx, centerX(ctx, fx, entry), centerY(ctx, fx, entry), max, nearest);
     for (let i = 0; i < count; i++) {
       applyStacks(ctx, ailment, targets[i] as Enemy, p, stacks, entry);
     }
@@ -198,21 +235,26 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     if (spec.ailment === 'burn') spreadBurn(ctx, target, fx.spread, entry.depth);
     else {
       const sf = spec.stacks ?? 1;
-      spreadPoison(ctx, target, fx.spread, sf, spec.maxTargets ?? Infinity, entry.depth);
+      const max = spec.maxTargets ?? Infinity;
+      spreadPoison(ctx, target, fx.spread, sf, max, entry.depth, spec.order === 'nearest');
     }
   },
   explode(ctx, spec, fx, entry) {
-    hitArea(ctx, fx, entry, entry.x, entry.y, spec.maxTargets ?? Infinity);
+    const max = spec.maxTargets ?? Infinity;
+    const nearest = spec.order === 'nearest';
+    hitArea(ctx, fx, entry, centerX(ctx, fx, entry), centerY(ctx, fx, entry), max, nearest);
   },
   nova(ctx, spec, fx, entry) {
     const atEvent = spec.at === 'event';
     const player = ctx.player;
-    hitArea(ctx, fx, entry, atEvent ? entry.x : player.x, atEvent ? entry.y : player.y, Infinity);
+    const x = atEvent ? centerX(ctx, fx, entry) : player.x;
+    const y = atEvent ? centerY(ctx, fx, entry) : player.y;
+    hitArea(ctx, fx, entry, x, y, Infinity, false);
   },
   push(ctx, spec, fx, entry) {
     const player = ctx.player;
     const targets = ctx.effectTargets;
-    const count = within(ctx, fx, entry.x, entry.y);
+    const count = within(ctx, fx, centerX(ctx, fx, entry), centerY(ctx, fx, entry));
     if (count === 0) return;
     for (let i = 0; i < count; i++) {
       const enemy = targets[i] as Enemy;
@@ -231,7 +273,9 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
       return;
     }
     const targets = ctx.effectTargets;
-    const count = Math.min(within(ctx, fx, entry.x, entry.y), spec.maxTargets ?? Infinity);
+    const max = spec.maxTargets ?? Infinity;
+    const nearest = spec.order === 'nearest';
+    const count = inArea(ctx, fx, centerX(ctx, fx, entry), centerY(ctx, fx, entry), max, nearest);
     for (let i = 0; i < count; i++) frostOne(ctx, targets[i] as Enemy, spec.amount, entry);
   },
   heal(ctx, spec) {

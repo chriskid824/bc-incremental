@@ -103,6 +103,10 @@ const STACK_READERS: {
 const heldReader = HELD_AILMENTS.map((ailment) => HELD_READERS[ailment]);
 const stackReader = STACK_AILMENTS.map((ailment) => STACK_READERS[ailment]);
 
+/** The live stacks `enemy` carries at tick `now` of the ailment at STACK_AILMENTS[a]. */
+export const liveStacks = (enemy: Enemy, a: number, now: number): number =>
+  (stackReader[a] as (enemy: Enemy, now: number) => number)(enemy, now);
+
 /** The flags of the ailments `enemy` holds at tick `now` (src/sim/effects/flags.ts). */
 export function heldFlags(enemy: Enemy, now: number): number {
   let flags = 0;

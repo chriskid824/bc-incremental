@@ -340,6 +340,16 @@ describe('EffectSpecSchema', () => {
     { kind: 'push', distance: 60, radius: 150 },
     { kind: 'addFrost', amount: 0.2 },
     { kind: 'addFrost', amount: 0.1, radius: 200, maxTargets: 5 },
+    { kind: 'addFrost', amount: 0.1, radius: 200, maxTargets: 2, order: 'nearest' },
+    { kind: 'applyAilment', ailment: 'shock', radius: 150, maxTargets: 2, order: 'id' },
+    { kind: 'explode', radius: 90, damagePct: 0.5, maxTargets: 2, order: 'nearest' },
+    {
+      kind: 'spreadAilment',
+      ailment: 'poison',
+      radius: 200,
+      maxTargets: 3,
+      order: 'nearest',
+    },
     { kind: 'heal', lifePct: 0.05 },
     { kind: 'gainShards', fraction: 0.5 },
   ])('accepts %o', (effect) => {
@@ -374,6 +384,13 @@ describe('EffectSpecSchema', () => {
     ['nova at an unknown point', { kind: 'nova', radius: 100, damagePct: 1, at: 'target' }],
     ['an element that is not one', { kind: 'nova', radius: 100, damagePct: 1, element: 'fire' }],
     ['an unknown key', { kind: 'heal', lifePct: 0.1, amount: 1 }],
+    ['an unknown order', { kind: 'explode', radius: 90, damagePct: 1, order: 'farthest' }],
+    ['order on a nova', { kind: 'nova', radius: 90, damagePct: 1, order: 'nearest' }],
+    ['order on push', { kind: 'push', distance: 60, radius: 150, order: 'nearest' }],
+    [
+      'order on a burn spread',
+      { kind: 'spreadAilment', ailment: 'burn', radius: 250, order: 'nearest' },
+    ],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
   });
@@ -392,10 +409,36 @@ describe('TriggerSpecSchema', () => {
   });
 
   it.each([
+    { pick: 'nearest' },
+    { pick: 'farthest', from: 'player', range: 400 },
+    { pick: 'highestHp', excludeBoss: true },
+    { pick: 'densest', from: 'event' },
+    { pick: 'outermost', excludeEventTarget: false },
+    { pick: 'player' },
+    { pick: 'mostStacks', ailment: 'shock', range: 300, excludeEventTarget: true },
+  ])('accepts the target selector %o', (target) => {
+    const trigger = { on: 'periodic', every: 2, target, do: [{ kind: 'heal', lifePct: 0.05 }] };
+    expect(TriggerSpecSchema.parse(trigger)).toEqual(trigger);
+  });
+
+  it.each<[string, unknown]>([
+    ['no pick', {}],
+    ['an unknown pick', { pick: 'random' }],
+    ['a pick name alone', 'nearest'],
+    ['an ailment without stacks', { pick: 'mostStacks', ailment: 'bleed' }],
+    ['an unknown origin', { pick: 'nearest', from: 'target' }],
+    ['an infinite range', { pick: 'nearest', range: Infinity }],
+    ['an unknown key', { pick: 'nearest', maxTargets: 2 }],
+  ])('rejects a target selector with %s', (_label, target) => {
+    const trigger = { on: 'kill', target, do: [{ kind: 'heal', lifePct: 0.05 }] };
+    expect(TriggerSpecSchema.safeParse(trigger).success).toBe(false);
+  });
+
+  it.each([
     ['an unknown event', { on: 'tick', do: [{ kind: 'heal', lifePct: 0.1 }] }],
     ['no effect list', { on: 'kill' }],
     ['an unknown effect', { on: 'kill', do: [{ kind: 'detonate' }] }],
-    ['an unknown key', { on: 'kill', do: [], target: 'nearest' }],
+    ['an unknown key', { on: 'kill', do: [], selector: { pick: 'nearest' } }],
   ])('rejects %s', (_label, trigger) => {
     expect(TriggerSpecSchema.safeParse(trigger).success).toBe(false);
   });

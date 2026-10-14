@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { createSimulation } from './simulation';
+import { createRunContext } from './systems/context';
 import { makeConfig, makeStats, makeTestData } from './testing';
 import { MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from './types';
 
 describe('simulation speed', () => {
+  it('keeps the run context below 128 properties, so every run shares its hidden class', () => {
+    // V8 caches the hidden class of an object literal only below 128 properties; past that each
+    // createRunContext builds its own, and every ctx access in the systems goes megamorphic
+    // once a few runs have passed through them (C4.4 measured a quarter slower). Group new
+    // fields into an object of their own instead (RunContext.selection).
+    const ctx = createRunContext(makeConfig(), makeTestData());
+    expect(Object.keys(ctx).length).toBeLessThan(128);
+  });
+
   it('runs a full 180 s run with a crowded arena quickly', () => {
     // Mid-strength build pushed past its frontier: enemies pile up, burn and chain all run.
     const config = makeConfig({

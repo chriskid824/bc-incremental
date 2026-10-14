@@ -21,12 +21,14 @@ import { mul, num, ONE, ZERO } from '../../core/num';
 import { TAG, tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { COEF_FIELDS, TRANSFER_EFFECTS, TRIGGER_EVENTS, WIRED_EVENTS } from '../../data/triggers';
-import type { EffectSpec, TriggerEventId, TriggerSpec } from '../../data/triggers';
+import type { EffectSpec, TargetSelector, TriggerEventId, TriggerSpec } from '../../data/triggers';
 import type { BurnSpread } from '../ailments/records';
 import { DOT_STEP_TICKS } from '../ailments/rings';
 import { compileCondition } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import { TICK_RATE } from '../types';
+import { compileSelector } from './select';
+import type { CompiledSelector } from './select';
 
 /**
  * The built-in shatter (docs/v3/game-design-v3.md §1.3): a frozen enemy that dies hits the
@@ -92,6 +94,11 @@ export interface CompiledTrigger {
   readonly stepEvery: number;
   /** One of its effects reads the dying enemy's drop (gainShards): kill entries carry it. */
   readonly takesDrop: boolean;
+  /**
+   * Its target selector (TriggerSpec.target, select.ts): its effects act on the enemy it picks
+   * instead of the event's; null without one.
+   */
+  readonly selector: CompiledSelector | null;
 }
 
 /** The built-in shatter's effect (SHATTER_TRIGGER), which no data can name. */
@@ -122,6 +129,13 @@ export interface CompiledEffect {
   readonly baseDamage: Num;
   /** spreadAilment's radius and effect (src/sim/ailments/apply.ts); null for the other kinds. */
   readonly spread: BurnSpread | null;
+  /**
+   * Its trigger's selector picks an enemy: the entry's target is that enemy, and the effect
+   * centers on it rather than on the event's point.
+   */
+  readonly atTarget: boolean;
+  /** Its trigger's selector picks 'player': the effect centers on the player, with no target. */
+  readonly atPlayer: boolean;
 }
 
 /**
@@ -177,6 +191,7 @@ export function compileTrigger(
         ? Math.max(1, Math.round((spec.every ?? DOT_STEP_TICKS / TICK_RATE) * STEPS_PER_SECOND))
         : 0,
     takesDrop: spec.do.some((effect) => effect.kind === 'gainShards'),
+    selector: spec.target === undefined ? null : compileSelector(spec.target, spec.on),
   };
 }
 
@@ -198,6 +213,7 @@ export function moduleTrigger(index: number, source: number): CompiledTrigger {
     periodTicks: 0,
     stepEvery: 0,
     takesDrop: false,
+    selector: null,
   };
 }
 
@@ -227,6 +243,8 @@ export function shatterEffect(radius: number): CompiledEffect {
     tags: TAG.hit | TAG.area | TAG.cold,
     baseDamage: ONE,
     spread: null,
+    atTarget: false,
+    atPlayer: false,
   };
 }
 
@@ -241,13 +259,14 @@ function withCoef(spec: EffectSpec, coef: number): EffectSpec {
 
 /**
  * Compiles an effect credited to `source`, with its COEF_FIELDS × coef; `damage` is the build's
- * damage stat.
+ * damage stat, and `target` the selector of its trigger, if any.
  */
 export function compileEffect(
   spec: EffectSpec,
   source: number,
   coef: number,
   damage: number,
+  target?: TargetSelector,
 ): CompiledEffect {
   // An effect's damage is damage × (damagePct × coef): the coefficient goes into the field
   // first. Keep that association, or a calibrated effect's damage moves by ulps.
@@ -285,5 +304,7 @@ export function compileEffect(
     tags,
     baseDamage,
     spread,
+    atTarget: target !== undefined && target.pick !== 'player',
+    atPlayer: target !== undefined && target.pick === 'player',
   };
 }

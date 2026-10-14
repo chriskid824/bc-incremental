@@ -2,9 +2,11 @@
  * Trigger dispatch (docs/v3/implementation-plan-v3.md §2.6, §2.15): an event happens, and each
  * trigger listening to it that passes its gates queues its effects (queue.ts). The gates, in
  * order: the depth (MAX_DEPTH), the trigger's own damage (rule 3), the signature (rule 8,
- * hitIs 'signature'), the nthAttack count, the cooldown, the conditions, then the chance, rolled
- * on the trigger stream. fire() and fireOne() only queue and roll, so a hit can dispatch
- * mid-resolution without re-entering anything.
+ * hitIs 'signature'), the nthAttack count, the cooldown, the conditions, the target selector
+ * (select.ts), then the chance, rolled on the trigger stream. A trigger stopped by its selector,
+ * which found no enemy to pick, rolls nothing and keeps its cooldown, but its nthAttack count
+ * has counted the event, as with a failed condition. fire() and fireOne() only queue, pick and
+ * roll, so a hit can dispatch mid-resolution without re-entering anything.
  *
  * Kills dispatch in two parts (killEnemy in src/sim/systems/death.ts): transfer triggers
  * (CompiledTrigger.inline) run their effects at once, while the victim still holds its
@@ -29,6 +31,7 @@ import { runEffect } from './execute';
 import { appliedFlag, HELD_MASK, SIGNATURE } from './flags';
 import { enqueue } from './queue';
 import type { PendingKill } from './queue';
+import { select } from './select';
 import { EVENT, MAX_DEPTH, SHATTER_TRIGGER } from './types';
 import type { CompiledTrigger } from './types';
 
@@ -115,7 +118,8 @@ export function fireApplied(
 
 /**
  * Trigger `i` on an event: if it passes its gates, queues its effects at depth + 1 with origin
- * `i`, credited to `source` (−1: the trigger's own source).
+ * `i`, credited to `source` (−1: the trigger's own source), on the enemy its selector picked or
+ * else on the event's.
  */
 export function fireOne(
   ctx: RunContext,
@@ -133,21 +137,27 @@ export function fireOne(
     ctx.counters.triggerDepthCapped++;
     return;
   }
-  const t = passes(ctx, i, origin, target, flags);
+  const t = passes(ctx, i, origin, target, flags, x, y);
   if (t === null) return;
   const credit = source >= 0 ? source : t.source;
+  const on = t.selector !== null ? ctx.selected : target;
   for (let e = t.effectStart; e < t.effectEnd; e++) {
-    enqueue(ctx, e, depth + 1, i, credit, target, x, y, value, flags);
+    enqueue(ctx, e, depth + 1, i, credit, on, x, y, value, flags);
   }
 }
 
-/** Trigger `i` if it fires on this event (its cooldown restarts), else null. */
+/**
+ * Trigger `i` if it fires on this event on `target` at (x, y) (its cooldown restarts, and its
+ * selector's pick is in ctx.selected), else null.
+ */
 function passes(
   ctx: RunContext,
   i: number,
   origin: number,
   target: Enemy | null,
   flags: number,
+  x: number,
+  y: number,
 ): CompiledTrigger | null {
   const t = ctx.build.triggers[i] as CompiledTrigger;
   if (i === origin || (t.signatureOnly && (flags & SIGNATURE) === 0)) return null;
@@ -161,6 +171,7 @@ function passes(
   if (now < (state.readyAt[i] as number) || !conditionsMet(t.conds, target, now, flags)) {
     return null;
   }
+  if (t.selector !== null && !select(ctx, t.selector, target, x, y)) return null;
   if (t.chance < 1 && !ctx.triggerRng.chance(t.chance)) return null;
   state.readyAt[i] = now + t.cooldownTicks;
   return t;
@@ -169,7 +180,9 @@ function passes(
 /**
  * The transfer triggers of a kill (RunContext.killInline), at the kill: `victim` is still
  * alive and holds its ailments, `flags` is the kill's snapshot (killEnemy). No depth gate: they
- * fire at any kill depth, and their effects run one deeper, at most MAX_DEPTH.
+ * fire at any kill depth, and their effects run one deeper, at most MAX_DEPTH. Their gates see
+ * the victim's point; their effects always act on the victim (validation keeps selectors off
+ * them).
  */
 export function fireInlineKill(
   ctx: RunContext,
@@ -184,7 +197,7 @@ export function fireInlineKill(
     const i = list[n] as number;
     const t = triggers[i] as CompiledTrigger;
     if (t.on === EVENT.diedWithAilment && (flags & HELD_MASK) === 0) continue;
-    if (passes(ctx, i, origin, null, flags) === null) continue;
+    if (passes(ctx, i, origin, null, flags, victim.x, victim.y) === null) continue;
     const entry = ctx.inlineEntry;
     for (let e = t.effectStart; e < t.effectEnd; e++) {
       entry.effect = e;

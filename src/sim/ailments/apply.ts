@@ -18,6 +18,7 @@ import type { AilmentKind } from '../../data/triggers';
 import { statAt } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
 import { ailmentCredit } from '../build/sources';
+import { orderNearest } from '../effects/select';
 import { slotRow } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
@@ -159,6 +160,7 @@ function spreadRings(
   sf: number,
   maxTargets: number,
   depth: number,
+  nearest: boolean,
 ): number {
   const pool = ctx.rings;
   const now = ctx.now;
@@ -167,7 +169,10 @@ function spreadRings(
   const from = source.rings;
   // In id order; moving stacks kills nothing, so collecting the targets first changes nothing.
   const targets = ctx.spreadTargets;
-  const count = ctx.grid.within(source.x, source.y, radiusSq, targets);
+  let count = ctx.grid.within(source.x, source.y, radiusSq, targets);
+  if (nearest && maxTargets < count) {
+    count = orderNearest(targets, count, maxTargets, source.x, source.y, source);
+  }
   let spreadTo = 0;
   for (let i = 0; i < count && spreadTo < maxTargets; i++) {
     const enemy = targets[i] as Enemy;
@@ -210,6 +215,7 @@ export function spreadBurn(
     1,
     Infinity,
     depth,
+    false,
   );
   if (targets < 0) return;
   ctx.events.push({
@@ -224,7 +230,8 @@ export function spreadBurn(
 
 /**
  * spreadAilment's poison: `stacks` (sf) of the source's poison stacks, the longest-lasting
- * first, with that share × `effect` of their damage left, to at most `maxTargets` enemies.
+ * first, with that share × `effect` of their damage left, to at most `maxTargets` enemies: the
+ * first in id order, or with `nearest` the nearest to the source, nearest first.
  */
 export function spreadPoison(
   ctx: RunContext,
@@ -233,6 +240,7 @@ export function spreadPoison(
   sf: number,
   maxTargets: number,
   depth: number,
+  nearest = false,
 ): void {
   const targets = spreadRings(
     ctx,
@@ -243,6 +251,7 @@ export function spreadPoison(
     sf,
     maxTargets,
     depth,
+    nearest,
   );
   if (targets < 0) return;
   ctx.events.push({

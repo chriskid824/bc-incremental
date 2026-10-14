@@ -784,6 +784,153 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('accepts target selectors with every pick where they can run', () => {
+    expect(
+      triggerIssues(
+        { on: 'hit', target: { pick: 'nearest', excludeEventTarget: true }, do: [explode] },
+        {
+          on: 'crit',
+          target: { pick: 'nearest', from: 'player', range: 300, excludeBoss: true },
+          do: [{ kind: 'applyAilment', ailment: 'shock', stacks: 2 }],
+        },
+        { on: 'periodic', every: 2, target: { pick: 'farthest' }, do: [explode] },
+        {
+          on: 'periodic',
+          every: 2,
+          target: { pick: 'mostStacks', ailment: 'poison' },
+          do: [{ kind: 'spreadAilment', ailment: 'poison', radius: 150, maxTargets: 2 }],
+        },
+        { on: 'kill', target: { pick: 'highestHp', range: 400 }, do: [explode] },
+        { on: 'nthAttack', every: 4, target: { pick: 'densest' }, do: [explode] },
+        { on: 'heroHit', target: { pick: 'outermost' }, do: [{ kind: 'addFrost', amount: 1 }] },
+        {
+          on: 'shatter',
+          target: { pick: 'player' },
+          do: [{ kind: 'push', distance: 50, radius: 90 }],
+        },
+        // A selector's enemy stands in for one the event has not, or has lost.
+        {
+          on: 'contact',
+          target: { pick: 'nearest', excludeEventTarget: true },
+          do: [{ kind: 'applyAilment', ailment: 'burn' }],
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects target selectors where they cannot run or scan too often', () => {
+    expect(triggerIssues({ on: 'waveStart', target: { pick: 'nearest' }, do: [explode] })).toEqual([
+      `${at} target is not allowed on 'waveStart' events; use a periodic trigger with a selector`,
+    ]);
+    // Transfers on a kill run at the kill, on the victim (CompiledTrigger.inline).
+    expect(
+      triggerIssues({
+        on: 'diedWithAilment',
+        target: { pick: 'nearest' },
+        do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 250 }],
+      }),
+    ).toEqual([
+      `${at} target is not allowed on a kill trigger that runs at the kill; it always acts on the victim`,
+    ]);
+    const scans = (['farthest', 'highestHp', 'densest', 'outermost'] as const).flatMap((pick) =>
+      (['hit', 'crit'] as const).map((on) => ({ on, target: { pick }, do: [explode] })),
+    );
+    const issues = triggerIssues(...scans);
+    expect(issues).toHaveLength(scans.length);
+    for (const issue of issues) expect(issue).toContain('scans every enemy');
+    expect(triggerIssues({ on: 'hit', target: { pick: 'farthest' }, do: [explode] })).toEqual([
+      `${at} target.pick 'farthest' scans every enemy on each 'hit' event; use 'nearest' here, or move the effect to a periodic trigger`,
+    ]);
+    expect(
+      triggerIssues(
+        {
+          on: 'ailmentApplied',
+          when: [{ ailment: 'burn' }],
+          target: { pick: 'mostStacks', ailment: 'burn' },
+          do: [explode],
+        },
+        {
+          on: 'ailmentTick',
+          when: [{ ailment: 'poison' }],
+          target: { pick: 'highestHp' },
+          do: [explode],
+        },
+      ),
+    ).toEqual([
+      `${at} target.pick 'mostStacks' scans every enemy on each 'ailmentApplied' event; use 'nearest' here, or move the effect to a periodic trigger`,
+      "talent 'vitality': triggers[1] target.pick 'highestHp' scans every enemy on each 'ailmentTick' event; use 'nearest' here, or move the effect to a periodic trigger",
+    ]);
+  });
+
+  it('checks a selector’s ailment, range and excluded event enemy', () => {
+    expect(
+      triggerIssues(
+        { on: 'kill', target: { pick: 'mostStacks' }, do: [explode] },
+        { on: 'kill', target: { pick: 'nearest', ailment: 'burn' }, do: [explode] },
+        { on: 'kill', target: { pick: 'nearest', range: 0 }, do: [explode] },
+        {
+          on: 'periodic',
+          every: 1,
+          target: { pick: 'nearest', excludeEventTarget: true },
+          do: [explode],
+        },
+      ),
+    ).toEqual([
+      `${at} target.pick 'mostStacks' needs target.ailment (burn, poison or shock)`,
+      "talent 'vitality': triggers[1] target.ailment only applies to pick 'mostStacks'",
+      "talent 'vitality': triggers[2] target.range must be > 0 (got 0)",
+      "talent 'vitality': triggers[3] target.excludeEventTarget needs the event's enemy, which 'periodic' events have not",
+    ]);
+    // A 'player' pick gives the effects no enemy to act on.
+    expect(
+      triggerIssues({
+        on: 'hit',
+        target: { pick: 'player' },
+        do: [
+          { kind: 'applyAilment', ailment: 'burn' },
+          { kind: 'spreadAilment', ailment: 'burn', radius: 100 },
+          { kind: 'addFrost', amount: 0.5, radius: 100 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] applyAilment needs an enemy, which target.pick 'player' does not give`,
+      `${at} do[1] spreadAilment needs an enemy, which target.pick 'player' does not give`,
+    ]);
+  });
+
+  it('needs a radius for an order', () => {
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { kind: 'applyAilment', ailment: 'burn', order: 'nearest' },
+          { kind: 'addFrost', amount: 0.2, order: 'id' },
+          { kind: 'applyAilment', ailment: 'burn', radius: 100, maxTargets: 2, order: 'nearest' },
+          { kind: 'addFrost', amount: 0.2, radius: 100, order: 'nearest' },
+          { kind: 'explode', radius: 90, damagePct: 0.5, maxTargets: 3, order: 'nearest' },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] order 'nearest' sorts the enemies a radius finds; add a radius or drop order`,
+      `${at} do[1] order 'id' sorts the enemies a radius finds; add a radius or drop order`,
+    ]);
+    expect(
+      triggerIssues({
+        on: 'kill',
+        when: [{ victimHas: 'poison' }],
+        do: [
+          {
+            kind: 'spreadAilment',
+            ailment: 'poison',
+            radius: 100,
+            maxTargets: 2,
+            order: 'nearest',
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it('accepts a keystone whose behaviour is a trigger, and needs a descKey for one', () => {
     expect(
       issuesAfter((d) => {
