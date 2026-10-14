@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { STAT_IDS } from '../data/stats';
 import { TALENTS } from '../data/talents';
 import { LOCALES, MESSAGES, fill, getLocale, isMessageKey, pickLocale, setLocale, t } from '.';
 import type { MessageKey } from '.';
@@ -25,6 +26,14 @@ describe('messages', () => {
     }
     expect(isMessageKey('talent.missing.name')).toBe(false);
     expect(isMessageKey('toString')).toBe(false);
+  });
+
+  it.each(LOCALES)('%s names every stat', (id) => {
+    for (const stat of STAT_IDS) {
+      const key = `stat.${stat}`;
+      expect(isMessageKey(key), key).toBe(true);
+      expect(MESSAGES[id][key as MessageKey]?.trim(), `${id} ${key}`).toBeTruthy();
+    }
   });
 });
 

@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BASELINE_FILE, CHECK_ENTRIES } from './bench';
 import {
+  ALIVE_MAX,
+  ALIVE_MIN,
   checkBench,
   entryRatio,
   formatBaseline,
@@ -153,6 +155,31 @@ describe('checkBench', () => {
     expect(checkBench(synthetic(60), RECORDED, KNOWN, true).ok).toBe(false);
   });
 
+  it(`fails a stress-family entry whose average alive leaves ${ALIVE_MIN}–${ALIVE_MAX}`, () => {
+    const stress = (alive: number): BenchTimings =>
+      timings([{ ...entry('hits', 14, 14), alive }, entry('ailments', 3.5, 14)]);
+    for (const alive of [ALIVE_MIN, 300, ALIVE_MAX]) {
+      const inside = checkBench(stress(alive), RECORDED, KNOWN, false);
+      expect(inside.ok, String(alive)).toBe(true);
+      expect(inside.lines[0]).toMatch(
+        new RegExp(`^hits: .*ratio 1\\.000, average alive ${alive}\\.0 \\(recorded 1, .*: ok$`),
+      );
+    }
+    for (const alive of [ALIVE_MIN - 0.1, ALIVE_MAX + 0.1, 0, NaN]) {
+      const outside = checkBench(stress(alive), RECORDED, KNOWN, false);
+      expect(outside.ok, String(alive)).toBe(false);
+      expect(outside.lines.filter((line) => line.endsWith('FAILED'))).toEqual([
+        expect.stringMatching(/^hits: .*, outside 280–320 alive: FAILED$/),
+      ]);
+    }
+    // With write it fails too and keeps the recorded ratio; the entry in the band is recorded.
+    const slower = timings([{ ...entry('hits', 28, 14), alive: 250 }, entry('ailments', 7, 14)]);
+    const written = checkBench(slower, RECORDED, KNOWN, true);
+    expect(written.ok).toBe(false);
+    expect(written.lines[0]).toMatch(/^hits: .*, outside 280–320 alive, not recorded: FAILED$/);
+    expect(written.baseline.ratios).toEqual({ ...RECORDED.ratios, ailments: 0.5 });
+  });
+
   it('throws on an entry bench.ts does not know', () => {
     expect(() => checkBench(timings([entry('chainStorm', 1, 1)]), RECORDED, KNOWN, false)).toThrow(
       /chainStorm/,
@@ -183,6 +210,7 @@ describe('bench.baseline.json', () => {
       'effects',
       'poisonBoss (500 stacks)',
       'poisonBoss (5 stacks)',
+      'stressM1',
     ]);
   });
 });

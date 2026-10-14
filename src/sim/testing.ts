@@ -1,9 +1,13 @@
 /**
- * Self-contained fixtures for simulation tests and tools: game data, stat blocks and run
- * configs built inline, so sim tests never depend on the tuned content in src/data.
+ * Self-contained fixtures for simulation tests and tools: game data, stat blocks, run configs
+ * and run contexts built inline, so sim tests never depend on the tuned content in src/data;
+ * and the brute-force references the tests' oracles compare against.
  */
 
-import type { RuleSpec } from '../data/rules';
+import { num } from '../core/num';
+import type { Rng, RngStreamName } from '../core/rng';
+import { targetDamage } from '../data/curve';
+import type { RuleSpec, SignatureSpec } from '../data/rules';
 import { BASE_STATS, NO_EXTRAS } from '../data/stats';
 import type { Modifier, StatBlock, StatExtras, StatId } from '../data/stats';
 import type { TagMask } from '../data/tags';
@@ -11,7 +15,14 @@ import type { TriggerSpec } from '../data/triggers';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyDef, EnemyId, GameData, WaveTable } from '../data/types';
 import { centerDamage, compileBuild } from './build/compile';
+import type { GridItem } from './grid';
+import type { TestModule } from './rules';
 import { createSimulation } from './simulation';
+import { createRunContext } from './systems/context';
+import type { Enemy, RunContext, WaveRecord } from './systems/context';
+import { rebuildGrid } from './systems/grid';
+import { addEnemy } from './systems/spawn';
+import { startDueWave } from './systems/waves';
 import { NO_INPUT } from './types';
 import type { InputFrame, RunConfig, RunResult, SimEvent } from './types';
 
@@ -157,6 +168,149 @@ export function damageRow(
 
 export function makeConfig(overrides: Partial<RunConfig> = {}): RunConfig {
   return { seed: 1, stats: makeStats(), rules: [], startWave: 1, mode: 'auto', ...overrides };
+}
+
+/** An enemy of placedEnemies: its type and exact position, radius, speed and hp. */
+export interface PlacedEnemy {
+  readonly x: number;
+  readonly y: number;
+  /** 'square' when omitted. */
+  readonly type?: EnemyId;
+  /** The type's radius when omitted. */
+  readonly radius?: number;
+  /** Arena units per second; 0 (standing still) when omitted. */
+  readonly speed?: number;
+  /** Its hp and max hp; 1e12 (immortal in practice) when omitted. */
+  readonly hp?: number;
+}
+
+export interface PlacedOptions {
+  readonly stats?: StatBlock;
+  readonly rules?: readonly RuleSpec[];
+  readonly signature?: SignatureSpec;
+  readonly modules?: readonly TestModule[];
+  readonly seed?: number;
+  /**
+   * The run's data, for its enemy types (radius, splits, drops); its waves are started but
+   * never released, so only the placed enemies exist. Fixture enemies without waves when
+   * omitted.
+   */
+  readonly data?: GameData;
+}
+
+/** Fixture data whose first wave has no enemies and whose next one is far away. */
+const noWaves = (): GameData =>
+  makeTestData({
+    waves: {
+      rules: [],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      spawnDurationSec: 0,
+      waveTimerSec: 1000,
+    },
+  });
+
+/**
+ * A run context on tick 1 holding exactly the `placed` enemies, in order (ids 1, 2, …): each
+ * at its position, with its radius, speed and hp, in the start wave's record, and the grid
+ * rebuilt for the tick's queries. Nothing has moved or attacked; the events of the wave start
+ * and the spawns are cleared. For tests of systems and executors that need exact geometry.
+ */
+export function placedEnemies(
+  placed: readonly PlacedEnemy[],
+  options: PlacedOptions = {},
+): RunContext {
+  const config = makeConfig({
+    seed: options.seed ?? 1,
+    stats: options.stats ?? makeStats(),
+    rules: options.rules ?? [],
+    ...(options.signature === undefined ? {} : { signature: options.signature }),
+  });
+  const data = options.data ?? noWaves();
+  const ctx = createRunContext(config, data, options.modules);
+  ctx.now = 1;
+  startDueWave(ctx);
+  const rec = ctx.current as WaveRecord;
+  const player = ctx.player;
+  for (const spec of placed) {
+    const type = data.enemies[spec.type ?? 'square'];
+    const def: EnemyDef = {
+      ...type,
+      radius: spec.radius ?? type.radius,
+      speed: spec.speed ?? 0,
+    };
+    const dx = spec.x - player.x;
+    const dy = spec.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 0) addEnemy(ctx, def, rec, dx / dist, dy / dist, dist);
+    else addEnemy(ctx, def, rec, 1, 0, 0);
+    const enemy = ctx.enemies.at(-1) as Enemy;
+    // addEnemy places it along its unit vector, which can be an ulp off the asked position.
+    enemy.x = enemy.prevX = spec.x;
+    enemy.y = enemy.prevY = spec.y;
+    const hp = num(spec.hp ?? 1e12);
+    Object.assign(enemy, { hp, maxHp: hp });
+  }
+  ctx.events.length = 0;
+  rebuildGrid(ctx);
+  return ctx;
+}
+
+/**
+ * The position of every RNG stream of the run (Rng.snapshot()), by stream name: equal before
+ * and after something that draws nothing.
+ */
+export function rngPositions(ctx: RunContext): Record<RngStreamName, ReturnType<Rng['snapshot']>> {
+  return {
+    spawn: ctx.spawnRng.snapshot(),
+    split: ctx.splitRng.snapshot(),
+    combat: ctx.combatRng.snapshot(),
+    drops: ctx.dropsRng.snapshot(),
+    trigger: ctx.triggerRng.snapshot(),
+    effects: ctx.effectsRng.snapshot(),
+  };
+}
+
+/**
+ * Reference: squared distance from (px, py) to the segment from (ax, ay) to (bx, by), ends
+ * included; a point when both ends are equal. The point's distance to an end when it lies
+ * beyond that end, else its distance to the line (the cross product over the length).
+ */
+export function segDistSqRef(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const toAx = px - ax;
+  const toAy = py - ay;
+  if (dx * toAx + dy * toAy <= 0) return toAx * toAx + toAy * toAy;
+  const toBx = px - bx;
+  const toBy = py - by;
+  if (dx * toBx + dy * toBy >= 0) return toBx * toBx + toBy * toBy;
+  const cross = dx * toAy - dy * toAx;
+  return (cross * cross) / (dx * dx + dy * dy);
+}
+
+/**
+ * Reference: the alive items within squared distance radiusSq (inclusive) of (x, y), in source
+ * order, by a scan of all of them: what SpatialGrid.within returns.
+ */
+export function withinRef<T extends GridItem>(
+  items: readonly T[],
+  x: number,
+  y: number,
+  radiusSq: number,
+): T[] {
+  return items.filter((item) => {
+    const dx = item.x - x;
+    const dy = item.y - y;
+    return item.alive && dx * dx + dy * dy <= radiusSq;
+  });
 }
 
 export interface RecordedRun {
@@ -348,3 +502,56 @@ export const GOLDEN_BUILDS: Readonly<Record<string, GoldenBuild>> = {
     BRIDGE_MODS,
   ),
 };
+
+/** The start wave of every stress-family bench scenario (tools/balance/bench.ts). */
+export const STRESS_START_WAVE = 30;
+
+/**
+ * The stress fixture (docs/v3/implementation-plan-v3.md §6): every wave 18 triangles, 11
+ * squares and 4 pentagons, a new wave every second, with slower enemies than the fixture's,
+ * so a build of stressStats() keeps about 300 alive from tick 300 on.
+ */
+export const stressData = (): GameData =>
+  makeTestData({
+    waves: {
+      rules: [
+        { enemy: 'triangle', fromWave: 1, base: 18, perWave: 0, maxCount: 999 },
+        { enemy: 'square', fromWave: 1, base: 11, perWave: 0, maxCount: 999 },
+        { enemy: 'pentagon', fromWave: 1, base: 4, perWave: 0, maxCount: 999 },
+      ],
+      eliteEvery: 5,
+      bossEvery: 1000,
+      spawnDurationSec: 1,
+      waveTimerSec: 1,
+    },
+    enemies: {
+      triangle: { speed: 110 },
+      square: { speed: 55 },
+      pentagon: { speed: 75 },
+      shard: { speed: 130 },
+      hexagon: { speed: 45 },
+    },
+  });
+
+/**
+ * The stress build: bench.ts's normal build at the stress start wave, immortal; `values`
+ * override its stats, `extras` add triggers.
+ */
+export const stressStats = (
+  values: Partial<Record<StatId, number>> = {},
+  extras?: StatExtras,
+): StatBlock =>
+  makeStats(
+    {
+      damage: targetDamage(STRESS_START_WAVE) / 2.5,
+      attackSpeed: 4,
+      critChance: 0.25,
+      critMultiplier: 2,
+      igniteChance: 0.4,
+      chainCount: 2,
+      maxLife: 1e12,
+      ...values,
+    },
+    [],
+    extras,
+  );

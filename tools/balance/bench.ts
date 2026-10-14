@@ -19,8 +19,13 @@
  *   16 s. Two variants draw the same rolls: poisonChance 0.99 keeps about 500 stacks on the
  *   boss, 0.01 about 5. A ring's step costs the same whatever its stacks, so the ratio of their
  *   p50s must stay under 1.3 (docs/v3 C3.8). It ignores --start-wave.
+ * - stressM1: the stress fixture (stressData and stressStats, src/sim/testing.ts), 30 s from
+ *   wave 30 with about 300 enemies alive from tick 300 on, under M1's attack alone. It is the
+ *   first of the stress family, the scenarios on that fixture that the C4 systems add (docs/v3
+ *   C4 design §7). A stress-family scenario ignores --start-wave, and its report adds its
+ *   workload: one untimed run's average alive over ticks 301–1800, its peaks and its counters.
  *
- *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss] [--runs 50]
+ *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1] [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>]
  *
@@ -32,6 +37,9 @@
  * It fails when a scenario's ratio to the reference exceeds 1.5 × the ratio recorded in
  * bench.baseline.json, or when normal's median run exceeds 50 ms. --write records the ratios
  * instead. --scenario limits the check to one scenario; normal alone checks only its budget.
+ * A stress-family scenario also fails when its seed-1 run's average alive leaves 280–320, which
+ * pins its workload, and prints a stress report line: its median, its ratio, the median of the
+ * normal runs timed with it and its workload (the STRESS gate of docs/v3 C4 design §0.5).
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -41,20 +49,32 @@ import { parseArgs } from 'node:util';
 import { loadGameData, targetDamage } from '../../src/data';
 import type { GameData, StatBlock } from '../../src/data';
 import type { StatExtras } from '../../src/data/stats';
-import { createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
-import type { RunConfig } from '../../src/sim';
+import { COUNTER_IDS, createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
+import type { CounterId, RunConfig } from '../../src/sim';
+import type { TestModule } from '../../src/sim/rules';
 import {
   centerTriggers,
   makeStats,
   makeTestData,
   PANDEMIC_MODS,
   PANDEMIC_TRIGGER,
+  STRESS_START_WAVE,
+  stressData,
+  stressStats,
 } from '../../src/sim/testing';
-import { checkBench, formatBaseline, parseBaseline } from './benchCheck';
+import {
+  ALIVE_MAX,
+  ALIVE_MIN,
+  checkBench,
+  entryRatio,
+  formatBaseline,
+  median,
+  parseBaseline,
+} from './benchCheck';
 import type { BenchTimings, EntryTimings } from './benchCheck';
 import { quantile } from './report';
 
-const SCENARIO_IDS = ['normal', 'hits', 'ailments', 'effects', 'poisonBoss'] as const;
+const SCENARIO_IDS = ['normal', 'hits', 'ailments', 'effects', 'poisonBoss', 'stressM1'] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
 /** The hits scenario's start wave, whatever --start-wave says. */
@@ -63,6 +83,8 @@ const HITS_START_WAVE = 40;
 const EFFECTS_START_WAVE = 30;
 /** --start-wave's default, and the start wave of every --check. */
 const DEFAULT_START_WAVE = 30;
+/** A stress-family run's average alive counts the ticks after this one (docs/v3 C4 design §7.2). */
+const ALIVE_FROM_TICK = 300;
 /** The ratios --check compares against (benchCheck.ts). */
 export const BASELINE_FILE = fileURLToPath(new URL('./bench.baseline.json', import.meta.url));
 type ScenarioId = (typeof SCENARIO_IDS)[number];
@@ -89,6 +111,13 @@ interface Scenario {
   readonly variants?: readonly string[];
   /** Game data of its runs; the real game data without it. */
   data?(): GameData;
+  /** Test modules of its runs (createSimulation's testModules), for workloads data cannot set. */
+  readonly testModules?: readonly TestModule[];
+  /**
+   * A stress-family scenario: on the stress fixture, with its workload in the report and its
+   * average alive checked against ALIVE_MIN–ALIVE_MAX by --check.
+   */
+  readonly stress?: boolean;
   /** Config of one run; runs differ only in their seed. */
   config(seed: number, startWave: number, variant: string): RunConfig;
 }
@@ -116,6 +145,34 @@ function normalStats(startWave: number, extras?: StatExtras): StatBlock {
   );
 }
 
+/**
+ * A stress-family scenario: `build`'s runs on the stress fixture, 20 timed and 3 warm-up runs
+ * of 30 s from STRESS_START_WAVE, whatever --start-wave says.
+ */
+function stressScenario(
+  build: () => Pick<RunConfig, 'stats' | 'rules' | 'signature'>,
+  testModules?: readonly TestModule[],
+): Scenario {
+  return {
+    runs: 20,
+    warmup: 3,
+    seconds: STRESS_SECONDS,
+    // §6's stress-scenario budget, on its reference machine; --check gates the ratio instead.
+    targetMs: 50,
+    startWave: STRESS_START_WAVE,
+    stress: true,
+    data: stressData,
+    ...(testModules === undefined ? {} : { testModules }),
+    config: (seed) => ({
+      seed,
+      ...build(),
+      startWave: STRESS_START_WAVE,
+      mode: 'auto',
+      maxTicks: STRESS_SECONDS * TICK_RATE,
+    }),
+  };
+}
+
 const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   normal: {
     runs: 50,
@@ -135,8 +192,8 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     runs: 50,
     warmup: 5,
     seconds: STRESS_SECONDS,
-    // No budget of its own: benchAB.ts gates it on its ratio to the previous commit and to
-    // 532074c. This is §6's stress-scenario budget.
+    // No budget of its own: benchAB.ts --inproc gates it on its ratio to the previous commit
+    // (docs/v3 C4 design §0.4). This is §6's stress-scenario budget.
     targetMs: 50,
     startWave: HITS_START_WAVE,
     // Kills an enemy in a few hits, so targets stay plentiful and most hits chain. Immortal.
@@ -234,6 +291,8 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
       maxTicks: STRESS_SECONDS * TICK_RATE,
     }),
   },
+  // About 300 alive from tick 300 on, under M1's attack (docs/v3 C4 design §7.2).
+  stressM1: stressScenario(() => ({ stats: stressStats(), rules: [] })),
 };
 
 function positiveInt(name: string, text: string, min = 1): number {
@@ -252,9 +311,13 @@ interface Sample {
   readonly maxAlive: number;
 }
 
-function runOnce(config: RunConfig, data: GameData): Sample {
+function runOnce(
+  config: RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[] = [],
+): Sample {
   const start = performance.now();
-  const sim = createSimulation(config, data);
+  const sim = createSimulation(config, data, testModules);
   let maxAlive = 0;
   while (!sim.state.finished) {
     sim.step(NO_INPUT);
@@ -270,6 +333,65 @@ function runOnce(config: RunConfig, data: GameData): Sample {
     highestWave: result.highestWaveReached,
     maxAlive,
   };
+}
+
+/** What an untimed run of a stress-family scenario did (docs/v3 C4 design §7.2). */
+interface Workload {
+  /** Alive enemies after each tick past ALIVE_FROM_TICK, averaged. */
+  readonly averageAlive: number;
+  readonly peakAlive: number;
+  /** Most projectiles in flight after a tick. */
+  readonly peakProjectiles: number;
+  readonly kills: number;
+  /** The run's counters that are not 0, in COUNTER_IDS order. */
+  readonly counters: readonly (readonly [CounterId, number])[];
+}
+
+/** The workload of an untimed run of `config`. */
+function measureWorkload(
+  config: RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[] = [],
+): Workload {
+  const sim = createSimulation(config, data, testModules);
+  const { state } = sim;
+  let aliveSum = 0;
+  let aliveTicks = 0;
+  let peakAlive = 0;
+  let peakProjectiles = 0;
+  while (!state.finished) {
+    sim.step(NO_INPUT);
+    let alive = 0;
+    for (const enemy of state.enemies) if (enemy.alive) alive++;
+    if (state.tick > ALIVE_FROM_TICK) {
+      aliveSum += alive;
+      aliveTicks++;
+    }
+    if (alive > peakAlive) peakAlive = alive;
+    if (state.projectiles.length > peakProjectiles) peakProjectiles = state.projectiles.length;
+  }
+  const result = sim.result();
+  return {
+    averageAlive: aliveTicks === 0 ? NaN : aliveSum / aliveTicks,
+    peakAlive,
+    peakProjectiles,
+    kills: result.kills,
+    counters: COUNTER_IDS.filter((id) => result.counters[id] !== 0).map(
+      (id) => [id, result.counters[id]] as const,
+    ),
+  };
+}
+
+/** The workload as report text: everything but the average alive. */
+function workloadText(workload: Workload): string {
+  const counters =
+    workload.counters.length === 0
+      ? 'none'
+      : workload.counters.map(([id, value]) => `${id} ${value}`).join(', ');
+  return (
+    `peak ${workload.peakAlive} alive, peak ${workload.peakProjectiles} projectiles, ` +
+    `${workload.kills} kills, counters: ${counters}`
+  );
 }
 
 /**
@@ -301,13 +423,20 @@ export const CHECK_ENTRIES: readonly string[] = SCENARIO_IDS.filter(
   (id) => id !== 'normal',
 ).flatMap((id) => (SCENARIOS[id].variants ?? ['']).map((variant) => entryName(id, variant)));
 
+/** A timed check, with the workload of each stress-family entry by entry name. */
+interface CheckTimings {
+  readonly timings: BenchTimings;
+  readonly workloads: ReadonlyMap<string, Workload>;
+}
+
 /**
  * Times the check of scenarios `ids`, normal's warm-up runs first. Each other scenario runs its
  * warm-up runs, then its timed rounds: in each, one normal run and one run of every variant,
  * the order reversed every other round, so the reference runs share the scenario's conditions.
- * Checking normal alone times its own runs only.
+ * Checking normal alone times its own runs only. A stress-family scenario first measures the
+ * workload of an untimed seed-1 run of each variant.
  */
-function timeCheck(ids: readonly ScenarioId[]): BenchTimings {
+function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
   const normal = SCENARIOS.normal;
   const realData = loadGameData();
   const referenceRun = (i: number): number =>
@@ -315,6 +444,7 @@ function timeCheck(ids: readonly ScenarioId[]): BenchTimings {
   for (let i = 0; i < normal.warmup; i++) referenceRun(normal.runs + i);
   const reference: number[] = [];
   const entries: EntryTimings[] = [];
+  const workloads = new Map<string, Workload>();
   const others = ids.filter((id) => id !== 'normal');
   if (others.length === 0) {
     for (let i = 0; i < normal.runs; i++) reference.push(referenceRun(i));
@@ -325,7 +455,13 @@ function timeCheck(ids: readonly ScenarioId[]): BenchTimings {
     const startWave = scenario.startWave ?? DEFAULT_START_WAVE;
     const variants = scenario.variants ?? [''];
     const run = (variant: string, i: number): number =>
-      runOnce(scenario.config(1 + i, startWave, variant), data).ms;
+      runOnce(scenario.config(1 + i, startWave, variant), data, scenario.testModules).ms;
+    if (scenario.stress === true) {
+      for (const variant of variants) {
+        const config = scenario.config(1, startWave, variant);
+        workloads.set(entryName(id, variant), measureWorkload(config, data, scenario.testModules));
+      }
+    }
     for (const variant of variants) {
       for (let i = 0; i < scenario.warmup; i++) run(variant, scenario.runs + i);
     }
@@ -341,10 +477,17 @@ function timeCheck(ids: readonly ScenarioId[]): BenchTimings {
     }
     reference.push(...referenceMs);
     variants.forEach((variant, v) => {
-      entries.push({ id: entryName(id, variant), ms: ms[v] as number[], referenceMs });
+      const name = entryName(id, variant);
+      const alive = workloads.get(name)?.averageAlive;
+      entries.push({
+        id: name,
+        ms: ms[v] as number[],
+        referenceMs,
+        ...(alive === undefined ? {} : { alive }),
+      });
     });
   }
-  return { reference, entries };
+  return { timings: { reference, entries }, workloads };
 }
 
 /** --check: times scenarios `ids` against normal and checks or, with `write`, records them. */
@@ -353,9 +496,20 @@ function check(ids: readonly ScenarioId[], write: boolean): void {
   const recorded = existsSync(BASELINE_FILE)
     ? parseBaseline(readFileSync(BASELINE_FILE, 'utf8'))
     : null;
-  const result = checkBench(timeCheck(ids), recorded, CHECK_ENTRIES, write);
+  const { timings, workloads } = timeCheck(ids);
+  const result = checkBench(timings, recorded, CHECK_ENTRIES, write);
   console.log(`bench check: ratio to normal's median run, against ${file}`);
   for (const line of result.lines) console.log(line);
+  for (const entry of timings.entries) {
+    const workload = workloads.get(entry.id);
+    if (workload === undefined) continue;
+    console.log(
+      `stress report ${entry.id}: median ${median(entry.ms).toFixed(2)} ms, ` +
+        `ratio ${entryRatio(entry).toFixed(3)}, ` +
+        `normal median ${median(entry.referenceMs).toFixed(2)} ms, ` +
+        `average alive ${workload.averageAlive.toFixed(1)}; ${workloadText(workload)}`,
+    );
+  }
   if (write) {
     writeFileSync(BASELINE_FILE, formatBaseline(result.baseline));
     console.log(`wrote ${file}`);
@@ -400,23 +554,33 @@ function main(): void {
     positiveInt('start-wave', values['start-wave'] ?? String(DEFAULT_START_WAVE));
   const data = scenario.data?.() ?? loadGameData();
   const variants = scenario.variants ?? [''];
+  const modules = scenario.testModules;
   const configFor = (variant: string, i: number): RunConfig =>
     scenario.config(seed + i, startWave, variant);
   for (const variant of variants) {
-    for (let i = 0; i < warmup; i++) runOnce(configFor(variant, runs + i), data);
+    for (let i = 0; i < warmup; i++) runOnce(configFor(variant, runs + i), data, modules);
   }
   const samples: Sample[][] = variants.map(() => []);
   for (let i = 0; i < runs; i++) {
     for (let n = 0; n < variants.length; n++) {
       const v = i % 2 === 0 ? n : variants.length - 1 - n;
-      (samples[v] as Sample[]).push(runOnce(configFor(variants[v] as string, i), data));
+      (samples[v] as Sample[]).push(runOnce(configFor(variants[v] as string, i), data, modules));
     }
   }
   const p50s = variants.map((variant, v) => {
     const poison =
       scenario.variants === undefined ? 0 : maxPoisonStacks(configFor(variant, 0), data);
     const timed = samples[v] as Sample[];
-    return report(id, variant, scenario, timed, poison, { runs, warmup, startWave });
+    const p50 = report(id, variant, scenario, timed, poison, { runs, warmup, startWave });
+    if (scenario.stress === true) {
+      const workload = measureWorkload(configFor(variant, 0), data, modules);
+      console.log(
+        `stress workload (seed ${seed}): average alive ${workload.averageAlive.toFixed(1)} ` +
+          `over ticks ${ALIVE_FROM_TICK + 1}+ (--check band ${ALIVE_MIN}–${ALIVE_MAX} at seed 1), ` +
+          workloadText(workload),
+      );
+    }
+    return p50;
   });
   if (p50s.length === 2) {
     const [first, second] = p50s as [number, number];

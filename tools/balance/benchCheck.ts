@@ -9,12 +9,19 @@
  * check fails when a ratio exceeds RATIO_LIMIT × the recorded one. A slowdown of the whole
  * simulation moves the reference with every scenario, so the check also fails when the
  * reference's own median run exceeds NORMAL_BUDGET_MS, §6's budget for a 3-minute run.
+ *
+ * A stress-family scenario (docs/v3 C4 design §7.2) also reports the average alive of its
+ * workload, which is deterministic: a check fails it outside ALIVE_MIN–ALIVE_MAX, since its
+ * ratio then times other work than the recorded one, and --write does not record it.
  */
 
 /** A scenario fails above this multiple of its recorded ratio (§6). */
 export const RATIO_LIMIT = 1.5;
 /** The reference (normal) fails above this median run time, ms (§6). */
 export const NORMAL_BUDGET_MS = 50;
+/** The band a stress-family scenario's average alive must stay in, inclusive. */
+export const ALIVE_MIN = 280;
+export const ALIVE_MAX = 320;
 
 /** Run times of one checked entry, a scenario or one variant of it, in ms. */
 export interface EntryTimings {
@@ -23,6 +30,11 @@ export interface EntryTimings {
   readonly ms: readonly number[];
   /** The reference runs that alternated with them. */
   readonly referenceMs: readonly number[];
+  /**
+   * A stress-family entry's average alive enemies over ticks 301–1800 of an untimed seed-1 run
+   * (bench.ts); absent for other entries.
+   */
+  readonly alive?: number;
 }
 
 export interface BenchTimings {
@@ -87,7 +99,8 @@ const ms = (value: number): string => `${value.toFixed(1)} ms`;
  * recorded ratio and stays within RATIO_LIMIT × it, the baseline names no unknown entry, and
  * the reference's median run is within NORMAL_BUDGET_MS. With `write`, only the reference's
  * budget can fail, and the returned baseline holds the measured ratios, the recorded ones of
- * known entries not timed this time, and nothing else.
+ * known entries not timed this time, and nothing else. Either way, an entry whose average
+ * alive is outside ALIVE_MIN–ALIVE_MAX fails, and `write` keeps its recorded ratio.
  */
 export function checkBench(
   timings: BenchTimings,
@@ -113,11 +126,17 @@ export function checkBench(
   }
   for (const entry of timings.entries) {
     const ratio = measured.get(entry.id) as number;
+    const { alive } = entry;
     const line =
       `${entry.id}: median ${ms(median(entry.ms))}, ` +
-      `reference ${ms(median(entry.referenceMs))}, ratio ${ratio.toFixed(RATIO_DECIMALS)}`;
+      `reference ${ms(median(entry.referenceMs))}, ratio ${ratio.toFixed(RATIO_DECIMALS)}` +
+      (alive === undefined ? '' : `, average alive ${alive.toFixed(1)}`);
     const was = old[entry.id];
-    if (write) {
+    if (alive !== undefined && !(alive >= ALIVE_MIN && alive <= ALIVE_MAX)) {
+      // Another workload: its ratio says nothing against the recorded one.
+      if (write) measured.delete(entry.id);
+      fail(`${line}, outside ${ALIVE_MIN}–${ALIVE_MAX} alive${write ? ', not recorded' : ''}`);
+    } else if (write) {
       lines.push(`${line}, recorded`);
     } else if (recorded === null) {
       lines.push(line);
