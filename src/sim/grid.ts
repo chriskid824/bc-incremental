@@ -9,7 +9,8 @@
  * allocates nothing, and neither does any query. Sorting at the first query rather than in
  * rebuild() means a tick without queries costs nothing. A source smaller than the
  * constructor's `linearBelow` is not sorted at all: scanning a few dozen items beats the
- * sort and the cell walk, so every query then scans the whole source (linearSource()).
+ * sort and the cell walk, so every query then scans the whole source (linearSource()), unless
+ * a caller about to make many queries sorts it anyway (sortNow()).
  *
  * Every query returns exactly what a linear scan over the source array would, for any finite
  * query point and any radius:
@@ -85,11 +86,16 @@ export class SpatialGrid<T extends GridItem> {
   private itemCell = new Int32Array(0);
   /** Source indices of the marked items, ascending. */
   private markedIndex = new Int32Array(0);
-  /** Source indices hit by within() and inSegmentBox(), before ordering. */
+  /** Source indices hit by within(), inSegmentBox() and blockItems(), before ordering. */
   private hits = new Int32Array(0);
   /** Per source index: the stamp of the last ordering sweep that saw it. */
   private stamps = new Int32Array(0);
   private stamp = 0;
+  /** Column and row of the center cell of the last densest() block; −1 when it found none. */
+  private blockCol = -1;
+  private blockRow = -1;
+  /** Sorts so far (sortCount). */
+  private sorts = 0;
 
   /** nearest() state: the best candidate so far. */
   private best: T | null = null;
@@ -167,6 +173,25 @@ export class SpatialGrid<T extends GridItem> {
     const index =
       k < this.markedSize ? (this.markedIndex[k] as number) : this.size + k - this.markedSize;
     return this.source[index] as T;
+  }
+
+  /** The item at source index i, as boxIndices() returns them. */
+  item(i: number): T {
+    return this.source[i] as T;
+  }
+
+  /**
+   * Sorts the source into the cells now, even one smaller than `linearBelow`, so that the
+   * queries until the next rebuild() read cells instead of scanning it. Their results stay the
+   * same; only their cost changes. Does nothing when the source is sorted already.
+   */
+  sortNow(): void {
+    if (this.stale || (this.size === 0 && this.source.length > 0)) this.sort();
+  }
+
+  /** Sorts into the cells since the grid was made: for tests of when the grid sorts. */
+  get sortCount(): number {
+    return this.sorts;
   }
 
   /**
@@ -292,6 +317,96 @@ export class SpatialGrid<T extends GridItem> {
   }
 
   /**
+   * Number of alive items within squared distance radiusSq (inclusive) of (x, y): what within()
+   * returns, without ordering or writing them.
+   */
+  countWithin(x: number, y: number, radiusSq: number): number {
+    if (this.stale) this.prepare();
+    const source = this.source;
+    let count = 0;
+    if (this.size > 0) {
+      const slotIndex = this.slotIndex;
+      const cellStart = this.cellStart;
+      const cols = this.cols;
+      const rowLo = this.rowLo;
+      const rowHi = this.rowHi;
+      const colLo = this.colLo;
+      const colHi = this.colHi;
+      // The block of cells within() reads.
+      const c0 = this.colOf(x);
+      const r0 = this.rowOf(y);
+      let cFrom = c0;
+      while (cFrom > 0 && square(x - (colLo[cFrom] as number)) <= radiusSq) cFrom--;
+      let cTo = c0;
+      while (cTo < cols - 1 && square((colHi[cTo] as number) - x) <= radiusSq) cTo++;
+      let rFrom = r0;
+      while (rFrom > 0 && square(y - (rowLo[rFrom] as number)) <= radiusSq) rFrom--;
+      let rTo = r0;
+      while (rTo < this.rows - 1 && square((rowHi[rTo] as number) - y) <= radiusSq) rTo++;
+      for (let row = rFrom; row <= rTo; row++) {
+        for (let c = cFrom; c <= cTo; c++) {
+          const cell = row * cols + c;
+          const end = cellStart[cell + 1] as number;
+          let s = cellStart[cell] as number;
+          if (s === end || this.cellGapSq(c, row, x, y) > radiusSq) continue;
+          for (; s < end; s++) {
+            const item = source[slotIndex[s] as number] as T;
+            if (!item.alive) continue;
+            const dx = item.x - x;
+            const dy = item.y - y;
+            if (dx * dx + dy * dy <= radiusSq) count++;
+          }
+        }
+      }
+    }
+    for (let i = this.size; i < source.length; i++) {
+      const item = source[i] as T;
+      if (!item.alive) continue;
+      const dx = item.x - x;
+      const dy = item.y - y;
+      if (dx * dx + dy * dy <= radiusSq) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Source indices of the alive items whose centre lies in the box [minX, maxX] × [minY, maxY]
+   * (bounds inclusive), written to out[0 .. count); returns count. Unordered, unlike
+   * inSegmentBox(): the cells' items cell by cell, each cell's in source order, then the items
+   * added after the sort (every item, when the source was too small to sort). `out` must have
+   * room for every item of the source.
+   */
+  boxIndices(minX: number, minY: number, maxX: number, maxY: number, out: Int32Array): number {
+    if (this.stale) this.prepare();
+    const source = this.source;
+    const slotIndex = this.slotIndex;
+    const cellStart = this.cellStart;
+    const cols = this.cols;
+    const cFrom = this.colOf(minX);
+    const cTo = this.colOf(maxX);
+    const rTo = this.rowOf(maxY);
+    let count = 0;
+    for (let row = this.rowOf(minY); row <= rTo; row++) {
+      // The cells of one row hold consecutive slots.
+      const end = cellStart[row * cols + cTo + 1] as number;
+      for (let s = cellStart[row * cols + cFrom] as number; s < end; s++) {
+        const index = slotIndex[s] as number;
+        const item = source[index] as T;
+        if (item.alive && item.x >= minX && item.x <= maxX && item.y >= minY && item.y <= maxY) {
+          out[count++] = index;
+        }
+      }
+    }
+    for (let i = this.size; i < source.length; i++) {
+      const item = source[i] as T;
+      if (item.alive && item.x >= minX && item.x <= maxX && item.y >= minY && item.y <= maxY) {
+        out[count++] = i;
+      }
+    }
+    return count;
+  }
+
+  /**
    * Densest point: the inner cell whose 3 × 3 block of cells holds the most alive items (the
    * outer ring counts as neighbours but is never the center). Writes the center of that cell,
    * clamped to the area, into `out` and returns the block's count; ties go to the first cell
@@ -335,8 +450,50 @@ export class SpatialGrid<T extends GridItem> {
       const half = this.cellSize / 2;
       out.x = Math.min((this.colLo[bestCol] as number) + half, this.width);
       out.y = Math.min((this.rowLo[bestRow] as number) + half, this.height);
+      this.blockCol = bestCol;
+      this.blockRow = bestRow;
+    } else {
+      this.blockCol = -1;
+      this.blockRow = -1;
     }
     return bestCount;
+  }
+
+  /**
+   * The alive items of the 3 × 3 block of cells the last densest() call found, written to
+   * out[0 .. count) in source order like within(); returns count, 0 when that call found no
+   * alive item. `out` is reused as is.
+   */
+  blockItems(out: T[]): number {
+    if (this.stale) this.prepare();
+    const c0 = this.blockCol;
+    const r0 = this.blockRow;
+    if (c0 < 0) return 0;
+    const source = this.source;
+    let count = 0;
+    if (this.size > 0) {
+      const slotIndex = this.slotIndex;
+      const cellStart = this.cellStart;
+      const hits = this.hits;
+      const cols = this.cols;
+      for (let row = r0 - 1; row <= r0 + 1; row++) {
+        // The three cells of one row hold consecutive slots.
+        const end = cellStart[row * cols + c0 + 2] as number;
+        for (let s = cellStart[row * cols + c0 - 1] as number; s < end; s++) {
+          const index = slotIndex[s] as number;
+          if ((source[index] as T).alive) hits[count++] = index;
+        }
+      }
+      count = this.ordered(count, out);
+    }
+    for (let i = this.size; i < source.length; i++) {
+      const item = source[i] as T;
+      if (!item.alive) continue;
+      const c = this.colOf(item.x);
+      const row = this.rowOf(item.y);
+      if (c >= c0 - 1 && c <= c0 + 1 && row >= r0 - 1 && row <= r0 + 1) out[count++] = item;
+    }
+    return count;
   }
 
   /** At the first query after rebuild(): sorts the source, unless it is too small to. */
@@ -355,6 +512,7 @@ export class SpatialGrid<T extends GridItem> {
   /** Counting sort of the source into the cells; each cell keeps its items in source order. */
   private sort(): void {
     this.stale = false;
+    this.sorts++;
     const source = this.source;
     const mark = this.mark;
     const n = source.length;

@@ -100,7 +100,8 @@ export function createSimulation(
    * 6. emitters: each emitter's due attacks are counted, with the onAttack hooks and the
    *    nthAttack triggers, and fire projectiles; then the rule modules' tick hooks run
    *    (emitters.ts, src/sim/emitters/).
-   * 7. projectiles: move, retarget, and hit on arrival (projectiles.ts). Hits and chains
+   * 7. projectiles: the volley's projectiles move, retarget, and hit on arrival, and the shot
+   *    pool's shots move and hit, all in id order (projectiles.ts, shots.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
    *    triggers, onKill hooks, drops and splits (death.ts) resolve inline.
    * 8. ailments: burn records expire; every BURN_TICK_INTERVAL, damage over time (burn, poison,

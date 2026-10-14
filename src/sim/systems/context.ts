@@ -60,6 +60,9 @@ import type {
 } from '../types';
 import { EMITTER_STEPS } from './emitters';
 import { createEnemyGrid } from './grid';
+import { createShotPool } from './shots';
+import type { ShotHits, ShotPool } from './shots';
+import { isToughType } from './spawn';
 
 const DAMAGE = SCOPED_INDEX.damage;
 const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
@@ -67,6 +70,9 @@ const FUSION = SOURCE_CLASS_ORDINAL.fusion;
 
 const HALF_WIDTH = ARENA_WIDTH / 2;
 const HALF_HEIGHT = ARENA_HEIGHT / 2;
+
+/** Enemies the shots' box query scratch holds at first (RunContext.candidates). */
+const SHOT_SCRATCH = 256;
 
 export interface WaveRecord {
   readonly wave: number;
@@ -364,7 +370,10 @@ export interface RunContext {
 
   // ---- Entities and public state ----
   readonly enemies: Enemy[];
+  /** The volley's homing projectiles; every other projectile is in the shot pool. */
   readonly projectiles: Projectile[];
+  /** The shot pool (src/sim/systems/shots.ts), also SimState.shots. */
+  readonly shots: ShotPool;
   readonly player: PlayerState;
   readonly state: SimState;
   /** Events of the current tick; step() clears it at the start of each tick. */
@@ -389,6 +398,19 @@ export interface RunContext {
   readonly spreadTargets: Enemy[];
   /** The effect executors' scratch list for area targets (src/sim/effects/execute.ts). */
   readonly effectTargets: Enemy[];
+  /**
+   * The largest radius of an enemy type that is not tough: a straight shot looks for the enemies
+   * it can reach in its path's box padded by this (src/sim/systems/shots.ts), and for the tough
+   * ones apart.
+   */
+  readonly shotPad: number;
+  /**
+   * Grid source indices of a box query's candidates (SpatialGrid.boxIndices), read before any of
+   * them is hit; grown by its users to hold every enemy.
+   */
+  candidates: Int32Array;
+  /** The enemies one straight shot's step hits, in hit order (src/sim/systems/shots.ts). */
+  readonly shotHits: ShotHits;
   /** The DoT rings of every enemy (src/sim/ailments/rings.ts). */
   readonly rings: RingPool;
   /** The step's damage per credited source of one ailment (src/sim/systems/ailments.ts). */
@@ -587,6 +609,11 @@ export function createRunContext(
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
+  const shots = createShotPool();
+  let shotPad = 0;
+  for (const id of ENEMY_IDS) {
+    if (!isToughType(id)) shotPad = Math.max(shotPad, data.enemies[id].radius);
+  }
   const maxLife = flags.maxLife ?? values.maxLife;
   const player = {
     x: HALF_WIDTH,
@@ -602,6 +629,8 @@ export function createRunContext(
     player,
     enemies,
     projectiles,
+    shots,
+    shotCount: 0,
     shards: ZERO,
     cores: 0,
     finished: false,
@@ -759,6 +788,7 @@ export function createRunContext(
 
     enemies,
     projectiles,
+    shots,
     player,
     state,
     events: [],
@@ -782,6 +812,9 @@ export function createRunContext(
     chainBudget: { hits: 0, extraJumps: 0, centerEvents: 0 },
     spreadTargets: [],
     effectTargets: [],
+    shotPad,
+    candidates: new Int32Array(SHOT_SCRATCH),
+    shotHits: { t: new Float64Array(SHOT_SCRATCH), enemies: [] },
     rings: new RingPool(),
     dotParts: { n: 0, source: new Int32Array(6), amount: new Array<Num>(6).fill(ZERO) },
     // A hit row has the share that stays a hit and one part per conversion at most.

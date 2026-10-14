@@ -6,11 +6,13 @@
  */
 
 import { ZERO } from '../../core/num';
+import { PROJECTILE_CAP } from '../caps';
 import { fire as fireTriggers } from '../effects/dispatch';
 import { EVENT } from '../effects/types';
 import { pickTargetInGrid } from '../targeting';
 import { focused, rollCount } from '../systems/context';
 import type { Enemy, Projectile, RunContext } from '../systems/context';
+import { liveProjectiles } from '../systems/shots';
 import type { EmitterRuntime } from './types';
 
 /**
@@ -54,9 +56,10 @@ export function countAttack(ctx: RunContext, em: EmitterRuntime, target: Enemy):
 /**
  * Fires an attack of `em` at `first`: projectileCount projectiles (its fraction is the chance
  * of one more, rolled on the payload's stream), each at its own target so they spread over
- * enemies; extra projectiles without a target are lost. Each projectile fired counts as a shot
- * and is steady on steadyAim's every-Nth shot, or when the whole attack is. `depth` and
- * `origin` travel with the projectiles to their hits: 0 and −1 for an emitter's own attacks.
+ * enemies; extra projectiles without a target are lost, and so are those PROJECTILE_CAP
+ * refuses. Each projectile fired counts as a shot and is steady on steadyAim's every-Nth shot,
+ * or when the whole attack is. `depth` and `origin` travel with the projectiles to their hits:
+ * 0 and −1 for an emitter's own attacks.
  */
 export function fireAttack(
   ctx: RunContext,
@@ -92,6 +95,10 @@ function fire(
   depth: number,
   origin: number,
 ): void {
+  if (liveProjectiles(ctx) >= PROJECTILE_CAP) {
+    ctx.counters.projectilesCapped++;
+    return;
+  }
   const player = ctx.player;
   target.inbound++;
   const projectile: Projectile = {

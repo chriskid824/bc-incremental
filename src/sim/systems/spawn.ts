@@ -5,7 +5,7 @@
  */
 
 import { mul, num, ZERO } from '../../core/num';
-import type { EnemyDef } from '../../data/types';
+import type { EnemyDef, EnemyId } from '../../data/types';
 import { RING_SLOTS } from '../ailments/rings';
 import { MAX_DEPTH } from '../effects/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, PLAYER_RADIUS } from '../types';
@@ -42,6 +42,9 @@ export function releaseEnemies(ctx: RunContext): void {
     }
   }
 }
+
+/** Enemies of these types are tough (Enemy.tough): the elites (hexagons) and the bosses. */
+export const isToughType = (id: EnemyId): boolean => id === 'hexagon' || id === 'boss';
 
 export function addEnemy(
   ctx: RunContext,
@@ -103,7 +106,7 @@ export function addEnemy(
     hitMark: 0,
     inbound: 0,
     volleyMark: 0,
-    tough: def.id === 'hexagon' || def.id === 'boss',
+    tough: isToughType(def.id),
     boss: def.id === 'boss',
     ailDepth: MAX_DEPTH,
     killDepth: 0,

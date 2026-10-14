@@ -9,3 +9,13 @@
  * the jumps it refuses count in chainHitCapped.
  */
 export const CHAIN_HIT_CAP = 32;
+/**
+ * Projectiles in flight at once: the volley's homing projectiles and the shot pool's shots
+ * together (src/sim/systems/shots.ts). A spawn at the cap is refused and counted in
+ * projectilesCapped.
+ */
+export const PROJECTILE_CAP = 512;
+/** Enemies a shot remembers having hit; it passes through them without hitting them again. */
+export const SHOT_MEMORY = 16;
+/** Ticks a small projectile lives: 2 s. */
+export const SMALL_PROJECTILE_TICKS = 120;

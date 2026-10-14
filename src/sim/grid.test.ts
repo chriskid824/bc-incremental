@@ -550,3 +550,150 @@ describe('grid queries match the linear scans', () => {
     expect(total.late).toBeGreaterThan(LATE_MIN);
   });
 });
+
+// ---- The shot queries (src/sim/systems/shots.ts) against the linear scans ----
+
+/** The alive items of the 3 × 3 block around the densest point bruteDensest wrote, in order. */
+function bruteBlock(items: readonly Item[], point: GridPoint): Item[] {
+  const innerCols = Math.ceil(ARENA_WIDTH / CELL);
+  const innerRows = Math.ceil(ARENA_HEIGHT / CELL);
+  const cellOf = (v: number, inner: number): number =>
+    v < 0 ? 0 : Math.min(inner + 1, 1 + Math.floor(v / CELL));
+  // The point is its cell's center, pulled back onto the arena's edge at most.
+  const col = 1 + Math.floor(point.x / CELL);
+  const row = 1 + Math.floor(point.y / CELL);
+  return items.filter(
+    (t) =>
+      t.alive &&
+      Math.abs(cellOf(t.x, innerCols) - col) <= 1 &&
+      Math.abs(cellOf(t.y, innerRows) - row) <= 1,
+  );
+}
+
+/** Everything the grid answers about one query, as plain values. */
+function answers(rng: Rng, grid: SpatialGrid<Item>, items: Item[], anchors: Point[]): unknown[] {
+  const result: unknown[] = [];
+  const out: Item[] = [];
+  const indices = new Int32Array(items.length);
+  for (let q = 0; q < 6; q++) {
+    const [x, y] = rng.chance(0.6) ? rng.pick(anchors) : randomPoint(rng, anchors, items);
+    const radiusSq = randomRadiusSq(rng, x, y, items);
+    const [bx, by] = randomPoint(rng, anchors, items);
+    const pad = [0, 10, 22, 70, 300][rng.int(5)] as number;
+    const [minX, maxX] = [Math.min(x, bx) - pad, Math.max(x, bx) + pad];
+    const [minY, maxY] = [Math.min(y, by) - pad, Math.max(y, by) + pad];
+
+    const count = grid.countWithin(x, y, radiusSq);
+    expect(count).toBe(linearWithin(items, x, y, radiusSq).length);
+
+    const n = grid.boxIndices(minX, minY, maxX, maxY, indices);
+    const found = Array.from(indices.subarray(0, n)).sort((a, b) => a - b);
+    expect(new Set(found).size, 'no item twice').toBe(n);
+    expect(found.map((i) => grid.item(i))).toEqual(linearBox(items, x, y, bx, by, pad));
+    for (const i of found) expect(grid.item(i)).toBe(items[i]);
+
+    result.push(
+      count,
+      found,
+      idOf(grid.nearest(x, y, radiusSq)),
+      idsOf(out, grid.within(x, y, radiusSq, out)),
+      idsOf(out, grid.inSegmentBox(x, y, bx, by, pad, out)),
+    );
+  }
+  const point = { x: NaN, y: NaN };
+  const expectedPoint = { x: NaN, y: NaN };
+  const densest = grid.densest(point);
+  expect(densest).toBe(bruteDensest(items, expectedPoint));
+  const block = idsOf(out, grid.blockItems(out));
+  expect(block).toEqual(densest === 0 ? [] : idsOf(bruteBlock(items, expectedPoint)));
+  expect(block).toHaveLength(densest);
+  const tough: number[] = [];
+  for (let k = 0; k < grid.markedCount(); k++) {
+    const t = grid.marked(k);
+    if (t.tough) tough.push(t.id);
+  }
+  result.push(densest, point, block, tough);
+  return result;
+}
+
+describe('the shot queries match the linear scans', () => {
+  it('boxIndices, countWithin and blockItems, sorted or scanned, late and dead items included', () => {
+    const rng = createRng(20261014);
+    const sorting = newGrid();
+    const scanning = newGrid(128);
+    let scanned = 0;
+    let blocks = 0;
+    let nextId = 1;
+    for (let state = 0; state < 400; state++) {
+      const grid = rng.chance(0.4) ? scanning : sorting;
+      const anchors: Point[] = [PLAYER];
+      for (let a = 0; a < 3; a++) anchors.push(randomPoint(rng, anchors, []));
+      anchors.push([edge(rng, 15), edge(rng, 9)]);
+      const items: Item[] = [];
+      const count = [0, 1, 5, 20, 80, 170, 320][rng.int(7)] as number;
+      for (let i = 0; i < count; i++) items.push(randomItem(rng, nextId++, anchors, items));
+      grid.rebuild(items, isTough);
+      if (grid.linearSource() !== null) scanned++;
+      answers(rng, grid, items, anchors);
+
+      // Later in the tick: kills and split children, appended after the sort.
+      for (const target of items) if (rng.chance(0.1)) target.alive = false;
+      const extra = rng.int(6);
+      for (let i = 0; i < extra; i++) items.push(randomItem(rng, nextId++, anchors, items));
+      const late = answers(rng, grid, items, anchors);
+      if ((late[late.length - 2] as number[]).length > 0) blocks++;
+    }
+    expect(scanned).toBeGreaterThan(100);
+    expect(blocks).toBeGreaterThan(200);
+  });
+
+  it('answers the same after sortNow, which sorts a scanned source once', () => {
+    const rng = createRng(20261015);
+    let sorted = 0;
+    let nextId = 1;
+    for (let state = 0; state < 200; state++) {
+      const grid = newGrid(128);
+      const anchors: Point[] = [PLAYER, randomPoint(rng, [PLAYER], [])];
+      const items: Item[] = [];
+      const count = [0, 1, 5, 40, 127, 128, 200][rng.int(7)] as number;
+      for (let i = 0; i < count; i++) items.push(randomItem(rng, nextId++, anchors, items));
+      grid.rebuild(items, isTough);
+      if (rng.chance(0.3)) items.push(randomItem(rng, nextId++, anchors, items));
+      const scan = grid.linearSource() !== null;
+      // The same queries before and after.
+      const seed = rng.int(1 << 30);
+      const before = answers(createRng(seed), grid, items, anchors);
+      const sorts = grid.sortCount;
+      grid.sortNow();
+      // A scanned source with items is sorted now; a sorted or empty one is left as it is.
+      const sorts1 = scan && items.length > 0 ? sorts + 1 : sorts;
+      expect(grid.sortCount).toBe(sorts1);
+      if (items.length > 0) expect(grid.linearSource()).toBeNull();
+      if (sorts1 > sorts) sorted++;
+      expect(answers(createRng(seed), grid, items, anchors)).toEqual(before);
+      grid.sortNow();
+      expect(grid.sortCount).toBe(sorts1);
+    }
+    expect(sorted).toBeGreaterThan(50);
+  });
+
+  it('counts its sorts: one per rebuild that a query or sortNow follows', () => {
+    const items = [item(1, 0, 0), item(2, 500, 500)];
+    const grid = newGrid();
+    grid.rebuild(items);
+    expect(grid.sortCount).toBe(0);
+    grid.nearest(0, 0, Infinity);
+    grid.countWithin(0, 0, 100);
+    expect(grid.sortCount).toBe(1);
+    grid.rebuild(items);
+    grid.sortNow();
+    grid.boxIndices(0, 0, 10, 10, new Int32Array(2));
+    expect(grid.sortCount).toBe(2);
+    const small = newGrid(4);
+    small.rebuild(items);
+    expect(small.linearSource()).toBe(items);
+    expect(small.sortCount).toBe(0);
+    small.sortNow();
+    expect([small.sortCount, small.linearSource()]).toEqual([1, null]);
+  });
+});

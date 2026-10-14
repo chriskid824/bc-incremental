@@ -13,9 +13,15 @@
 
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { mul, num } from '../core/num';
+import { TAG } from '../data/tags';
 import type { GameData } from '../data/types';
-import type { TestModule } from './rules';
+import { SMALL_PROJECTILE_TICKS } from './caps';
+import { createPayload, ROWS } from './emitters/types';
+import type { Payload } from './emitters/types';
+import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
+import { MOTION_HOMING, MOTION_LOB, MOTION_STRAIGHT, spawnShot } from './systems/shots';
 import { GOLDEN_BUILDS, makeConfig, makeTestData, projectResult } from './testing';
 import { COUNTER_IDS, NO_INPUT } from './types';
 import type { CounterId, RunConfig } from './types';
@@ -36,8 +42,113 @@ interface GoldenC4Entry {
   readonly expected: readonly [string, string];
 }
 
+/**
+ * C4.2's shot pool beside the volley: every 15 ticks, a ring of six straight shots from the
+ * player (pierce 1 to 6 or without limit, bounces, one wide shot), a homing shot (steady every
+ * fourth round) and a lob landing 24 ticks later, all on one payload credited to
+ * outer.barrage.
+ */
+function shotsModule(): TestModule {
+  let payload: Payload | null = null;
+  const module = (b: BuildCompiler, source: number): void => {
+    b.hook('tick', (ctx) => {
+      if (ctx.now % 15 !== 0) return;
+      payload ??= createPayload({
+        baseDamage: mul(num(ctx.build.values.damage), 0.4),
+        tags: TAG.hit | TAG.projectile,
+        source,
+        flags: 0,
+        rng: ctx.effectsRng,
+        chains: false,
+        rollsAilments: true,
+        canCrit: true,
+        damageMode: ROWS,
+      });
+      const round = ctx.now / 15;
+      const until = ctx.now + SMALL_PROJECTILE_TICKS;
+      const { x, y } = ctx.player;
+      for (let i = 0; i < 6; i++) {
+        const angle = (i * Math.PI) / 3 + round * 0.37;
+        const pierce = i === 0 ? -1 : i;
+        const vx = 16 * Math.cos(angle);
+        const vy = 16 * Math.sin(angle);
+        const s = spawnShot(
+          ctx,
+          MOTION_STRAIGHT,
+          x,
+          y,
+          vx,
+          vy,
+          until,
+          payload,
+          0.5,
+          pierce,
+          i % 3,
+          0,
+          -1,
+          false,
+          -1,
+          -1,
+          null,
+        );
+        if (s >= 0 && i === 3) ctx.shots.radius[s] = 14;
+      }
+      const steady = round % 4 === 0;
+      spawnShot(
+        ctx,
+        MOTION_HOMING,
+        x,
+        y,
+        0,
+        0,
+        until,
+        payload,
+        1,
+        1,
+        0,
+        0,
+        -1,
+        steady,
+        -1,
+        -1,
+        null,
+      );
+      const angle = round * 0.9;
+      const lx = x + 300 * Math.cos(angle);
+      const ly = y + 300 * Math.sin(angle);
+      spawnShot(
+        ctx,
+        MOTION_LOB,
+        lx,
+        ly,
+        x,
+        y,
+        ctx.now + 24,
+        payload,
+        1,
+        1,
+        0,
+        0,
+        -1,
+        false,
+        -1,
+        -1,
+        null,
+      );
+    });
+  };
+  return Object.assign(module, { source: 'outer.barrage' });
+}
+
 /** The entries, in the order their commits appended them. */
-const ENTRIES: readonly GoldenC4Entry[] = [];
+const ENTRIES: readonly GoldenC4Entry[] = [
+  {
+    name: 'shots/testModule',
+    config: { ...GOLDEN_BUILDS.bridges, startWave: 8 },
+    modules: () => [shotsModule()],
+    expected: ['d32decc45c4cb5c1', 'a3baa3324af324b2'],
+  },
+];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
 function nonzeroCounters(counters: Readonly<Record<CounterId, number>>): [CounterId, number][] {

@@ -1,13 +1,13 @@
 /**
  * Grid system (docs/v3/implementation-plan-v3.md §2.3, §2.15): right after movement, hands
  * the enemies to the uniform spatial grid (src/sim/grid.ts) for the target queries of the
- * rest of the tick: projectile targets, chain jumps and pandemic spread. The grid sorts them
- * into its cells at the tick's first query, with the positions of this tick; ticks without
- * queries skip the sort, and so do ticks with fewer than GRID_LINEAR_BELOW enemies, whose
- * queries scan them linearly. Enemies that die later in the tick stay in their cells and are
- * skipped; enemies added later in the tick (split children) are scanned linearly by every
- * query. Nothing moves enemies after movement yet; whatever will (knockback) is seen at its
- * new cell from the next tick.
+ * rest of the tick: projectile targets, shot paths, chain jumps and pandemic spread. The grid
+ * sorts them into its cells at the tick's first query, with the positions of this tick; ticks
+ * without queries skip the sort, and so do ticks with fewer than GRID_LINEAR_BELOW enemies,
+ * whose queries scan them linearly, unless many straight shots fly (projectiles.ts). Enemies
+ * that die later in the tick stay in their cells and are skipped; enemies added later in the
+ * tick (split children) are scanned linearly by every query. Nothing moves enemies after
+ * movement yet; whatever will (knockback) is seen at its new cell from the next tick.
  */
 
 import { SpatialGrid } from '../grid';

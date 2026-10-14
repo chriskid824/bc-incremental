@@ -86,6 +86,27 @@ export interface ProjectileState {
   alive: boolean;
 }
 
+/**
+ * The shot pool (src/sim/systems/shots.ts): every projectile but the volley's homing ones, in
+ * typed arrays reused from tick to tick. Slots 0 .. SimState.shotCount − 1 hold the shots in
+ * flight, in id order.
+ */
+export interface ShotPoolState {
+  readonly id: Int32Array;
+  /** How it moves: 0 straight, 1 homing, 2 lobbed (MOTION_*). */
+  readonly motion: Uint8Array;
+  /** Its position; a lobbed shot's landing point. */
+  readonly x: Float64Array;
+  readonly y: Float64Array;
+  /** Its velocity per tick; a lobbed shot's launch point. */
+  readonly vx: Float64Array;
+  readonly vy: Float64Array;
+  /** The tick it expires; a lobbed shot's landing tick. */
+  readonly until: Int32Array;
+  /** A lobbed shot's form, for drawing; 0 for the others. */
+  readonly form: Uint8Array;
+}
+
 export interface PlayerState {
   readonly x: number;
   readonly y: number;
@@ -108,6 +129,9 @@ export interface SimState {
   /** Dense arrays; dead entries may be reused or compacted by the simulation. */
   readonly enemies: EnemyState[];
   readonly projectiles: ProjectileState[];
+  /** The other projectiles; the first shotCount slots are in flight. */
+  readonly shots: ShotPoolState;
+  shotCount: number;
   /** Currencies collected so far this run (before skip compensation, which meta adds). */
   shards: Num;
   cores: number;
@@ -252,6 +276,8 @@ export const COUNTER_IDS = [
   'chainHitCapped',
   /** Most hits one attack dealt, its primary hit included (a gauge). */
   'chainHitsPeak',
+  /** Projectiles not fired because PROJECTILE_CAP were already in flight. */
+  'projectilesCapped',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 
