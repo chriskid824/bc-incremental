@@ -1,10 +1,11 @@
 /**
  * Trigger vocabulary (docs/v3/implementation-plan-v3.md §2.6): the events a talent's triggers
  * listen to, their conditions and their effects; the ailment kinds, which damage attribution
- * reads (src/data/sources.ts); and the scaling of modifiers whose value depends on the damage
- * instance (Modifier.scaling). Each member lands together with the simulation code that reads it
- * (src/sim/effects/, src/sim/build/eval.ts), so the schemas (src/data/schema.ts) accept only what
- * the simulation can run.
+ * reads (src/data/sources.ts); the scaling of modifiers whose value depends on the damage
+ * instance (Modifier.scaling); and damage conversions (§2.7). Each member lands together with the
+ * simulation code that reads it (src/sim/effects/, src/sim/build/eval.ts,
+ * src/sim/combat/convert.ts), so the schemas (src/data/schema.ts) accept only what the
+ * simulation can run.
  */
 
 import type { DamageTag } from './tags';
@@ -337,4 +338,22 @@ export interface TriggerSpec {
   readonly every?: number;
   readonly when?: readonly Condition[];
   readonly do: readonly EffectSpec[];
+}
+
+/** What a conversion turns part of a hit into: a damage-over-time kind or an element. */
+export const CONVERSION_TARGETS = ['burn', 'poison', 'bleed', 'cold', 'lightning'] as const;
+export type ConversionTarget = (typeof CONVERSION_TARGETS)[number];
+
+/**
+ * A damage conversion (docs/v3/implementation-plan-v3.md §2.7): `fraction` of every hit that
+ * carries all of `tags` (every hit without them) becomes `to`, before modifiers. The converted
+ * part keeps the hit's delivery tags, crit and source; a damage-over-time kind replaces the hit's
+ * kind and element, an element only its element (convertMask, src/data/tags.ts). It is part of
+ * the hit, dealt at once: it applies no ailment. Only hits convert. A node's conversions add up
+ * to at most 1; when a hit's conversions add up to more, each takes its share of the whole hit.
+ */
+export interface ConversionSpec {
+  readonly tags?: readonly DamageTag[];
+  readonly to: ConversionTarget;
+  readonly fraction: number;
 }

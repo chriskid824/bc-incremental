@@ -6,7 +6,14 @@
 import type { RuleSpec } from '../data/rules';
 import { sourceOfNode } from '../data/sources';
 import { BASE_STATS, isScopedStat, STAT_IDS } from '../data/stats';
-import type { Modifier, SourcedTrigger, StatBlock, StatExtras, StatId } from '../data/stats';
+import type {
+  Modifier,
+  SourcedConversion,
+  SourcedTrigger,
+  StatBlock,
+  StatExtras,
+  StatId,
+} from '../data/stats';
 import type { GameData } from '../data/types';
 import { nodeRank } from './talents';
 import type { MetaState } from './types';
@@ -25,20 +32,22 @@ export function collectModifiers(meta: Readonly<MetaState>, data: GameData): Mod
 }
 
 /**
- * Triggers of the start node and every allocated node, repeated per rank like modifiers, each
- * with its node's source (sourceOfNode), in data order; and their conversions, none yet.
+ * Triggers and conversions of the start node and every allocated node, repeated per rank like
+ * modifiers, each with its node's source (sourceOfNode), in data order.
  */
 export function collectExtras(meta: Readonly<MetaState>, data: GameData): StatExtras {
   const triggers: SourcedTrigger[] = [];
+  const conversions: SourcedConversion[] = [];
   for (const node of data.talents) {
     const rank = nodeRank(meta, node);
-    if (rank === 0 || node.triggers.length === 0) continue;
+    if (rank === 0 || (node.triggers.length === 0 && node.conversions.length === 0)) continue;
     const source = sourceOfNode(node.id);
     for (let r = 0; r < rank; r++) {
       for (const spec of node.triggers) triggers.push({ source, spec });
+      for (const spec of node.conversions) conversions.push({ source, spec });
     }
   }
-  return { triggers, conversions: [] };
+  return { triggers, conversions };
 }
 
 /** Rules of the start node and every allocated node, once each. */

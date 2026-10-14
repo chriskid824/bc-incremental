@@ -8,7 +8,7 @@ import type { RuleSpec } from './rules';
 import { ARCHETYPE_TAGS, sourceOfNode } from './sources';
 import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
-import { DELIVERY_MASK, TAG } from './tags';
+import { DELIVERY_MASK, DOT_MASK, TAG } from './tags';
 import {
   CONDITION_CONTEXTS,
   conditionKey,
@@ -17,7 +17,13 @@ import {
   TRANSFER_EFFECTS,
   WIRED_EVENTS,
 } from './triggers';
-import type { Condition, EffectSpec, TriggerEventId, TriggerSpec } from './triggers';
+import type {
+  Condition,
+  ConversionSpec,
+  EffectSpec,
+  TriggerEventId,
+  TriggerSpec,
+} from './triggers';
 import { ENEMY_IDS } from './types';
 import type { EnemyDef, EnemyId, GameData, TalentNode, WaveTable } from './types';
 
@@ -203,16 +209,17 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
       }
     }
 
-    // Triggers and behaviour modifiers change how a run plays, as rules do (Searing Crits is
-    // data).
+    // Triggers, conversions and behaviour modifiers change how a run plays, as rules do
+    // (Searing Crits is data).
     const behaviour = node.modifiers.some(isBehaviourModifier);
     if (
       node.kind === 'keystone' &&
       node.rules.length === 0 &&
       node.triggers.length === 0 &&
+      node.conversions.length === 0 &&
       !behaviour
     ) {
-      issues.push(`${at}: keystone needs a rule, a trigger or a behaviour modifier`);
+      issues.push(`${at}: keystone needs a rule, a trigger, a conversion or a behaviour modifier`);
     }
     if (node.kind !== 'keystone' && node.kind !== 'notable' && node.rules.length > 0) {
       issues.push(`${at}: only keystones and notables may have rules`);
@@ -229,6 +236,15 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     node.triggers.forEach((trigger, i) => {
       for (const problem of triggerIssues(trigger)) issues.push(`${at}: triggers[${i}] ${problem}`);
     });
+    node.conversions.forEach((conversion, i) => {
+      for (const problem of conversionIssues(conversion)) {
+        issues.push(`${at}: conversions[${i}] ${problem}`);
+      }
+    });
+    // More than the whole hit cannot convert; the simulation scales a sum over 1 from several
+    // nodes down, but one node's sum is its own mistake.
+    const converted = node.conversions.reduce((sum, conversion) => sum + conversion.fraction, 0);
+    if (converted > 1) issues.push(`${at}: conversions add up to ${converted}, more than 1`);
 
     if (node.shardCostFactor !== undefined && !(node.shardCostFactor >= 0)) {
       issues.push(`${at}: shardCostFactor must be >= 0 (got ${node.shardCostFactor})`);
@@ -241,11 +257,14 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     // The talent screen lists plain modifiers itself; descKey covers everything else.
     const described = needsDescKey(node);
     if (described && node.descKey === undefined) {
-      issues.push(`${at}: a node with rules, triggers or behaviour modifiers needs a descKey`);
+      issues.push(
+        `${at}: a node with rules, triggers, conversions or behaviour modifiers needs a descKey`,
+      );
     }
     if (!described && node.descKey !== undefined) {
       issues.push(
-        `${at}: descKey describes rules, triggers and behaviour modifiers; this node has none`,
+        `${at}: descKey describes rules, triggers, conversions and behaviour modifiers; ` +
+          'this node has none',
       );
     }
   }
@@ -424,6 +443,26 @@ function triggerIssues(trigger: TriggerSpec): string[] {
   trigger.do.forEach((effect, i) => {
     for (const problem of effectIssues(effect, on)) issues.push(`do[${i}] ${problem}`);
   });
+  return issues;
+}
+
+/**
+ * Ranges of one conversion: a share of the hit above 0, and tags a hit can carry, so no kind
+ * besides hit (only hits convert; src/sim/combat/convert.ts).
+ */
+function conversionIssues(conversion: ConversionSpec): string[] {
+  const issues: string[] = [];
+  if (!(conversion.fraction > 0)) issues.push(`fraction must be > 0 (got ${conversion.fraction})`);
+  const tags = conversion.tags;
+  if (tags === undefined) return issues;
+  if (tags.length === 0 || new Set(tags).size !== tags.length) {
+    issues.push('tags must be unique and not empty; omit the field instead');
+  }
+  for (const tag of tags) {
+    if ((TAG[tag] & DOT_MASK) !== 0) {
+      issues.push(`tag '${tag}' is a damage-over-time kind, and only hits convert`);
+    }
+  }
   return issues;
 }
 

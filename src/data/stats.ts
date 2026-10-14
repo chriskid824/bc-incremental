@@ -6,7 +6,7 @@
 import type { SourceSelector } from './sources';
 import { TAG } from './tags';
 import type { DamageTag } from './tags';
-import type { ScalingSpec, TargetCondition, TriggerSpec } from './triggers';
+import type { ConversionSpec, ScalingSpec, TargetCondition, TriggerSpec } from './triggers';
 
 export const STAT_IDS = [
   /** Flat base damage per attack. Damage modifiers may carry tags; see src/data/tags.ts. */
@@ -226,12 +226,20 @@ export interface SourcedTrigger {
 }
 
 /**
- * Triggers and conversions of the allocated nodes, with their sources, in data order. The
- * talent vocabulary has no conversions yet (docs/v3/implementation-plan-v3.md §2.7).
+ * A damage conversion of an allocated node, with the source of its node. A conversion converts
+ * every hit with its tags whatever the hit's source, and the converted part keeps the hit's
+ * source (docs/v3/implementation-plan-v3.md §2.7), so the simulation does not read this one.
  */
+export interface SourcedConversion {
+  /** Source id (src/data/sources.ts), from the node's id. */
+  readonly source: string;
+  readonly spec: ConversionSpec;
+}
+
+/** Triggers and conversions of the allocated nodes, with their sources, in data order. */
 export interface StatExtras {
   readonly triggers: readonly SourcedTrigger[];
-  readonly conversions: readonly never[];
+  readonly conversions: readonly SourcedConversion[];
 }
 
 export const NO_EXTRAS: StatExtras = { triggers: [], conversions: [] };

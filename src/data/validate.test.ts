@@ -4,7 +4,7 @@ import { loadGameData, parseGameData } from './index';
 import { TALENTS } from './talents';
 import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
-import type { TriggerSpec } from './triggers';
+import type { ConversionSpec, TriggerSpec } from './triggers';
 import type { GameData, TalentNode } from './types';
 import { MAX_KEYSTONES, starArchetypeIssues, validateGameData } from './validate';
 import { WAVES } from './waves';
@@ -166,7 +166,7 @@ describe('validateGameData: talents', () => {
       issuesAfter((d) => talent(d, 'vitality').rules.push({ id: 'glassCannon', damageMore: 1 })),
     ).toEqual([
       "talent 'vitality': only keystones and notables may have rules",
-      "talent 'vitality': a node with rules, triggers or behaviour modifiers needs a descKey",
+      "talent 'vitality': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
     ]);
     expect(
       issuesAfter((d) => {
@@ -174,7 +174,9 @@ describe('validateGameData: talents', () => {
         node.rules = [];
         delete node.descKey;
       }),
-    ).toEqual(["talent 'glassCannon': keystone needs a rule, a trigger or a behaviour modifier"]);
+    ).toEqual([
+      "talent 'glassCannon': keystone needs a rule, a trigger, a conversion or a behaviour modifier",
+    ]);
   });
 
   it('accepts a keystone whose behaviour is all modifiers (Searing Crits)', () => {
@@ -187,8 +189,8 @@ describe('validateGameData: talents', () => {
         talent(d, 'searingCrits').modifiers = [{ stat: 'damage', kind: 'more', value: -0.5 }];
       }),
     ).toEqual([
-      "talent 'searingCrits': keystone needs a rule, a trigger or a behaviour modifier",
-      "talent 'searingCrits': descKey describes rules, triggers and behaviour modifiers; this node has none",
+      "talent 'searingCrits': keystone needs a rule, a trigger, a conversion or a behaviour modifier",
+      "talent 'searingCrits': descKey describes rules, triggers, conversions and behaviour modifiers; this node has none",
     ]);
   });
 
@@ -203,8 +205,8 @@ describe('validateGameData: talents', () => {
         talent(d, 'pandemic').triggers = [];
       }),
     ).toEqual([
-      "talent 'pandemic': keystone needs a rule, a trigger or a behaviour modifier",
-      "talent 'pandemic': descKey describes rules, triggers and behaviour modifiers; this node has none",
+      "talent 'pandemic': keystone needs a rule, a trigger, a conversion or a behaviour modifier",
+      "talent 'pandemic': descKey describes rules, triggers, conversions and behaviour modifiers; this node has none",
     ]);
   });
 
@@ -264,12 +266,12 @@ describe('validateGameData: talents', () => {
       });
     });
     expect(issues).toEqual([
-      "talent 'glassCannon': a node with rules, triggers or behaviour modifiers needs a descKey",
-      "talent 'vitality': descKey describes rules, triggers and behaviour modifiers; this node has none",
-      "talent 'keenEye': a node with rules, triggers or behaviour modifiers needs a descKey",
-      "talent 'precision': a node with rules, triggers or behaviour modifiers needs a descKey",
-      "talent 'kindling': a node with rules, triggers or behaviour modifiers needs a descKey",
-      "talent 'staticFocus': a node with rules, triggers or behaviour modifiers needs a descKey",
+      "talent 'glassCannon': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+      "talent 'vitality': descKey describes rules, triggers, conversions and behaviour modifiers; this node has none",
+      "talent 'keenEye': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+      "talent 'precision': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+      "talent 'kindling': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+      "talent 'staticFocus': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
     ]);
   });
 
@@ -791,7 +793,69 @@ describe('trigger validation', () => {
     expect(
       issuesAfter((d) => talent(d, 'vitality').triggers.push({ on: 'kill', do: [explode] })),
     ).toEqual([
-      "talent 'vitality': a node with rules, triggers or behaviour modifiers needs a descKey",
+      "talent 'vitality': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+    ]);
+  });
+});
+
+describe('conversion validation', () => {
+  /** Issues of the real content with `conversions` on 'vitality', which then has its descKey. */
+  const conversionIssues = (...conversions: ConversionSpec[]): string[] =>
+    issuesAfter((d) => {
+      const node = talent(d, 'vitality');
+      node.conversions.push(...(conversions as Mutable<ConversionSpec>[]));
+      node.descKey = 'talent.vitality.desc';
+    });
+  const at = "talent 'vitality': conversions";
+
+  it('accepts conversions to every target adding up to at most 1', () => {
+    expect(
+      conversionIssues(
+        { to: 'poison', fraction: 0.3 },
+        { tags: ['minion'], to: 'bleed', fraction: 0.2 },
+        { tags: ['chain', 'crit'], to: 'cold', fraction: 0.25 },
+        { to: 'lightning', fraction: 0.15 },
+        { tags: ['hit'], to: 'burn', fraction: 0.1 },
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects a node's conversions adding up to more than 1", () => {
+    expect(
+      conversionIssues({ to: 'poison', fraction: 0.6 }, { to: 'bleed', fraction: 0.5 }),
+    ).toEqual(["talent 'vitality': conversions add up to 1.1, more than 1"]);
+  });
+
+  it('rejects a share of 0 or less and tags no hit carries', () => {
+    expect(
+      conversionIssues(
+        { to: 'poison', fraction: 0 },
+        { tags: [], to: 'poison', fraction: 0.1 },
+        { tags: ['burn', 'projectile', 'projectile'], to: 'cold', fraction: 0.1 },
+        { tags: ['poison'], to: 'bleed', fraction: -0.2 },
+      ),
+    ).toEqual([
+      `${at}[0] fraction must be > 0 (got 0)`,
+      `${at}[1] tags must be unique and not empty; omit the field instead`,
+      `${at}[2] tags must be unique and not empty; omit the field instead`,
+      `${at}[2] tag 'burn' is a damage-over-time kind, and only hits convert`,
+      `${at}[3] fraction must be > 0 (got -0.2)`,
+      `${at}[3] tag 'poison' is a damage-over-time kind, and only hits convert`,
+    ]);
+  });
+
+  it('accepts a keystone whose behaviour is a conversion, and needs a descKey for one', () => {
+    expect(
+      issuesAfter((d) => {
+        const node = talent(d, 'glassCannon');
+        node.rules = [];
+        node.conversions = [{ to: 'poison', fraction: 0.5 }];
+      }),
+    ).toEqual([]);
+    expect(
+      issuesAfter((d) => talent(d, 'vitality').conversions.push({ to: 'poison', fraction: 0.5 })),
+    ).toEqual([
+      "talent 'vitality': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
     ]);
   });
 });

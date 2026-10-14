@@ -5,9 +5,10 @@
  * offset stats, add modifiers, set flags and the signature attack's parameters, and add
  * triggers, effects and hooks. The result holds the final stat values, the ModTable of the
  * build's scoped modifiers followed by the rule-added ones, the run's damage sources and ailment
- * attribution, the hook lists, the emitters, the signature's first, and the triggers with their
+ * attribution, the hook lists, the emitters, the signature's first, the triggers with their
  * effects: the built-in shatter (SHATTER_TRIGGER) first, then the build's own
- * (StatBlock.triggers), then the modules', in compile order (src/sim/effects/types.ts).
+ * (StatBlock.triggers), then the modules', in compile order (src/sim/effects/types.ts); and the
+ * build's damage conversions, which the ModTable lists per hit row (src/sim/combat/convert.ts).
  *
  * The source table, the attribution's outer sources and the ModTable rows grow while a run
  * uses them, so createRunContext compiles a fresh build for every run. The talent screen and
@@ -35,8 +36,8 @@ import type { EmitterSpec } from '../emitters/types';
 import { RULE_MODULES, SIGNATURES } from '../rules';
 import type { BuildCompiler, HookName, Hooks, TestModule } from '../rules';
 import { statAt, staticInput } from './eval';
-import { compileMods, ModTable } from './modTable';
-import type { CompiledMod } from './modTable';
+import { compileConversions, compileMods, ModTable } from './modTable';
+import type { CompiledConversion, CompiledMod } from './modTable';
 import {
   CENTER,
   createAttribution,
@@ -111,6 +112,8 @@ export interface CompiledBuild {
   readonly triggersOn: readonly Int32Array[];
   /** Every effect: the triggers' in trigger order, and the ones modules added (addEffect). */
   readonly effects: readonly CompiledEffect[];
+  /** The damage conversions (StatBlock.conversions), in data order; the table's. */
+  readonly conversions: readonly CompiledConversion[];
 }
 
 function compileRule<K extends RuleId>(
@@ -282,9 +285,16 @@ export function compileBuild(
   );
 
   const mods = compileMods(scoped, sources);
+  const conversions = compileConversions(stats.conversions);
   const scopedOf = (perStat: Readonly<Record<StatId, number>>): Float64Array =>
     Float64Array.from(SCOPED_STATS, (stat) => perStat[stat]);
-  const table = new ModTable(mods, scopedOf(stats.base), scopedOf(postScale), scopedOf(postOffset));
+  const table = new ModTable(
+    mods,
+    scopedOf(stats.base),
+    scopedOf(postScale),
+    scopedOf(postOffset),
+    conversions,
+  );
   return {
     values,
     table,
@@ -299,6 +309,7 @@ export function compileBuild(
     triggers,
     triggersOn,
     effects,
+    conversions,
   };
 }
 
@@ -320,7 +331,7 @@ export function centerStat(
 
 /**
  * Damage multiplier of a center instance with tags `mask` outside a run: a primary hit with
- * these tags deals values.damage × centerDamage(build, mask) before crits.
+ * these tags deals values.damage × centerDamage(build, mask) before crits and conversions.
  */
 export function centerDamage(build: CompiledBuild, mask: TagMask): number {
   return build.table.damage(rowKey(mask, CENTER));

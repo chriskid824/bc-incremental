@@ -5,7 +5,8 @@
  * ailments it rolled, each raising ailmentApplied, then its frost (frostOnHit), which may
  * freeze. Chances, the crit multiplier, the damage multiplier and frost are the scoped stats of
  * the hit's own ModTable row (the payload's slot for its tags and source), so tagged, scoped and
- * scaling modifiers apply per hit. A shocked or frozen enemy takes more (takenMult). Every
+ * scaling modifiers apply per hit. Conversions split a hit's damage into parts with rows of
+ * their own (src/sim/combat/convert.ts). A shocked or frozen enemy takes more (takenMult). Every
  * damage instance, hits and damage-over-time steps alike, goes into the run's tallies through
  * tally.
  *
@@ -16,7 +17,7 @@
  */
 
 import type { Num } from '../../core/num';
-import { add, assertFinite, gt, lte, mul, sub, ZERO } from '../../core/num';
+import { add, assertFinite, gt, lte, mul, sub, toNumber, ZERO } from '../../core/num';
 import { DOT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { ailmentDps, applyBurn, applyPoison, creditOf } from '../ailments/apply';
@@ -48,6 +49,7 @@ import type { Payload } from '../emitters/types';
 import { clamp01 } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { killEnemy } from '../systems/death';
+import { convertHit } from './convert';
 
 const CRIT = TAG.crit;
 const BURN = TAG.burn;
@@ -90,6 +92,20 @@ export function tally(ctx: RunContext, tags: TagMask, source: number, amount: Nu
   else if ((tags & CHAIN) !== 0) ctx.damageChain = add(ctx.damageChain, amount);
   else ctx.damageHit = add(ctx.damageHit, amount);
   ctx.bySource[source] = add(ctx.bySource[source] as Num, amount);
+}
+
+/**
+ * Tallies a converted hit's `amount` part by part (RunContext.hitParts, convertHit): each part's
+ * share of what was dealt, with its own tags, credited to the hit's `source`.
+ */
+function tallyParts(ctx: RunContext, source: number, amount: Num): void {
+  const parts = ctx.hitParts;
+  // takenMult and the modifyDamage hooks scale every part alike.
+  const scale = amount === parts.total ? 1 : toNumber(amount) / toNumber(parts.total);
+  for (let i = 0; i < parts.n; i++) {
+    const part = parts.amount[i] as Num;
+    tally(ctx, parts.mask[i] as number, source, scale === 1 ? part : mul(part, scale));
+  }
 }
 
 /**
@@ -207,9 +223,12 @@ export function hitWithPayload(
   const mask = crit ? plain | CRIT : plain;
   const source = jump ? p.jumpSource : p.source;
   const flags = p.flags | HIT_EVENT | (jump ? CHAIN_JUMP : 0) | (crit ? CRIT_HIT : 0);
-  // A shatter (pctMaxHp) takes only the bounded part of its damage row (pctMaxHpFactor).
-  let amount =
-    p.damageMode === ROWS
+  // A hit whose row converts deals its parts (convertHit); a shatter (pctMaxHp) takes only the
+  // bounded part of its damage row (pctMaxHpFactor).
+  const converted = ctx.converts && p.damageMode === ROWS && table.convCount[row] !== 0;
+  let amount = converted
+    ? convertHit(ctx, row, base, ev)
+    : p.damageMode === ROWS
       ? mul(base, statAt(table, row, DAMAGE, ev))
       : p.damageMode === PRESCALED
         ? base
@@ -233,6 +252,7 @@ export function hitWithPayload(
     flags,
     fromX,
     fromY,
+    converted,
   );
   if (!enemy.alive) return;
   if (ignites && ctx.burnTicks > 0) {
@@ -334,8 +354,8 @@ function dispatchHit(
 }
 
 /**
- * Deals a hit's `amount` to `enemy`: hp, the chain's hit mark, tallies and the hit event; a
- * lethal hit raises its events (with KILLED) and kills it.
+ * Deals a hit's `amount` to `enemy`: hp, the chain's hit mark, tallies (part by part for a
+ * `converted` hit) and the hit event; a lethal hit raises its events (with KILLED) and kills it.
  */
 export function applyHitDamage(
   ctx: RunContext,
@@ -350,10 +370,12 @@ export function applyHitDamage(
   flags: number,
   fromX: number | null,
   fromY: number | null,
+  converted: boolean,
 ): void {
   enemy.hp = sub(enemy.hp, amount);
   enemy.hitMark = ctx.attackSerial;
-  tally(ctx, tags, source, amount);
+  if (converted) tallyParts(ctx, source, amount);
+  else tally(ctx, tags, source, amount);
   if (gt(amount, ctx.maxHit)) ctx.maxHit = amount;
   ctx.events.push({
     type: 'hit',

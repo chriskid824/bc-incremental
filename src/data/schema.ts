@@ -14,6 +14,7 @@ import type { Modifier, ModifierKind, StatId } from './stats';
 import { DAMAGE_TAGS } from './tags';
 import {
   APPLIED_AILMENTS,
+  CONVERSION_TARGETS,
   HELD_AILMENTS,
   HIT_KINDS,
   KILL_KINDS,
@@ -23,7 +24,14 @@ import {
   TARGET_KINDS,
   TRIGGER_EVENTS,
 } from './triggers';
-import type { Condition, EffectSpec, ScalingSpec, TargetCondition, TriggerSpec } from './triggers';
+import type {
+  Condition,
+  ConversionSpec,
+  EffectSpec,
+  ScalingSpec,
+  TargetCondition,
+  TriggerSpec,
+} from './triggers';
 import { ENEMY_IDS } from './types';
 import type {
   EnemyDef,
@@ -277,6 +285,16 @@ export const TriggerSpecSchema = exact<TriggerSpec>()(
     .readonly(),
 );
 
+export const ConversionSpecSchema = exact<ConversionSpec>()(
+  z
+    .strictObject({
+      tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
+      to: z.enum(CONVERSION_TARGETS),
+      fraction: finite,
+    })
+    .readonly(),
+);
+
 export const RuleSpecSchema = exact<RuleSpec>()(
   z.discriminatedUnion('id', [
     z
@@ -358,7 +376,7 @@ export const TalentNodeSchema = exact<TalentNode>()(
       modifiers: z.array(ModifierSchema).readonly(),
       rules: z.array(RuleSpecSchema).readonly(),
       triggers: z.array(TriggerSpecSchema).readonly(),
-      conversions: z.array(z.never()).readonly(),
+      conversions: z.array(ConversionSpecSchema).readonly(),
       archetype: z.enum(TALENT_ARCHETYPES),
       nameKey: z.string(),
       descKey: z.string().exactOptional(),

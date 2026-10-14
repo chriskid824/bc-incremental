@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BASE_STATS, NO_EXTRAS, STAT_IDS } from '../data/stats';
 import type { Modifier, StatBlock } from '../data/stats';
 import { tagMask } from '../data/tags';
-import type { TriggerSpec } from '../data/triggers';
+import type { ConversionSpec, TriggerSpec } from '../data/triggers';
 import { damageRow } from '../sim/testing';
 import { createMetaState } from './state';
 import {
@@ -234,6 +234,8 @@ describe('collectExtras', () => {
   };
   const heal: TriggerSpec = { on: 'waveStart', do: [{ kind: 'heal', lifePct: 0.1 }] };
   const shards: TriggerSpec = { on: 'kill', do: [{ kind: 'gainShards', fraction: 0.2 }] };
+  const toPoison: ConversionSpec = { to: 'poison', fraction: 0.3 };
+  const dronesToBleed: ConversionSpec = { tags: ['minion'], to: 'bleed', fraction: 0.1 };
   const data = fixtureData({
     talents: [
       ...FIXTURE_TALENTS,
@@ -241,8 +243,10 @@ describe('collectExtras', () => {
       talent('hub.loot', 'repeatable', ['start'], {
         repeat: { baseShards: 10, growth: 2 },
         triggers: [shards],
+        conversions: [dronesToBleed],
       }),
-      talent('unbought', 'small', ['start'], { triggers: [heal] }),
+      talent('outer.poison.venom', 'notable', ['start'], { conversions: [toPoison] }),
+      talent('unbought', 'small', ['start'], { triggers: [heal], conversions: [toPoison] }),
     ],
   });
 
@@ -261,17 +265,40 @@ describe('collectExtras', () => {
       { source: 'hub', spec: shards },
       { source: 'hub', spec: shards },
     ]);
-    expect(extras.conversions).toEqual([]);
+    expect(extras.conversions).toEqual([
+      { source: 'hub', spec: dronesToBleed },
+      { source: 'hub', spec: dronesToBleed },
+    ]);
+  });
+
+  it('lists the conversions in data order, ranks repeated, with their node source', () => {
+    const meta = createMetaState();
+    for (const id of ['outer.poison.venom', 'hub.loot']) meta.allocated.add(id);
+    meta.ranks.set('hub.loot', 3);
+    const extras = collectExtras(meta, data);
+    expect(extras.conversions).toEqual([
+      { source: 'hub', spec: dronesToBleed },
+      { source: 'hub', spec: dronesToBleed },
+      { source: 'hub', spec: dronesToBleed },
+      { source: 'outer.poison', spec: toPoison },
+    ]);
+    expect(extras.triggers).toEqual([
+      { source: 'hub', spec: shards },
+      { source: 'hub', spec: shards },
+      { source: 'hub', spec: shards },
+    ]);
   });
 
   it('reaches the stat block and leaves the values unchanged', () => {
     const meta = createMetaState();
     meta.allocated.add('outer.fire.burst');
+    meta.allocated.add('outer.poison.venom');
     const stats = statBlockFor(meta, data);
     expect(stats.triggers).toEqual([
       { source: 'outer.fire', spec: explode },
       { source: 'outer.fire', spec: heal },
     ]);
+    expect(stats.conversions).toEqual([{ source: 'outer.poison', spec: toPoison }]);
     expect(stats.values).toEqual(statBlockFor(createMetaState(), data).values);
     expect(stats.scoped).toEqual([]);
   });

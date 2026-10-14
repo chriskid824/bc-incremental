@@ -5,6 +5,7 @@ import type { RuleId, RuleSpec } from './rules';
 import { RULE_IDS } from './rules';
 import {
   ConditionSchema,
+  ConversionSpecSchema,
   EffectSpecSchema,
   GameDataSchema,
   ModifierSchema,
@@ -397,6 +398,28 @@ describe('TriggerSpecSchema', () => {
   });
 });
 
+describe('ConversionSpecSchema', () => {
+  it.each([
+    ['to poison', { to: 'poison', fraction: 0.3 }],
+    ['tagged, to an element', { tags: ['minion', 'crit'], to: 'cold', fraction: 0.5 }],
+    ['to burn', { to: 'burn', fraction: 1 }],
+    ['to bleed', { to: 'bleed', fraction: 0.1 }],
+    ['to lightning', { to: 'lightning', fraction: 0.2 }],
+  ])('accepts a conversion %s', (_label, conversion) => {
+    expect(ConversionSpecSchema.parse(conversion)).toEqual(conversion);
+  });
+
+  it.each([
+    ['an unknown target', { to: 'fire', fraction: 0.3 }],
+    ['a target that is a hit', { to: 'hit', fraction: 0.3 }],
+    ['no fraction', { to: 'poison' }],
+    ['an unknown tag', { tags: ['drone'], to: 'poison', fraction: 0.3 }],
+    ['an unknown key', { to: 'poison', fraction: 0.3, scope: 'center' }],
+  ])('rejects %s', (_label, conversion) => {
+    expect(ConversionSpecSchema.safeParse(conversion).success).toBe(false);
+  });
+});
+
 describe('RuleSpecSchema', () => {
   it('accepts every rule id with its parameters', () => {
     for (const id of RULE_IDS) {
@@ -449,7 +472,7 @@ describe('GameDataSchema', () => {
     expect(GameDataSchema.safeParse(unknown).success).toBe(false);
   });
 
-  it('accepts triggers on a talent and rejects any conversion', () => {
+  it('accepts triggers and conversions on a talent, and requires both lists', () => {
     const triggers = content();
     Object.assign(talentAt(triggers, 'vitality')[1], {
       triggers: [{ on: 'kill', do: [{ kind: 'gainShards', fraction: 0.2 }] }],
@@ -460,11 +483,17 @@ describe('GameDataSchema', () => {
     Object.assign(talentAt(conversions, 'vitality')[1], {
       conversions: [{ to: 'poison', fraction: 0.3 }],
     });
-    expect(GameDataSchema.safeParse(conversions).success).toBe(false);
+    expect(GameDataSchema.safeParse(conversions).success).toBe(true);
 
-    const missing = content();
-    Reflect.deleteProperty(talentAt(missing, 'vitality')[1], 'triggers');
-    expect(GameDataSchema.safeParse(missing).success).toBe(false);
+    const bad = content();
+    Object.assign(talentAt(bad, 'vitality')[1], { conversions: [{ to: 'fire', fraction: 0.3 }] });
+    expect(GameDataSchema.safeParse(bad).success).toBe(false);
+
+    for (const list of ['triggers', 'conversions']) {
+      const missing = content();
+      Reflect.deleteProperty(talentAt(missing, 'vitality')[1], list);
+      expect(GameDataSchema.safeParse(missing).success, list).toBe(false);
+    }
   });
 
   it('rejects unknown talent kinds and archetypes', () => {

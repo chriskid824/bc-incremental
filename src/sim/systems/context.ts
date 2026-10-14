@@ -280,6 +280,11 @@ export interface RunContext {
    * skip reading it.
    */
   readonly hitsFrost: boolean;
+  /**
+   * The build has damage conversions (src/sim/combat/convert.ts). Without them, hits skip
+   * looking for their rows' conversion parts.
+   */
+  readonly converts: boolean;
   readonly chainCount: number;
   readonly chainRetention: number;
   readonly projectileCount: number;
@@ -380,6 +385,8 @@ export interface RunContext {
   readonly rings: RingPool;
   /** The step's damage per credited source of one ailment (src/sim/systems/ailments.ts). */
   readonly dotParts: DotParts;
+  /** The parts of the converted hit being dealt (src/sim/combat/convert.ts). */
+  readonly hitParts: HitParts;
   /**
    * Some bleed has taken an enemy's slot this run (src/sim/ailments/bleed.ts): until then no
    * enemy bleeds, and movement skips counting bleeding enemies' moves.
@@ -464,6 +471,17 @@ export interface DotParts {
   n: number;
   readonly source: Int32Array;
   readonly amount: Num[];
+}
+
+/**
+ * The parts of one converted hit before takenMult and the hooks, in its row's part order: tags
+ * mask[0 .. n) and amount[0 .. n), which add up to total.
+ */
+export interface HitParts {
+  n: number;
+  readonly mask: Int32Array;
+  readonly amount: Num[];
+  total: Num;
 }
 
 /** Stats that let a hit poison, bleed or shock (RunContext.rollsDots). */
@@ -679,6 +697,7 @@ export function createRunContext(
     shatterDamage: values.shatterDamage,
     shatterRadius: Math.max(0, values.shatterRadius),
     hitsFrost,
+    converts: build.conversions.length !== 0,
     chainCount: Math.max(0, values.chainCount),
     chainRetention: clamp01(values.chainRetention),
     projectileCount: Math.max(1, values.projectileCount),
@@ -749,6 +768,13 @@ export function createRunContext(
     effectTargets: [],
     rings: new RingPool(),
     dotParts: { n: 0, source: new Int32Array(6), amount: new Array<Num>(6).fill(ZERO) },
+    // A hit row has the share that stays a hit and one part per conversion at most.
+    hitParts: {
+      n: 0,
+      mask: new Int32Array(1 + build.conversions.length),
+      amount: new Array<Num>(1 + build.conversions.length).fill(ZERO),
+      total: ZERO,
+    },
     bleedApplied: false,
     frostApplied: false,
 

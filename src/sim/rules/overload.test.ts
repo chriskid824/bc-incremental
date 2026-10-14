@@ -70,6 +70,25 @@ describe('overload', () => {
     expect(eventsOf(more, 'burnTick')).toEqual(burns);
   });
 
+  it("with chainMore leaves a jump's converted part unchanged: it is no hit", () => {
+    const stats = makeStats(
+      { damage: 10, critChance: 0, chainCount: 2, chainRetention: 1, chainRange: 5000 },
+      [],
+      { triggers: [], conversions: [{ source: 'center', spec: { to: 'poison', fraction: 0.3 } }] },
+    );
+    const neutral = { id: 'overload', chainCountMultiplier: 1, retentionPenalty: 0 } as const;
+    const recorded = (rules: RuleSpec[]) =>
+      recordRun(makeConfig({ stats, rules, maxTicks: 300 }), stationarySquares(4)).result;
+    const plain = recorded([neutral]);
+    const more = recorded([{ ...neutral, chainMore: 3.5 }]);
+    expect(plain.damage.chain).toBeGreaterThan(0);
+    expect(plain.damage.poison).toBeGreaterThan(0);
+    // Every jump's poison part, and every primary hit, as without chainMore.
+    expect(more.damage.poison).toBe(plain.damage.poison);
+    expect(more.damage.hit).toBe(plain.damage.hit);
+    expect(more.damage.chain).toBeCloseTo(plain.damage.chain * 4.5, 9);
+  });
+
   it('compiles chainMore to a [chain, hit] damage more', () => {
     const build = compileBuild(makeStats(), [{ ...M1_OVERLOAD, chainMore: 3.5 }]);
     expect(build.mods).toHaveLength(1);

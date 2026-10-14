@@ -22,14 +22,25 @@
  * Modifiers with a scaling or conditions (Modifier.when) are dynamic entries: a row lists the
  * matching ones per stat in data order, and statAt (src/sim/build/eval.ts) adds those whose
  * conditions hold per damage instance, after the static parts.
+ *
+ * A hit's row also lists its conversion parts when conversions take it (§2.7): the share of the
+ * hit that stays a hit, then each conversion's share with the key of its converted tags under the
+ * hit's source. A hit deals each part on that part's row (src/sim/combat/convert.ts).
  */
 
 import { SOURCE_CLASSES, sourceClass } from '../../data/sources';
 import type { SourceClass, SourceSelector } from '../../data/sources';
 import { SCOPED_STATS } from '../../data/stats';
-import type { Modifier, ModifierKind, ScopedStat, StatBlock } from '../../data/stats';
-import { tagMask } from '../../data/tags';
+import type {
+  Modifier,
+  ModifierKind,
+  ScopedStat,
+  SourcedConversion,
+  StatBlock,
+} from '../../data/stats';
+import { convertMask, TAG, tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
+import type { ConversionTarget } from '../../data/triggers';
 import { compileCondition, compileScaling, statAt, staticInput } from './eval';
 import type { CompiledCondition, CompiledScaling } from './eval';
 import { createSourceTable, SOURCE_SHIFT } from './sources';
@@ -79,6 +90,27 @@ export interface CompiledMod {
    * kind of entry a shatter's damage takes (pctMaxHpFactor in src/sim/build/eval.ts).
    */
   readonly shatterOk: boolean;
+}
+
+/** A damage conversion compiled for row building. */
+export interface CompiledConversion {
+  /** Tags a hit must all carry to convert. */
+  readonly all: TagMask;
+  /** What its part becomes. */
+  readonly to: ConversionTarget;
+  /** Its share of the hit, before a sum over 1 is scaled down. */
+  readonly fraction: number;
+}
+
+/** Compiles StatBlock.conversions, keeping data order. */
+export function compileConversions(
+  conversions: readonly SourcedConversion[],
+): CompiledConversion[] {
+  return conversions.map(({ spec }) => ({
+    all: tagMask(spec.tags ?? []),
+    to: spec.to,
+    fraction: spec.fraction,
+  }));
 }
 
 /** The class of the sources a selector picks: the class itself, or an exact id's. */
@@ -131,6 +163,8 @@ const INITIAL_SLOTS = 16;
 const HASH_MULTIPLIER = 0x9e3779b1;
 /** Dynamic entries a new table has room for; `dyn` doubles when full. */
 const INITIAL_DYNAMIC = 16;
+/** Conversion parts a new table has room for; the part arrays double when full. */
+const INITIAL_PARTS = 8;
 
 function grown(values: Float64Array, length: number): Float64Array {
   const copy = new Float64Array(length);
@@ -163,8 +197,23 @@ export class ModTable {
   dynCount: Int32Array;
   /** Dynamic entries of every row and stat: indices into `mods`. */
   dyn: Int32Array;
+  /**
+   * Per row: where its conversion parts start in the part arrays, and how many there are; 0
+   * when no conversion takes its instance.
+   */
+  convStart: Int32Array;
+  convCount: Int32Array;
+  /**
+   * The conversion parts of every converting row, the share that stays a hit first: each part's
+   * share of the hit's base damage (shares over 1 in all scaled down to 1 in proportion), the
+   * key of its row, and that row, −1 until partRow first looks it up.
+   */
+  convShare: Float64Array;
+  convKey: Int32Array;
+  convRow: Int32Array;
 
   readonly mods: readonly CompiledMod[];
+  readonly conversions: readonly CompiledConversion[];
   /**
    * Per scoped stat, the rules' factor and addend on every row's final value; damage rows
    * ignore both, since rules change damage through modifiers.
@@ -174,6 +223,8 @@ export class ModTable {
   private readonly base: Float64Array;
   /** Entries used in `dyn`. */
   private dynLength = 0;
+  /** Entries used in the part arrays. */
+  private convLength = 0;
   /** Per scoped stat, the indices of its dynamic modifiers, in data order. */
   private readonly dynamicMods: readonly (readonly number[])[];
   /** Open addressing with linear probing: key + 1 per slot (0 = empty), and that key's row. */
@@ -186,19 +237,22 @@ export class ModTable {
 
   /**
    * `base` holds each scoped stat's StatBlock.base value, and `postScale` and `postOffset` the
-   * rules' post-operations (1 and 0 without rules), in SCOPED_STATS order.
+   * rules' post-operations (1 and 0 without rules), in SCOPED_STATS order; `conversions` are
+   * the build's, in data order.
    */
   constructor(
     mods: readonly CompiledMod[],
     base: Float64Array,
     postScale: Float64Array = new Float64Array(S).fill(1),
     postOffset: Float64Array = new Float64Array(S),
+    conversions: readonly CompiledConversion[] = [],
   ) {
     if (base.length !== S) throw new RangeError(`base must hold ${S} values`);
     if (postScale.length !== S || postOffset.length !== S) {
       throw new RangeError(`postScale and postOffset must hold ${S} values`);
     }
     this.mods = mods;
+    this.conversions = conversions;
     this.base = base;
     this.postScale = postScale;
     this.postOffset = postOffset;
@@ -216,6 +270,11 @@ export class ModTable {
       mods.flatMap((mod, i) => (mod.stat === s && isDynamic(mod) ? [i] : [])),
     );
     this.dyn = new Int32Array(INITIAL_DYNAMIC);
+    this.convStart = new Int32Array(INITIAL_SLOTS / 2);
+    this.convCount = new Int32Array(INITIAL_SLOTS / 2);
+    this.convShare = new Float64Array(INITIAL_PARTS);
+    this.convKey = new Int32Array(INITIAL_PARTS);
+    this.convRow = new Int32Array(INITIAL_PARTS);
   }
 
   /** The row of `key`, filled on its first use. */
@@ -232,12 +291,23 @@ export class ModTable {
 
   /**
    * Damage multiplier of `key` for a primary hit (chain jump 0) without a target: (1 +
-   * Σincreased) × Π(1 + more) of its damage modifiers, conditional ones left out.
+   * Σincreased) × Π(1 + more) of its damage modifiers, conditional ones left out, before any
+   * conversion.
    */
   damage(key: number): number {
     // Row first: filling it may grow, and so replace, the arrays.
     const row = this.row(key);
     return statAt(this, row, DAMAGE, ESTIMATE);
+  }
+
+  /** Row of conversion part `j` (convStart, convCount), filled on its first use. */
+  partRow(j: number): number {
+    const cached = this.convRow[j] as number;
+    if (cached >= 0) return cached;
+    // Filling the row may grow, and so replace, the part arrays.
+    const row = this.row(this.convKey[j] as number);
+    this.convRow[j] = row;
+    return row;
   }
 
   /** The first empty slot on `key`'s probe path. */
@@ -283,6 +353,8 @@ export class ModTable {
     this.more = grown(this.more, rowValues);
     this.dynStart = grownInts(this.dynStart, rowValues);
     this.dynCount = grownInts(this.dynCount, rowValues);
+    this.convStart = grownInts(this.convStart, slots / 2);
+    this.convCount = grownInts(this.convCount, slots / 2);
   }
 
   private fill(row: number, key: number): void {
@@ -331,23 +403,66 @@ export class ModTable {
       this.dynStart[at + s] = start;
       this.dynCount[at + s] = this.dynLength - start;
     }
+    if (this.conversions.length !== 0) this.fillConversions(row, key);
   }
 
   private pushDynamic(mod: number): void {
     if (this.dynLength === this.dyn.length) this.dyn = grownInts(this.dyn, this.dyn.length * 2);
     this.dyn[this.dynLength++] = mod;
   }
+
+  /**
+   * The conversion parts of `row`, a hit's row that conversions take: the share the conversions
+   * leave, on the row itself, then each conversion's share, on the row of its converted tags
+   * under the same source. Only hits convert.
+   */
+  private fillConversions(row: number, key: number): void {
+    const tags = key & TAG_BITS;
+    if ((tags & TAG.hit) === 0) return;
+    let total = 0;
+    for (const conversion of this.conversions) {
+      if ((conversion.all & ~tags) === 0) total += conversion.fraction;
+    }
+    if (!(total > 0)) return;
+    const start = this.convLength;
+    const source = key - tags;
+    // Over 1 in all, nothing stays a hit and each conversion takes its share of the whole.
+    if (total < 1) this.pushPart(1 - total, key, row);
+    for (const conversion of this.conversions) {
+      if ((conversion.all & ~tags) !== 0) continue;
+      const share = total > 1 ? conversion.fraction / total : conversion.fraction;
+      this.pushPart(share, convertMask(tags, conversion.to) | source, -1);
+    }
+    this.convStart[row] = start;
+    this.convCount[row] = this.convLength - start;
+  }
+
+  private pushPart(share: number, key: number, row: number): void {
+    if (this.convLength === this.convShare.length) {
+      const length = this.convLength * 2;
+      this.convShare = grown(this.convShare, length);
+      this.convKey = grownInts(this.convKey, length);
+      this.convRow = grownInts(this.convRow, length);
+    }
+    const j = this.convLength++;
+    this.convShare[j] = share;
+    this.convKey[j] = key;
+    this.convRow[j] = row;
+  }
 }
 
 /**
- * A table of `stats`' scoped modifiers alone, whose scopes resolve against `sources`: no rules,
- * so no rule-added modifiers and no post-operations (compileBuild in compile.ts has both). For
- * tests of the table itself.
+ * A table of `stats`' scoped modifiers and conversions alone, whose scopes resolve against
+ * `sources`: no rules, so no rule-added modifiers and no post-operations (compileBuild in
+ * compile.ts has both). For tests of the table itself.
  */
 export function modTableFor(
   stats: StatBlock,
   sources: SourceTable = createSourceTable(),
 ): ModTable {
   const base = Float64Array.from(SCOPED_STATS, (stat) => stats.base[stat]);
-  return new ModTable(compileMods(stats.scoped, sources), base);
+  const scale = new Float64Array(S).fill(1);
+  const offset = new Float64Array(S);
+  const conversions = compileConversions(stats.conversions);
+  return new ModTable(compileMods(stats.scoped, sources), base, scale, offset, conversions);
 }

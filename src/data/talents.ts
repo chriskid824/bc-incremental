@@ -11,7 +11,7 @@
 import type { Modifier } from './stats';
 import type { DamageTag } from './tags';
 import type { RuleSpec } from './rules';
-import type { TriggerSpec } from './triggers';
+import type { ConversionSpec, TriggerSpec } from './triggers';
 import type { TalentNode } from './types';
 import { needsDescKey } from './validate';
 
@@ -31,6 +31,7 @@ interface NodeSpec {
   readonly modifiers?: readonly Modifier[];
   readonly rules?: readonly RuleSpec[];
   readonly triggers?: readonly TriggerSpec[];
+  readonly conversions?: readonly ConversionSpec[];
   readonly shardCostFactor?: number;
   readonly coreCost?: number;
   readonly repeat?: TalentNode['repeat'];
@@ -38,8 +39,8 @@ interface NodeSpec {
 
 /**
  * Fills the boilerplate fields: kind defaults to small, the lists to empty, keys follow
- * talent.<id>.name/desc, and a node with rules, triggers or behaviour modifiers gets its desc
- * key (needsDescKey).
+ * talent.<id>.name/desc, and a node with rules, triggers, conversions or behaviour modifiers
+ * gets its desc key (needsDescKey).
  */
 function node(id: string, spec: NodeSpec): TalentNode {
   const kind = spec.kind ?? 'small';
@@ -47,7 +48,7 @@ function node(id: string, spec: NodeSpec): TalentNode {
     modifiers: spec.modifiers ?? [],
     rules: spec.rules ?? [],
     triggers: spec.triggers ?? [],
-    conversions: [],
+    conversions: spec.conversions ?? [],
   };
   return {
     id,
