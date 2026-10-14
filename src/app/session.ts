@@ -9,7 +9,7 @@
  */
 
 import type { Num } from '../core/num';
-import { DAMAGE_TAG_BIT } from '../data/stats';
+import { TAG } from '../data/tags';
 import type { GameData } from '../data/types';
 import {
   DEFAULT_ECONOMY,
@@ -500,7 +500,7 @@ export class Session {
     };
     // The damage row includes Searing Crits' ×0.5, Glass Cannon's ×2 and Pandemic's ×0.7.
     const build = compileBuild(stats, config.rules);
-    const typicalHit = build.values.damage * centerDamage(build, DAMAGE_TAG_BIT.hit);
+    const typicalHit = build.values.damage * centerDamage(build, TAG.hit);
     this.active = {
       number: this.meta.runs + 1,
       config,

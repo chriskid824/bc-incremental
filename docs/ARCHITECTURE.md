@@ -1,6 +1,6 @@
 # 架構文件
 
-> 狀態：草稿 v0.2（2026-10-12），依 Hoshi 第一輪審查修改。
+> 狀態：草稿 v0.3（2026-10-14）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查。
 
 ## 1. 技術選型
 
@@ -47,7 +47,7 @@ tests/         跨模組測試、存檔 fixture
 ```mermaid
 flowchart LR
   D[data/*.ts<br/>zod 驗證] --> M[meta<br/>天賦配點、資源、轉生]
-  M -->|StatBlock + RuleFlags + 起始波次 + seed| S[sim<br/>一局模擬]
+  M -->|StatBlock + RuleSpec + 起始波次 + seed| S[sim<br/>一局模擬]
   I[InputFrame<br/>滑鼠或機器人] --> S
   S -->|SimEvents| R[render<br/>PixiJS]
   S -->|RunResult| M
@@ -56,9 +56,9 @@ flowchart LR
   S -.headless.-> B[tools/balance<br/>CSV]
 ```
 
-- `meta` 把天賦網與昇華編譯成一個 `StatBlock`（所有屬性的最終值）和一組 `RuleFlags`（keystone 開關與參數），連同起始波次交給 `sim` 開一局。跳波補償由 `meta` 在結算時依期望掉落計算，`sim` 只回報有沒有清掉起始波次。
+- `meta` 把天賦網與昇華編譯成一個 `StatBlock`（屬性的最終值，加上帶標籤、範圍或條件的修正、觸發與轉換，§4.4）和一組 `RuleSpec`（keystone 規則與參數），連同起始波次交給 `sim` 開一局。跳波補償由 `meta` 在結算時依期望掉落計算，`sim` 只回報有沒有清掉起始波次。
 - `sim` 每個 tick 產出 `SimEvents`（擊中、暴擊、點燃、連鎖、死亡、掉落）。`render` 只讀狀態和事件，不改狀態。
-- 一局結束時 `sim` 回傳 `RunResult`（最遠波次、各類傷害統計、掉落），`meta` 結算資源後存檔。
+- 一局結束時 `sim` 回傳 `RunResult`（最遠波次、各類與各來源的傷害統計、掉落、計數器），`meta` 結算資源後存檔。
 - 平衡模擬器直接呼叫 `meta` 與 `sim`，不載入 `render`、`ui`、`platform`。
 
 ## 4. 模擬核心
@@ -72,27 +72,199 @@ flowchart LR
 ### 4.2 可決定性
 
 - 保證範圍：**同一個 build、同一個 seed、同一串 `InputFrame`，結果一致**。不保證跨版本或跨 JS 引擎，所以不做重播檔。
-- RNG：自寫的 sfc32（約 20 行），每個子系統一條獨立的 stream（`spawn`、`split`、`combat`、`drops`），由主 seed 衍生。改掉落邏輯不會讓生怪順序跟著變，調數值時比較曲線才有意義。分裂子怪的位置走 `split`：分裂的次數與時機取決於戰鬥，如果共用 `spawn`，改傷害就會讓後面每一波的生怪跟著變。
+- RNG：自寫的 sfc32（約 20 行），每個子系統一條獨立的 stream（`spawn`、`split`、`combat`、`drops`、`trigger`、`effects`），由主 seed 衍生。改掉落邏輯不會讓生怪順序跟著變，調數值時比較曲線才有意義。觸發的機率在派發時從 `trigger` 擲，效果造成的擊中從 `effects` 擲，所以加一個觸發不會改變 `combat` 的序列。分裂子怪的位置走 `split`：分裂的次數與時機取決於戰鬥，如果共用 `spawn`，改傷害就會讓後面每一波的生怪跟著變。
 - 實體用遞增整數 ID；只迭代陣列與 `Map`（插入順序固定），不依賴物件 key 的列舉順序。
 
 ### 4.3 狀態與系統
 
 - 不用 ECS 框架。實體是物件陣列＋物件池（避免 GC 抖動）。附近目標查詢走均勻空間格（`src/sim/grid.ts`，`docs/v3/implementation-plan-v3.md` §2.3）：格子 128，場地 15 × 9 格外多一圈，更遠的夾到最外圈；每 tick 敵人移動後重建（計數排序寫進 typed array，實際排序延到當 tick 第一次查詢，沒有查詢的 tick 不花成本；敵人少於 128 隻時不排序，查詢直接線性掃描，實測比較快）。投射物選目標、連鎖、瘟疫擴散都查格子，結果和原本的線性掃描完全一樣：同距離取陣列裡較前面（ID 較小）的；同一 tick 後來才加入的敵人（分裂子怪）每次查詢另外線性掃；死掉的留在格子裡、查詢時跳過。同一 tick 內被移動的敵人（例如之後的擊退）下一 tick 才更新所在的格子。
-- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變）：`input → spawn → movement → grid（重建空間格）→ contact → emitters → projectiles（命中、連鎖、擊殺當下結算）→ ailments → death（壓縮陣列）→ waveControl → runEnd`。v3 的完整順序（空間格、無人機、線段、地面區域、效果佇列）見 `docs/v3/implementation-plan-v3.md` §2.15。
+- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變）：`input → spawn（含 waveStart 觸發）→ movement（冰冷減速、凍結、流血的移動計數）→ grid（重建空間格）→ contact（heroHit、contact 觸發）→ emitters（攻擊，之後是規則模組的 tick hook）→ projectiles（命中、連鎖、擊殺當下結算）→ ailments（持續傷害、ailmentTick 觸發）→ effects（到期的 periodic 觸發，再跑佇列裡的效果）→ death（派發待處理的擊殺觸發、壓縮陣列）→ waveControl → runEnd`。emitters 到 effects 只在角色活著時跑。各步驟在傷害引擎裡做什麼見 §4.4；之後才做的系統（無人機、線段、地面區域、敵人 AI）見 `docs/v3/implementation-plan-v3.md` §2.15。
+- 傷害引擎在 `src/sim/` 的子資料夾：`build/`（`compileBuild`、ModTable、來源、條件與縮放）、`rules/`（規則模組）、`emitters/`（發射器與酬載）、`combat/`（命中、連鎖、轉換）、`ailments/`（燃燒記錄、分桶環、流血、感電、冰冷）、`effects/`（觸發派發、效果佇列、中心事件）。熱路徑不配置記憶體：每筆傷害只新增一個 `SimEvent`；分桶環與效果佇列是 typed array 物件池，命中、擊殺、中心事件與條件的輸入各用一個重複使用的暫存物件。
 
-### 4.4 屬性與修正
+### 4.4 屬性、修正與傷害引擎
+
+v3 引擎的第一段（`docs/v3/implementation-plan-v3.md` §2.1、§2.5–§2.7，實作步驟 C3）。所有傷害走同一套：屬性與修正（4.4.1）依傷害的標籤（4.4.2）與來源（4.4.4）查 ModTable（4.4.3）；規則模組（4.4.5）在開局時改屬性、加修正與觸發；命中（4.4.6）、異常狀態（4.4.7）、觸發與效果（4.4.8）、轉換（4.4.9）共用同一份 ModTable 與同一套統計。M1 的內容在 C3 的每一步都要讓行為指紋（§12）逐行相同；只有兩個量過的行為修改重新記錄了基準：修掉有上限的燃燒被換掉時重複計算的一段（Hoshi 接受 dot-greedy 到第 20 波的時間 +6.4%），以及無盡烈焰改用分桶環（只動到合成 build）。
+
+#### 4.4.1 修正與 StatBlock
 
 ```ts
 type Modifier = {
-  stat: StatId;                         // 'damage' | 'critChance' | 'chainCount' | ...
+  stat: StatId;                  // 'damage' | 'critChance' | 'chainCount' | ...
   kind: 'flat' | 'increased' | 'more';
   value: number;
-  tags?: DamageTag[];                   // 'hit' | 'crit' | 'burn' | 'chain'
+  // 下面五個只能用在 SCOPED_STATS
+  tags?: DamageTag[];            // 全部都要有（4.4.2）
+  notTags?: DamageTag[];         // 一個都不能有
+  scope?: SourceSelector;        // 傷害來源（4.4.4）
+  when?: TargetCondition[];      // 每筆傷害當下判斷，全部成立才算
+  scaling?: ScalingSpec;         // 「每有 X，得到 Y」
 };
 ```
 
-- 最終值 = `(base + Σflat) × (1 + Σincreased) × Π(1 + more)`，依標籤分別計算。
-- **keystone 不寫成腳本**：每個 keystone 對應一個在程式裡列舉的 `RuleId` 加上型別化參數（例：`{ rule: 'critsAlwaysIgnite' }`）。資料檔只能引用已存在的規則，zod 會擋掉打錯字的 ID。
+- 最終值 = `(base + Σflat) × (1 + Σincreased) × Π(1 + more)`。
+- **scoped stat**（`SCOPED_STATS`）的值隨每筆傷害變：傷害倍率、暴擊率、暴擊倍率、點燃／中毒／流血／感電機率、五個 `*Always`、`frostOnHit`。只有它們的修正可以帶 `tags`、`notTags`、`scope`、`when`、`scaling`；其他屬性（攻速、連鎖數、持續時間…）一局只有一個值。平坦傷害不能帶標籤，留在 `values.damage`。
+- `StatBlock = { base, values, scoped, triggers, conversions }`（`src/data/stats.ts`）：`values` 是不帶標籤、範圍與條件的修正合出的最終值（和 M1 一樣）；scoped stat 的所有修正（含不帶標籤的）另外依資料順序放進 `scoped`；`triggers`、`conversions` 也依資料順序收集，各帶節點換算出的來源（`sourceOfNode`）。`meta` 用 `statBlockFor` 產生，測試與工具用 `makeStats`。
+- `*Always` 在擲骰**之後**把結果改成成功（例：灼熱暴擊 = `igniteAlways flat 1 [crit]` 加 `damage more −0.5 [hit] notTags [crit]`），所以 RNG 的消耗和改成資料之前一樣。
+- 縮放：貢獻 `c = min(cap, value × g(x))`，`g` 是線性（可用 `every` 取整步）、`log10(1 + x)` 或 `x^exponent`；flat 與 increased 加上 c，more 乘 `1 + c`。變數：連鎖第幾跳、目標的燃燒／毒／感電層數、目標的冰冷量表、目標和角色的距離、失去的生命比例。
+- **能寫成資料的就寫成資料**：M1 的橋接 notable 與灼熱暴擊是修正（帶標籤的機率、`*Always`、縮放、`notTags`），瘟疫是觸發（4.4.8）；只有真的改規則的才寫成規則模組（4.4.5）。
+
+#### 4.4.2 傷害標籤
+
+17 個標籤（`src/data/tags.ts`），M1 的四個 bit 不變：hit 1、crit 2、burn 4、chain 8。
+
+| 組 | 標籤 | 規則 |
+| --- | --- | --- |
+| 類型 | hit、burn、poison、bleed | 每筆傷害剛好一個 |
+| 元素 | cold、lightning | 只跟 hit 一起出現 |
+| 修飾 | crit | |
+| 擁有者（傳遞） | minion、aura、orbit、zone、strike、thorns、trigger | 誰放的 |
+| 幾何（傳遞） | projectile、chain、area | 怎麼送到 |
+
+衍生的傷害這樣組標籤：
+
+- **連鎖跳**（`jumpMask`）：`hit | chain | (主要命中 & (擁有者 | 元素))`，那一跳暴擊時再加 crit。跳躍不帶主要命中的幾何標籤：M1 的主要命中是 `hit|projectile`，跳是 `hit|chain`。
+- **異常狀態**（`ailmentMask`）：`種類 | (施加者 & 擁有者) | (暴擊施加 ? crit : 0)`。持續傷害記得「誰放的」，不記得「怎麼送到」，所以連鎖跳點燃的燃燒就是普通的 `burn|crit`，和 M1 一樣。
+- **效果造成的擊中**：`hit | trigger | 幾何 | 元素`，所以 `[hit]` 修正（瘟疫的代價、過載）也作用在效果的擊中。唯一的例外是內建的碎裂：`hit|area|cold`，沒有 `trigger`。
+- **轉換**（`convertMask`）：轉成持續傷害種類時換掉類型與元素；轉成元素時換掉元素、保留 hit。傳遞標籤與 crit 都留著（4.4.9）。
+
+#### 4.4.3 ModTable：用到才算的修正表
+
+`src/sim/build/modTable.ts`。17 個標籤有 131,072 種組合，再乘上來源，不能像 M1 的 `damageMult` 全部先算。
+
+- 一列（row）的 key 是 `tags | (來源 << 17)`。第一次用到才算，算完快取到這局結束（天賦在局中不變）。一列存每個 scoped stat 的值（structure of arrays）。
+- 修正「符合」一列：`tags` 全部在 key 裡、`notTags` 一個都不在、`scope` 選到 key 的來源。
+- 固定的累加順序，讓傷害列和 M1 的 `damageMult[mask]`、機率列和 M1 的橋接算式逐位元相同：
+  1. `v = base + Σ不帶標籤的 flat`（資料順序），再依資料順序加上符合的帶標籤 flat；
+  2. increased：所有符合的依資料順序相加，帶標籤與不帶標籤的交錯；
+  3. more：依同樣順序相乘 `(1 + value)`；
+  4. 傷害列只存 `(1 + Σinc) × Πmore`（平坦傷害在 `values.damage`，一筆傷害 = `values.damage` × 它的傷害列）；其他屬性 = `v × (1 + inc) × more`，再乘規則模組的 `postScale`、加 `postOffset`（`scaleStat`、`offsetStat`）。傷害列沒有 v，所以這兩個對 `'damage'` 會丟錯，傷害倍率要用 `addModifier`。
+- 有 `when` 或 `scaling` 的修正是動態項：列只記下符合的動態項，`statAt`（`src/sim/build/eval.ts`）在每筆傷害當下，於靜態部分之後加上條件成立的項。輸入是重複使用的 `EvalInput { now, target, chainJump, playerLifeFrac }`。估算（天賦網的說明、平衡工具）用沒有目標的輸入，條件一律不成立。
+- `compileBuild`（`src/sim/build/compile.ts`）在開局時把 `StatBlock`、`RuleSpec` 與招牌攻擊編成一局要讀的 `CompiledBuild`：最終屬性、ModTable（節點的修正在前、規則加的在後）、來源表、旗標、hook、發射器、觸發、效果與轉換。來源表與列會在局中長大，所以每局都重新編譯；UI 與工具可以自己編一份做估算，但不能拿去開局。
+- 命中不查雜湊表：每個酬載（4.4.6）有 10 個列的快取槽（擊中、連鎖跳、三種持續傷害，各分暴擊與否），第一次用到才查。
+
+#### 4.4.4 傷害來源與歸屬
+
+`src/data/sources.ts`、`src/sim/build/sources.ts`。impl §2.1 的「來源和標籤分開存」。
+
+- 來源 ID 以盤為單位：`center`、`hub`、`asc`、`outer.<外盤>`、`fusion.<角色>.<外盤>`。節點 ID 用 `sourceOfNode` 換算，M1 的節點全部算 `center`。每局一張來源表，第 0 個固定是 `center`，最多 64 個（key 裡的 6 bit）。
+- 修正的 `scope` 選來源：一個類別（`center|outer|fusion|hub|asc`）或一個確切的 ID。例：融合精通 `more .04 scope 'fusion.<c>.<o>'`、外盤 ★ 的 `scope 'outer.<o>'`。
+- 異常狀態的跳傷歸屬（`ailmentCredit`）：① 施加者是融合 → 那條融合；② 種類屬於角色自己的流派 → `center`；③ 其他 → 那個種類的外盤（燃燒 fire、毒 poison、流血 bleed、感電 lightning、冰冷 ice）。M1 沒有角色，所有種類都算 `center`；C6 起依角色的流派設定。持續傷害讀歸屬後那個來源的列。
+- 連鎖跳：酬載的 `jumpSource`（預設是酬載自己的來源）決定第 1 跳起的列與統計；跳躍施加的異常狀態仍以酬載的來源當施加者。C6 起，非雷角色的中心酬載的跳躍算 `outer.lightning`。
+- 每筆傷害都依來源累計（`RunResult.damageBySource`，用 `num.ts` 的 `add` 加）。中心主體性、鏡像融合與結算的傷害組成都讀它（C10）。
+
+#### 4.4.5 規則模組
+
+`src/sim/rules/`。**keystone 不寫成腳本**：資料檔只能引用程式裡列舉的 `RuleSpec`（型別化參數，zod 擋掉打錯的 ID），每個 id 對應一個模組（`RULE_MODULES`，mapped type 強制每個 id 都有模組）。修正或觸發寫得出來的，就寫成資料（4.4.1）。
+
+- `compileBuild` 每局對每個 id 呼叫一次模組的 `compile`，帶著這個 id 的所有實例（依節點順序，合併方式照 M1：取最小、相乘或相加）。模組透過 `BuildCompiler` 改 build：`scaleStat`／`offsetStat`（在所有修正之後乘或加，ModTable 的列一起）、`addModifier`（接在節點的修正後面）、`flags`（全局開關）、`signature()`（招牌攻擊的參數）、`addTrigger`／`addEffect`、`hook()`。
+- Hook：`tick`（每 tick，發射器之後）、`onAttack`（每次攻擊，只能讓這次攻擊必定暴擊）、`onHit`、`modifyDamage`（命中與持續傷害的每一步，在受傷倍率之後）、`onKill`（擊殺當下，轉移觸發之後、移除之前）、`onCenterEvent`。
+- 一個模組實例是一個觸發：第一次 `hook()` 拿到一個觸發編號，所有 hook 共用。Hook 要造成傷害或施加異常狀態，只能把自己編譯的效果排進佇列（`enqueueModuleEffect`，`src/sim/rules/api.ts`），所以深度、第 3 條與每 tick 的預算（4.4.8）對它們一樣有效。
+- M1 的四個模組：
+  - `steadyAim`：關掉隨機暴擊（含靜電聚焦的每跳暴擊率）；每第 N 發（`counts: 'shot'`）或每第 N 次攻擊的每一發（`'attack'`）必定暴擊；`scaleStat('critMultiplier', …)`。
+  - `eternalFlame`：`flags.burnRings`（燃燒改用分桶環，沒有層數上限）；`scaleStat('burnDuration', …)`。
+  - `overload`：`scaleStat('chainCount', …)`、`offsetStat('chainRetention', −…)`；有 `chainMore` 時加 `more [chain, hit]`（4.4.10）。
+  - `glassCannon`：`addModifier(more +1)`（不帶標籤；×2 是 2 的次方，結果和原本完全一樣）、最大生命 1、碎裂的倍率 `flags.shatterMult` 也 ×2。
+- 招牌攻擊也是模組（`SIGNATURES`；M1 只有 `m1Volley`），產生第 0 個發射器。
+
+#### 4.4.6 命中
+
+`src/sim/combat/`、`src/sim/emitters/`。
+
+- 每個發射器（`EmitterSpec`）每局有一個酬載（`Payload`）：基礎傷害（`values.damage × damagePct`）、標籤、來源、`jumpSource`、RNG stream（發射器用 `combat`，效果用 `effects`）、旗標（招牌攻擊帶 `SIGNATURE`）、`canCrit`、傷害模式與列的快取槽。M1 的齊射是第 0 個發射器，主要命中 `hit|projectile`。
+- 發射器、連鎖跳與效果都走同一個 `hitWithPayload`，順序固定：
+  1. 暴擊：擲暴擊率，或必定暴擊（steadyAim 的節奏、`critAlways`）；`canCrit` 為 false 時整個跳過（碎裂）。
+  2. 異常狀態依序擲：點燃、中毒、流血、感電；機率 0 不擲。
+  3. 傷害：`基礎 × 暴擊倍率 × 連鎖保留 × 列的傷害倍率`（有轉換時分段，4.4.9）。傷害模式 `prescaled` 不乘列（C4 的引爆），`pctMaxHp` 是碎裂（4.4.7）。
+  4. 目標感電或凍結時 × 受傷倍率；有 `modifyDamage` hook 時依序套用。
+  5. 扣血、統計、事件。致死的命中：先派發 hit／crit 觸發與 `onHit`（帶 `KILLED`，條件看到的是被打中那一刻的目標），再進擊殺。
+  6. 沒死：施加擲中的異常狀態（每次成功施加都派發 `ailmentApplied`）與 `frostOnHit`，最後才派發 hit／crit 觸發與 `onHit`，所以條件看得到剛施加的狀態。
+- 派發只排佇列、只擲 `trigger` stream，所以命中不會重入。
+- 連鎖（`combat/chain.ts`）是 M1 的迴圈：跳數由 `chainCount` 擲出，從上一個命中點找最近、這次攻擊還沒打過的敵人，每跳保留 `chainRetention`。
+- 每筆傷害（含持續傷害的每一步）只新增一個 `SimEvent`；hook、觸發、動態項與轉換的清單是空的時候都走快速路徑。
+
+#### 4.4.7 異常狀態
+
+`src/sim/ailments/`、`src/sim/systems/ailments.ts`。
+
+- 持續傷害每 15 tick（0.25 秒）結算一步，第 k 步涵蓋 tick (15(k−1), 15k]。每隻活著的敵人依 ID 順序：燃燒 → 毒 → 流血，每種一筆傷害（感電或凍結時 × 受傷倍率，再過 `modifyDamage` hook），然後是牠的 `ailmentTick` 觸發。
+- **快照與即時 hook**：施加當下就用施加者那一列算好每秒傷害（`基礎 × burnDamage 等 × 異常狀態列的傷害倍率`），列裡的 `when`／`scaling` 也在那時判斷，之後不再變。要每一步重算的寫成 `modifyDamage` hook：它在每一步收到那一步的種類、目標與歸屬來源。異常狀態的列讀第 0 跳（狀態不記得怎麼送到），所以「每跳」的縮放不會影響持續傷害。
+- **有上限的燃燒**（M1 與沒有無盡烈焰的 build）：沿用 M1 的每層記錄（`ailments/records.ts`），滿了換掉最弱的一層；被換掉的那層在這個 tick 已經結算過的部分不再計入（C3.7b 的修正）。每層記錄帶深度、來源類別與歸屬。
+- **分桶環**（毒，以及無盡烈焰下的燃燒；`ailments/rings.ts`）：
+  - 每隻敵人每種狀態、每個來源類別（中心、外盤、融合）最多一個環；融合的環算給第一個施加的融合。
+  - 一個環 64 桶，一桶一步：存那一步速率的變化、頭尾不滿一步的傷害、在那一步結束的層數；表頭存目前速率、剩餘傷害、層數與最後一步。施加 O(1)、每一步 O(1)，**和層數無關**。超過 63 步（15.75–16 秒）的持續時間截到那裡。
+  - 擴散（瘟疫）搬每一桶的速率與傷害 × 比例；層數搬最晚結束的 floor(比例 × 活著的層數) 層。只有「當下這一步」那一份是近似，誤差最多一步。
+  - 環放在 typed array 物件池，取出時清空；最後一步、死亡與漏怪時歸還。
+- **流血**：每隻敵人只留最強的一個（剩餘傷害較多的才取代；被取代的已累積部分留到下一步）。移動中的 tick ×3（`flags.bleedMoveMult`），靜止 × `bleedStationaryMult`（基礎 1）。大出血的 8 層模式在 C7。
+- **感電**：層數有上限、共用一個計時器，本身不造成傷害。所有讀層數的地方都經過 `activeShockStacks`，過期就是 0。
+- **受傷倍率** = `1 + frozenDamageTaken·[凍結中] + shockEffect·感電層數`（相加），命中與持續傷害都乘；沒有感電也沒有凍結時不算。
+- **冰冷、凍結、碎裂**（`ailments/frost.ts`）：
+  - 每隻敵人一個 0–1 的冰冷量表（命中的 `frostOnHit`、`addFrost` 效果）。量表會減速，上限 `frostSlowCap`（一般 30%，Boss 少 0.15，也就是 15%）。
+  - 一般敵人滿了凍結 `freezeDuration`（1.2 秒），之後 180 tick 不再累積；Boss 不凍結，滿了量表歸零、鎖 252 tick（4.2 秒）。兩者都發出 `freeze` 中心事件（任何冰冷來源都算）。融合類的凍結酬載在任何連續 60 tick 內最多 8 次；超過時照樣凍結、其他監聽照跑，只記次數。
+  - 凍結中死亡會碎裂：對 `shatterRadius`（90）內的其他敵人造成死者最大生命 × `shatterDamage`（15%），標籤 `hit|area|cold`，不會暴擊，歸屬是凍住牠的那個冰冷的來源。碎裂是固定編號 0 的觸發（`SHATTER_TRIGGER`），所以被碎裂殺死的敵人不會再碎裂。
+  - 碎裂只吃有界的加成：中心或融合範圍的 `when`／`scaling` 動態項，加上玻璃大砲的 ×2（`flags.shatterMult`）；不吃不帶標籤的 more（強化∞）、靜態的範圍加成（融合精通），也不吃外盤、樞紐、昇華範圍的加成。這樣「%最大生命」的傷害不會被 build 的幾百倍再放大（game-design-v3 強化∞ 的註腳）。
+- **「燒得死嗎」**（`doomed`，找目標用）：`hp ≤ 燃燒記錄剩餘 + Σ環的剩餘 + 流血剩餘`；沒有環與流血時就是 M1 的算式。
+
+#### 4.4.8 觸發與效果
+
+`src/data/triggers.ts`（詞彙）、`src/sim/effects/`。這裡說明 impl §2.6 的安全規則 1–8 落在哪裡，以及三個刻意的例外。
+
+- `TriggerSpec = { on, every?, when?, do }`。
+  - 已接上的事件（`WIRED_EVENTS`，驗證擋掉其他的）：hit、crit、kill、diedWithAilment、nthAttack、waveStart、periodic、heroHit、contact、ailmentApplied、ailmentTick、freeze、shatter。explode 與 chainJump 在 C4，無人機的事件在 C5。
+  - 效果：`applyAilment`、`spreadAilment`、`explode`、`nova`、`push`、`addFrost`、`heal`、`gainShards`；C4 起陸續加。
+  - 條件：目標帶著的狀態、種類、血量、層數、機率、冷卻、`hitIs`、`victimHas`、`killedBy`、`ailment`；每個條件能用在哪些事件由 `CONDITION_CONTEXTS` 規定。
+  - 每種效果、條件值與縮放變數都和執行它的程式在同一個 commit 加入，並用 mapped type 的登錄表強制，所以資料寫不出模擬還不會跑的東西。
+- 觸發依編譯順序編號：0 是碎裂，接著是 build 的資料觸發，再來是規則模組（一個實例一個編號）。
+- **派發**（`fire`／`fireOne`）依序檢查：深度、自己的傷害（第 3 條）、招牌攻擊（第 8 條）、nthAttack 計數、冷卻、條件，最後在 `trigger` stream 擲機率。通過就把效果排進佇列，深度 +1、origin = 這個觸發。
+- **第 1、4 條**（佇列與預算）：先進先出的 typed array 環。效果在 tick 的 effects 階段執行，每 tick 最多 2,000 個，剩下的照順序留到下一 tick，記在 `effectBudgetTicks`、`effectsDeferred` 與 `effectBudgetStreakMax`；執行中新排的接在尾端。
+- **第 2 條**（深度）：發射器的命中是深度 0；深度 3 以上的事件不派發觸發（記在 `triggerDepthCapped`），深度 3 的效果照樣執行。
+- **第 3 條**：觸發造成的直接傷害帶它的編號（origin），不會再觸發它自己；A→B→A 可以，到深度 3 為止。
+- **第 5 條**：觸發的機率只從 `trigger` stream 擲，效果裡的擲骰只從 `effects` 擲；同一個 tick 的待處理擊殺依（死者 ID、觸發編號）排序。
+- **第 6 條**：效果造成的傷害帶效果的深度與 origin。持續傷害的規則：每隻敵人記住施加在牠身上的所有狀態裡最小的深度（`ailDepth`，只降不升），持續傷害的事件與擊殺帶這個深度、**不帶 origin**。所以持續傷害造成的擊殺不受第 3 條限制，但受第 2 條限制。後果（設計 §12 Q2，決定保留）：焚屍爆炸點燃（助燃）的燃燒之後燒死目標，會再觸發焚屍，到深度 3 為止；爆炸本身的直接擊殺仍被第 3 條擋住（直到連環焚燒）。因此**助燃一定要掛在焚屍爆炸的同一個酬載上（同一個觸發編號）**，不能寫成另一個觸發。
+- **第 7 條**（重複攻擊不計數）：C4 的重複攻擊才用到；計數與發射已經分開（`countAttack`、`fireAttack`）。
+- **第 8 條**：中心事件（`emitCenterEvent`）只有帶 `SIGNATURE` 的才派發；凍結例外，任何冰冷都算，但深度照算。`hitIs: 'signature'` 的觸發也只吃招牌攻擊。
+- **擊殺的順序**（`killEnemy`，`src/sim/systems/death.ts`）：
+  1. 轉移觸發（效果全是 `spreadAilment` 的 kill／diedWithAilment 觸發，例：瘟疫）**當場**執行，然後是 `onKill` hook；死者這時還帶著所有狀態。
+  2. 移除、掉落、擊殺事件、分裂子怪。
+  3. 其他擊殺觸發記成待處理擊殺，快照死者帶著的狀態、死因與致命一擊的旗標；碎裂另外快照死者的最大生命與冰冷的歸屬。tick 的 death 步驟依（死者 ID、觸發編號）派發，效果下一 tick 執行。
+  4. 歸還分桶環。
+- **三個刻意的例外**：
+  - **轉移觸發當場執行**，是第 1 條的窄例外。轉移不造成傷害、不擲骰、不殺怪，所以不會當場遞迴；當場執行才讀得到死者的狀態（不需要保留屍體），分裂子怪也和 M1 一樣不會被擴散到。驗證擋掉把轉移和其他效果混在一起的擊殺觸發（拆成兩個）。
+  - **轉移觸發不受第 2 條的深度上限**（Hoshi 2026-10-14 決定）：任何深度的擊殺都會擴散，和 M1 的瘟疫一樣。擴散出去的層數深度 = 擊殺深度 + 1（最多 3），被它們殺死的敵人對其他觸發照樣受深度限制。轉移鏈靠每次擴散的比例 < 1 收斂（C6 的驗證保證 `effect × coef < 1`）。
+  - **佇列硬上限 65,536**：超過時丟掉最新的，記在 `effectsDropped`。這違反第 4 條「不丟」，是為了不讓失控的 build 吃光記憶體；平衡工具與模糊測試把任何一次丟棄當成失敗。
+- **驗證**（`src/data/validate.ts`）另外擋掉：
+  - 沒接上的事件；事件不適用的條件；`chance`、`cooldownSec` 重複。
+  - `every`：nthAttack 要正整數、periodic 要 > 0 秒、ailmentTick 要 0.25 秒的正整數倍，其他事件不能帶。
+  - ailmentApplied 與 ailmentTick 要剛好一個 `ailment` 條件（ailmentTick 的要是持續傷害種類），否則會對每次施加、每隻敵人都觸發。
+  - `gainShards` 只能用在 kill 與 diedWithAilment（它讀死者的掉落）。
+  - 需要事件目標的效果（沒有半徑的 `applyAilment`、`addFrost`，以及 `spreadAilment`）：沒有目標的事件（waveStart、periodic、heroHit）不行；contact 不行（效果執行時那隻敵人已經漏掉或死了）；kill、diedWithAilment、shatter 上 `applyAilment`、`addFrost` 要有半徑，`spreadAilment` 只能用在 kill 與 diedWithAilment（它當場執行）。
+
+#### 4.4.9 轉換
+
+`src/sim/combat/convert.ts`。impl §2.7「在修正之前套用」的字面讀法。
+
+- 只有擊中（類型是 hit）會轉換。一列有轉換時，命中的基礎傷害分段：沒被轉走的比例留在原本的列；每條轉換的比例用換過標籤的列（`convertMask`，同一個來源），乘那一列自己的傷害倍率。轉換合計超過 1 時依比例縮到 1（驗證另外擋掉單一節點合計超過 1）。
+- 轉過去的部分保留傳遞標籤、crit 與來源：蜂巢無人機傷害轉成毒的那一段仍帶 `minion`，中心盤的「無人機傷害 +%」照樣有效。轉成持續傷害種類的那一段不再是 hit，所以過載的 `more [chain, hit]`、瘟疫的 `[hit]` 代價都不影響它。
+- 各段是同一次命中：扣一次血、一個擊中事件，統計依各段的類型分開記（轉成毒的算毒）。轉出來的部分是即時傷害，不施加異常狀態；異常狀態仍由命中自己用自己的列擲骰。
+- 另一種讀法（轉出來的部分變成一次異常狀態的施加，對致死毒素這種疊層 build 比較好）留給 Hoshi 在 B2 用原型決定（設計 §12 O1）；要換只改 `convert.ts`。
+
+#### 4.4.10 過載的決定
+
+一個 `overload` 模組同時給 M1、雷塔中心 ★ 與雷外盤 ★ 用。倍率是型別化參數 `chainMore`，有設定時編成 `{stat: 'damage', kind: 'more', value: chainMore, tags: ['chain', 'hit']}`，兩個標籤都要有。
+
+- **M1 的內容不變**：節點保留 `moreDmg(3.5, 'hit')` 與 `{id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2}`，不帶 `chainMore`。M1 每一次命中（主要命中與連鎖跳，暴擊與否）都 ×4.5，燃燒不受影響，也就是第 3 輪調出來的「只加擊中」。
+- 把 M1 的標籤改成 `chain`，主要命中（投射物，不是連鎖）就失去加成，量出來過不了平衡門檻（C3 開始前的 HEAD，seed 1–3 × 12 × 60 分鐘，chain-greedy，兩位審查者重現）：
+
+| 指標 | `'hit'`（現在） | `'chain'` |
+| --- | --- | --- |
+| F@20 | 24 | 21 |
+| F@40 | 34 | 30 |
+| F@60 | 38 | 35 |
+| 到第 30 波的分鐘 | 27.1 | 36.7（T2 對齊 1.44，FAIL） |
+| 前線附近的菁英被擊殺 | 94% | 17%（T7 FAIL） |
+| 流派倍率 D | 6.25 | 1.79 |
+
+- **v3 的兩個 ★** 帶 `chainMore: 3.5`、不帶傷害修正。雷塔的三相雷每一下都是 `hit|chain|lightning`（電弧本身就是連鎖，第一個目標也是），所以 ★ 乘整個招牌攻擊，和 M1 同級；熔核、霜晶、蜂巢只有連鎖送到的擊中（導電的跳、chainBolt、雷鳴…）×4.5，熔岩彈、冰錐與無人機不受影響。要求 `hit` 也把燃燒（狀態只保留擁有者標籤）與轉換出來的持續傷害排除在外。B4 用 `keystones.ts` 把 3.5 校到 +4…+6 波。
+- C6 的驗證：外盤 ★ 上每個值 > 0 的傷害修正（含規則參數編出來的）都要帶那塊外盤的流派標籤（`ARCHETYPE_TAGS`）或 `scope: 'outer.<o>'`；代價（值 < 0）與中心、樞紐、融合、M1 的節點不受限。規則在 C3 已經寫好並用測試資料驗過，C6 對內容開啟。
 
 ### 4.5 輸入
 
@@ -117,7 +289,7 @@ type ControlMode = 'auto';
 ## 6. 資料檔
 
 - 每類資料一個 TS 檔，用 `satisfies` 拿到編輯器型別提示，載入時再過 zod schema。
-- 天賦節點：`{ id, kind: 'small'|'notable'|'keystone', pos: {x, y}, links: id[], cost, modifiers?, rule?, nameKey, descKey }`。
+- 天賦節點：`{ id, kind, pos: {x, y}, links: id[], 價格欄位, modifiers, rules, triggers, conversions, archetype, nameKey, descKey? }`（`src/data/types.ts`）。修正、規則、觸發與轉換見 §4.4；節點有規則、觸發、轉換或行為修正（帶標籤的非傷害屬性、`notTags`、`when`、`scaling`、`*Always`）時必須有 `descKey`。
 - 驗證（Vitest 裡也跑一次）：ID 唯一、連線雙向、從起點全部可達、keystone 數量在範圍內、每個 i18n key 在 en 與 zh-TW 都存在。
 - `tools/talent-viewer`：開發用頁面，畫出天賦網並標示錯誤，存檔後熱更新。不做拖拉編輯。
 
@@ -262,7 +434,16 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
   - `curve_check.csv`：每個驗收時間點的實際值與 GDD 第 7 節主曲線目標並列，標出超出容許範圍的列
   - `dps_probe.csv`：固定 build 對木樁的 DPS 曲線
 - 驗收標準就是 GDD 第 7.5 節；主曲線（血量分段、擊殺次數倍率）放在 `src/data/curve.ts`，遊戲與模擬器共用同一份。
-- `worker_threads` 平行跑；M0 先量效能，目標一局 3 分鐘的模擬在 100 ms 內跑完。
+- `worker_threads` 平行跑。效能預算照 impl §6：`npm run bench` 的一般一局（`normal`，3 分鐘）平均 ≤ 50 ms；`bench.ts` 刻意用比較嚴的 p95 比。
+
+**行為與效能的守門**（引擎重構靠這些證明「行為沒變」）：
+
+- `npm run fingerprint`（`tools/balance/fingerprint.ts`）：1,032 個案例（972 個合成 build＋60 個真實天賦 build）跑完，把每個 tick 的事件（投影到 M1 的欄位）與結果做雜湊，一個案例一行。`-- --check` 和 `tools/balance/fingerprint.baseline.txt` 逐行比對，重構必須完全相同；`-- --compare-results` 列出每個變動案例的波次、擊殺、漏怪、傷害與燃燒差多少；`-- --write` 重寫基準，只有量過、說明過的行為修改可以用。
+- `src/sim/golden.test.ts`：24 個案例 × 1,200 tick 的事件雜湊，跟著 `npm test` 跑。
+- `npx tsx tools/balance/probe.ts --json <檔案>` 與 `tools/balance/probeDiff.ts <前> <後>`：比兩次平衡探針（各策略的前線 F@10/20/40/60、到第 20／30 波的分鐘在 ±5% 內，T1–T8 通過）。`out/` 不進 git，參考檔放在本機的 `out/balance/`。
+- `npm run bench -- --scenario normal|hits|ailments|effects|poisonBoss`：一般一局、擊中路徑、異常狀態壓力（瘟疫＋無盡烈焰，第 30 波）、效果佇列、Boss 身上約 500 層毒（和 5 層比，持續傷害每一步的成本要和層數無關，比值 < 1.3）。
+- `npm run bench -- --check`（CI，§14）：照 impl §6，參考是同一個 job 裡這一版的 `normal`。每個場景的計時和 `normal` 交替跑，各自取中位數；場景 ÷ `normal` 的比值超過 `tools/balance/bench.baseline.json` 記錄值的 1.5 倍就失敗。整個模擬一起變慢時比值不會動，所以 `normal` 自己的中位數超過 50 ms 也算失敗（本機在 `--check` 裡約 20–25 ms）。比值在本機記錄；效能特性刻意改變（新場景、取捨）或 CI 的機器穩定地不同時，用 `npm run bench -- --check --write` 重新記錄，PR 寫明原因。`--scenario` 只檢查一個場景。
+- 引擎開發期間，每個改到 `src` 的 commit 另外用 `tools/balance/benchAB.ts` 把 `normal` 與 `hits` 和前一個 commit、和 C2 的 532074c 交替計時比較（`git archive` 出來的樹）。
 
 ## 13. i18n
 
@@ -274,7 +455,7 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 ## 14. CI 與發布
 
-- GitHub Actions：`lint` → `typecheck` → `test` → `build:web`，build 結果存成 artifact。
+- GitHub Actions：`format:check` → `lint` → `typecheck` → `test` → `bench -- --check`（模擬的效能，§12）→ `vite build`，build 結果存成 artifact。
 - 試玩版發布到 itch.io（免費，可以設成限制存取的頁面）：`.github/workflows/itch.yml`，推 `playtest-v*` tag（或在 Actions 頁手動執行）時跑 `npm run check`、`npm run build`、刪掉 source map，再用 butler 推到 `ITCH_TARGET` 的 `html5` channel，userversion 是 `tag+sha`。需要 repo secret `BUTLER_API_KEY`（itch API key，只放 GitHub，不貼在任何地方）。第一次上傳後要在 itch 編輯頁勾「This file will be played in the browser」。
 - 試玩版從 tag 之後只修 bug：修好的 commit 打下一個 tag（`playtest-v2`…），CI 自動上傳。
 - Steam 版在本機用 `npm run build:steam` 產出，用 SteamPipe 上傳（M3）。

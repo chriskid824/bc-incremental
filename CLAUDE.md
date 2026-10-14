@@ -91,4 +91,5 @@
 | `npm run build` | 型別檢查＋網頁版 build（輸出到 `dist/`） |
 | `npm run balance -- --strategy all --sessions 8 --minutes 60` | 平衡模擬器，CSV 輸出到 `out/balance/`（參數見 `tools/balance/cli.ts`） |
 | `npm run bench` | 模擬核心效能量測 |
+| `npm run fingerprint` | 行為指紋；加 `-- --check` 和 `tools/balance/fingerprint.baseline.txt` 逐行比對，重構必須完全相同 |
 | `npm run format` | Prettier 自動排版 |

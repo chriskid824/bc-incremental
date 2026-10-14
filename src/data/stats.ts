@@ -4,7 +4,6 @@
  */
 
 import type { SourceSelector } from './sources';
-import { TAG } from './tags';
 import type { DamageTag } from './tags';
 import type { ConversionSpec, ScalingSpec, TargetCondition, TriggerSpec } from './triggers';
 
@@ -137,11 +136,6 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   shatterRadius: 90,
   frozenDamageTaken: 0.3,
 };
-
-/**
- * M1 name of TAG (src/data/tags.ts), kept until the C3 wrap-up so M1 code reads unchanged.
- */
-export const DAMAGE_TAG_BIT = TAG;
 
 /**
  * Stats whose modifiers may carry tags, notTags, a scope, conditions and a scaling: their value

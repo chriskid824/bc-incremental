@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAMAGE_TAG_BIT, loadGameData } from '../../src/data';
+import { loadGameData, TAG } from '../../src/data';
 import { createMetaState, DEFAULT_ECONOMY, statBlockFor } from '../../src/meta';
 import { damageRow, makeStats } from '../../src/sim/testing';
 import {
@@ -69,7 +69,7 @@ describe('effectiveHit', () => {
   });
 
   it('adds the expected burn, computed from the crit hit on crits', () => {
-    const { hit } = DAMAGE_TAG_BIT;
+    const { hit } = TAG;
     const stats = makeStats(
       {
         damage: 100,

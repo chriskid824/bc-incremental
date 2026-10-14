@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadGameData } from '../data';
-import { DAMAGE_TAG_BIT } from '../data/stats';
+import { TAG } from '../data/tags';
 import { num, toNumber } from '../core/num';
 import {
   DEFAULT_ECONOMY,
@@ -92,7 +92,7 @@ describe('Session', () => {
     expect(run.config.startWave).toBe(1);
     expect(run.config.mode).toBe('auto');
     const { stats, rules } = run.config;
-    expect(run.typicalHit).toBe(stats.values.damage * damageRow(stats, DAMAGE_TAG_BIT.hit, rules));
+    expect(run.typicalHit).toBe(stats.values.damage * damageRow(stats, TAG.hit, rules));
     expect(() => session.start()).toThrow();
   });
 
@@ -102,7 +102,7 @@ describe('Session', () => {
     meta.allocated.add('glassCannon');
     session.start();
     const { stats, rules } = session.run.config;
-    const hit = DAMAGE_TAG_BIT.hit;
+    const hit = TAG.hit;
     // Searing Crits halves non-crit hits; Glass Cannon is a rule whose ×2 reaches every row.
     expect(damageRow(stats, hit)).toBe(0.5);
     expect(damageRow(stats, hit, rules)).toBe(0.5 * 2);

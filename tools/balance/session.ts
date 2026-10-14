@@ -6,7 +6,7 @@
 
 import { assertFinite, num, toNumber } from '../../src/core/num';
 import { deriveSeed } from '../../src/core/rng';
-import { DAMAGE_TAG_BIT, loadGameData, stdHp } from '../../src/data';
+import { loadGameData, stdHp, TAG } from '../../src/data';
 import type { GameData, RuleSpec, StatBlock } from '../../src/data';
 import {
   allowedStartWave,
@@ -90,10 +90,10 @@ export function runSeed(seed: number, session: number, run: number): number {
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
-const HIT = DAMAGE_TAG_BIT.hit;
-const CRIT = DAMAGE_TAG_BIT.crit;
-const BURN = DAMAGE_TAG_BIT.burn;
-const CHAIN = DAMAGE_TAG_BIT.chain;
+const HIT = TAG.hit;
+const CRIT = TAG.crit;
+const BURN = TAG.burn;
+const CHAIN = TAG.chain;
 
 const DAMAGE = SCOPED_INDEX.damage;
 const CRIT_CHANCE = SCOPED_INDEX.critChance;

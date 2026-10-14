@@ -4,7 +4,8 @@ import { formatNum } from '../core/format';
 import { num } from '../core/num';
 import type { RuleSpec } from '../data/rules';
 import type { Modifier, StatBlock, StatId } from '../data/stats';
-import { DAMAGE_TAG_BIT, isBehaviourModifier } from '../data/stats';
+import { isBehaviourModifier } from '../data/stats';
+import { TAG } from '../data/tags';
 import type { DamageTag } from '../data/tags';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
@@ -92,7 +93,7 @@ export function describeBuild(stats: StatBlock, rules: readonly RuleSpec[] = [])
   const build = compileBuild(stats, rules);
   const { values, flags } = build;
   const multAt = (mask: number): number => centerDamage(build, mask);
-  const { hit: HIT, crit: CRIT, burn: BURN, chain: CHAIN } = DAMAGE_TAG_BIT;
+  const { hit: HIT, crit: CRIT, burn: BURN, chain: CHAIN } = TAG;
   const hit = values.damage * multAt(HIT);
   const critHit = values.damage * values.critMultiplier * multAt(HIT | CRIT);
   const burnPerSecond = values.damage * values.burnDamage * multAt(BURN);

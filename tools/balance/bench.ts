@@ -22,10 +22,21 @@
  *
  *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss] [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
+ *   npm run bench -- --check [--write] [--scenario <id>]
  *
  * --runs and --warmup default to the scenario's own counts.
+ *
+ * --check is CI's performance check (docs/v3/implementation-plan-v3.md §6, benchCheck.ts): in one
+ * process, each scenario (each variant of poisonBoss) times its runs alternating with runs of
+ * normal, the reference, at the scenarios' own counts, seeds from 1 and normal's start wave 30.
+ * It fails when a scenario's ratio to the reference exceeds 1.5 × the ratio recorded in
+ * bench.baseline.json, or when normal's median run exceeds 50 ms. --write records the ratios
+ * instead. --scenario limits the check to one scenario; normal alone checks only its budget.
  */
 
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { relative } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadGameData, targetDamage } from '../../src/data';
 import type { GameData, StatBlock } from '../../src/data';
@@ -39,6 +50,8 @@ import {
   PANDEMIC_MODS,
   PANDEMIC_TRIGGER,
 } from '../../src/sim/testing';
+import { checkBench, formatBaseline, parseBaseline } from './benchCheck';
+import type { BenchTimings, EntryTimings } from './benchCheck';
 import { quantile } from './report';
 
 const SCENARIO_IDS = ['normal', 'hits', 'ailments', 'effects', 'poisonBoss'] as const;
@@ -48,6 +61,10 @@ const STRESS_SECONDS = 30;
 const HITS_START_WAVE = 40;
 /** The effects scenario's start wave, whatever --start-wave says: normal's default. */
 const EFFECTS_START_WAVE = 30;
+/** --start-wave's default, and the start wave of every --check. */
+const DEFAULT_START_WAVE = 30;
+/** The ratios --check compares against (benchCheck.ts). */
+export const BASELINE_FILE = fileURLToPath(new URL('./bench.baseline.json', import.meta.url));
 type ScenarioId = (typeof SCENARIO_IDS)[number];
 
 const isScenarioId = (value: string): value is ScenarioId =>
@@ -272,27 +289,115 @@ function maxPoisonStacks(config: RunConfig, data: GameData): number {
   return most;
 }
 
+/** A check entry's name: the scenario id, with its variant in parentheses. */
+const entryName = (id: ScenarioId, variant: string): string =>
+  variant === '' ? id : `${id} (${variant})`;
+
+/**
+ * Every entry --check times, in check order: each scenario but normal, the reference, once per
+ * variant. bench.baseline.json records a ratio for each.
+ */
+export const CHECK_ENTRIES: readonly string[] = SCENARIO_IDS.filter(
+  (id) => id !== 'normal',
+).flatMap((id) => (SCENARIOS[id].variants ?? ['']).map((variant) => entryName(id, variant)));
+
+/**
+ * Times the check of scenarios `ids`, normal's warm-up runs first. Each other scenario runs its
+ * warm-up runs, then its timed rounds: in each, one normal run and one run of every variant,
+ * the order reversed every other round, so the reference runs share the scenario's conditions.
+ * Checking normal alone times its own runs only.
+ */
+function timeCheck(ids: readonly ScenarioId[]): BenchTimings {
+  const normal = SCENARIOS.normal;
+  const realData = loadGameData();
+  const referenceRun = (i: number): number =>
+    runOnce(normal.config(1 + i, DEFAULT_START_WAVE, ''), realData).ms;
+  for (let i = 0; i < normal.warmup; i++) referenceRun(normal.runs + i);
+  const reference: number[] = [];
+  const entries: EntryTimings[] = [];
+  const others = ids.filter((id) => id !== 'normal');
+  if (others.length === 0) {
+    for (let i = 0; i < normal.runs; i++) reference.push(referenceRun(i));
+  }
+  for (const id of others) {
+    const scenario = SCENARIOS[id];
+    const data = scenario.data?.() ?? realData;
+    const startWave = scenario.startWave ?? DEFAULT_START_WAVE;
+    const variants = scenario.variants ?? [''];
+    const run = (variant: string, i: number): number =>
+      runOnce(scenario.config(1 + i, startWave, variant), data).ms;
+    for (const variant of variants) {
+      for (let i = 0; i < scenario.warmup; i++) run(variant, scenario.runs + i);
+    }
+    const referenceMs: number[] = [];
+    const ms: number[][] = variants.map(() => []);
+    for (let i = 0; i < scenario.runs; i++) {
+      // Slot 0 is the reference, slot v + 1 variant v.
+      for (let n = 0; n <= variants.length; n++) {
+        const slot = i % 2 === 0 ? n : variants.length - n;
+        if (slot === 0) referenceMs.push(referenceRun(i));
+        else (ms[slot - 1] as number[]).push(run(variants[slot - 1] as string, i));
+      }
+    }
+    reference.push(...referenceMs);
+    variants.forEach((variant, v) => {
+      entries.push({ id: entryName(id, variant), ms: ms[v] as number[], referenceMs });
+    });
+  }
+  return { reference, entries };
+}
+
+/** --check: times scenarios `ids` against normal and checks or, with `write`, records them. */
+function check(ids: readonly ScenarioId[], write: boolean): void {
+  const file = relative(process.cwd(), BASELINE_FILE);
+  const recorded = existsSync(BASELINE_FILE)
+    ? parseBaseline(readFileSync(BASELINE_FILE, 'utf8'))
+    : null;
+  const result = checkBench(timeCheck(ids), recorded, CHECK_ENTRIES, write);
+  console.log(`bench check: ratio to normal's median run, against ${file}`);
+  for (const line of result.lines) console.log(line);
+  if (write) {
+    writeFileSync(BASELINE_FILE, formatBaseline(result.baseline));
+    console.log(`wrote ${file}`);
+  }
+  if (!result.ok) process.exitCode = 1;
+}
+
 function main(): void {
   const { values } = parseArgs({
     args: process.argv.slice(2),
     strict: true,
     options: {
-      scenario: { type: 'string', default: 'normal' },
+      scenario: { type: 'string' },
       runs: { type: 'string' },
       warmup: { type: 'string' },
-      seed: { type: 'string', default: '1' },
-      'start-wave': { type: 'string', default: '30' },
+      seed: { type: 'string' },
+      'start-wave': { type: 'string' },
+      check: { type: 'boolean', default: false },
+      write: { type: 'boolean', default: false },
     },
   });
-  const id = values.scenario;
+  const id = values.scenario ?? 'normal';
   if (!isScenarioId(id)) {
     throw new Error(`--scenario must be one of ${SCENARIO_IDS.join(', ')}, got '${id}'`);
   }
+  if (values.check) {
+    for (const name of ['runs', 'warmup', 'seed', 'start-wave'] as const) {
+      if (values[name] !== undefined) {
+        throw new Error(`--${name} does not go with --check, whose workloads are fixed`);
+      }
+    }
+    check(values.scenario === undefined ? SCENARIO_IDS : [id], values.write);
+    return;
+  }
+  if (values.write) throw new Error('--write records the ratios of --check; add --check');
   const scenario = SCENARIOS[id];
   const runs = positiveInt('runs', values.runs ?? String(scenario.runs));
   const warmup = positiveInt('warmup', values.warmup ?? String(scenario.warmup), 0);
-  const seed = positiveInt('seed', values.seed, 0);
-  const startWave = scenario.startWave ?? positiveInt('start-wave', values['start-wave']);
+  const seed = positiveInt('seed', values.seed ?? '1', 0);
+  const startWave =
+    scenario.startWave ??
+    positiveInt('start-wave', values['start-wave'] ?? String(DEFAULT_START_WAVE));
   const data = scenario.data?.() ?? loadGameData();
   const variants = scenario.variants ?? [''];
   const configFor = (variant: string, i: number): RunConfig =>
@@ -364,4 +469,5 @@ function report(
   return quantile(ms, 0.5);
 }
 
-main();
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) main();
