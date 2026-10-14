@@ -15,21 +15,21 @@ import type { EmitterRuntime } from './types';
 
 /**
  * Fires every due attack of `em`. The accumulator gains the emitter's cadence per tick; an
- * attack is due each time it reaches the attack interval. Without a target the emitter stays
+ * attack is due each time it reaches the emitter's interval. Without a target the emitter stays
  * ready without banking attacks: it fires on the tick a target appears.
  */
 export function runVolley(ctx: RunContext, em: EmitterRuntime): void {
   const grid = ctx.grid;
   const player = ctx.player;
-  const attackInterval = ctx.attackInterval;
+  const interval = em.interval;
   em.acc += em.cadence;
-  while (em.acc >= attackInterval) {
+  while (em.acc >= interval) {
     const target = pickTargetInGrid(grid, player.x, player.y, ctx.shootable, focused);
     if (target === null) {
-      em.acc = attackInterval - em.cadence;
+      em.acc = interval - em.cadence;
       return;
     }
-    em.acc -= attackInterval;
+    em.acc -= interval;
     countAttack(ctx, em, target);
     fireAttack(ctx, em, target, 0, -1);
   }

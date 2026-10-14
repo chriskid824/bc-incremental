@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../../core/rng';
 import type { RuleSpec } from '../../data/rules';
+import { BASE_STATS } from '../../data/stats';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
-import { makeConfig, makeStats, stationarySquares } from '../testing';
+import { createRunContext } from '../systems/context';
+import { makeConfig, makeStats, makeTestData, stationarySquares } from '../testing';
 import { NO_INPUT, TICK_RATE } from '../types';
 import type { RunConfig } from '../types';
+import { BASE_ATTACK_SPEED, VOLLEY_RATE } from './types';
 
 /**
  * The steady flag of each attack's projectiles, in attack order. Every attack fires within one
@@ -86,6 +89,26 @@ describe('volley', () => {
     attacks.forEach((shots, i) => {
       expect(shots).toEqual(Array<boolean>(3).fill((i + 1) % 2 === 0));
     });
+  });
+
+  it('attacks every 60 / attackSpeed ticks exactly, from the emitter stage at index 0', () => {
+    expect(BASE_ATTACK_SPEED).toBe(BASE_STATS.attackSpeed);
+    expect(VOLLEY_RATE).toBe(BASE_ATTACK_SPEED);
+    const rng = createRng(11);
+    const data = makeTestData();
+    const speeds = [0, ...Array.from({ length: 20 }, () => 10 ** rng.range(-2, 3))];
+    for (const attackSpeed of speeds) {
+      const ctx = createRunContext(makeConfig({ stats: makeStats({ attackSpeed }) }), data);
+      const [volley] = ctx.emitters;
+      expect(volley?.interval, `attackSpeed ${attackSpeed}`).toBe(
+        attackSpeed > 0 ? TICK_RATE / attackSpeed : Infinity,
+      );
+      expect(volley?.index).toBe(0);
+      expect(ctx.stepEmitters).toHaveLength(1);
+      expect(ctx.stepEmitters[0]).toBe(volley);
+      expect(ctx.thornsEmitters).toEqual([]);
+      expect(ctx.segmentEmitters).toEqual([]);
+    }
   });
 
   it("attacks on M1's accumulator ticks at any attack speed (cadence 1)", () => {

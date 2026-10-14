@@ -6,7 +6,7 @@ import { TAG } from '../../data/tags';
 import type { Condition, ScalingSpec } from '../../data/triggers';
 import type { GameData, WaveTable } from '../../data/types';
 import { addBurn } from '../ailments/records';
-import { CHAIN_JUMP, CRIT_HIT, heldFlag, HIT_EVENT, killKindFlag } from '../effects/flags';
+import { CHAIN_JUMP, CRIT_HIT, heldFlag, HIT_EVENT, killKindFlag, PRIMARY } from '../effects/flags';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
 import { createRunContext } from '../systems/context';
@@ -353,12 +353,13 @@ describe('conditions', () => {
       false,
       true,
     ]);
-    expect([0, HIT_EVENT, crit, jump].map((f) => flagged({ hitIs: 'primary' }, f))).toEqual([
-      false,
-      true,
-      true,
-      false,
-    ]);
+    // An attack's primary hit carries PRIMARY; an effect's hit (HIT alone) is not primary.
+    const primary = HIT_EVENT | PRIMARY;
+    expect(
+      [0, HIT_EVENT, primary, primary | CRIT_HIT, jump, jump | PRIMARY].map((f) =>
+        flagged({ hitIs: 'primary' }, f),
+      ),
+    ).toEqual([false, false, true, true, false, false]);
     expect([0, HIT_EVENT, crit, jump].map((f) => flagged({ hitIs: 'chainJump' }, f))).toEqual([
       false,
       false,

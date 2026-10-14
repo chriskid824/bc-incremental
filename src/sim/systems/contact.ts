@@ -3,8 +3,10 @@
  * deals its contact damage and leaks, i.e. leaves the field without a kill or drops. Each touch
  * then raises heroHit (no target, at the player) and contact (on the touching enemy), and the
  * leaked enemy gives its DoT rings back (src/sim/ailments/apply.ts). Runs after
- * movement; every enemy is still alive here, since compaction ran last tick. Once every contact
- * is resolved, the player's life fraction is set for this tick's reads (lifeLostPct).
+ * movement; every enemy is still alive here, since compaction ran last tick. The enemies that
+ * exist when it starts are the ones it resolves: one added during it touches from the next
+ * tick. Once every contact is resolved, the player's life fraction is set for this tick's reads
+ * (lifeLostPct).
  */
 
 import { ZERO } from '../../core/num';
@@ -17,7 +19,8 @@ import { removeEnemy } from './death';
 export function resolveContacts(ctx: RunContext): void {
   const enemies = ctx.enemies;
   const player = ctx.player;
-  for (let i = 0; i < enemies.length; i++) {
+  const count = enemies.length;
+  for (let i = 0; i < count; i++) {
     const enemy = enemies[i] as Enemy;
     if (enemy.dist <= enemy.contactDist && player.life > 0) {
       // The touching enemy's thorns hits come first (C4); a kill there ends its contact.

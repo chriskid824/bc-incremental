@@ -396,10 +396,15 @@ describe('damage sources', () => {
     }
   });
 
-  it('reports every counter, all 0 while nothing counts them', () => {
+  it('reports every counter, all 0 while nothing counts them but the chainHitsPeak gauge', () => {
     const { result } = recordRun(config, data);
     expect(Object.keys(result.counters)).toEqual([...COUNTER_IDS]);
-    for (const id of COUNTER_IDS) expect(result.counters[id], id).toBe(0);
+    for (const id of COUNTER_IDS) {
+      if (id !== 'chainHitsPeak') expect(result.counters[id], id).toBe(0);
+    }
+    // Every attack hits its primary target; M1's chains stay far below the 32-hit cap.
+    expect(result.counters.chainHitsPeak).toBeGreaterThanOrEqual(1);
+    expect(result.counters.chainHitsPeak).toBeLessThanOrEqual(9);
   });
 });
 

@@ -38,10 +38,12 @@ export type RuleId = RuleSpec['id'];
 export const RULE_IDS: readonly RuleId[] = ['steadyAim', 'eternalFlame', 'overload', 'glassCannon'];
 
 /**
- * A character's signature attack: the emitter at index 0 of the run (src/sim/rules/, SIGNATURES).
- * M1 has one, the volley of homing projectiles.
+ * A character's signature attack: the emitter at index 0 of the run (src/sim/rules/, SIGNATURES),
+ * one member per signature, with its parameters.
  */
-export type SignatureSpec = { readonly id: 'm1Volley' };
+export type SignatureSpec =
+  /** M1's volley of homing projectiles. */
+  { readonly id: 'm1Volley' };
 
 export type SignatureId = SignatureSpec['id'];
 

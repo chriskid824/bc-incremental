@@ -182,9 +182,10 @@ function applyDots(
  * Hit `k` of an attack's chain (0 for the primary hit) of payload `p` on `enemy`: `scale` is
  * the chain retention so far, (fromX, fromY) the previous hit's position (null for the primary
  * hit), `forced` a steady shot's sure crit, `depth` and `origin` the trigger depth of the hit
- * and the trigger its damage comes from (0 and −1 for emitter hits). A primary hit has the
- * payload's tags and source, a jump jumpMask of the tags and the payload's jumpSource; the
- * ailments either applies are credited from the payload's source.
+ * and the trigger its damage comes from (0 and −1 for emitter hits), `bits` flags the caller
+ * adds to the hit's (PRIMARY on an attack's primary hit, src/sim/combat/chain.ts). A primary
+ * hit has the payload's tags and source, a jump jumpMask of the tags and the payload's
+ * jumpSource; the ailments either applies are credited from the payload's source.
  */
 export function hitWithPayload(
   ctx: RunContext,
@@ -197,6 +198,7 @@ export function hitWithPayload(
   forced: boolean,
   depth: number,
   origin: number,
+  bits = 0,
 ): void {
   const build = ctx.build;
   const table = ctx.table;
@@ -227,7 +229,7 @@ export function hitWithPayload(
   const base = mul(p.baseDamage, critMultiplier * scale);
   const mask = crit ? plain | CRIT : plain;
   const source = jump ? p.jumpSource : p.source;
-  const flags = p.flags | HIT_EVENT | (jump ? CHAIN_JUMP : 0) | (crit ? CRIT_HIT : 0);
+  const flags = p.flags | HIT_EVENT | (jump ? CHAIN_JUMP : 0) | (crit ? CRIT_HIT : 0) | bits;
   // A hit whose row converts deals its parts (convertHit); a shatter (pctMaxHp) takes only the
   // bounded part of its damage row (pctMaxHpFactor).
   const converted = ctx.converts && p.damageMode === ROWS && table.convCount[row] !== 0;

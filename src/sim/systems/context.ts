@@ -30,6 +30,7 @@ import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import {
   createEmitterRuntime,
   createPayload,
+  emitterInterval,
   emitterPayload,
   ROWS,
   SLOT_HIT,
@@ -57,6 +58,7 @@ import type {
   SimEvent,
   SimState,
 } from '../types';
+import { EMITTER_STEPS } from './emitters';
 import { createEnemyGrid } from './grid';
 
 const DAMAGE = SCOPED_INDEX.damage;
@@ -289,8 +291,6 @@ export interface RunContext {
   readonly chainRetention: number;
   readonly projectileCount: number;
   readonly chainRangeSq: number;
-  /** Ticks between attacks; Infinity disables attacking. */
-  readonly attackInterval: number;
   readonly projectileStep: number;
   readonly shardGain: number;
   readonly coreGain: number;
@@ -308,6 +308,14 @@ export interface RunContext {
   // ---- Emitters (src/sim/emitters/) ----
   /** The build's emitters with their payloads and counters; index 0 is the signature attack. */
   readonly emitters: readonly EmitterRuntime[];
+  /**
+   * The emitters by the stage that runs them, each list in emitter order: the emitter stage's
+   * (src/sim/systems/emitters.ts), the contact stage's thorns and the segment stage's. Every
+   * kind so far attacks in the emitter stage; thorns and segments come later in C4.
+   */
+  readonly stepEmitters: readonly EmitterRuntime[];
+  readonly thornsEmitters: readonly EmitterRuntime[];
+  readonly segmentEmitters: readonly EmitterRuntime[];
 
   // ---- Triggers and effects (src/sim/effects/) ----
   /**
@@ -548,10 +556,16 @@ export function createRunContext(
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
-  // Emitters fire on the combat stream.
-  const emitters = build.emitters.map((spec) =>
-    createEmitterRuntime(spec, emitterPayload(build, spec, combatRng)),
+  // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps.
+  const emitters = build.emitters.map((spec, index) =>
+    createEmitterRuntime(
+      spec,
+      emitterPayload(build, spec, combatRng),
+      index,
+      emitterInterval(build, spec),
+    ),
   );
+  const stepEmitters = emitters.filter((em) => EMITTER_STEPS[em.spec.kind] !== null);
   const signatureEmitter = emitters[0] as EmitterRuntime;
   const signaturePayload = signatureEmitter.payload;
 
@@ -702,7 +716,6 @@ export function createRunContext(
     chainRetention: clamp01(values.chainRetention),
     projectileCount: Math.max(1, values.projectileCount),
     chainRangeSq: Math.max(0, values.chainRange) ** 2,
-    attackInterval: values.attackSpeed > 0 ? TICK_RATE / values.attackSpeed : Infinity,
     projectileStep: values.projectileSpeed * DT,
     shardGain: values.shardGain,
     coreGain: Math.max(0, values.coreGain),
@@ -710,6 +723,9 @@ export function createRunContext(
     projectileEstimate,
 
     emitters,
+    stepEmitters,
+    thornsEmitters: [],
+    segmentEmitters: [],
 
     evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1 },
     triggerState: {

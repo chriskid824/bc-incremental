@@ -32,6 +32,7 @@ import {
   HELD_SHIFT,
   HIT_EVENT,
   killKindFlag,
+  PRIMARY,
 } from '../effects/flags';
 import type { Enemy } from '../systems/context';
 import type { CompiledMod, ModTable } from './modTable';
@@ -225,7 +226,7 @@ export function compileCondition(condition: Condition, on?: TriggerEventId): Com
       case 'nonCrit':
         return flagsCondition(HIT_EVENT, CRIT_HIT);
       case 'primary':
-        return flagsCondition(HIT_EVENT, CHAIN_JUMP);
+        return flagsCondition(HIT_EVENT | PRIMARY, CHAIN_JUMP);
       case 'chainJump':
         return flagsCondition(HIT_EVENT | CHAIN_JUMP);
       case 'signature':

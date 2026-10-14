@@ -13,6 +13,7 @@ import { ailmentMask, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { CompiledBuild } from '../build/compile';
 import { ailmentCredit, rowKey } from '../build/sources';
+import { TICK_RATE } from '../types';
 
 export interface EmitterSpec {
   /** How the emitter attacks: 'volley' fires homing projectiles (volley.ts). */
@@ -130,10 +131,38 @@ export function emitterPayload(build: CompiledBuild, spec: EmitterSpec, rng: Rng
   });
 }
 
+/** Ticks between periodic events at `rate` per second: Infinity (never) at a rate ≤ 0. */
+export function periodTicks(rate: number): number {
+  return rate > 0 ? TICK_RATE / rate : Infinity;
+}
+
+/**
+ * The attackSpeed at which an emitter attacks at its base rate, the stat's base value
+ * (BASE_STATS.attackSpeed, src/data/stats.ts); other values scale the rate in proportion.
+ */
+export const BASE_ATTACK_SPEED = 4;
+/** The volley's attacks per second at BASE_ATTACK_SPEED: M1 attacks attackSpeed times a second. */
+export const VOLLEY_RATE = 4;
+
+/** Ticks between the attacks of an emitter of `spec` in `build` (EmitterRuntime.interval). */
+export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number {
+  switch (spec.kind) {
+    case 'volley':
+      return periodTicks((VOLLEY_RATE * build.values.attackSpeed) / BASE_ATTACK_SPEED);
+  }
+}
+
 /** One emitter of the run: its spec, payload and counters. */
 export interface EmitterRuntime {
   readonly spec: EmitterSpec;
   readonly payload: Payload;
+  /**
+   * Its position in CompiledBuild.emitters (0: the signature attack); the stage lists of the run
+   * keep that order (RunContext.stepEmitters).
+   */
+  readonly index: number;
+  /** Ticks between its attacks (emitterInterval); Infinity disables attacking. */
+  interval: number;
   /** Ticks accumulated towards the next attack, cadence per tick. */
   acc: number;
   /** Projectiles fired, for steadyAim's every-Nth shot. */
@@ -148,10 +177,17 @@ export interface EmitterRuntime {
   cadence: number;
 }
 
-export function createEmitterRuntime(spec: EmitterSpec, payload: Payload): EmitterRuntime {
+export function createEmitterRuntime(
+  spec: EmitterSpec,
+  payload: Payload,
+  index: number,
+  interval: number,
+): EmitterRuntime {
   return {
     spec,
     payload,
+    index,
+    interval,
     acc: 0,
     shots: 0,
     attacks: 0,
@@ -163,10 +199,11 @@ export function createEmitterRuntime(spec: EmitterSpec, payload: Payload): Emitt
 
 /**
  * What one attack and its chain have used of their caps; one reused object per run, reset at
- * each attack (src/sim/combat/chain.ts). The caps that read it come with C4.
+ * each attack (beginAttack, src/sim/combat/chain.ts). CHAIN_HIT_CAP reads hits; the caps that
+ * read the other fields come later in C4.
  */
 export interface ChainBudget {
-  /** Hits of the attack so far, its primary hit included. */
+  /** Hits of the attack so far, its primary hit included (CHAIN_HIT_CAP, src/sim/caps.ts). */
   hits: number;
   extraJumps: number;
   centerEvents: number;

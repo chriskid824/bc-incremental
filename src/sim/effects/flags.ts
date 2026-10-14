@@ -1,9 +1,10 @@
 /**
  * Bits of the flags a trigger event carries (fire and fireOne in dispatch.ts): what the hit
  * behind the event was and, on kill events, what the victim held when it died. Payload.flags
- * holds SIGNATURE; a hit adds HIT, CHAIN_JUMP and CRIT; a lethal hit's dispatch adds KILLED; a
- * kill's snapshot adds the ailments the victim held and what killed it. Conditions read them
- * (hitIs, victimHas, killedBy; src/sim/build/eval.ts), and onKill hooks see the kill's flags.
+ * holds SIGNATURE; a hit adds HIT, CHAIN_JUMP and CRIT, and an attack's primary hit PRIMARY; a
+ * lethal hit's dispatch adds KILLED; a kill's snapshot adds the ailments the victim held and
+ * what killed it. Conditions read them (hitIs, victimHas, killedBy; src/sim/build/eval.ts), and
+ * onKill hooks see the kill's flags.
  *
  * Layout, bit: meaning (commit):
  * - 0: SIGNATURE, damage of the signature attack (C3.5, src/sim/emitters/types.ts);
@@ -12,7 +13,8 @@
  *   and shock (C3.8); frost and frozen (C3.9);
  * - 11–14: the kill kind, one bit per KillKind from KILL_KIND_SHIFT: hit and burn (C3.6); poison
  *   and bleed (C3.8);
- * - 15–17: the kind an ailmentApplied event applied, its AilmentKind ordinal + 1 (C3.8).
+ * - 15–17: the kind an ailmentApplied event applied, its AilmentKind ordinal + 1 (C3.8);
+ * - 18: PRIMARY, 19: REPEAT (C4.1).
  */
 
 import { AILMENT_KINDS, HELD_AILMENTS, KILL_KINDS } from '../../data/triggers';
@@ -29,8 +31,15 @@ export const HIT_EVENT = 1 << 2;
 export const CHAIN_JUMP = 1 << 3;
 /** The hit killed its target: a lethal hit's hit and crit events and onHit hooks. */
 export const KILLED = 1 << 4;
+/**
+ * The hit is a signature attack's primary hit (primaryHit, src/sim/combat/chain.ts); effect
+ * hits and chain jumps never are.
+ */
+export const PRIMARY = 1 << 18;
+/** The hit belongs to a repeat of the signature attack, which never repeats in turn. */
+export const REPEAT = 1 << 19;
 /** The bits a kill keeps of its killing hit's flags. */
-export const HIT_BITS = SIGNATURE | CRIT_HIT | HIT_EVENT | CHAIN_JUMP;
+export const HIT_BITS = SIGNATURE | CRIT_HIT | HIT_EVENT | CHAIN_JUMP | PRIMARY | REPEAT;
 
 export const HELD_SHIFT = 5;
 /** The six bits of the held ailments. */

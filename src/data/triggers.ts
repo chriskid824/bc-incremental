@@ -151,9 +151,9 @@ export const TARGET_KINDS = ['normal', 'elite', 'boss'] as const;
 export type TargetKind = (typeof TARGET_KINDS)[number];
 
 /**
- * Which hit an event comes from (hitIs): a crit or not, the primary hit of an attack or a chain
- * jump, the signature attack's. On kill events it is the killing hit; a kill by damage over time
- * is none of these.
+ * Which hit an event comes from (hitIs): a crit or not, the primary hit of a signature attack
+ * (never an effect's hit) or a chain jump, the signature attack's. On kill events it is the
+ * killing hit; a kill by damage over time is none of these.
  */
 export const HIT_KINDS = ['crit', 'nonCrit', 'primary', 'chainJump', 'signature'] as const;
 export type HitKind = (typeof HIT_KINDS)[number];

@@ -93,8 +93,8 @@ export interface KillScratch {
   x: number;
   y: number;
   /**
-   * The kill's flags (src/sim/effects/flags.ts): the killing hit's SIGNATURE, CRIT, HIT and
-   * CHAIN_JUMP, the ailments the victim held, and the kill kind.
+   * The kill's flags (src/sim/effects/flags.ts): the killing hit's SIGNATURE, CRIT, HIT,
+   * CHAIN_JUMP, PRIMARY and REPEAT (HIT_BITS), the ailments the victim held, and the kill kind.
    */
   flags: number;
 }

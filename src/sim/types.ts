@@ -227,8 +227,9 @@ export interface DamageBreakdown {
 }
 
 /**
- * Run counters for the effect and freeze budgets (RunResult.counters). They stay 0 until the
- * systems that count them exist (docs/v3/implementation-plan-v3.md §2.5, §2.6, §6).
+ * Run counters for the effect, freeze and chain budgets and the spec caps (RunResult.counters,
+ * src/sim/caps.ts). They stay 0 until the systems that count them exist
+ * (docs/v3/implementation-plan-v3.md §2.4–§2.6, §6); new ones are appended.
  */
 export const COUNTER_IDS = [
   /** Effects run from the effect queue. */
@@ -247,6 +248,10 @@ export const COUNTER_IDS = [
   'freezePayloadsLimited',
   /** Most ticks in a row that ended with effects carried over (effectBudgetTicks' longest run). */
   'effectBudgetStreakMax',
+  /** Chain jumps refused because their attack had dealt CHAIN_HIT_CAP hits. */
+  'chainHitCapped',
+  /** Most hits one attack dealt, its primary hit included (a gauge). */
+  'chainHitsPeak',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 
