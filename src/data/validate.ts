@@ -285,13 +285,6 @@ function ruleIssues(rule: RuleSpec): string[] {
       }
       more('critMultiplierMore', rule.critMultiplierMore);
       break;
-    case 'pandemic':
-      if (!(rule.spreadRadius > 0)) {
-        issues.push(`spreadRadius must be > 0 (got ${rule.spreadRadius})`);
-      }
-      chance('spreadEffect', rule.spreadEffect);
-      more('hitMore', rule.hitMore);
-      break;
     case 'eternalFlame':
       more('durationMore', rule.durationMore);
       break;
@@ -496,8 +489,6 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
         : [{ stat: 'damage', kind: 'more', value: rule.chainMore, tags: ['chain', 'hit'] }];
     case 'glassCannon':
       return [{ stat: 'damage', kind: 'more', value: rule.damageMore }];
-    case 'pandemic':
-      return [{ stat: 'damage', kind: 'more', value: rule.hitMore, tags: ['hit'] }];
     case 'steadyAim':
     case 'eternalFlame':
       return [];

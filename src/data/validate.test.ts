@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ENEMIES } from './enemies';
 import { loadGameData, parseGameData } from './index';
 import { TALENTS } from './talents';
+import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
 import type { TriggerSpec } from './triggers';
 import type { GameData, TalentNode } from './types';
@@ -188,6 +189,22 @@ describe('validateGameData: talents', () => {
     ).toEqual([
       "talent 'searingCrits': keystone needs a rule, a trigger or a behaviour modifier",
       "talent 'searingCrits': descKey describes rules, triggers and behaviour modifiers; this node has none",
+    ]);
+  });
+
+  it('accepts the Pandemic keystone through its trigger alone', () => {
+    const pandemic = talent(content(), 'pandemic');
+    expect(pandemic.kind).toBe('keystone');
+    expect(pandemic.rules).toEqual([]);
+    expect(pandemic.modifiers.filter(isBehaviourModifier)).toEqual([]);
+    expect(pandemic.triggers).toHaveLength(1);
+    expect(
+      issuesAfter((d) => {
+        talent(d, 'pandemic').triggers = [];
+      }),
+    ).toEqual([
+      "talent 'pandemic': keystone needs a rule, a trigger or a behaviour modifier",
+      "talent 'pandemic': descKey describes rules, triggers and behaviour modifiers; this node has none",
     ]);
   });
 

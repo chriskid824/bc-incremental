@@ -22,16 +22,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { toNumber } from '../../src/core/num';
 import { loadGameData } from '../../src/data';
-import type { GameData, Modifier, RuleSpec, StatBlock, StatId } from '../../src/data';
+import type { GameData, Modifier, RuleSpec, StatBlock, StatId, TriggerSpec } from '../../src/data';
 import { collectRules, statBlockFor } from '../../src/meta';
 import { createSimulation, NO_INPUT } from '../../src/sim';
 import type { RunConfig, RunResult } from '../../src/sim';
 import {
   BRIDGE_MODS,
+  centerTriggers,
   makeConfig,
   makeStats,
   makeTestData,
   maskProbeMods,
+  PANDEMIC_MODS,
+  PANDEMIC_TRIGGER,
   projectEvent,
   projectResult,
   SEARING_CRITS_MODS,
@@ -59,8 +62,8 @@ export interface RuleSet {
   readonly rules: readonly RuleSpec[];
   /** Scoped modifiers appended to the profile's maskProbeMods(). */
   readonly modifiers: readonly Modifier[];
-  /** Data-form triggers; the rule vocabulary has none yet. */
-  readonly triggers: readonly never[];
+  /** Data triggers, credited to the center as an M1 node's are. */
+  readonly triggers: readonly TriggerSpec[];
 }
 
 const rulesOnly = (...rules: RuleSpec[]): RuleSet => ({ rules, modifiers: [], triggers: [] });
@@ -69,15 +72,20 @@ const modifiersOnly = (modifiers: readonly Modifier[]): RuleSet => ({
   modifiers,
   triggers: [],
 });
-const PANDEMIC: RuleSpec = { id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 };
 const ETERNAL: RuleSpec = { id: 'eternalFlame', durationMore: -0.5 };
+/** Pandemic as data since C3.7: its hit cost and its spread trigger (src/data/talents.ts). */
+const withPandemic = (...rules: RuleSpec[]): RuleSet => ({
+  rules,
+  modifiers: PANDEMIC_MODS,
+  triggers: [PANDEMIC_TRIGGER],
+});
 
 export const RULE_SETS: Readonly<Record<string, RuleSet>> = {
   none: rulesOnly(),
   steady: rulesOnly({ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' }),
-  pandemic: rulesOnly(PANDEMIC),
+  pandemic: withPandemic(),
   eternal: rulesOnly(ETERNAL),
-  eternalPandemic: rulesOnly(ETERNAL, PANDEMIC),
+  eternalPandemic: withPandemic(ETERNAL),
   overload: rulesOnly({ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2 }),
   glass: rulesOnly({ id: 'glassCannon', damageMore: 1 }),
   // Searing Crits and the bridge notables are data since C3.3 (src/data/talents.ts).
@@ -98,9 +106,12 @@ export interface FingerprintCase {
   readonly config: RunConfig;
 }
 
-/** The profile's values with the damage table of maskProbeMods() plus the set's modifiers. */
+/**
+ * The profile's values with the damage table of maskProbeMods() plus the set's modifiers, and
+ * the set's triggers.
+ */
 function syntheticStats(profile: Partial<Record<StatId, number>>, set: RuleSet): StatBlock {
-  return makeStats(profile, [...maskProbeMods(), ...set.modifiers]);
+  return makeStats(profile, [...maskProbeMods(), ...set.modifiers], centerTriggers(set.triggers));
 }
 
 /**

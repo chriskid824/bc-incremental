@@ -10,7 +10,6 @@ import { glassCannon } from './glassCannon';
 import { m1Volley } from './m1Volley';
 import type { RuleModule, SignatureModule } from './module';
 import { overload } from './overload';
-import { pandemicLegacy } from './pandemicLegacy';
 import { steadyAim } from './steadyAim';
 
 export type {
@@ -32,7 +31,6 @@ export const RULE_MODULES: {
   readonly [K in RuleId]: RuleModule<Extract<RuleSpec, { id: K }>>;
 } = {
   steadyAim,
-  pandemic: pandemicLegacy,
   eternalFlame,
   overload,
   glassCannon,

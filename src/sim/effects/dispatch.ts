@@ -10,6 +10,12 @@
  * (CompiledTrigger.inline) run their effects at once, while the victim still holds its
  * ailments; the others are recorded as pending kills and dispatched at the tick's death step,
  * sorted by victim id and trigger index, so their effects run in the next tick's effect phase.
+ *
+ * Transfer triggers skip the depth gate and fire at any kill depth, as M1's Pandemic spread did
+ * (Hoshi's call, 2026-10-14): they deal no damage, and the stacks they move keep their end and
+ * lose strength with each spread, which bounds their chains. The moved stacks take one depth more
+ * than the kill, at most MAX_DEPTH, and a kill by them carries that depth to the other triggers,
+ * which keep the gate.
  */
 
 import type { Num } from '../../core/num';
@@ -105,7 +111,8 @@ function passes(
 
 /**
  * The transfer triggers of a kill (RunContext.killInline), at the kill: `victim` is still
- * alive and holds its ailments, `flags` is the kill's snapshot (killEnemy).
+ * alive and holds its ailments, `flags` is the kill's snapshot (killEnemy). No depth gate: they
+ * fire at any kill depth, and their effects run one deeper, at most MAX_DEPTH.
  */
 export function fireInlineKill(
   ctx: RunContext,
@@ -115,20 +122,16 @@ export function fireInlineKill(
 ): void {
   const list = ctx.killInline;
   const triggers = ctx.build.triggers;
-  const depth = victim.killDepth;
+  const depth = Math.min(victim.killDepth + 1, MAX_DEPTH);
   for (let n = 0; n < list.length; n++) {
     const i = list[n] as number;
     const t = triggers[i] as CompiledTrigger;
     if (t.on === EVENT.diedWithAilment && (flags & HELD_MASK) === 0) continue;
-    if (depth >= MAX_DEPTH) {
-      ctx.counters.triggerDepthCapped++;
-      continue;
-    }
     if (passes(ctx, i, origin, null, flags) === null) continue;
     const entry = ctx.inlineEntry;
     for (let e = t.effectStart; e < t.effectEnd; e++) {
       entry.effect = e;
-      entry.depth = depth + 1;
+      entry.depth = depth;
       entry.origin = i;
       entry.source = t.source;
       entry.flags = flags;

@@ -7,6 +7,7 @@ import type { RuleSpec } from '../data/rules';
 import { BASE_STATS, NO_EXTRAS } from '../data/stats';
 import type { Modifier, StatBlock, StatExtras, StatId } from '../data/stats';
 import type { TagMask } from '../data/tags';
+import type { TriggerSpec } from '../data/triggers';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyDef, EnemyId, GameData, WaveTable } from '../data/types';
 import { centerDamage, compileBuild } from './build/compile';
@@ -285,12 +286,31 @@ export const BRIDGE_MODS: readonly Modifier[] = [
   { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
 ];
 
+/**
+ * Pandemic as data (src/data/talents.ts), its trigger and its modifier: a burning enemy's burns
+ * spread on death to the enemies within 250 at 40% strength, and hits deal 30% less.
+ */
+export const PANDEMIC_TRIGGER: TriggerSpec = {
+  on: 'diedWithAilment',
+  when: [{ victimHas: 'burn' }],
+  do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 250, effect: 0.4 }],
+};
+export const PANDEMIC_MODS: readonly Modifier[] = [
+  { stat: 'damage', kind: 'more', value: -0.3, tags: ['hit'] },
+];
+
+/** Stat extras (makeStats) with these triggers, credited to the center as an M1 node's are. */
+export function centerTriggers(triggers: readonly TriggerSpec[]): StatExtras {
+  return { triggers: triggers.map((spec) => ({ source: 'center', spec })), conversions: [] };
+}
+
 const golden = (
   values: Partial<Record<StatId, number>>,
   rules: readonly RuleSpec[] = [],
   modifiers: readonly Modifier[] = [],
+  triggers: readonly TriggerSpec[] = [],
 ) => ({
-  stats: makeStats(values, [...maskProbeMods(), ...modifiers]),
+  stats: makeStats(values, [...maskProbeMods(), ...modifiers], centerTriggers(triggers)),
   rules,
 });
 
@@ -298,12 +318,11 @@ const CRIT = { critChance: 0.4, critMultiplier: 3, damage: 40 };
 const BURN = { igniteChance: 0.6, burnDamage: 2, burnMaxStacks: 8, damage: 30 };
 const CHAIN = { chainCount: 3.4, chainRetention: 0.8, chainRange: 300, damage: 30 };
 const VOLLEY = { projectileCount: 3.5, attackSpeed: 6, damage: 25 };
-const PANDEMIC: RuleSpec = { id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 };
 
 /**
  * Builds of src/sim/golden.test.ts on makeTestData(): each M1 stat archetype, each M1 rule on
- * the archetype it acts on (Searing Crits and the bridge notables as data), and every damage
- * mask probed through maskProbeMods.
+ * the archetype it acts on (Searing Crits and the bridge notables as data, Pandemic as a data
+ * trigger), and every damage mask probed through maskProbeMods.
  */
 export const GOLDEN_BUILDS: Readonly<Record<string, GoldenBuild>> = {
   plain: golden({}),
@@ -312,12 +331,14 @@ export const GOLDEN_BUILDS: Readonly<Record<string, GoldenBuild>> = {
   chain: golden(CHAIN),
   volley: golden(VOLLEY),
   steady: golden(CRIT, [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' }]),
-  pandemic: golden(BURN, [PANDEMIC]),
+  pandemic: golden(BURN, [], PANDEMIC_MODS, [PANDEMIC_TRIGGER]),
   // Fast, sure ignites so stacks pile past the cap that eternalFlame lifts.
-  eternalPandemic: golden({ ...BURN, igniteChance: 1, attackSpeed: 8 }, [
-    { id: 'eternalFlame', durationMore: -0.5 },
-    PANDEMIC,
-  ]),
+  eternalPandemic: golden(
+    { ...BURN, igniteChance: 1, attackSpeed: 8 },
+    [{ id: 'eternalFlame', durationMore: -0.5 }],
+    PANDEMIC_MODS,
+    [PANDEMIC_TRIGGER],
+  ),
   overload: golden(CHAIN, [{ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2 }]),
   glass: golden(VOLLEY, [{ id: 'glassCannon', damageMore: 1 }]),
   searing: golden({ ...CRIT, igniteChance: 0.2 }, [], SEARING_CRITS_MODS),

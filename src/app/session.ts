@@ -498,7 +498,7 @@ export class Session {
       mode: 'auto',
       ...(this.waveCap === undefined ? {} : { waveCap: Math.max(this.waveCap, this.startWave) }),
     };
-    // The damage row includes Searing Crits' ×0.5 and Glass Cannon's ×2.
+    // The damage row includes Searing Crits' ×0.5, Glass Cannon's ×2 and Pandemic's ×0.7.
     const build = compileBuild(stats, config.rules);
     const typicalHit = build.values.damage * centerDamage(build, DAMAGE_TAG_BIT.hit);
     this.active = {

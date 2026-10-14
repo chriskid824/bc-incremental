@@ -1,14 +1,14 @@
 /**
  * Burn records (docs/GDD.md §2–3): applying, expiring and spreading burn stacks, one record per
  * stack, and the damage a stack accrues between burn ticks. Shared by hits (ignite), triggered
- * effects (applyAilment, spreadAilment; src/sim/effects/), rule modules (pandemic's spread),
- * ailments (the burn tick), targeting (doomed) and the trigger conditions (holdsBurn,
- * liveBurnStacks). The per-tick burn update is the ailments system
- * (src/sim/systems/ailments.ts).
+ * effects (applyAilment, spreadAilment, which is Pandemic's spread; src/sim/effects/), ailments
+ * (the burn tick), targeting (doomed) and the trigger conditions (holdsBurn, liveBurnStacks).
+ * The per-tick burn update is the ailments system (src/sim/systems/ailments.ts).
  *
  * Each stack keeps the trigger depth of what applied it, and the enemy keeps the lowest depth of
  * any ailment ever applied to it (Enemy.ailDepth): a kill by damage over time carries that depth,
  * so chains of triggers through ailments stay bounded (MAX_DEPTH in src/sim/effects/types.ts).
+ * Spreads are the exception: they fire at any depth (spreadBurns).
  */
 
 import type { Num } from '../../core/num';
@@ -127,9 +127,11 @@ export interface BurnSpread {
 
 /**
  * Copies `source`'s active stacks (same end, effect × damage) onto every alive enemy within the
- * spread radius, in id order, at trigger depth `depth`: pandemic
- * (src/sim/rules/pandemicLegacy.ts) and the spreadAilment effect (src/sim/effects/execute.ts).
- * Spread stacks spread again, weaker each time.
+ * spread radius, in id order, at trigger depth `depth`: the spreadAilment effect
+ * (src/sim/effects/execute.ts), Pandemic's (src/data/talents.ts) among them. Spread stacks
+ * spread again, weaker each time, at any kill depth: the depth limit does not apply to transfers
+ * (src/sim/effects/dispatch.ts), and the copies keep their source's end, so no chain outlasts the
+ * stacks it started from. `depth` is at most MAX_DEPTH (src/sim/effects/types.ts).
  */
 export function spreadBurns(
   ctx: RunContext,

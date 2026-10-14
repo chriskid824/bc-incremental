@@ -27,7 +27,7 @@ import type { StatBlock } from '../../src/data';
 import type { StatExtras } from '../../src/data/stats';
 import { createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { RunConfig } from '../../src/sim';
-import { makeStats } from '../../src/sim/testing';
+import { centerTriggers, makeStats, PANDEMIC_MODS, PANDEMIC_TRIGGER } from '../../src/sim/testing';
 import { quantile } from './report';
 
 const SCENARIO_IDS = ['normal', 'hits', 'ailments', 'effects'] as const;
@@ -123,16 +123,17 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     // then Eternal Flame (no stack cap, half duration) and Pandemic (spread on death). Immortal.
     config: (seed, startWave) => ({
       seed,
-      stats: makeStats({
-        damage: targetDamage(startWave),
-        igniteChance: 1,
-        burnDuration: 1.6,
-        maxLife: 1e12,
-      }),
-      rules: [
-        { id: 'eternalFlame', durationMore: -0.5 },
-        { id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 },
-      ],
+      stats: makeStats(
+        {
+          damage: targetDamage(startWave),
+          igniteChance: 1,
+          burnDuration: 1.6,
+          maxLife: 1e12,
+        },
+        PANDEMIC_MODS,
+        centerTriggers([PANDEMIC_TRIGGER]),
+      ),
+      rules: [{ id: 'eternalFlame', durationMore: -0.5 }],
       startWave,
       mode: 'auto',
       maxTicks: STRESS_SECONDS * TICK_RATE,
@@ -148,15 +149,10 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     // stat.
     config: (seed) => ({
       seed,
-      stats: normalStats(EFFECTS_START_WAVE, {
-        triggers: [
-          {
-            source: 'center',
-            spec: { on: 'kill', do: [{ kind: 'explode', radius: 90, damagePct: 0.5 }] },
-          },
-        ],
-        conversions: [],
-      }),
+      stats: normalStats(
+        EFFECTS_START_WAVE,
+        centerTriggers([{ on: 'kill', do: [{ kind: 'explode', radius: 90, damagePct: 0.5 }] }]),
+      ),
       rules: [],
       startWave: EFFECTS_START_WAVE,
       mode: 'auto',

@@ -3,7 +3,8 @@
  * data files can only reference rules defined here (docs/ARCHITECTURE.md §4.4).
  * Each rule is a module of the simulation (src/sim/rules/). A change that modifiers can
  * express (a tagged chance, an *Always stat, a scaling, notTags) is data instead, like the
- * bridge notables and Searing Crits (src/data/talents.ts).
+ * bridge notables and Searing Crits, and so is one that triggers can express, like Pandemic's
+ * spread on death (src/data/talents.ts).
  */
 
 export type RuleSpec =
@@ -16,16 +17,6 @@ export type RuleSpec =
       readonly everyNth: number;
       readonly critMultiplierMore: number;
       readonly counts: 'shot' | 'attack';
-    }
-  /**
-   * Burning enemies spread their burns on death to enemies within spreadRadius, each spread
-   * stack dealing spreadEffect × the source stack's damage; hit damage gets (1 + hitMore).
-   */
-  | {
-      readonly id: 'pandemic';
-      readonly spreadRadius: number;
-      readonly spreadEffect: number;
-      readonly hitMore: number;
     }
   /** No burn stack cap; burn duration gets (1 + durationMore). */
   | { readonly id: 'eternalFlame'; readonly durationMore: number }
@@ -44,13 +35,7 @@ export type RuleSpec =
 
 export type RuleId = RuleSpec['id'];
 
-export const RULE_IDS: readonly RuleId[] = [
-  'steadyAim',
-  'pandemic',
-  'eternalFlame',
-  'overload',
-  'glassCannon',
-];
+export const RULE_IDS: readonly RuleId[] = ['steadyAim', 'eternalFlame', 'overload', 'glassCannon'];
 
 /**
  * A character's signature attack: the emitter at index 0 of the run (src/sim/rules/, SIGNATURES).

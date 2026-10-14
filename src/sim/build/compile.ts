@@ -74,11 +74,6 @@ export interface CompiledBuild {
   readonly signature: Readonly<SignatureParams>;
   /** Each hook's functions, in the order the modules added them. */
   readonly hooks: { readonly [K in HookName]: readonly Hooks[K][] };
-  /**
-   * pandemic's multiplier on hit damage (crit or not; burns excluded) on top of the damage row,
-   * until pandemic becomes data (C3.7).
-   */
-  readonly legacyHitMult: number;
   /** The run's emitters; index 0 is the signature attack. */
   readonly emitters: readonly EmitterSpec[];
   /** Every trigger, by trigger index; a module instance's entry listens to no event. */
@@ -211,7 +206,6 @@ export function compileBuild(
       effects.push(compileEffect(spec, sources.index(source), coef, values.damage));
       return effects.length - 1;
     },
-    legacyHitMult: 1,
   };
 
   for (const { source, spec } of stats.triggers) addTrigger(sources.index(source), spec, 1);
@@ -237,7 +231,6 @@ export function compileBuild(
     flags,
     signature: params,
     hooks,
-    legacyHitMult: compiler.legacyHitMult,
     emitters: [signatureEmitter(signature.id, signature)],
     triggers,
     triggersOn,

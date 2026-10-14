@@ -85,19 +85,19 @@ const pct = (value: number): string => `${trim(value * 100)}%`;
  * src/sim/systems/): hit damage is a non-crit primary hit, a crit hit is one primary crit, a burn
  * stack is what a non-crit hit ignites, the first chain jump is a non-crit jump, and steadyAim
  * replaces the crit chance with its every-Nth-shot rhythm. Damage reads each instance's damage
- * row, so tagged modifiers (Searing Crits' non-crit half included) and rule-added ones (Glass
- * Cannon's) count. Each archetype's nodes move at least one line.
+ * row, so tagged modifiers (Searing Crits' non-crit half and Pandemic's hit cost included) and
+ * rule-added ones (Glass Cannon's) count. Each archetype's nodes move at least one line.
  */
 export function describeBuild(stats: StatBlock, rules: readonly RuleSpec[] = []): BuildLine[] {
   const build = compileBuild(stats, rules);
-  const { values, flags, legacyHitMult } = build;
+  const { values, flags } = build;
   const multAt = (mask: number): number => centerDamage(build, mask);
   const { hit: HIT, crit: CRIT, burn: BURN, chain: CHAIN } = DAMAGE_TAG_BIT;
-  const hit = values.damage * multAt(HIT) * legacyHitMult;
-  const critHit = values.damage * values.critMultiplier * multAt(HIT | CRIT) * legacyHitMult;
+  const hit = values.damage * multAt(HIT);
+  const critHit = values.damage * values.critMultiplier * multAt(HIT | CRIT);
   const burnPerSecond = values.damage * values.burnDamage * multAt(BURN);
   const retention = Math.min(1, Math.max(0, values.chainRetention));
-  const chainJump = values.damage * retention * multAt(HIT | CHAIN) * legacyHitMult;
+  const chainJump = values.damage * retention * multAt(HIT | CHAIN);
   const every = build.signature.forceCritEvery;
   const crit =
     every > 0 ? t('build.critEveryNth', { n: every }) : pct(Math.min(1, values.critChance));

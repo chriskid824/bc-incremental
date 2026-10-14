@@ -10,11 +10,14 @@ import type { EnemyId, GameData, WaveTable } from '../data/types';
 import { BURN_TICK_INTERVAL, createSimulation } from './simulation';
 import { FOCUS_RANGE } from './targeting';
 import {
+  centerTriggers,
   GOLDEN_BUILDS,
   makeConfig,
   makeStats,
   makeTestData,
   maskProbeMods,
+  PANDEMIC_MODS,
+  PANDEMIC_TRIGGER,
   recordRun,
   SEARING_CRITS_MODS,
   stationarySquares,
@@ -1295,22 +1298,28 @@ describe('drops', () => {
   });
 });
 
-describe('pandemic', () => {
+describe('Pandemic as data', () => {
   it('spreads the burns of a dying enemy to enemies in range; hits deal 70%', () => {
     // Enemies with 30 HP: the first hit ignites, burn kills, the burn spreads.
-    const stats = makeStats({
-      damage: 1,
-      attackSpeed: 0.2,
-      critChance: 0,
-      igniteChance: 1,
-      burnDamage: 20,
-      burnDuration: 4,
-    });
+    const stats = makeStats(
+      {
+        damage: 1,
+        attackSpeed: 0.2,
+        critChance: 0,
+        igniteChance: 1,
+        burnDamage: 20,
+        burnDuration: 4,
+      },
+      PANDEMIC_MODS,
+      centerTriggers([
+        {
+          ...PANDEMIC_TRIGGER,
+          do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 5000, effect: 1 }],
+        },
+      ]),
+    );
     const data = stationarySquares(30, 30 / 20);
-    const rules: RuleSpec[] = [
-      { id: 'pandemic', spreadRadius: 5000, spreadEffect: 1, hitMore: -0.3 },
-    ];
-    const { ticks } = run({ stats, rules, maxTicks: 1200 }, data);
+    const { ticks } = run({ stats, maxTicks: 1200 }, data);
     const hits = eventsOf(ticks, 'hit');
     expect(hits[0]?.amount).toBeCloseTo(0.7, 12);
     const spreads = eventsOf(ticks, 'burnSpread');

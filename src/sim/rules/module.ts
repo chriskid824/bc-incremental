@@ -72,11 +72,6 @@ export interface BuildCompiler {
    * `source`, with its COEF_FIELDS × coef (default 1). Returns its effect index.
    */
   addEffect(source: string, spec: EffectSpec, coef?: number): number;
-  /**
-   * Multiplier on hit damage on top of the damage row (CompiledBuild.legacyHitMult). Only
-   * pandemicLegacy sets it, until pandemic becomes data (C3.7).
-   */
-  legacyHitMult: number;
 }
 
 /**

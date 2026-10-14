@@ -129,9 +129,7 @@ function hitValue(build: CompiledBuild, jump: number): number {
         ? 1 / every
         : clamp01(at(HIT | chain, CRIT_CHANCE));
   const critFactor = critChance * at(HIT | CRIT | chain, CRIT_MULTIPLIER);
-  const hit =
-    build.legacyHitMult *
-    ((1 - critChance) * mult(HIT | chain) + critFactor * mult(HIT | CRIT | chain));
+  const hit = (1 - critChance) * mult(HIT | chain) + critFactor * mult(HIT | CRIT | chain);
   const ignite = chance(HIT | chain, IGNITE_CHANCE, IGNITE_ALWAYS);
   const critIgnite = chance(HIT | CRIT | chain, IGNITE_CHANCE, IGNITE_ALWAYS);
   const burnPerDamage =

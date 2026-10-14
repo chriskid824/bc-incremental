@@ -1,8 +1,8 @@
 /**
  * Death and drops (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2–3). Kills resolve
  * inline, at the hit or burn tick that kills, in this order:
- * 1. the kill's transfer triggers (src/sim/effects/dispatch.ts), then the rule modules' onKill
- *    hooks (pandemic's spread), while the victim still holds its ailments;
+ * 1. the kill's transfer triggers (Pandemic's spread; src/sim/effects/dispatch.ts), then the rule
+ *    modules' onKill hooks, while the victim still holds its ailments;
  * 2. removal, drops, the kill event and split children, so later hits of the same tick can
  *    reach the children;
  * 3. the kill's other triggers, recorded as pending kills.

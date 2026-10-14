@@ -2,9 +2,10 @@
  * Snapshot of the build estimators behind probe T6 (effectiveHit, attackDamage, crowdDps and
  * buildMultipliers in tools/balance/session.ts) and of the talent screen's build summary
  * (src/ui/describe.ts) for six fixed builds of the real talent web, which between them carry
- * every M1 rule on a talent node (Searing Crits and the bridge notables as modifiers since C3.3).
- * A refactor of how stats, tags and rules compile must keep the numbers within 1e-12 (exactly,
- * in practice) and the summary text unchanged.
+ * every M1 rule on a talent node (Searing Crits and the bridge notables as modifiers since C3.3,
+ * Pandemic as a trigger and a modifier since C3.7). A refactor of how stats, tags and rules
+ * compile must keep the numbers within 1e-12 (exactly, in practice) and the summary text
+ * unchanged.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -88,7 +89,8 @@ const EXPECTED: Readonly<Record<string, Expected>> = {
     ],
   },
   'dot+pandemic': {
-    rules: ['pandemic'],
+    // Pandemic is a trigger and a modifier since C3.7.
+    rules: [],
     effectiveHit: 403.73939610400015,
     attackDamage: 403.73939610400015,
     crowdDps: 8074.787922080003,

@@ -266,9 +266,17 @@ export const TALENTS: readonly TalentNode[] = [
     pos: at(DOT, 840),
     links: ['heat', 'wildfire'],
     // Cheaper than the other keystones: it adds no damage of its own (hit damage −30%) until
-    // burns spread, and spreading needs a burn on the dying enemy.
+    // burns spread, and spreading needs a burn on the dying enemy. The spread moves stacks, so
+    // it runs at the kill, while the dying enemy still burns (src/sim/effects/dispatch.ts).
     shardCostFactor: 2.5,
-    rules: [{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 }],
+    modifiers: [moreDmg(-0.3, 'hit')],
+    triggers: [
+      {
+        on: 'diedWithAilment',
+        when: [{ victimHas: 'burn' }],
+        do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 250, effect: 0.4 }],
+      },
+    ],
     archetype: 'dot',
   }),
 

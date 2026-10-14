@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { RuleSpec } from '../data/rules';
 import { BASE_STATS } from '../data/stats';
 import { DAMAGE_TAGS } from '../data/tags';
+import { TALENTS } from '../data/talents';
 import { setLocale, t } from '../i18n';
-import { makeStats, SEARING_CRITS_MODS } from '../sim/testing';
+import { makeStats, PANDEMIC_MODS, SEARING_CRITS_MODS } from '../sim/testing';
 import { describeBuild, describeModifier } from './describe';
 
 /** describeBuild as a label → value record. */
@@ -70,15 +71,11 @@ describe('describeBuild', () => {
     ).toBe('每 3 發一次');
   });
 
-  it('applies glassCannon, pandemic and overload', () => {
+  it('applies glassCannon, Pandemic’s hit cost and overload', () => {
     const glass = build([{ id: 'glassCannon', damageMore: 1 }]);
     expect(glass[t('stat.damage.hit')]).toBe('20');
     expect(glass[t('stat.maxLife')]).toBe('1');
-    expect(
-      build([{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.8, hitMore: -0.3 }])[
-        t('stat.damage.hit')
-      ],
-    ).toBe('7');
+    expect(build([], makeStats({}, PANDEMIC_MODS))[t('stat.damage.hit')]).toBe('7');
     const overload = build(
       [{ id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.15 }],
       makeStats({ chainCount: 1.5 }),
@@ -105,6 +102,14 @@ describe('describeModifier', () => {
       describeModifier({ stat: 'damage', kind: 'increased', value: 0.2, tags: ['burn'] }),
     ).toBe('20% increased Burn damage');
     expect(describeModifier({ stat: 'damage', kind: 'more', value: 0.1 })).toBe('10% more Damage');
+  });
+
+  it('shows Pandemic’s hit cost as a line, which its node text leaves out', () => {
+    const pandemic = TALENTS.find((node) => node.id === 'pandemic');
+    if (pandemic === undefined) throw new Error('missing pandemic');
+    expect(pandemic.modifiers.map(describeModifier)).toEqual(['30% less Hit damage']);
+    setLocale('zh-TW');
+    expect(pandemic.modifiers.map(describeModifier)).toEqual(['擊中傷害總減 30%']);
   });
 
   it('names the damage of every tag, each differently, in both locales', () => {

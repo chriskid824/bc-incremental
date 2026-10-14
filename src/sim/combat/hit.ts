@@ -115,10 +115,7 @@ export function hitWithPayload(
   const mask = crit ? plain | CRIT : plain;
   const source = jump ? p.jumpSource : p.source;
   const flags = p.flags | HIT_EVENT | (jump ? CHAIN_JUMP : 0) | (crit ? CRIT_HIT : 0);
-  let amount =
-    p.damageMode === PRESCALED
-      ? base
-      : mul(base, statAt(table, row, DAMAGE, ev) * build.legacyHitMult);
+  let amount = p.damageMode === PRESCALED ? base : mul(base, statAt(table, row, DAMAGE, ev));
   if (build.hooks.modifyDamage.length !== 0) {
     amount = modifyDamage(ctx, enemy, amount, mask, source, crit, k, depth, origin, flags);
   }

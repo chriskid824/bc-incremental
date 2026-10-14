@@ -41,7 +41,6 @@ describe('compileBuild', () => {
     expect(build.triggers).toEqual([]);
     expect(build.effects).toEqual([]);
     expect(build.triggersOn.every((list) => list.length === 0)).toBe(true);
-    expect(build.legacyHitMult).toBe(1);
     expect(build.sources.names).toEqual(['center']);
     const table = modTableFor(stats);
     for (const mask of MASKS) {
@@ -142,23 +141,26 @@ describe('compileBuild', () => {
   });
 
   it('compiles the rules in order of first appearance, then the test modules', () => {
-    const seen: number[] = [];
+    const seen: (number | null)[] = [];
     const rules: RuleSpec[] = [
-      { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.1 },
-      { id: 'pandemic', spreadRadius: 100, spreadEffect: 0.5, hitMore: 0 },
-      { id: 'overload', chainCountMultiplier: 1.5, retentionPenalty: 0.1 },
+      { id: 'glassCannon', damageMore: 0.5 },
+      { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.1, chainMore: 1 },
+      { id: 'glassCannon', damageMore: 0.25 },
+      { id: 'overload', chainCountMultiplier: 1.5, retentionPenalty: 0.1, chainMore: 2 },
     ];
     const onKill = (): void => undefined;
     const build = compileBuild(makeStats({ chainCount: 1 }), rules, undefined, [
       (b, source) => {
-        // Both overload instances compiled already.
-        seen.push(b.values.chainCount, source, b.source('center'), b.source('outer.lightning'));
+        // Every instance of both rules compiled already.
+        seen.push(b.values.chainCount, b.flags.maxLife);
+        seen.push(source, b.source('center'), b.source('outer.lightning'));
         b.hook('onKill', onKill);
       },
     ]);
-    expect(seen).toEqual([3, 0, 0, 1]);
+    expect(seen).toEqual([3, 1, 0, 0, 1]);
+    // Each rule's added modifiers together, the rules in the order they first appear.
+    expect(build.mods.map((mod) => mod.value)).toEqual([0.5, 0.25, 1, 2]);
     expect(build.sources.names).toEqual(['center', 'outer.lightning']);
-    expect(build.hooks.onKill).toHaveLength(2);
-    expect(build.hooks.onKill[1]).toBe(onKill);
+    expect(build.hooks.onKill).toEqual([onKill]);
   });
 });

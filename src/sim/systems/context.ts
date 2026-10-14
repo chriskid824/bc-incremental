@@ -350,7 +350,7 @@ export function createRunContext(
   testModules: readonly TestModule[] = [],
 ): RunContext {
   const build = compileBuild(config.stats, config.rules, config.signature, testModules);
-  const { values, flags, signature, legacyHitMult, sources, attribution, table } = build;
+  const { values, flags, signature, sources, attribution, table } = build;
   const {
     spawn: spawnRng,
     split: splitRng,
@@ -381,10 +381,9 @@ export function createRunContext(
   const averageCrit = forceCritEvery > 0 ? 1 / forceCritEvery : clamp01(values.critChance);
   const expectedHit =
     toNumber(signaturePayload.baseDamage) *
-    ((1 - averageCrit) * hitMult * legacyHitMult +
-      averageCrit * critMultiplier * critHitMult * legacyHitMult);
+    ((1 - averageCrit) * hitMult + averageCrit * critMultiplier * critHitMult);
 
-  const projectileEstimate = mul(signaturePayload.baseDamage, hitMult * legacyHitMult);
+  const projectileEstimate = mul(signaturePayload.baseDamage, hitMult);
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];

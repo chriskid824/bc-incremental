@@ -27,7 +27,7 @@ import { dispatchPendingKills } from './dispatch';
 import { runEffectQueue } from './execute';
 import { HIT_EVENT, KILL_BY_BURN, KILL_BY_HIT, KILLED, killKindFlag, SIGNATURE } from './flags';
 import { enqueue } from './queue';
-import { EFFECT_QUEUE_HARD_CAP, EFFECTS_PER_TICK, EVENT } from './types';
+import { EFFECT_QUEUE_HARD_CAP, EFFECTS_PER_TICK, EVENT, MAX_DEPTH } from './types';
 import type { CompiledTrigger } from './types';
 
 type HitEvent = Extract<SimEvent, { type: 'hit' }>;
@@ -624,9 +624,49 @@ describe('kill triggers', () => {
       [885, 14, 0],
     ]);
     expect(hash.digest('hex').slice(0, 16)).toBe('1327e1c24d33ed46');
-    // No spread was cut short by the depth limit; transfers never go through the queue.
+    // Transfers are not depth-capped and never go through the queue.
     expect(result.counters.triggerDepthCapped).toBe(0);
     expect(result.counters.effectsRun).toBe(0);
+  });
+
+  it('fires transfer triggers at any kill depth, while other kill triggers keep the limit (D5)', () => {
+    const stats = makeStats(
+      {},
+      [],
+      center(
+        {
+          on: 'diedWithAilment',
+          when: [{ victimHas: 'burn' }],
+          do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 5000, effect: 0.4 }],
+        },
+        { on: 'kill', do: [{ kind: 'heal', lifePct: 0.01 }] },
+      ),
+    );
+    for (const depth of [MAX_DEPTH - 1, MAX_DEPTH]) {
+      const ctx = spawned(stats, stationarySquares(2, 1));
+      const [victim, neighbour] = ctx.enemies as [Enemy, Enemy];
+      // A burn applied at `depth` burns the victim to death: the kill carries that depth.
+      addBurn(ctx, victim, num(1), 61, depth);
+      victim.killKind = KILL_BY_BURN;
+      victim.killDepth = victim.ailDepth;
+      expect(victim.killDepth).toBe(depth);
+      killEnemy(ctx, victim, -1, 0);
+      // The spread fires at either depth; its stacks run one deeper, at most MAX_DEPTH.
+      expect(eventsOf([ctx.events], 'burnSpread')).toMatchObject([
+        { enemyId: victim.id, targets: 1 },
+      ]);
+      expect(neighbour.burns.map((stack) => [stack.dps, stack.end, stack.depth])).toEqual([
+        [mul(num(1), 0.4), 61, MAX_DEPTH],
+      ]);
+      expect(ctx.counters.triggerDepthCapped).toBe(0);
+      // The heal is recorded either way, and capped at dispatch at MAX_DEPTH only.
+      const [heal] = listening(ctx, EVENT.kill);
+      expect(ctx.pendingKills.slice(0, ctx.pendingCount).map((e) => e.trigger)).toEqual([heal]);
+      dispatchPendingKills(ctx);
+      const capped = depth >= MAX_DEPTH;
+      expect(queued(ctx).map((entry) => entry.origin)).toEqual(capped ? [] : [heal]);
+      expect(ctx.counters.triggerDepthCapped).toBe(capped ? 1 : 0);
+    }
   });
 });
 

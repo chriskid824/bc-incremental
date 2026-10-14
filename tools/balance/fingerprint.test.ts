@@ -8,6 +8,8 @@ import {
   BRIDGE_MODS,
   damageRow,
   maskProbeMods,
+  PANDEMIC_MODS,
+  PANDEMIC_TRIGGER,
   projectEvent,
   projectResult,
   SEARING_CRITS_MODS,
@@ -38,7 +40,11 @@ describe('fingerprint cases', () => {
     const rulesOf = (id: string): string[] =>
       (cases.find((c) => c.id === id)?.config.rules ?? []).map((rule) => rule.id);
     expect(rulesOf('talent/crit/keystone/s1/w1')).toEqual(['steadyAim']);
-    expect(rulesOf('talent/dot/keystone/s1/w1')).toEqual(['pandemic']);
+    // Pandemic is a data trigger since C3.7.
+    expect(rulesOf('talent/dot/keystone/s1/w1')).toEqual([]);
+    const dot = cases.find((c) => c.id === 'talent/dot/keystone/s1/w1')?.config.stats;
+    expect(dot?.triggers).toEqual([{ source: 'center', spec: PANDEMIC_TRIGGER }]);
+    expect(dot?.scoped).toContainEqual(PANDEMIC_MODS[0]);
     expect(rulesOf('talent/chain/keystone/s1/w1')).toEqual(['overload']);
     expect(rulesOf('talent/dot/glassCannon/s1/w1')).toEqual(['glassCannon']);
     expect(rulesOf('talent/chain/plain/s1/w1')).toEqual([]);
@@ -62,6 +68,18 @@ describe('fingerprint cases', () => {
     for (const set of ['searing', 'bridges']) {
       expect(RULE_SETS[set]?.rules).toEqual([]);
     }
+  });
+
+  it('runs Pandemic as its modifier and trigger in its synthetic sets', () => {
+    const stats = (id: string) => cases.find((c) => c.id === id)?.config.stats;
+    const pandemic = { source: 'center', spec: PANDEMIC_TRIGGER };
+    for (const id of ['real/burn/pandemic/s1/w1', 'test/tank/eternalPandemic/s2/w12']) {
+      expect(stats(id)?.scoped).toEqual([...maskProbeMods(), ...PANDEMIC_MODS]);
+      expect(stats(id)?.triggers).toEqual([pandemic]);
+    }
+    expect(RULE_SETS['pandemic']?.rules).toEqual([]);
+    expect(RULE_SETS['eternalPandemic']?.rules.map((rule) => rule.id)).toEqual(['eternalFlame']);
+    expect(stats('real/burn/eternal/s1/w1')?.triggers).toEqual([]);
   });
 
   it('gives the synthetic builds the damage table of maskProbeMods', () => {

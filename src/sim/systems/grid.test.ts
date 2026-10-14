@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { stdHp } from '../../data/curve';
 import { createSimulation } from '../simulation';
-import { makeConfig, makeStats, makeTestData } from '../testing';
+import {
+  centerTriggers,
+  makeConfig,
+  makeStats,
+  makeTestData,
+  PANDEMIC_MODS,
+  PANDEMIC_TRIGGER,
+} from '../testing';
 import { NO_INPUT } from '../types';
 import type { RunConfig } from '../types';
 import type * as GridSystem from './grid';
@@ -65,16 +72,19 @@ const SCENARIOS: Record<string, Partial<RunConfig>> = {
     }),
   },
   pandemic: {
-    stats: makeStats({
-      damage: HP * 0.5,
-      attackSpeed: 5,
-      projectileCount: 3,
-      igniteChance: 0.7,
-      burnMaxStacks: 6,
-      chainCount: 2,
-      maxLife: 1e12,
-    }),
-    rules: [{ id: 'pandemic', spreadRadius: 250, spreadEffect: 0.4, hitMore: -0.3 }],
+    stats: makeStats(
+      {
+        damage: HP * 0.5,
+        attackSpeed: 5,
+        projectileCount: 3,
+        igniteChance: 0.7,
+        burnMaxStacks: 6,
+        chainCount: 2,
+        maxLife: 1e12,
+      },
+      PANDEMIC_MODS,
+      centerTriggers([PANDEMIC_TRIGGER]),
+    ),
   },
 };
 

@@ -19,8 +19,6 @@ function quotedNumbers(rule: RuleSpec): string[][] {
   switch (rule.id) {
     case 'steadyAim':
       return [[String(rule.everyNth)], [`×${1 + rule.critMultiplierMore}`]];
-    case 'pandemic':
-      return [[percent(rule.spreadEffect)], [signedPercent(rule.hitMore)]];
     case 'eternalFlame':
       return [[signedPercent(rule.durationMore)]];
     case 'overload':
@@ -114,7 +112,7 @@ describe('rule descriptions', () => {
       node.rules.length > 0 || node.triggers.length > 0 || node.modifiers.some(isBehaviourModifier),
   );
 
-  it('covers the M1 rules and the bridge notables and Searing Crits as data', () => {
+  it('covers the M1 rules, and the bridge notables, Searing Crits and Pandemic as data', () => {
     expect(described.map((node) => node.id).sort()).toEqual(
       [
         'conduction',
@@ -155,6 +153,15 @@ describe('rule descriptions', () => {
     expect(numbersOf('conduction')).toEqual([['+25%']]);
     expect(numbersOf('staticFocus')).toEqual([['+10%']]);
     expect(numbersOf('searingCrits')).toEqual([['−50%']]);
+  });
+
+  it('reads Pandemic’s numbers from its trigger', () => {
+    const pandemic = TALENTS.find((node) => node.id === 'pandemic');
+    if (pandemic === undefined) throw new Error('missing pandemic');
+    expect(pandemic.rules).toEqual([]);
+    // The spread's strength; the hit cost is a plain modifier, shown as its own line.
+    expect(nodeNumbers(pandemic)).toEqual([['40%']]);
+    expect(pandemic.modifiers.filter(isBehaviourModifier)).toEqual([]);
   });
 
   it('reads the numbers of triggers', () => {

@@ -4,7 +4,8 @@
  * hold, each of its effects is queued (queue.ts) and runs in the tick's effect phase
  * (execute.ts), at one depth more than the event. The rules that bound chains of triggers:
  * - depth: an event at depth MAX_DEPTH or more raises nothing (counted in triggerDepthCapped);
- *   a depth-3 effect still runs. Emitter hits are depth 0;
+ *   a depth-3 effect still runs. Emitter hits are depth 0. A kill's transfer triggers (inline)
+ *   are the exception: they fire at any depth (dispatch.ts);
  * - a trigger never fires on its own direct damage: each queued effect carries the index of the
  *   trigger that queued it as its origin, and damage it deals carries that origin;
  * - at most EFFECTS_PER_TICK effects run per tick; the rest wait for the next tick, and past
@@ -26,7 +27,7 @@ import { compileCondition } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import { TICK_RATE } from '../types';
 
-/** Events at this depth or deeper raise no triggers. */
+/** Events at this depth or deeper raise no triggers but a kill's transfers. */
 export const MAX_DEPTH = 3;
 /** Effects run per tick at most; the rest carry over. */
 export const EFFECTS_PER_TICK = 2000;
