@@ -3,21 +3,24 @@
  * EmitterSpec says what an emitter is; each run gives it an EmitterRuntime with its counters and
  * a Payload, the compiled form of its damage: base damage, tags, credit sources, RNG stream,
  * flags and the ModTable rows of its hits and ailments, cached by slot. The signature attack is
- * the emitter at index 0 (CompiledBuild.emitters); M1's is the volley (volley.ts).
+ * the emitter at index 0 (CompiledBuild.emitters); M1's is the volley (volley.ts). The talent
+ * nodes' emitter grants (src/data/emitters.ts) follow it, such as thorns, whose hits the contact
+ * stage deals (src/sim/systems/contact.ts).
  */
 
 import type { Num } from '../../core/num';
 import { mul, num } from '../../core/num';
 import type { Rng } from '../../core/rng';
+import { THORNS_DAMAGE_PCT } from '../../data/emitters';
+import type { EmitterGrant } from '../../data/emitters';
 import { ailmentMask, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { CompiledBuild } from '../build/compile';
 import { ailmentCredit, rowKey } from '../build/sources';
 import { TICK_RATE } from '../types';
 
-export interface EmitterSpec {
-  /** How the emitter attacks: 'volley' fires homing projectiles (volley.ts). */
-  readonly kind: 'volley';
+/** What every emitter kind has: how its payload is made (emitterPayload). */
+interface EmitterBase {
   /** The character's signature attack (rule 8 of the triggers); sets SIGNATURE on its payload. */
   readonly signature: boolean;
   /** Source id its damage is credited to (src/data/sources.ts). */
@@ -29,6 +32,42 @@ export interface EmitterSpec {
   readonly chains: boolean;
   readonly rollsAilments: boolean;
   readonly canCrit: boolean;
+}
+
+/** Fires volleys of homing projectiles (volley.ts). */
+export interface VolleySpec extends EmitterBase {
+  readonly kind: 'volley';
+}
+
+/**
+ * A thorns grant: hits each enemy that touches the player before it deals its contact damage
+ * (src/sim/systems/contact.ts). It never attacks on its own.
+ */
+export interface ThornsSpec extends EmitterBase {
+  readonly kind: 'thorns';
+}
+
+/** What an emitter is; `kind` says how it deals its damage. */
+export type EmitterSpec = VolleySpec | ThornsSpec;
+
+/**
+ * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
+ * never the signature attack, never chaining.
+ */
+export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
+  switch (grant.kind) {
+    case 'thorns':
+      return {
+        kind: 'thorns',
+        signature: false,
+        source,
+        damagePct: grant.damagePct ?? THORNS_DAMAGE_PCT,
+        tags: TAG.hit | TAG.thorns,
+        chains: false,
+        rollsAilments: true,
+        canCrit: true,
+      };
+  }
 }
 
 /**
@@ -149,6 +188,9 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
   switch (spec.kind) {
     case 'volley':
       return periodTicks((VOLLEY_RATE * build.values.attackSpeed) / BASE_ATTACK_SPEED);
+    case 'thorns':
+      // Its hits come with the contacts, not on a period.
+      return Infinity;
   }
 }
 

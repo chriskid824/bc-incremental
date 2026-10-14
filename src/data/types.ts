@@ -4,6 +4,7 @@
  * files under `src/data/` and is validated on load.
  */
 
+import type { EmitterGrant } from './emitters';
 import type { Modifier } from './stats';
 import type { RuleSpec } from './rules';
 import type { ConversionSpec, TriggerSpec } from './triggers';
@@ -88,12 +89,17 @@ export interface TalentNode {
   readonly triggers: readonly TriggerSpec[];
   /** Damage conversions of hits, granted once (or per rank for repeatable nodes). */
   readonly conversions: readonly ConversionSpec[];
+  /**
+   * Emitters the node adds to the run, such as thorns (src/data/emitters.ts): granted once, also
+   * on repeatable nodes, credited to the node's source.
+   */
+  readonly emitters: readonly EmitterGrant[];
   /** Archetype for UI color and balance reporting. */
   readonly archetype: 'none' | 'crit' | 'dot' | 'chain' | 'hybrid';
   readonly nameKey: string;
   /**
-   * Text for what the node's rules, triggers, conversions and behaviour modifiers do; required
-   * exactly when it has any (needsDescKey, src/data/validate.ts).
+   * Text for what the node's rules, triggers, conversions, emitters and behaviour modifiers do;
+   * required exactly when it has any (needsDescKey, src/data/validate.ts).
    */
   readonly descKey?: string;
 }

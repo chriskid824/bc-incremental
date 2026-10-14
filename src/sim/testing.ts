@@ -455,7 +455,11 @@ export const PANDEMIC_MODS: readonly Modifier[] = [
 
 /** Stat extras (makeStats) with these triggers, credited to the center as an M1 node's are. */
 export function centerTriggers(triggers: readonly TriggerSpec[]): StatExtras {
-  return { triggers: triggers.map((spec) => ({ source: 'center', spec })), conversions: [] };
+  return {
+    triggers: triggers.map((spec) => ({ source: 'center', spec })),
+    conversions: [],
+    emitters: [],
+  };
 }
 
 const golden = (

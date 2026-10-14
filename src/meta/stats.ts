@@ -3,6 +3,7 @@
  * (docs/ARCHITECTURE.md §3, §4.4).
  */
 
+import type { SourcedEmitter } from '../data/emitters';
 import type { RuleSpec } from '../data/rules';
 import { sourceOfNode } from '../data/sources';
 import { BASE_STATS, isScopedStat, STAT_IDS } from '../data/stats';
@@ -33,21 +34,29 @@ export function collectModifiers(meta: Readonly<MetaState>, data: GameData): Mod
 
 /**
  * Triggers and conversions of the start node and every allocated node, repeated per rank like
- * modifiers, each with its node's source (sourceOfNode), in data order.
+ * modifiers, and their emitter grants, once per node whatever its rank; each with its node's
+ * source (sourceOfNode), in data order.
  */
 export function collectExtras(meta: Readonly<MetaState>, data: GameData): StatExtras {
   const triggers: SourcedTrigger[] = [];
   const conversions: SourcedConversion[] = [];
+  const emitters: SourcedEmitter[] = [];
   for (const node of data.talents) {
     const rank = nodeRank(meta, node);
-    if (rank === 0 || (node.triggers.length === 0 && node.conversions.length === 0)) continue;
+    if (
+      rank === 0 ||
+      (node.triggers.length === 0 && node.conversions.length === 0 && node.emitters.length === 0)
+    ) {
+      continue;
+    }
     const source = sourceOfNode(node.id);
     for (let r = 0; r < rank; r++) {
       for (const spec of node.triggers) triggers.push({ source, spec });
       for (const spec of node.conversions) conversions.push({ source, spec });
     }
+    for (const grant of node.emitters) emitters.push({ source, grant });
   }
-  return { triggers, conversions };
+  return { triggers, conversions, emitters };
 }
 
 /** Rules of the start node and every allocated node, once each. */
@@ -72,7 +81,7 @@ interface Accumulator {
  * order; tagged, scoped, conditional and scaling ones go only there, and the simulation folds
  * them per damage instance (src/sim/build/modTable.ts). An empty list counts as none. Throws on
  * tags, notTags, a scope, conditions or a scaling outside scoped stats or on flat damage, which
- * data validation should prevent. The extras (triggers, conversions) pass through.
+ * data validation should prevent. The extras (triggers, conversions, emitters) pass through.
  */
 export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExtras): StatBlock {
   const acc = {} as Record<StatId, Accumulator>;
@@ -114,6 +123,7 @@ export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExt
     scoped,
     triggers: extras.triggers,
     conversions: extras.conversions,
+    emitters: extras.emitters,
   };
 }
 

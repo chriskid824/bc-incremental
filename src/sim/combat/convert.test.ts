@@ -32,6 +32,7 @@ const { poison: POISON, bleed: BLEED, cold: COLD, burn: BURN } = TAG;
 const converting = (...specs: ConversionSpec[]): StatExtras => ({
   triggers: [],
   conversions: specs.map((spec) => ({ source: 'center', spec })),
+  emitters: [],
 });
 
 const more = (value: number, ...tags: DamageTag[]): Modifier => ({

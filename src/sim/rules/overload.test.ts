@@ -74,7 +74,11 @@ describe('overload', () => {
     const stats = makeStats(
       { damage: 10, critChance: 0, chainCount: 2, chainRetention: 1, chainRange: 5000 },
       [],
-      { triggers: [], conversions: [{ source: 'center', spec: { to: 'poison', fraction: 0.3 } }] },
+      {
+        triggers: [],
+        conversions: [{ source: 'center', spec: { to: 'poison', fraction: 0.3 } }],
+        emitters: [],
+      },
     );
     const neutral = { id: 'overload', chainCountMultiplier: 1, retentionPenalty: 0 } as const;
     const recorded = (rules: RuleSpec[]) =>

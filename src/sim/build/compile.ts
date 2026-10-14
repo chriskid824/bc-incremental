@@ -5,8 +5,9 @@
  * offset stats, add modifiers, set flags and the signature attack's parameters, and add
  * triggers, effects and hooks. The result holds the final stat values, the ModTable of the
  * build's scoped modifiers followed by the rule-added ones, the run's damage sources and ailment
- * attribution, the hook lists, the emitters, the signature's first, the triggers with their
- * effects: the built-in shatter (SHATTER_TRIGGER) first, then the build's own
+ * attribution, the hook lists, the emitters: the signature's first, then the emitter grants, the
+ * build's (StatBlock.emitters) and the modules', one per kind, source and key; the triggers with
+ * their effects: the built-in shatter (SHATTER_TRIGGER) first, then the build's own
  * (StatBlock.triggers), then the modules', in compile order (src/sim/effects/types.ts); and the
  * build's damage conversions, which the ModTable lists per hit row (src/sim/combat/convert.ts).
  *
@@ -16,6 +17,8 @@
  * one into a run.
  */
 
+import { grantKey } from '../../data/emitters';
+import type { SourcedEmitter } from '../../data/emitters';
 import { M1_SIGNATURE } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { isScopedStat, SCOPED_STATS, STAT_IDS } from '../../data/stats';
@@ -32,6 +35,7 @@ import {
   shatterTrigger,
 } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
+import { grantEmitter } from '../emitters/types';
 import type { EmitterSpec } from '../emitters/types';
 import { RULE_MODULES, SIGNATURES } from '../rules';
 import type { BuildCompiler, HookName, Hooks, TestModule } from '../rules';
@@ -101,7 +105,9 @@ export interface CompiledBuild {
   readonly hooks: { readonly [K in HookName]: readonly Hooks[K][] };
   /** The trigger index of the module instance that added each hook, in the same order. */
   readonly hookOwners: { readonly [K in HookName]: readonly number[] };
-  /** The run's emitters; index 0 is the signature attack. */
+  /**
+   * The run's emitters; index 0 is the signature attack, then the granted ones (grantEmitters).
+   */
   readonly emitters: readonly EmitterSpec[];
   /**
    * Every trigger, by trigger index: SHATTER_TRIGGER first, which listens to kill only when the
@@ -146,6 +152,23 @@ function signatureEmitter<K extends SignatureId>(
   spec: Extract<SignatureSpec, { id: K }>,
 ): EmitterSpec {
   return SIGNATURES[id].emitter(spec);
+}
+
+/**
+ * The emitters of the grants, in grant order, the first of each kind, source and key
+ * (grantKey): a node grants each emitter once, and nodes of one source that grant the same one
+ * agree on its fields (data validation), so dropping the others loses nothing.
+ */
+function grantEmitters(grants: readonly SourcedEmitter[]): EmitterSpec[] {
+  const seen = new Set<string>();
+  const emitters: EmitterSpec[] = [];
+  for (const { source, grant } of grants) {
+    const id = `${grant.kind}|${source}|${grantKey(grant)}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    emitters.push(grantEmitter(source, grant));
+  }
+  return emitters;
 }
 
 /**
@@ -202,6 +225,8 @@ export function compileBuild(
     modifyDamage: [],
     onCenterEvent: [],
   };
+  // The talent nodes' emitter grants, then the ones modules add.
+  const grants: SourcedEmitter[] = [...stats.emitters];
   // SHATTER_TRIGGER's index; its entry is decided once every module has compiled.
   const triggers: CompiledTrigger[] = [shatterTrigger(false, 0)];
   const effects: CompiledEffect[] = [];
@@ -258,6 +283,9 @@ export function compileBuild(
       effects.push(compileEffect(spec, sources.index(source), coef, values.damage));
       return effects.length - 1;
     },
+    addEmitter(source, grant) {
+      grants.push({ source, grant });
+    },
   };
 
   for (const { source, spec } of stats.triggers) addTrigger(sources.index(source), spec, 1);
@@ -305,7 +333,7 @@ export function compileBuild(
     signature: params,
     hooks,
     hookOwners,
-    emitters: [signatureEmitter(signature.id, signature)],
+    emitters: [signatureEmitter(signature.id, signature), ...grantEmitters(grants)],
     triggers,
     triggersOn,
     effects,

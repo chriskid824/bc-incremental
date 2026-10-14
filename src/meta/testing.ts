@@ -19,6 +19,7 @@ type TalentExtras = Partial<
     | 'rules'
     | 'triggers'
     | 'conversions'
+    | 'emitters'
     | 'archetype'
     | 'pos'
   >
@@ -26,7 +27,7 @@ type TalentExtras = Partial<
 
 /**
  * A node with empty lists by default; like src/data/talents.ts node(), it gets a descKey when
- * it has rules, triggers, conversions or behaviour modifiers (needsDescKey).
+ * it has rules, triggers, conversions, emitters or behaviour modifiers (needsDescKey).
  */
 export function talent(
   id: string,
@@ -43,6 +44,7 @@ export function talent(
     rules: [],
     triggers: [],
     conversions: [],
+    emitters: [],
     archetype: 'none',
     nameKey: `talent.${id}.name`,
     ...extras,

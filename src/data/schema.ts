@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import type { EmitterGrant, GrantKind } from './emitters';
 import type { RuleSpec } from './rules';
 import { isSourceSelector } from './sources';
 import type { SourceSelector } from './sources';
@@ -318,6 +319,21 @@ export const RuleSpecSchema = exact<RuleSpec>()(
   ]),
 );
 
+/**
+ * The schema of each emitter grant kind (src/data/emitters.ts). Typed over the kinds, so a new
+ * kind needs its entry here; EmitterGrantSchema joins them. They live here rather than in
+ * emitters.ts, which the simulation imports, so that zod stays out of the simulation's modules.
+ */
+export const GRANT_SCHEMAS = {
+  thorns: z
+    .strictObject({ kind: z.literal('thorns'), damagePct: finite.exactOptional() })
+    .readonly(),
+} as const satisfies { readonly [K in GrantKind]: z.ZodType<Extract<EmitterGrant, { kind: K }>> };
+
+export const EmitterGrantSchema = exact<EmitterGrant>()(
+  z.discriminatedUnion('kind', [GRANT_SCHEMAS.thorns]),
+);
+
 export const EnemyDefSchema = exact<EnemyDef>()(
   z
     .strictObject({
@@ -377,6 +393,7 @@ export const TalentNodeSchema = exact<TalentNode>()(
       rules: z.array(RuleSpecSchema).readonly(),
       triggers: z.array(TriggerSpecSchema).readonly(),
       conversions: z.array(ConversionSpecSchema).readonly(),
+      emitters: z.array(EmitterGrantSchema).readonly(),
       archetype: z.enum(TALENT_ARCHETYPES),
       nameKey: z.string(),
       descKey: z.string().exactOptional(),

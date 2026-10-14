@@ -42,6 +42,7 @@ const heal = { kind: 'heal', lifePct: 0.01 } as const;
 const sourced = (source: string, ...specs: TriggerSpec[]): StatExtras => ({
   triggers: specs.map((spec) => ({ source, spec })),
   conversions: [],
+  emitters: [],
 });
 
 /**
@@ -197,6 +198,7 @@ describe('the freeze payload limit (A28)', () => {
         ...sourced('fusion.ice.fire', { on: 'freeze', do: [heal] }).triggers,
       ],
       conversions: [],
+      emitters: [],
     });
     const ctx = spawned(stats, field(12), [fusionHook]);
     const [own, fusion] = ctx.build.triggersOn[EVENT.freeze] as Int32Array;

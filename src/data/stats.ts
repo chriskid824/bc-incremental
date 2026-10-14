@@ -3,6 +3,7 @@
  * See docs/GDD.md §3 for the meaning of each stat.
  */
 
+import type { SourcedEmitter } from './emitters';
 import type { SourceSelector } from './sources';
 import type { DamageTag } from './tags';
 import type { ConversionSpec, ScalingSpec, TargetCondition, TriggerSpec } from './triggers';
@@ -230,13 +231,17 @@ export interface SourcedConversion {
   readonly spec: ConversionSpec;
 }
 
-/** Triggers and conversions of the allocated nodes, with their sources, in data order. */
+/**
+ * Triggers, conversions and emitter grants (src/data/emitters.ts) of the allocated nodes, with
+ * their sources, in data order.
+ */
 export interface StatExtras {
   readonly triggers: readonly SourcedTrigger[];
   readonly conversions: readonly SourcedConversion[];
+  readonly emitters: readonly SourcedEmitter[];
 }
 
-export const NO_EXTRAS: StatExtras = { triggers: [], conversions: [] };
+export const NO_EXTRAS: StatExtras = { triggers: [], conversions: [], emitters: [] };
 
 /** Final stats handed to the simulation for one run. */
 export interface StatBlock {
@@ -256,4 +261,5 @@ export interface StatBlock {
   readonly scoped: readonly Modifier[];
   readonly triggers: StatExtras['triggers'];
   readonly conversions: StatExtras['conversions'];
+  readonly emitters: StatExtras['emitters'];
 }

@@ -38,6 +38,7 @@ type HitEvent = Extract<SimEvent, { type: 'hit' }>;
 const center = (...specs: TriggerSpec[]): StatExtras => ({
   triggers: specs.map((spec) => ({ source: 'center', spec })),
   conversions: [],
+  emitters: [],
 });
 
 /** Runs to the end, keeping each tick's events (index i holds tick i + 1's). */
@@ -154,6 +155,7 @@ describe('hit triggers', () => {
         { source: 'outer.lightning', spec: explode('lightning') },
       ],
       conversions: [],
+      emitters: [],
     });
     const ctx = spawned(stats, stationarySquares(1));
     return { ctx, target: ctx.enemies[0] as Enemy };

@@ -14,7 +14,9 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { mul, num } from '../core/num';
+import type { Modifier } from '../data/stats';
 import { TAG } from '../data/tags';
+import type { TriggerSpec } from '../data/triggers';
 import type { GameData } from '../data/types';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { createPayload, ROWS } from './emitters/types';
@@ -22,7 +24,14 @@ import type { Payload } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
 import { MOTION_HOMING, MOTION_LOB, MOTION_STRAIGHT, spawnShot } from './systems/shots';
-import { GOLDEN_BUILDS, makeConfig, makeTestData, projectResult } from './testing';
+import {
+  GOLDEN_BUILDS,
+  makeConfig,
+  makeStats,
+  makeTestData,
+  maskProbeMods,
+  projectResult,
+} from './testing';
 import { COUNTER_IDS, NO_INPUT } from './types';
 import type { CounterId, RunConfig } from './types';
 
@@ -140,6 +149,30 @@ function shotsModule(): TestModule {
   return Object.assign(module, { source: 'outer.barrage' });
 }
 
+/**
+ * C4.3's thorns: outer.thorns grants thorns at the default 300% and the center at 100%, each
+ * contact raises a thorns nova at the toucher, and thorns damage is doubled by a thorns-scoped
+ * more. The volley is too weak to clear wave 12, so some touchers die to the thorns (pentagons
+ * among them, whose shards touch from the next tick) and others leak.
+ */
+const THORNS_NOVA: TriggerSpec = {
+  on: 'contact',
+  do: [{ kind: 'nova', radius: 120, damagePct: 1.5, tags: ['thorns'], at: 'event' }],
+};
+const THORNS_MORE: Modifier = { stat: 'damage', kind: 'more', value: 1, tags: ['thorns'] };
+const THORNS_STATS = makeStats(
+  { damage: 5, maxLife: 1e6, critChance: 0.2, critMultiplier: 2, igniteChance: 0.3 },
+  [...maskProbeMods(), THORNS_MORE],
+  {
+    triggers: [{ source: 'center', spec: THORNS_NOVA }],
+    conversions: [],
+    emitters: [
+      { source: 'outer.thorns', grant: { kind: 'thorns' } },
+      { source: 'center', grant: { kind: 'thorns', damagePct: 1 } },
+    ],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -147,6 +180,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { ...GOLDEN_BUILDS.bridges, startWave: 8 },
     modules: () => [shotsModule()],
     expected: ['d32decc45c4cb5c1', 'a3baa3324af324b2'],
+  },
+  {
+    name: 'thorns',
+    config: { stats: THORNS_STATS, rules: [], startWave: 12 },
+    expected: ['9a4af4a9ea58986a', 'be2d89ddac3465ef'],
   },
 ];
 

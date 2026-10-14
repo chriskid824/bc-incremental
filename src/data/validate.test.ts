@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { EmitterGrant } from './emitters';
 import { ENEMIES } from './enemies';
 import { loadGameData, parseGameData } from './index';
 import { TALENTS } from './talents';
@@ -34,6 +35,7 @@ function smallNode(id: string, links: string[]): Mutable<TalentNode> {
     rules: [],
     triggers: [],
     conversions: [],
+    emitters: [],
     archetype: 'none',
     nameKey: `talent.${id}.name`,
   };
@@ -166,7 +168,7 @@ describe('validateGameData: talents', () => {
       issuesAfter((d) => talent(d, 'vitality').rules.push({ id: 'glassCannon', damageMore: 1 })),
     ).toEqual([
       "talent 'vitality': only keystones and notables may have rules",
-      "talent 'vitality': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+      "talent 'vitality': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
     ]);
     expect(
       issuesAfter((d) => {
@@ -175,7 +177,7 @@ describe('validateGameData: talents', () => {
         delete node.descKey;
       }),
     ).toEqual([
-      "talent 'glassCannon': keystone needs a rule, a trigger, a conversion or a behaviour modifier",
+      "talent 'glassCannon': keystone needs a rule, a trigger, a conversion, an emitter or a behaviour modifier",
     ]);
   });
 
@@ -189,8 +191,8 @@ describe('validateGameData: talents', () => {
         talent(d, 'searingCrits').modifiers = [{ stat: 'damage', kind: 'more', value: -0.5 }];
       }),
     ).toEqual([
-      "talent 'searingCrits': keystone needs a rule, a trigger, a conversion or a behaviour modifier",
-      "talent 'searingCrits': descKey describes rules, triggers, conversions and behaviour modifiers; this node has none",
+      "talent 'searingCrits': keystone needs a rule, a trigger, a conversion, an emitter or a behaviour modifier",
+      "talent 'searingCrits': descKey describes rules, triggers, conversions, emitters and behaviour modifiers; this node has none",
     ]);
   });
 
@@ -205,8 +207,8 @@ describe('validateGameData: talents', () => {
         talent(d, 'pandemic').triggers = [];
       }),
     ).toEqual([
-      "talent 'pandemic': keystone needs a rule, a trigger, a conversion or a behaviour modifier",
-      "talent 'pandemic': descKey describes rules, triggers, conversions and behaviour modifiers; this node has none",
+      "talent 'pandemic': keystone needs a rule, a trigger, a conversion, an emitter or a behaviour modifier",
+      "talent 'pandemic': descKey describes rules, triggers, conversions, emitters and behaviour modifiers; this node has none",
     ]);
   });
 
@@ -266,12 +268,12 @@ describe('validateGameData: talents', () => {
       });
     });
     expect(issues).toEqual([
-      "talent 'glassCannon': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
-      "talent 'vitality': descKey describes rules, triggers, conversions and behaviour modifiers; this node has none",
-      "talent 'keenEye': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
-      "talent 'precision': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
-      "talent 'kindling': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
-      "talent 'staticFocus': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+      "talent 'glassCannon': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
+      "talent 'vitality': descKey describes rules, triggers, conversions, emitters and behaviour modifiers; this node has none",
+      "talent 'keenEye': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
+      "talent 'precision': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
+      "talent 'kindling': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
+      "talent 'staticFocus': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
     ]);
   });
 
@@ -793,7 +795,7 @@ describe('trigger validation', () => {
     expect(
       issuesAfter((d) => talent(d, 'vitality').triggers.push({ on: 'kill', do: [explode] })),
     ).toEqual([
-      "talent 'vitality': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+      "talent 'vitality': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
     ]);
   });
 });
@@ -865,7 +867,107 @@ describe('conversion validation', () => {
     expect(
       issuesAfter((d) => talent(d, 'vitality').conversions.push({ to: 'poison', fraction: 0.5 })),
     ).toEqual([
-      "talent 'vitality': a node with rules, triggers, conversions or behaviour modifiers needs a descKey",
+      "talent 'vitality': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
+    ]);
+  });
+});
+
+describe('emitter grant validation', () => {
+  /**
+   * The real content plus two leaf nodes off the start node, `first` and `second`, each with a
+   * descKey and these grants.
+   */
+  type Leaf = { id: string; emitters: EmitterGrant[] };
+  const withGrants = (first: Leaf, second: Leaf | null = null): Mutable<GameData> => {
+    const d = content();
+    const start = d.talents.find((node) => node.kind === 'start') as Mutable<TalentNode>;
+    for (const leaf of second === null ? [first] : [first, second]) {
+      start.links.push(leaf.id);
+      d.talents.push({
+        ...smallNode(leaf.id, [start.id]),
+        emitters: leaf.emitters,
+        descKey: `talent.${leaf.id}.desc`,
+      });
+    }
+    return d;
+  };
+  const grantIssues = (first: Leaf, second: Leaf | null = null): string[] =>
+    validateGameData(withGrants(first, second));
+
+  it('accepts thorns grants, with or without a damage share', () => {
+    expect(grantIssues({ id: 'outer.thorns.spikes', emitters: [{ kind: 'thorns' }] })).toEqual([]);
+    expect(
+      grantIssues({ id: 'outer.thorns.spikes', emitters: [{ kind: 'thorns', damagePct: 0.5 }] }),
+    ).toEqual([]);
+  });
+
+  it('rejects a damage share that is not above 0', () => {
+    expect(
+      grantIssues({
+        id: 'outer.thorns.spikes',
+        emitters: [
+          { kind: 'thorns', damagePct: 0 },
+          { kind: 'thorns', damagePct: -1 },
+        ],
+      }),
+    ).toEqual([
+      "talent 'outer.thorns.spikes': emitters[0] damagePct must be > 0 (got 0)",
+      "talent 'outer.thorns.spikes': emitters[1] damagePct must be > 0 (got -1)",
+      "talents: emitter thorns '' is granted twice by source 'outer.thorns' with different " +
+        'fields; keep it on one node',
+    ]);
+  });
+
+  it('rejects grants of one kind, source and key that differ, on one node or on two', () => {
+    const conflict =
+      "talents: emitter thorns '' is granted twice by source 'outer.thorns' with different " +
+      'fields; keep it on one node';
+    expect(
+      grantIssues(
+        { id: 'outer.thorns.spikes', emitters: [{ kind: 'thorns' }] },
+        { id: 'outer.thorns.barbs', emitters: [{ kind: 'thorns', damagePct: 3 }] },
+      ),
+    ).toEqual([conflict]);
+    expect(
+      grantIssues({
+        id: 'outer.thorns.spikes',
+        emitters: [
+          { kind: 'thorns', damagePct: 2 },
+          { kind: 'thorns', damagePct: 4 },
+        ],
+      }),
+    ).toEqual([conflict]);
+    // A load error.
+    const conflicting = withGrants(
+      { id: 'outer.thorns.spikes', emitters: [{ kind: 'thorns' }] },
+      { id: 'outer.thorns.barbs', emitters: [{ kind: 'thorns', damagePct: 3 }] },
+    );
+    expect(() => parseGameData(conflicting)).toThrow(conflict);
+    // Equal grants are one emitter, and other sources have their own.
+    expect(
+      grantIssues(
+        { id: 'outer.thorns.spikes', emitters: [{ kind: 'thorns', damagePct: 2 }] },
+        { id: 'outer.thorns.barbs', emitters: [{ kind: 'thorns', damagePct: 2 }] },
+      ),
+    ).toEqual([]);
+    expect(
+      grantIssues(
+        { id: 'outer.thorns.spikes', emitters: [{ kind: 'thorns', damagePct: 2 }] },
+        { id: 'hub.barbs', emitters: [{ kind: 'thorns', damagePct: 4 }] },
+      ),
+    ).toEqual([]);
+  });
+
+  it('accepts a keystone whose behaviour is a grant, and needs a descKey for one', () => {
+    expect(
+      issuesAfter((d) => {
+        const node = talent(d, 'glassCannon');
+        node.rules = [];
+        node.emitters = [{ kind: 'thorns' }];
+      }),
+    ).toEqual([]);
+    expect(issuesAfter((d) => talent(d, 'vitality').emitters.push({ kind: 'thorns' }))).toEqual([
+      "talent 'vitality': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
     ]);
   });
 });

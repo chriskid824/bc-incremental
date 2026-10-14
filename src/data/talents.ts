@@ -8,6 +8,7 @@
  * start. y grows downward; positions are in talent-web units.
  */
 
+import type { EmitterGrant } from './emitters';
 import type { Modifier } from './stats';
 import type { DamageTag } from './tags';
 import type { RuleSpec } from './rules';
@@ -32,6 +33,7 @@ interface NodeSpec {
   readonly rules?: readonly RuleSpec[];
   readonly triggers?: readonly TriggerSpec[];
   readonly conversions?: readonly ConversionSpec[];
+  readonly emitters?: readonly EmitterGrant[];
   readonly shardCostFactor?: number;
   readonly coreCost?: number;
   readonly repeat?: TalentNode['repeat'];
@@ -39,8 +41,8 @@ interface NodeSpec {
 
 /**
  * Fills the boilerplate fields: kind defaults to small, the lists to empty, keys follow
- * talent.<id>.name/desc, and a node with rules, triggers, conversions or behaviour modifiers
- * gets its desc key (needsDescKey).
+ * talent.<id>.name/desc, and a node with rules, triggers, conversions, emitters or behaviour
+ * modifiers gets its desc key (needsDescKey).
  */
 function node(id: string, spec: NodeSpec): TalentNode {
   const kind = spec.kind ?? 'small';
@@ -49,6 +51,7 @@ function node(id: string, spec: NodeSpec): TalentNode {
     rules: spec.rules ?? [],
     triggers: spec.triggers ?? [],
     conversions: spec.conversions ?? [],
+    emitters: spec.emitters ?? [],
   };
   return {
     id,

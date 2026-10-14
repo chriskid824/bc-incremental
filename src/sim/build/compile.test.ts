@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { THORNS_DAMAGE_PCT } from '../../data/emitters';
+import type { EmitterGrant } from '../../data/emitters';
 import type { RuleSpec } from '../../data/rules';
 import { SCOPED_STATS } from '../../data/stats';
 import type { Modifier } from '../../data/stats';
@@ -175,5 +177,41 @@ describe('compileBuild', () => {
     expect(build.mods.map((mod) => mod.value)).toEqual([0.5, 0.25, 1, 2]);
     expect(build.sources.names).toEqual(['center', 'outer.lightning']);
     expect(build.hooks.onKill).toEqual([onKill]);
+  });
+
+  it('puts the emitter grants after the signature, the first of each kind, source and key', () => {
+    const thorns = (damagePct?: number): EmitterGrant =>
+      damagePct === undefined ? { kind: 'thorns' } : { kind: 'thorns', damagePct };
+    const stats = makeStats({}, [], {
+      triggers: [],
+      conversions: [],
+      emitters: [
+        { source: 'outer.thorns', grant: thorns(2) },
+        { source: 'center', grant: thorns() },
+        { source: 'outer.thorns', grant: thorns(5) },
+      ],
+    });
+    const build = compileWith(stats, (b) => {
+      b.addEmitter('hub', thorns(7));
+      b.addEmitter('center', thorns(9));
+    });
+    expect(build.emitters.map((em) => [em.kind, em.source, em.damagePct])).toEqual([
+      ['volley', 'center', 1],
+      ['thorns', 'outer.thorns', 2],
+      ['thorns', 'center', THORNS_DAMAGE_PCT],
+      ['thorns', 'hub', 7],
+    ]);
+    expect(build.emitters[0]?.signature).toBe(true);
+    for (const em of build.emitters.slice(1)) {
+      expect(em).toMatchObject({
+        signature: false,
+        tags: TAG.hit | TAG.thorns,
+        chains: false,
+        rollsAilments: true,
+        canCrit: true,
+      });
+    }
+    // Without grants, the signature alone.
+    expect(compileBuild(makeStats(), []).emitters.map((em) => em.kind)).toEqual(['volley']);
   });
 });

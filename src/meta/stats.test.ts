@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { loadGameData } from '../data';
+import type { EmitterGrant } from '../data/emitters';
 import { BASE_STATS, NO_EXTRAS, STAT_IDS } from '../data/stats';
 import type { Modifier, StatBlock } from '../data/stats';
 import { tagMask } from '../data/tags';
 import type { ConversionSpec, TriggerSpec } from '../data/triggers';
+import { compileBuild } from '../sim/build/compile';
 import { damageRow } from '../sim/testing';
 import { createMetaState } from './state';
 import {
@@ -251,7 +254,11 @@ describe('collectExtras', () => {
   });
 
   it('has no triggers on a fresh profile', () => {
-    expect(collectExtras(createMetaState(), data)).toEqual({ triggers: [], conversions: [] });
+    expect(collectExtras(createMetaState(), data)).toEqual({
+      triggers: [],
+      conversions: [],
+      emitters: [],
+    });
   });
 
   it('lists the triggers in data order, ranks repeated, with their node source', () => {
@@ -301,5 +308,59 @@ describe('collectExtras', () => {
     expect(stats.conversions).toEqual([{ source: 'outer.poison', spec: toPoison }]);
     expect(stats.values).toEqual(statBlockFor(createMetaState(), data).values);
     expect(stats.scoped).toEqual([]);
+  });
+});
+
+describe('emitter grants', () => {
+  const spikes: EmitterGrant = { kind: 'thorns' };
+  const spines: EmitterGrant = { kind: 'thorns', damagePct: 2 };
+  const shards: TriggerSpec = { on: 'kill', do: [{ kind: 'gainShards', fraction: 0.2 }] };
+  const data = fixtureData({
+    talents: [
+      ...FIXTURE_TALENTS,
+      talent('outer.thorns.spikes', 'small', ['start'], { emitters: [spikes] }),
+      talent('hub.spines', 'repeatable', ['start'], {
+        repeat: { baseShards: 10, growth: 2 },
+        triggers: [shards],
+        emitters: [spines],
+      }),
+      talent('unbought', 'small', ['start'], { emitters: [spikes] }),
+    ],
+  });
+
+  it("lists each allocated node's grants once, whatever its rank, in data order", () => {
+    const meta = createMetaState();
+    for (const id of ['hub.spines', 'outer.thorns.spikes']) meta.allocated.add(id);
+    meta.ranks.set('hub.spines', 3);
+    const extras = collectExtras(meta, data);
+    expect(extras.emitters).toEqual([
+      { source: 'outer.thorns', grant: spikes },
+      { source: 'hub', grant: spines },
+    ]);
+    // The node's triggers still repeat per rank.
+    expect(extras.triggers).toHaveLength(3);
+  });
+
+  it('carries a grant-only node into the stat block and the build (R6)', () => {
+    const meta = createMetaState();
+    meta.allocated.add('outer.thorns.spikes');
+    const stats = statBlockFor(meta, data);
+    expect(stats.emitters).toEqual([{ source: 'outer.thorns', grant: spikes }]);
+    expect(stats.triggers).toEqual([]);
+    expect(stats.conversions).toEqual([]);
+    expect(stats.values).toEqual(statBlockFor(createMetaState(), data).values);
+    const emitters = compileBuild(stats, []).emitters;
+    expect(emitters.map((em) => [em.kind, em.source, em.damagePct])).toEqual([
+      ['volley', 'center', 1],
+      ['thorns', 'outer.thorns', 3],
+    ]);
+  });
+
+  it('finds none in the M1 content, so its builds and saves are unchanged', () => {
+    const content = loadGameData();
+    expect(content.talents.filter((node) => node.emitters.length > 0)).toEqual([]);
+    const meta = createMetaState();
+    for (const node of content.talents) meta.allocated.add(node.id);
+    expect(statBlockFor(meta, content).emitters).toEqual([]);
   });
 });

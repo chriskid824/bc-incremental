@@ -4,6 +4,8 @@
  * the same messages.
  */
 
+import { grantKey } from './emitters';
+import type { EmitterGrant } from './emitters';
 import type { RuleSpec } from './rules';
 import { ARCHETYPE_TAGS, sourceOfNode } from './sources';
 import { isBehaviourModifier } from './stats';
@@ -37,16 +39,17 @@ const isPositiveInt = (n: number): boolean => Number.isInteger(n) && n > 0;
 const isNonNegativeInt = (n: number): boolean => Number.isInteger(n) && n >= 0;
 
 /**
- * A node whose descKey text the talent screen shows: it has rules, triggers, conversions or
- * behaviour modifiers, which the screen cannot describe from numbers alone.
+ * A node whose descKey text the talent screen shows: it has rules, triggers, conversions,
+ * emitters or behaviour modifiers, which the screen cannot describe from numbers alone.
  */
 export function needsDescKey(
-  node: Pick<TalentNode, 'modifiers' | 'rules' | 'triggers' | 'conversions'>,
+  node: Pick<TalentNode, 'modifiers' | 'rules' | 'triggers' | 'conversions' | 'emitters'>,
 ): boolean {
   return (
     node.rules.length > 0 ||
     node.triggers.length > 0 ||
     node.conversions.length > 0 ||
+    node.emitters.length > 0 ||
     node.modifiers.some(isBehaviourModifier)
   );
 }
@@ -209,17 +212,20 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
       }
     }
 
-    // Triggers, conversions and behaviour modifiers change how a run plays, as rules do
-    // (Searing Crits is data).
+    // Triggers, conversions, emitter grants and behaviour modifiers change how a run plays, as
+    // rules do (Searing Crits is data).
     const behaviour = node.modifiers.some(isBehaviourModifier);
     if (
       node.kind === 'keystone' &&
       node.rules.length === 0 &&
       node.triggers.length === 0 &&
       node.conversions.length === 0 &&
+      node.emitters.length === 0 &&
       !behaviour
     ) {
-      issues.push(`${at}: keystone needs a rule, a trigger, a conversion or a behaviour modifier`);
+      issues.push(
+        `${at}: keystone needs a rule, a trigger, a conversion, an emitter or a behaviour modifier`,
+      );
     }
     if (node.kind !== 'keystone' && node.kind !== 'notable' && node.rules.length > 0) {
       issues.push(`${at}: only keystones and notables may have rules`);
@@ -246,6 +252,9 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     // 1 in decimal (0.34 + 0.56 + 0.1) pass.
     const converted = node.conversions.reduce((sum, conversion) => sum + conversion.fraction, 0);
     if (converted > 1 + 1e-9) issues.push(`${at}: conversions add up to ${converted}, more than 1`);
+    node.emitters.forEach((grant, i) => {
+      for (const problem of grantIssues(grant)) issues.push(`${at}: emitters[${i}] ${problem}`);
+    });
 
     if (node.shardCostFactor !== undefined && !(node.shardCostFactor >= 0)) {
       issues.push(`${at}: shardCostFactor must be >= 0 (got ${node.shardCostFactor})`);
@@ -259,16 +268,19 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     const described = needsDescKey(node);
     if (described && node.descKey === undefined) {
       issues.push(
-        `${at}: a node with rules, triggers, conversions or behaviour modifiers needs a descKey`,
+        `${at}: a node with rules, triggers, conversions, emitters or behaviour modifiers ` +
+          'needs a descKey',
       );
     }
     if (!described && node.descKey !== undefined) {
       issues.push(
-        `${at}: descKey describes rules, triggers, conversions and behaviour modifiers; ` +
-          'this node has none',
+        `${at}: descKey describes rules, triggers, conversions, emitters and behaviour ` +
+          'modifiers; this node has none',
       );
     }
   }
+
+  issues.push(...grantConflicts(talents));
 
   // Reachability over the links as listed; asymmetric links are reported above.
   if (starts.length > 0) {
@@ -287,6 +299,56 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     }
   }
 
+  return issues;
+}
+
+/**
+ * A build has one emitter per grant kind, source and key (grantKey): compileBuild keeps the
+ * first grant. Grants of a source that share them must therefore agree field for field, or the
+ * emitter a build gets would depend on which of its nodes comes first.
+ */
+function grantConflicts(talents: readonly TalentNode[]): string[] {
+  const issues: string[] = [];
+  const first = new Map<string, EmitterGrant>();
+  const reported = new Set<string>();
+  for (const node of talents) {
+    const source = sourceOfNode(node.id);
+    for (const grant of node.emitters) {
+      const key = grantKey(grant);
+      const id = `${grant.kind}|${source}|${key}`;
+      const kept = first.get(id);
+      if (kept === undefined) first.set(id, grant);
+      else if (canonical(kept) !== canonical(grant) && !reported.has(id)) {
+        reported.add(id);
+        issues.push(
+          `talents: emitter ${grant.kind} '${key}' is granted twice by source '${source}' ` +
+            'with different fields; keep it on one node',
+        );
+      }
+    }
+  }
+  return issues;
+}
+
+/** JSON of a data value with every object's keys sorted, so equal values give equal text. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v !== null && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : v,
+  );
+}
+
+/** Parameter ranges of one emitter grant; the simulation relies on them (src/sim/emitters/). */
+function grantIssues(grant: EmitterGrant): string[] {
+  const issues: string[] = [];
+  switch (grant.kind) {
+    case 'thorns':
+      if (grant.damagePct !== undefined && !(grant.damagePct > 0)) {
+        issues.push(`damagePct must be > 0 (got ${grant.damagePct})`);
+      }
+      break;
+  }
   return issues;
 }
 

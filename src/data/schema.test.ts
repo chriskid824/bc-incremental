@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { EmitterGrant, GrantKind } from './emitters';
 import { ENEMIES } from './enemies';
 import { parseGameData } from './index';
 import type { RuleId, RuleSpec } from './rules';
@@ -7,7 +8,9 @@ import {
   ConditionSchema,
   ConversionSpecSchema,
   EffectSpecSchema,
+  EmitterGrantSchema,
   GameDataSchema,
+  GRANT_SCHEMAS,
   ModifierSchema,
   RuleSpecSchema,
   TriggerSpecSchema,
@@ -420,6 +423,30 @@ describe('ConversionSpecSchema', () => {
   });
 });
 
+const SAMPLE_GRANTS: { readonly [K in GrantKind]: Extract<EmitterGrant, { kind: K }> } = {
+  thorns: { kind: 'thorns', damagePct: 2 },
+};
+
+describe('EmitterGrantSchema', () => {
+  it('accepts every grant kind with its fields, through its own schema too', () => {
+    for (const kind of Object.keys(GRANT_SCHEMAS) as GrantKind[]) {
+      const grant = SAMPLE_GRANTS[kind];
+      expect(EmitterGrantSchema.parse(grant)).toEqual(grant);
+      expect(GRANT_SCHEMAS[kind].parse(grant)).toEqual(grant);
+    }
+    expect(EmitterGrantSchema.parse({ kind: 'thorns' })).toEqual({ kind: 'thorns' });
+  });
+
+  it.each([
+    ['an unknown kind', { kind: 'spikes' }],
+    ['a damage share that is not a number', { kind: 'thorns', damagePct: '3' }],
+    ['a damage share that is not finite', { kind: 'thorns', damagePct: Infinity }],
+    ['an unknown key', { kind: 'thorns', radius: 40 }],
+  ])('rejects %s', (_label, grant) => {
+    expect(EmitterGrantSchema.safeParse(grant).success).toBe(false);
+  });
+});
+
 describe('RuleSpecSchema', () => {
   it('accepts every rule id with its parameters', () => {
     for (const id of RULE_IDS) {
@@ -494,6 +521,20 @@ describe('GameDataSchema', () => {
       Reflect.deleteProperty(talentAt(missing, 'vitality')[1], list);
       expect(GameDataSchema.safeParse(missing).success, list).toBe(false);
     }
+  });
+
+  it('accepts emitter grants on a talent, and requires the list', () => {
+    const grants = content();
+    Object.assign(talentAt(grants, 'vitality')[1], { emitters: [{ kind: 'thorns' }] });
+    expect(GameDataSchema.safeParse(grants).success).toBe(true);
+
+    const bad = content();
+    Object.assign(talentAt(bad, 'vitality')[1], { emitters: [{ kind: 'aura' }] });
+    expect(GameDataSchema.safeParse(bad).success).toBe(false);
+
+    const missing = content();
+    Reflect.deleteProperty(talentAt(missing, 'vitality')[1], 'emitters');
+    expect(GameDataSchema.safeParse(missing).success).toBe(false);
   });
 
   it('rejects unknown talent kinds and archetypes', () => {

@@ -3,8 +3,8 @@
  * run plays rather than a number data can carry. Each RuleSpec id has one module, registered in
  * RULE_MODULES (index.ts). compileBuild (src/sim/build/compile.ts) compiles each module once per
  * run with every instance of its rule, through a BuildCompiler: the module scales or offsets
- * stats, adds modifiers, sets build flags and the signature attack's parameters, adds triggers
- * and effects, and registers hooks the simulation calls at fixed points of the tick.
+ * stats, adds modifiers, sets build flags and the signature attack's parameters, adds triggers,
+ * effects and emitters, and registers hooks the simulation calls at fixed points of the tick.
  *
  * Each module instance (one compile call, or one TestModule) is one trigger of the build: its
  * first hook() takes it a trigger index, which every hook of the instance shares. Hooks deal
@@ -13,6 +13,7 @@
  */
 
 import type { Num } from '../../core/num';
+import type { EmitterGrant } from '../../data/emitters';
 import type { RuleSpec, SignatureSpec } from '../../data/rules';
 import type { Modifier, StatId } from '../../data/stats';
 import type { TagMask } from '../../data/tags';
@@ -72,6 +73,12 @@ export interface BuildCompiler {
    * `source`, with its COEF_FIELDS × coef (default 1). Returns its effect index.
    */
   addEffect(source: string, spec: EffectSpec, coef?: number): number;
+  /**
+   * Grants the run an emitter credited to `source`, after the talent nodes' grants
+   * (StatBlock.emitters); like theirs, it is dropped when an earlier grant has its kind, source
+   * and key (grantKey, src/data/emitters.ts).
+   */
+  addEmitter(source: string, grant: EmitterGrant): void;
 }
 
 /**

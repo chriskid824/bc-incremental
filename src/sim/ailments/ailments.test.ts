@@ -38,6 +38,7 @@ const W = 15;
 const center = (...specs: TriggerSpec[]): StatExtras => ({
   triggers: specs.map((spec) => ({ source: 'center', spec })),
   conversions: [],
+  emitters: [],
 });
 
 /** Squares that walk at `speed` px/s, immortal, all released on the first tick. */
@@ -430,6 +431,7 @@ describe('records with two burn classes', () => {
             },
           ],
           conversions: [],
+          emitters: [],
         },
       ),
       maxTicks: 1800,

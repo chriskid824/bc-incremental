@@ -1,8 +1,8 @@
 /**
  * Emitters system (docs/v3/implementation-plan-v3.md §2.15): every emitter of the build that
  * attacks in this stage does, in emitter order, the signature attack first (src/sim/emitters/);
- * then the rule modules' tick hooks run. Emitters of the kinds another stage runs (contact,
- * segments) are not in this stage's list (RunContext.stepEmitters).
+ * then the rule modules' tick hooks run. Emitters of the kinds another stage runs (thorns in the
+ * contact stage, segments) are not in this stage's list (RunContext.stepEmitters).
  */
 
 import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
@@ -18,6 +18,8 @@ export type EmitterStep = (ctx: RunContext, em: EmitterRuntime) => void;
  */
 export const EMITTER_STEPS: { readonly [K in EmitterSpec['kind']]: EmitterStep | null } = {
   volley: runVolley,
+  // Its hits come with the contacts (src/sim/systems/contact.ts).
+  thorns: null,
 };
 
 /** Fires every due attack of the emitter stage's emitters, in emitter order. */

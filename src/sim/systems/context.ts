@@ -316,8 +316,8 @@ export interface RunContext {
   readonly emitters: readonly EmitterRuntime[];
   /**
    * The emitters by the stage that runs them, each list in emitter order: the emitter stage's
-   * (src/sim/systems/emitters.ts), the contact stage's thorns and the segment stage's. Every
-   * kind so far attacks in the emitter stage; thorns and segments come later in C4.
+   * (src/sim/systems/emitters.ts), the contact stage's thorns (src/sim/systems/contact.ts) and
+   * the segment stage's, which come later in C4.
    */
   readonly stepEmitters: readonly EmitterRuntime[];
   readonly thornsEmitters: readonly EmitterRuntime[];
@@ -578,7 +578,8 @@ export function createRunContext(
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
-  // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps.
+  // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
+  // contact stage the thorns.
   const emitters = build.emitters.map((spec, index) =>
     createEmitterRuntime(
       spec,
@@ -588,6 +589,7 @@ export function createRunContext(
     ),
   );
   const stepEmitters = emitters.filter((em) => EMITTER_STEPS[em.spec.kind] !== null);
+  const thornsEmitters = emitters.filter((em) => em.spec.kind === 'thorns');
   const signatureEmitter = emitters[0] as EmitterRuntime;
   const signaturePayload = signatureEmitter.payload;
 
@@ -753,7 +755,7 @@ export function createRunContext(
 
     emitters,
     stepEmitters,
-    thornsEmitters: [],
+    thornsEmitters,
     segmentEmitters: [],
 
     evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1 },
