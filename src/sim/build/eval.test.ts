@@ -5,11 +5,16 @@ import { TAG } from '../../data/tags';
 import type { ScalingSpec } from '../../data/triggers';
 import { makeStats } from '../testing';
 import { compileScaling, scaledValue, statAt } from './eval';
-import { modTableFor, SCOPED_INDEX } from './modTable';
+import { compileMods, ModTable, modTableFor, SCOPED_INDEX } from './modTable';
 import { createSourceTable, rowKey } from './sources';
 
 const S = SCOPED_STATS.length;
-const { damage: DAMAGE, critChance: CRIT_CHANCE, igniteChance: IGNITE_CHANCE } = SCOPED_INDEX;
+const {
+  damage: DAMAGE,
+  critChance: CRIT_CHANCE,
+  critMultiplier: CRIT_MULTIPLIER,
+  igniteChance: IGNITE_CHANCE,
+} = SCOPED_INDEX;
 
 const g = (spec: Omit<ScalingSpec, 'per'>, value: number, x: number): number =>
   scaledValue(value, compileScaling({ per: 'chainJump', ...spec }), x);
@@ -150,5 +155,32 @@ describe('statAt', () => {
       expect(statAt(table, row, CRIT_CHANCE, 3), `key ${key}`).toBe(0 + chain + notBurn);
       expect(statAt(table, row, DAMAGE, 3), `key ${key}`).toBe((key & TAG.hit) !== 0 ? 4 : 1);
     });
+  });
+
+  it('applies postScale, then postOffset, to dynamic entries as to static ones', () => {
+    const stats = makeStats({ critMultiplier: 2, critChance: 0.1 }, [
+      perJump('critMultiplier', 'flat', 1),
+      perJump('critChance', 'increased', 0.5),
+      perJump('damage', 'more', 1),
+    ]);
+    const sources = createSourceTable();
+    const mods = compileMods(stats.scoped, sources);
+    const base = Float64Array.from(SCOPED_STATS, (stat) => stats.base[stat]);
+    base[DAMAGE] = 1;
+    const postScale = new Float64Array(S).fill(1);
+    const postOffset = new Float64Array(S);
+    postScale[CRIT_MULTIPLIER] = 1.5;
+    postScale[CRIT_CHANCE] = 2;
+    postOffset[CRIT_CHANCE] = 0.25;
+    postScale[DAMAGE] = 7;
+    postOffset[DAMAGE] = 5;
+    const table = new ModTable(mods, base, postScale, postOffset);
+    const row = table.row(TAG.hit | TAG.chain);
+    for (const jump of [0, 1, 3]) {
+      expect(statAt(table, row, CRIT_MULTIPLIER, jump)).toBe((2 + jump) * 1.5);
+      expect(statAt(table, row, CRIT_CHANCE, jump)).toBe(0.1 * (1 + 0.5 * jump) * 2 + 0.25);
+      // Damage rows ignore both arrays.
+      expect(statAt(table, row, DAMAGE, jump)).toBe(1 + jump);
+    }
   });
 });

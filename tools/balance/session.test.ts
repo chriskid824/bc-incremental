@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DAMAGE_TAG_BIT, loadGameData } from '../../src/data';
 import { createMetaState, DEFAULT_ECONOMY, statBlockFor } from '../../src/meta';
-import { damageRow } from '../../src/sim';
-import { makeStats } from '../../src/sim/testing';
+import { damageRow, makeStats } from '../../src/sim/testing';
 import {
   attackDamage,
   buildMultipliers,

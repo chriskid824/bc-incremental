@@ -3,13 +3,16 @@
  *
  * - normal (default): full 180 s runs on the real game data with a build that cannot die and
  *   starts below its frontier, so it kills quickly at first and ends with enemies piling up
- *   (docs/ARCHITECTURE.md §12: under 100 ms per run).
+ *   (docs/v3/implementation-plan-v3.md §6: under 50 ms per run, compared at p95 here).
+ * - hits: the hit path under load, 30 s at wave 40 with six projectiles and eight chain jumps,
+ *   about 8.6 hits per tick. It pins its start wave and ignores --start-wave, so it is the
+ *   same workload as tools/balance/benchAB.ts's, which times it across commits.
  * - ailments: the ailment stress case of docs/v3/implementation-plan-v3.md §6, 30 s at wave 30
  *   with Pandemic, Eternal Flame and a longer burn on a build that clears wave 30. M1 keeps
  *   one record per burn stack, which takes seconds per run here; the budget is 50 ms. Slow, so
  *   it runs only when asked for and with few runs.
  *
- *   npm run bench -- [--scenario normal|ailments] [--runs 50] [--warmup 5] [--seed 1]
+ *   npm run bench -- [--scenario normal|hits|ailments] [--runs 50] [--warmup 5] [--seed 1]
  *     [--start-wave 30]
  *
  * --runs and --warmup default to the scenario's own counts.
@@ -22,9 +25,11 @@ import type { RunConfig } from '../../src/sim';
 import { makeStats } from '../../src/sim/testing';
 import { quantile } from './report';
 
-const SCENARIO_IDS = ['normal', 'ailments'] as const;
+const SCENARIO_IDS = ['normal', 'hits', 'ailments'] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
+/** The hits scenario's start wave, whatever --start-wave says. */
+const HITS_START_WAVE = 40;
 type ScenarioId = (typeof SCENARIO_IDS)[number];
 
 const isScenarioId = (value: string): value is ScenarioId =>
@@ -37,6 +42,8 @@ interface Scenario {
   readonly seconds: number;
   /** Budget for the p95 run time. */
   readonly targetMs: number;
+  /** Start wave the scenario always uses, in place of --start-wave. */
+  readonly startWave?: number;
   /** Config of one run; runs differ only in their seed. */
   config(seed: number, startWave: number): RunConfig;
 }
@@ -46,7 +53,7 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     runs: 50,
     warmup: 5,
     seconds: MAX_RUN_SECONDS,
-    targetMs: 100,
+    targetMs: 50,
     // Strong enough to one-shot the start wave, about 10 waves short of its frontier, immortal.
     config: (seed, startWave) => ({
       seed,
@@ -62,6 +69,33 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
       rules: [],
       startWave,
       mode: 'auto',
+    }),
+  },
+  hits: {
+    runs: 50,
+    warmup: 5,
+    seconds: STRESS_SECONDS,
+    // No budget of its own: benchAB.ts gates it on its ratio to the previous commit and to
+    // 532074c. This is §6's stress-scenario budget.
+    targetMs: 50,
+    startWave: HITS_START_WAVE,
+    // Kills an enemy in a few hits, so targets stay plentiful and most hits chain. Immortal.
+    config: (seed) => ({
+      seed,
+      stats: makeStats({
+        damage: targetDamage(HITS_START_WAVE) / 4,
+        attackSpeed: 12,
+        projectileCount: 6,
+        chainCount: 8,
+        critChance: 0.25,
+        critMultiplier: 2,
+        igniteChance: 0.4,
+        maxLife: 1e12,
+      }),
+      rules: [],
+      startWave: HITS_START_WAVE,
+      mode: 'auto',
+      maxTicks: STRESS_SECONDS * TICK_RATE,
     }),
   },
   ailments: {
@@ -147,7 +181,7 @@ function main(): void {
   const runs = positiveInt('runs', values.runs ?? String(scenario.runs));
   const warmup = positiveInt('warmup', values.warmup ?? String(scenario.warmup), 0);
   const seed = positiveInt('seed', values.seed, 0);
-  const startWave = positiveInt('start-wave', values['start-wave']);
+  const startWave = scenario.startWave ?? positiveInt('start-wave', values['start-wave']);
   const configFor = (i: number): RunConfig => scenario.config(seed + i, startWave);
 
   loadGameData();

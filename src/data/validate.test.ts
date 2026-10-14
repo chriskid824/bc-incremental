@@ -278,6 +278,14 @@ describe('validateGameData: talents', () => {
       "talent 'steadyAim': rule 'steadyAim' everyNth must be a positive integer (got 0)",
       "talent 'steadyAim': rule 'steadyAim' critMultiplierMore must be > -1 (got -2)",
     ]);
+    const chainMore = issuesAfter((d) => {
+      talent(d, 'overload').rules = [
+        { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2, chainMore: -1 },
+      ];
+    });
+    expect(chainMore).toEqual([
+      "talent 'overload': rule 'overload' chainMore must be > -1 (got -1)",
+    ]);
   });
 
   it('rejects invalid costs', () => {

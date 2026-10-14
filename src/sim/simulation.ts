@@ -11,9 +11,11 @@
  * elites and bosses that come close, and retarget when their target dies first
  * (src/sim/targeting.ts). Target queries read a spatial grid rebuilt every tick
  * (src/sim/grid.ts), with exactly the results of a linear scan.
- * Keystone rules (config.rules) are compiled once per run (src/sim/rules.ts); the scoped stats
- * (damage multiplier, crit and ignite chances, crit multiplier) per tag mask and damage source
- * fill a ModTable on first use (src/sim/build/modTable.ts, src/sim/build/sources.ts).
+ * The build's stats and keystone rules (config.rules) compile once per run
+ * (src/sim/build/compile.ts): each rule is a module (src/sim/rules/) that changes stats, flags
+ * and modifiers and may hook into the tick. The scoped stats (damage multiplier, crit and ignite
+ * chances, crit multiplier) per tag mask and damage source fill a ModTable on first use
+ * (src/sim/build/modTable.ts, src/sim/build/sources.ts).
  */
 
 import { STAT_IDS } from '../data/stats';
@@ -21,8 +23,9 @@ import type { GameData } from '../data/types';
 import { updateBurns } from './systems/ailments';
 import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
+import type { TestModule } from './rules';
 import { compact } from './systems/death';
-import { attack } from './systems/emitters';
+import { attack, runTickHooks } from './systems/emitters';
 import { rebuildGrid } from './systems/grid';
 import { moveEnemies } from './systems/movement';
 import { moveProjectiles } from './systems/projectiles';
@@ -64,9 +67,17 @@ function validateConfig(config: RunConfig): void {
   }
 }
 
-export function createSimulation(config: RunConfig, data: GameData): Simulation {
+/**
+ * A run of `config` on `data`. testModules are for tests only: rule modules without a RuleSpec
+ * (src/sim/rules/module.ts).
+ */
+export function createSimulation(
+  config: RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[] = [],
+): Simulation {
   validateConfig(config);
-  const ctx = createRunContext(config, data);
+  const ctx = createRunContext(config, data, testModules);
   const { state, events } = ctx;
 
   /**
@@ -79,9 +90,11 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
    * 3. movement: every enemy walks towards the player (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
    * 5. contact: enemies that reached the player hit it and leak (contact.ts).
-   * 6. emitters: due attacks fire projectiles (emitters.ts).
+   * 6. emitters: due attacks fire projectiles, then the rule modules' tick hooks run
+   *    (emitters.ts).
    * 7. projectiles: move, retarget, and hit on arrival (projectiles.ts). Hits and chains
-   *    (hits.ts) and kills with their spread, drops and splits (death.ts) resolve inline.
+   *    (hits.ts) and kills with their onKill hooks, drops and splits (death.ts) resolve
+   *    inline.
    * 8. ailments: burn stacks expire; burn damage every BURN_TICK_INTERVAL (ailments.ts).
    * 9. death: compact dead enemies and projectiles (death.ts), after the last grid query.
    * 10. waveControl: record cleared waves (waves.ts).
@@ -101,6 +114,7 @@ export function createSimulation(config: RunConfig, data: GameData): Simulation 
     resolveContacts(ctx);
     if (ctx.player.life > 0) {
       attack(ctx);
+      runTickHooks(ctx);
       moveProjectiles(ctx);
       updateBurns(ctx);
     }

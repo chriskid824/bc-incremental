@@ -6,8 +6,10 @@
 import type { RuleSpec } from '../data/rules';
 import { BASE_STATS } from '../data/stats';
 import type { Modifier, StatBlock, StatId } from '../data/stats';
+import type { TagMask } from '../data/tags';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyDef, EnemyId, GameData, WaveTable } from '../data/types';
+import { centerDamage, compileBuild } from './build/compile';
 import { createSimulation } from './simulation';
 import { NO_INPUT } from './types';
 import type { InputFrame, RunConfig, RunResult, SimEvent } from './types';
@@ -108,6 +110,23 @@ export function makeTestData(overrides: TestDataOverrides = {}): GameData {
 }
 
 /**
+ * One wave of `count` stationary squares with HP multiplier `hpMult` (immortal by default), all
+ * released on the first tick; no elites, bosses or later waves.
+ */
+export function stationarySquares(count: number, hpMult = 1e12): GameData {
+  return makeTestData({
+    enemies: { square: { hpMult, speed: 0 } },
+    waves: {
+      rules: [{ enemy: 'square', fromWave: 1, base: count, perWave: 0, maxCount: count }],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      spawnDurationSec: 0,
+      waveTimerSec: 1000,
+    },
+  });
+}
+
+/**
  * Stat block from BASE_STATS plus overrides, which are both its base and its values, with the
  * given scoped modifiers: tagged or untagged increased/more damage, e.g. maskProbeMods(). Flat
  * changes belong in the overrides.
@@ -118,6 +137,19 @@ export function makeStats(
 ): StatBlock {
   const stats = { ...BASE_STATS, ...values };
   return { base: stats, values: stats, scoped, triggers: [], conversions: [] };
+}
+
+/**
+ * Damage multiplier of a center instance with tags `mask` for `stats` and `rules` outside a run
+ * (centerDamage of a fresh compileBuild): a primary hit with these tags deals values.damage ×
+ * this before crits.
+ */
+export function damageRow(
+  stats: StatBlock,
+  mask: TagMask,
+  rules: readonly RuleSpec[] = [],
+): number {
+  return centerDamage(compileBuild(stats, rules), mask);
 }
 
 export function makeConfig(overrides: Partial<RunConfig> = {}): RunConfig {
@@ -158,6 +190,14 @@ export function maskProbeMods(): Modifier[] {
 }
 
 type EventOf<T extends SimEvent['type']> = Extract<SimEvent, { type: T }>;
+
+/** The events of one type in a run's ticks (RecordedRun.ticks), in order. */
+export function eventsOf<T extends SimEvent['type']>(
+  ticks: readonly (readonly SimEvent[])[],
+  type: T,
+): EventOf<T>[] {
+  return ticks.flat().filter((event): event is EventOf<T> => event.type === type);
+}
 
 /**
  * Keys of every M1 event type, in a fixed order. Fingerprints and the golden test hash events

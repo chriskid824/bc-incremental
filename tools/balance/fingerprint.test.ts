@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { num } from '../../src/core/num';
 import { isBehaviourModifier, NO_EXTRAS } from '../../src/data';
 import { computeStatBlock } from '../../src/meta';
-import { damageRow } from '../../src/sim';
 import { COUNTER_IDS } from '../../src/sim';
 import type { RunResult, SimEvent } from '../../src/sim';
 import {
   BRIDGE_MODS,
+  damageRow,
   maskProbeMods,
   projectEvent,
   projectResult,

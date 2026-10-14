@@ -26,6 +26,7 @@ function quotedNumbers(rule: RuleSpec): string[][] {
       return [
         [`×${rule.chainCountMultiplier}`, ...(rule.chainCountMultiplier === 2 ? ['twice'] : [])],
         [`−${Math.round(rule.retentionPenalty * 100)}`],
+        ...(rule.chainMore === undefined ? [] : [[`×${1 + rule.chainMore}`]]),
       ];
     case 'glassCannon':
       return [[`×${1 + rule.damageMore}`]];

@@ -15,9 +15,9 @@ import type { Modifier, ModifierKind, ScopedStat, StatId } from '../../data/stat
 import { DAMAGE_TAGS, TAG, tagMask } from '../../data/tags';
 import type { DamageTag } from '../../data/tags';
 import { computeStatBlock } from '../../meta/stats';
-import { BRIDGE_MODS, makeStats, maskProbeMods, SEARING_CRITS_MODS } from '../testing';
+import { BRIDGE_MODS, damageRow, makeStats, maskProbeMods, SEARING_CRITS_MODS } from '../testing';
 import { statAt } from './eval';
-import { compileMods, damageRow, ModTable, modTableFor, SCOPED_INDEX } from './modTable';
+import { compileMods, ModTable, modTableFor, SCOPED_INDEX } from './modTable';
 import { createSourceTable, rowKey, SOURCE_SHIFT } from './sources';
 import type { SourceTable } from './sources';
 
@@ -443,6 +443,43 @@ describe('ModTable', () => {
         }
       }
     }
+  });
+
+  it('applies postScale, then postOffset, to the folded value of every stat but damage', () => {
+    const modifiers: Modifier[] = [
+      { stat: 'critMultiplier', kind: 'flat', value: 0.5, tags: ['crit'] },
+      { stat: 'critMultiplier', kind: 'more', value: 0.25, tags: ['chain'] },
+      { stat: 'critChance', kind: 'increased', value: 0.5 },
+      { stat: 'damage', kind: 'more', value: 1, tags: ['hit'] },
+    ];
+    const postScale = new Float64Array(S).fill(1);
+    const postOffset = new Float64Array(S);
+    postScale[SCOPED_INDEX.critMultiplier] = 1.5;
+    postScale[SCOPED_INDEX.critChance] = 3;
+    postOffset[SCOPED_INDEX.critChance] = -0.125;
+    // Damage rows ignore both arrays.
+    postScale[DAMAGE] = 7;
+    postOffset[DAMAGE] = 5;
+    const mods = compileMods(modifiers, createSourceTable());
+    const plain = new ModTable(mods, baseRow(1));
+    const post = new ModTable(mods, baseRow(1), postScale, postOffset);
+    for (let key = 0; key < 1 << 6; key++) {
+      for (let s = 0; s < S; s++) {
+        const folded = plain.final[plain.row(key) * S + s] as number;
+        const expected =
+          s === DAMAGE ? folded : folded * (postScale[s] as number) + (postOffset[s] as number);
+        expect(post.final[post.row(key) * S + s], `key ${key} stat ${s}`).toBe(expected);
+      }
+    }
+    expect(post.damage(TAG.hit)).toBe(2);
+  });
+
+  it('rejects post arrays that do not hold one value per scoped stat', () => {
+    const mods = compileMods([], createSourceTable());
+    expect(() => new ModTable(mods, baseRow(1), new Float64Array(S - 1))).toThrow(RangeError);
+    expect(
+      () => new ModTable(mods, baseRow(1), new Float64Array(S), new Float64Array(S + 1)),
+    ).toThrow(RangeError);
   });
 });
 

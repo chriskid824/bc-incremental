@@ -1,9 +1,9 @@
 /**
  * Keystone and notable rule changes. Rules are enumerated in code with typed parameters;
  * data files can only reference rules defined here (docs/ARCHITECTURE.md §4.4).
- * The simulation compiles them in src/sim/rules.ts. A change that modifiers can express (a
- * tagged chance, an *Always stat, a scaling, notTags) is data instead, like the bridge notables
- * and Searing Crits (src/data/talents.ts).
+ * Each rule is a module of the simulation (src/sim/rules/). A change that modifiers can
+ * express (a tagged chance, an *Always stat, a scaling, notTags) is data instead, like the
+ * bridge notables and Searing Crits (src/data/talents.ts).
  */
 
 export type RuleSpec =
@@ -21,11 +21,15 @@ export type RuleSpec =
     }
   /** No burn stack cap; burn duration gets (1 + durationMore). */
   | { readonly id: 'eternalFlame'; readonly durationMore: number }
-  /** Chain count × chainCountMultiplier; chain retention reduced by retentionPenalty (absolute). */
+  /**
+   * Chain count × chainCountMultiplier; chain retention reduced by retentionPenalty (absolute);
+   * with chainMore, hits delivered by a chain ([chain, hit]) deal (1 + chainMore) more.
+   */
   | {
       readonly id: 'overload';
       readonly chainCountMultiplier: number;
       readonly retentionPenalty: number;
+      readonly chainMore?: number;
     }
   /** All damage gets (1 + damageMore); max life becomes 1. */
   | { readonly id: 'glassCannon'; readonly damageMore: number };

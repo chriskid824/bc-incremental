@@ -35,7 +35,7 @@ export function updateBurns(ctx: RunContext): void {
     tally(ctx, BURN, ctx.burnCredit, amount);
     if (gt(amount, ctx.maxHit)) ctx.maxHit = amount;
     ctx.events.push({ type: 'burnTick', targetId: enemy.id, x: enemy.x, y: enemy.y, amount });
-    if (lte(enemy.hp, ZERO)) killEnemy(ctx, enemy);
+    if (lte(enemy.hp, ZERO)) killEnemy(ctx, enemy, -1);
   }
   if (burnTick) ctx.lastBurnTick = now;
 }

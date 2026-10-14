@@ -189,6 +189,8 @@ describe('RuleSpecSchema', () => {
     for (const id of RULE_IDS) {
       expect(RuleSpecSchema.parse(SAMPLE_RULES[id])).toEqual(SAMPLE_RULES[id]);
     }
+    const chainMore = { ...SAMPLE_RULES.overload, chainMore: 3.5 };
+    expect(RuleSpecSchema.parse(chainMore)).toEqual(chainMore);
   });
 
   it.each([
@@ -196,6 +198,10 @@ describe('RuleSpecSchema', () => {
     ['a missing parameter', { id: 'steadyAim', everyNth: 3 }],
     ['a parameter of another rule', { id: 'glassCannon', damageMore: 1, hitMore: 1 }],
     ['a non-numeric parameter', { id: 'eternalFlame', durationMore: '-0.5' }],
+    [
+      'an undefined optional parameter',
+      { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.2, chainMore: undefined },
+    ],
   ])('rejects %s', (_label, rule) => {
     expect(RuleSpecSchema.safeParse(rule).success).toBe(false);
   });

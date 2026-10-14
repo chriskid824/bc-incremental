@@ -233,7 +233,7 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
   return issues;
 }
 
-/** Parameter ranges of one rule; the simulation relies on them (src/sim/rules.ts). */
+/** Parameter ranges of one rule; the simulation relies on them (src/sim/rules/). */
 function ruleIssues(rule: RuleSpec): string[] {
   const issues: string[] = [];
   const more = (name: string, value: number): void => {
@@ -264,6 +264,7 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`chainCountMultiplier must be >= 0 (got ${rule.chainCountMultiplier})`);
       }
       chance('retentionPenalty', rule.retentionPenalty);
+      if (rule.chainMore !== undefined) more('chainMore', rule.chainMore);
       break;
     case 'glassCannon':
       more('damageMore', rule.damageMore);

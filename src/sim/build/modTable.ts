@@ -15,8 +15,9 @@
  * - more: Π(1 + value) in the same order.
  * A damage row holds only (1 + Σincreased) × Π(1 + more): flat damage stays in
  * StatBlock.values.damage, so damage of an instance = values.damage × its damage row, which is
- * M1's damageMult[mask] bit for bit. Any other scoped stat folds to its final value; with no
- * tagged, scoped or scaling modifier that is StatBlock.values[stat] bit for bit.
+ * M1's damageMult[mask] bit for bit. Any other scoped stat folds to its final value, then takes
+ * the rules' post-operations, × postScale + postOffset (scaleStat and offsetStat, src/sim/rules/);
+ * with no tagged, scoped or scaling modifier that is CompiledBuild.values[stat] bit for bit.
  *
  * Modifiers with a scaling are dynamic entries: a row lists the matching ones per stat in data
  * order, and statAt (src/sim/build/eval.ts) adds them per damage instance after the static
@@ -29,7 +30,7 @@ import { tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { compileScaling, statAt } from './eval';
 import type { CompiledScaling } from './eval';
-import { CENTER, createSourceTable, rowKey, SOURCE_SHIFT } from './sources';
+import { createSourceTable, SOURCE_SHIFT } from './sources';
 import type { SourceTable } from './sources';
 
 /** Values per row: one per scoped stat. */
@@ -138,6 +139,12 @@ export class ModTable {
   dyn: Int32Array;
 
   readonly mods: readonly CompiledMod[];
+  /**
+   * Per scoped stat, the rules' factor and addend on every row's final value; damage rows
+   * ignore both, since rules change damage through modifiers.
+   */
+  readonly postScale: Float64Array;
+  readonly postOffset: Float64Array;
   private readonly base: Float64Array;
   /** Entries used in `dyn`. */
   private dynLength = 0;
@@ -151,11 +158,24 @@ export class ModTable {
   /** Scratch: Σ untagged flats per scoped stat of the row being filled. */
   private readonly untaggedFlat = new Float64Array(S);
 
-  /** `base` holds each scoped stat's StatBlock.base value, in SCOPED_STATS order. */
-  constructor(mods: readonly CompiledMod[], base: Float64Array) {
+  /**
+   * `base` holds each scoped stat's StatBlock.base value, and `postScale` and `postOffset` the
+   * rules' post-operations (1 and 0 without rules), in SCOPED_STATS order.
+   */
+  constructor(
+    mods: readonly CompiledMod[],
+    base: Float64Array,
+    postScale: Float64Array = new Float64Array(S).fill(1),
+    postOffset: Float64Array = new Float64Array(S),
+  ) {
     if (base.length !== S) throw new RangeError(`base must hold ${S} values`);
+    if (postScale.length !== S || postOffset.length !== S) {
+      throw new RangeError(`postScale and postOffset must hold ${S} values`);
+    }
     this.mods = mods;
     this.base = base;
+    this.postScale = postScale;
+    this.postOffset = postOffset;
     this.keys = new Int32Array(INITIAL_SLOTS);
     this.slotRows = new Int32Array(INITIAL_SLOTS);
     this.shift = 32 - Math.log2(INITIAL_SLOTS);
@@ -240,7 +260,7 @@ export class ModTable {
   }
 
   private fill(row: number, key: number): void {
-    const { mods, base, untaggedFlat, flatV, inc, more, final } = this;
+    const { mods, base, postScale, postOffset, untaggedFlat, flatV, inc, more, final } = this;
     const at = row * S;
     const tags = key & TAG_BITS;
     const source = key >>> SOURCE_SHIFT;
@@ -272,7 +292,10 @@ export class ModTable {
       const increased = 1 + (inc[at + s] as number);
       const product = more[at + s] as number;
       final[at + s] =
-        s === DAMAGE ? increased * product : (flatV[at + s] as number) * increased * product;
+        s === DAMAGE
+          ? increased * product
+          : (flatV[at + s] as number) * increased * product * (postScale[s] as number) +
+            (postOffset[s] as number);
     }
     for (let s = 0; s < S; s++) {
       const start = this.dynLength;
@@ -290,35 +313,15 @@ export class ModTable {
   }
 }
 
-/** A fresh table for one run of `stats`, whose scopes resolve against `sources`. */
+/**
+ * A table of `stats`' scoped modifiers alone, whose scopes resolve against `sources`: no rules,
+ * so no rule-added modifiers and no post-operations (compileBuild in compile.ts has both). For
+ * tests of the table itself.
+ */
 export function modTableFor(
   stats: StatBlock,
   sources: SourceTable = createSourceTable(),
 ): ModTable {
   const base = Float64Array.from(SCOPED_STATS, (stat) => stats.base[stat]);
   return new ModTable(compileMods(stats.scoped, sources), base);
-}
-
-const blockTables = new WeakMap<StatBlock, ModTable>();
-
-/**
- * Scoped stat `stat` (SCOPED_INDEX) of a center instance with tags `mask`, `chainJump` jumps into
- * its chain (0 for a primary hit), of a stat block outside a run (talent screen, estimators).
- * The table of each block is built once and kept while the block lives.
- */
-export function scopedStat(stats: StatBlock, mask: TagMask, stat: number, chainJump = 0): number {
-  let table = blockTables.get(stats);
-  if (table === undefined) {
-    table = modTableFor(stats);
-    blockTables.set(stats, table);
-  }
-  return statAt(table, table.row(rowKey(mask, CENTER)), stat, chainJump);
-}
-
-/**
- * Damage multiplier of `mask` for a center instance of a stat block outside a run: a primary
- * hit with these tags deals values.damage × damageRow(stats, mask).
- */
-export function damageRow(stats: StatBlock, mask: TagMask): number {
-  return scopedStat(stats, mask, DAMAGE);
 }

@@ -2,6 +2,6 @@
 
 export * from './types';
 export { BURN_TICK_INTERVAL, createSimulation } from './simulation';
-export { compileRules, NO_RULES } from './rules';
-export { damageRow, SCOPED_INDEX, scopedStat } from './build/modTable';
-export type { RuleEffects } from './rules';
+export { centerDamage, centerStat, compileBuild } from './build/compile';
+export type { BuildFlags, CompiledBuild, SignatureParams } from './build/compile';
+export { SCOPED_INDEX } from './build/modTable';

@@ -71,16 +71,17 @@ export function scaledValue(value: number, scaling: CompiledScaling, x: number):
  * Scoped stat `stat` (its SCOPED_STATS index) of row `row` for a damage instance `chainJump`
  * jumps into its chain (0 for a primary hit). A row without dynamic entries for the stat is its
  * folded value; otherwise each dynamic entry adds its contribution after the row's static parts,
- * in data order: flat and increased add, more multiplies by 1 + c.
+ * in data order: flat and increased add, more multiplies by 1 + c. The rules' post-operations
+ * (ModTable.postScale, postOffset) then apply as they do to the folded value.
  */
 export function statAt(table: ModTable, row: number, stat: number, chainJump: number): number {
   const at = row * S + stat;
   return table.dynCount[at] === 0
     ? (table.final[at] as number)
-    : evalDynamic(table, at, stat === DAMAGE, chainJump);
+    : evalDynamic(table, at, stat, chainJump);
 }
 
-function evalDynamic(table: ModTable, at: number, damage: boolean, chainJump: number): number {
+function evalDynamic(table: ModTable, at: number, stat: number, chainJump: number): number {
   const { mods, dyn } = table;
   let flat = table.flatV[at] as number;
   let inc = table.inc[at] as number;
@@ -96,5 +97,8 @@ function evalDynamic(table: ModTable, at: number, damage: boolean, chainJump: nu
     else more *= 1 + c;
   }
   const increased = 1 + inc;
-  return damage ? increased * more : flat * increased * more;
+  return stat === DAMAGE
+    ? increased * more
+    : flat * increased * more * (table.postScale[stat] as number) +
+        (table.postOffset[stat] as number);
 }

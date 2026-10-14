@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { createRng, deriveSeed } from '../core/rng';
 import { shardsPerStdEnemy, stdHp } from '../data/curve';
+import type { RuleSpec } from '../data/rules';
 import type { SourceSelector } from '../data/sources';
 import { BASE_STATS } from '../data/stats';
 import type { Modifier } from '../data/stats';
@@ -14,6 +16,8 @@ import {
   makeTestData,
   maskProbeMods,
   recordRun,
+  SEARING_CRITS_MODS,
+  stationarySquares,
   TEST_ENEMIES,
   TEST_WAVES,
 } from './testing';
@@ -82,6 +86,11 @@ function runWith(
     inspect(sim, events);
   }
   return { ticks, result: sim.result() };
+}
+
+/** A recorded run of `config` (600 ticks unless it says otherwise) on `data`. */
+function run(config: Partial<RunConfig>, data: GameData) {
+  return recordRun(makeConfig({ maxTicks: 600, ...config }), data);
 }
 
 /** Kills any early enemy in one hit, never dies, no chains. */
@@ -1279,5 +1288,189 @@ describe('drops', () => {
     expect(checked).toBeGreaterThan(kills.length / 2);
     expect(kills.some((kill) => kill.enemy === 'boss')).toBe(true);
     expect(kills.some((kill) => kill.enemy === 'shard')).toBe(true);
+  });
+});
+
+describe('pandemic', () => {
+  it('spreads the burns of a dying enemy to enemies in range; hits deal 70%', () => {
+    // Enemies with 30 HP: the first hit ignites, burn kills, the burn spreads.
+    const stats = makeStats({
+      damage: 1,
+      attackSpeed: 0.2,
+      critChance: 0,
+      igniteChance: 1,
+      burnDamage: 20,
+      burnDuration: 4,
+    });
+    const data = stationarySquares(30, 30 / 20);
+    const rules: RuleSpec[] = [
+      { id: 'pandemic', spreadRadius: 5000, spreadEffect: 1, hitMore: -0.3 },
+    ];
+    const { ticks } = run({ stats, rules, maxTicks: 1200 }, data);
+    const hits = eventsOf(ticks, 'hit');
+    expect(hits[0]?.amount).toBeCloseTo(0.7, 12);
+    const spreads = eventsOf(ticks, 'burnSpread');
+    expect(spreads.length).toBeGreaterThan(0);
+    expect(spreads[0]?.targets).toBeGreaterThan(0);
+    // Far more enemies burn than were hit directly.
+    const ignited = new Set(eventsOf(ticks, 'ignite').map((event) => event.targetId));
+    const hitIds = new Set(hits.map((hit) => hit.targetId));
+    expect(ignited.size).toBeGreaterThan(hitIds.size);
+  });
+});
+
+/** A flat `stat` modifier for the hits that carry `tag`. */
+const tagged = (stat: Modifier['stat'], tag: 'crit' | 'chain', value = 1): Modifier => ({
+  stat,
+  kind: 'flat',
+  value,
+  tags: [tag],
+});
+
+describe('bridge notables and Searing Crits as data', () => {
+  it('Searing Crits ignites every crit and halves non-crit hits', () => {
+    const crits = run(
+      { stats: makeStats({ damage: 10, critChance: 1, igniteChance: 0 }, SEARING_CRITS_MODS) },
+      stationarySquares(1),
+    );
+    const critHits = eventsOf(crits.ticks, 'hit');
+    expect(critHits.length).toBeGreaterThan(0);
+    expect(critHits.every((hit) => hit.crit && hit.amount === 15)).toBe(true);
+    expect(eventsOf(crits.ticks, 'ignite').length).toBe(critHits.length);
+    const plain = run(
+      { stats: makeStats({ damage: 10, critChance: 0, igniteChance: 0 }, SEARING_CRITS_MODS) },
+      stationarySquares(1),
+    );
+    expect(eventsOf(plain.ticks, 'hit').every((hit) => hit.amount === 5)).toBe(true);
+    expect(eventsOf(plain.ticks, 'ignite')).toHaveLength(0);
+  });
+
+  it('Searing Crits still draws the ignite roll of a crit', () => {
+    // Nothing dies, so each hit draws exactly its crit roll, then its ignite roll.
+    const stats = makeStats(
+      { damage: 10, critChance: 0.5, igniteChance: 0.3, attackSpeed: 6, projectileCount: 1 },
+      SEARING_CRITS_MODS,
+    );
+    const { ticks } = run({ seed: 5, stats }, stationarySquares(1));
+    const hits = eventsOf(ticks, 'hit');
+    expect(hits.length).toBeGreaterThan(30);
+    const combat = createRng(deriveSeed(5, 'combat'));
+    let ignites = 0;
+    for (const hit of hits) {
+      const crit = combat.chance(0.5);
+      const rolled = combat.chance(0.3);
+      expect(hit.crit).toBe(crit);
+      if (crit || rolled) ignites++;
+    }
+    expect(hits.some((hit) => hit.crit) && hits.some((hit) => !hit.crit)).toBe(true);
+    expect(eventsOf(ticks, 'ignite')).toHaveLength(ignites);
+  });
+
+  it('Static Focus adds crit chance per jump', () => {
+    const stats = makeStats(
+      { damage: 10, critChance: 0, chainCount: 1, chainRange: 5000, attackSpeed: 10 },
+      [{ stat: 'critChance', kind: 'flat', value: 1, scaling: { per: 'chainJump' } }],
+    );
+    const { ticks } = run({ stats }, stationarySquares(4));
+    const hits = eventsOf(ticks, 'hit');
+    expect(hits.length).toBeGreaterThan(10);
+    for (const hit of hits) expect(hit.crit).toBe(hit.chainIndex > 0);
+  });
+
+  it('steadyAim turns off the crit chance Static Focus adds', () => {
+    const stats = makeStats(
+      { damage: 10, critChance: 0, chainCount: 1, chainRange: 5000, attackSpeed: 10 },
+      [{ stat: 'critChance', kind: 'flat', value: 1, scaling: { per: 'chainJump' } }],
+    );
+    const rules: RuleSpec[] = [{ id: 'steadyAim', everyNth: 1000, critMultiplierMore: 0 }];
+    const hits = eventsOf(run({ stats, rules }, stationarySquares(4)).ticks, 'hit');
+    expect(hits.some((hit) => hit.chainIndex > 0)).toBe(true);
+    expect(hits.every((hit) => !hit.crit)).toBe(true);
+  });
+
+  it('Conduction and Flashpoint add ignite chance to their hits only', () => {
+    const base = { damage: 10, chainCount: 1, chainRange: 5000, attackSpeed: 10, igniteChance: 0 };
+    const chain = run(
+      { stats: makeStats({ ...base, critChance: 0 }, [tagged('igniteChance', 'chain')]) },
+      stationarySquares(4),
+    );
+    const chainHits = eventsOf(chain.ticks, 'hit').filter((hit) => hit.chainIndex > 0);
+    const ignited = eventsOf(chain.ticks, 'ignite').length;
+    expect(chainHits.length).toBeGreaterThan(0);
+    expect(ignited).toBe(chainHits.length);
+
+    const crit = run(
+      {
+        stats: makeStats({ ...base, chainCount: 0, critChance: 1 }, [
+          tagged('igniteChance', 'crit'),
+        ]),
+      },
+      stationarySquares(4),
+    );
+    expect(eventsOf(crit.ticks, 'ignite').length).toBe(eventsOf(crit.ticks, 'hit').length);
+    const plain = run(
+      {
+        stats: makeStats({ ...base, chainCount: 0, critChance: 0 }, [
+          tagged('igniteChance', 'crit'),
+        ]),
+      },
+      stationarySquares(4),
+    );
+    expect(eventsOf(plain.ticks, 'ignite')).toHaveLength(0);
+  });
+
+  it('critAlways crits the hits with its tags and reads the crit multiplier of their row', () => {
+    const stats = makeStats(
+      {
+        damage: 10,
+        critChance: 0,
+        critMultiplier: 2,
+        chainCount: 1,
+        chainRange: 5000,
+        chainRetention: 1,
+        attackSpeed: 10,
+      },
+      [
+        tagged('critAlways', 'chain'),
+        { stat: 'critMultiplier', kind: 'more', value: 0.5, tags: ['chain'] },
+      ],
+    );
+    const hits = eventsOf(run({ stats }, stationarySquares(4)).ticks, 'hit');
+    expect(hits.some((hit) => hit.chainIndex > 0)).toBe(true);
+    for (const hit of hits) {
+      expect(hit.crit).toBe(hit.chainIndex > 0);
+      expect(hit.amount).toBe(hit.chainIndex > 0 ? 30 : 10);
+    }
+  });
+});
+
+describe('projectileCount', () => {
+  it('fires one projectile per whole count, each at a different target', () => {
+    const stats = makeStats({ damage: 1, projectileCount: 3, attackSpeed: 1 });
+    const sim = createSimulation(makeConfig({ stats, maxTicks: 61 }), stationarySquares(5));
+    const events: SimEvent[] = [];
+    while (!sim.state.finished) events.push(...sim.step(NO_INPUT));
+    const attacks = eventsOf([events], 'attack');
+    expect(attacks.length % 3).toBe(0);
+    expect(new Set(attacks.slice(0, 3).map((attack) => attack.targetId)).size).toBe(3);
+  });
+});
+
+describe('targeting doomed enemies', () => {
+  it('does not shoot an enemy its burns will already kill', () => {
+    const stats = makeStats({
+      damage: 1,
+      attackSpeed: 2,
+      critChance: 0,
+      igniteChance: 1,
+      burnDamage: 100,
+      burnDuration: 3,
+      projectileSpeed: 1e6,
+    });
+    // Projectiles land on the next tick. 100 HP each: one hit ignites 300 burn damage, enough to kill within the second.
+    const { ticks } = run({ stats, maxTicks: 150 }, stationarySquares(2, 5));
+    const hits = eventsOf(ticks, 'hit');
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+    expect(hits[1]?.targetId).not.toBe(hits[0]?.targetId);
   });
 });

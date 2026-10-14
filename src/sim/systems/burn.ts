@@ -87,26 +87,33 @@ export function addBurn(ctx: RunContext, enemy: Enemy, dps: Num, end: number): v
   ctx.events.push({ type: 'ignite', targetId: enemy.id, stacks: burns.length });
 }
 
+/** How far a dying enemy's burns spread, and how strong a spread stack is. */
+export interface BurnSpread {
+  readonly radius: number;
+  readonly radiusSq: number;
+  /** Damage of a spread stack relative to its source stack. */
+  readonly effect: number;
+}
+
 /**
- * pandemic: copies the dying enemy's active stacks (same end, pandemicEffect × damage) onto
- * every alive enemy within the spread radius, in id order. Spread stacks spread again, weaker
- * each time.
+ * pandemic (src/sim/rules/pandemicLegacy.ts): copies the dying enemy's active stacks (same end,
+ * effect × damage) onto every alive enemy within the spread radius, in id order. Spread stacks
+ * spread again, weaker each time.
  */
-export function spreadBurns(ctx: RunContext, source: Enemy): void {
+export function spreadBurns(ctx: RunContext, source: Enemy, spread: BurnSpread): void {
   if (ctx.now >= source.burnNextEnd) expireBurns(ctx, source);
   const burns = source.burns;
   if (burns.length === 0) return;
-  const fx = ctx.fx;
   // In id order; addBurn kills nothing, so collecting the targets first changes nothing.
   const targets = ctx.spreadTargets;
-  const count = ctx.grid.within(source.x, source.y, ctx.pandemicRadiusSq, targets);
+  const count = ctx.grid.within(source.x, source.y, spread.radiusSq, targets);
   let spreadTo = 0;
   for (let i = 0; i < count; i++) {
     const enemy = targets[i] as Enemy;
     if (enemy === source) continue;
     for (let s = 0; s < burns.length; s++) {
       const stack = burns[s] as BurnStack;
-      addBurn(ctx, enemy, mul(stack.dps, fx.pandemicEffect), stack.end);
+      addBurn(ctx, enemy, mul(stack.dps, spread.effect), stack.end);
     }
     spreadTo++;
   }
@@ -115,7 +122,7 @@ export function spreadBurns(ctx: RunContext, source: Enemy): void {
     enemyId: source.id,
     x: source.x,
     y: source.y,
-    radius: fx.pandemicRadius,
+    radius: spread.radius,
     targets: spreadTo,
   });
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BASE_STATS, NO_EXTRAS, STAT_IDS } from '../data/stats';
 import type { Modifier, StatBlock } from '../data/stats';
 import { tagMask } from '../data/tags';
-import { damageRow } from '../sim/build/modTable';
+import { damageRow } from '../sim/testing';
 import { createMetaState } from './state';
 import { collectModifiers, collectRules, computeStatBlock, statBlockFor } from './stats';
 import { fixtureData } from './testing';

@@ -25,7 +25,7 @@ import {
   statBlockFor,
 } from '../meta';
 import type { EconomyConfig, MetaState, Settlement } from '../meta';
-import { NO_INPUT, createSimulation, damageRow } from '../sim';
+import { NO_INPUT, centerDamage, compileBuild, createSimulation } from '../sim';
 import type { RunConfig, RunResult, SimEvent, Simulation } from '../sim';
 
 /** How long the result screen stays up before the next run starts (a click skips it). */
@@ -498,7 +498,9 @@ export class Session {
       mode: 'auto',
       ...(this.waveCap === undefined ? {} : { waveCap: Math.max(this.waveCap, this.startWave) }),
     };
-    const typicalHit = stats.values.damage * damageRow(stats, DAMAGE_TAG_BIT.hit);
+    // The damage row includes Searing Crits' ×0.5 and Glass Cannon's ×2.
+    const build = compileBuild(stats, config.rules);
+    const typicalHit = build.values.damage * centerDamage(build, DAMAGE_TAG_BIT.hit);
     this.active = {
       number: this.meta.runs + 1,
       config,

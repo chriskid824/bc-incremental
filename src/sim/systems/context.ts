@@ -12,21 +12,13 @@ import { createStreams } from '../../core/rng';
 import { DAMAGE_TAG_BIT } from '../../data/stats';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
-import { modTableFor } from '../build/modTable';
+import { compileBuild } from '../build/compile';
+import type { CompiledBuild } from '../build/compile';
 import type { ModTable } from '../build/modTable';
-import {
-  ailmentCredit,
-  CENTER,
-  createAttribution,
-  createSourceTable,
-  M1_CENTER_AILMENTS,
-  MAX_SOURCES,
-  rowKey,
-} from '../build/sources';
+import { ailmentCredit, CENTER, MAX_SOURCES, rowKey } from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
 import type { SpatialGrid } from '../grid';
-import { compileRules } from '../rules';
-import type { RuleEffects } from '../rules';
+import type { KillScratch, TestModule } from '../rules';
 import { FOCUS_RANGE, isCovered } from '../targeting';
 import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, MAX_RUN_SECONDS, TICK_RATE } from '../types';
 import type {
@@ -109,7 +101,11 @@ export interface Projectile extends ProjectileState {
 export interface RunContext {
   // ---- Run inputs and constants ----
   readonly data: GameData;
-  readonly fx: RuleEffects;
+  /**
+   * The build compiled for this run (src/sim/build/compile.ts): final stat values, ModTable,
+   * sources, flags, the signature attack's parameters and the rule modules' hooks.
+   */
+  readonly build: CompiledBuild;
   readonly spawnRng: Rng;
   readonly splitRng: Rng;
   readonly combatRng: Rng;
@@ -121,9 +117,9 @@ export interface RunContext {
   readonly waveTimerTicks: number;
 
   // ---- Damage sources (src/sim/build/sources.ts) ----
-  /** The run's source ids; index 0 is 'center'. */
+  /** The run's source ids; index 0 is 'center'. The same object as build.sources. */
   readonly sources: SourceTable;
-  /** Who ailment damage is credited to; in M1 every ailment is the center's own. */
+  /** Who ailment damage is credited to (build.attribution); in M1 every ailment is the center's. */
   readonly attribution: AttributionPolicy;
   /** Source credited with burn damage: every burn comes from the attack's hits. */
   readonly burnCredit: number;
@@ -131,8 +127,8 @@ export interface RunContext {
   // ---- Derived stats, clamped as documented in src/data/stats.ts ----
   /**
    * Scoped stats (damage multiplier, crit and ignite chances, crit multiplier) per tag mask and
-   * source (rowKey), from the build's scoped modifiers, filled on first use; read through
-   * statAt (src/sim/build/eval.ts).
+   * source (rowKey), from the build's scoped and rule-added modifiers, filled on first use; read
+   * through statAt (src/sim/build/eval.ts). The same object as build.table.
    */
   readonly table: ModTable;
   /**
@@ -146,12 +142,9 @@ export interface RunContext {
   readonly burnCap: number;
   readonly burnMult: number;
   readonly burnCritMult: number;
-  /** Rules' multiplier on hit damage on top of the damage row (pandemic, glassCannon). */
-  readonly hitMult: number;
   readonly chainCount: number;
   readonly chainRetention: number;
   readonly projectileCount: number;
-  readonly pandemicRadiusSq: number;
   readonly chainRangeSq: number;
   /** Ticks between attacks; Infinity disables attacking. */
   readonly attackInterval: number;
@@ -172,6 +165,8 @@ export interface RunContext {
   readonly events: SimEvent[];
   /** The enemies sorted into cells, rebuilt every tick after movement (systems/grid.ts). */
   readonly grid: SpatialGrid<Enemy>;
+  /** The kill the onKill hooks see, refilled at every kill (killEnemy in death.ts). */
+  readonly killScratch: KillScratch;
   /**
    * spreadBurns' scratch list for the targets of one spread; only spreadBurns may use it. A
    * kill spreads burns, so a query whose targets can die needs a list of its own.
@@ -245,10 +240,17 @@ export const clamp01 = (value: number): number => Math.min(1, Math.max(0, value)
 /** Elites and bosses close to the player draw every shot until covered. */
 export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
 
-/** Builds the context of one run; the config must already be validated. */
-export function createRunContext(config: RunConfig, data: GameData): RunContext {
-  const { values } = config.stats;
-  const fx = compileRules(config.rules);
+/**
+ * Builds the context of one run; the config must already be validated. testModules are for
+ * tests only (src/sim/rules/module.ts).
+ */
+export function createRunContext(
+  config: RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[] = [],
+): RunContext {
+  const build = compileBuild(config.stats, config.rules, testModules);
+  const { values, flags, signature, legacyHitMult, sources, attribution, table } = build;
   const {
     spawn: spawnRng,
     split: splitRng,
@@ -257,29 +259,24 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
-  const sources = createSourceTable();
-  const attribution = createAttribution(M1_CENTER_AILMENTS);
   const burnCredit = ailmentCredit(sources, attribution, 'burn', ATTACK_SOURCE);
 
   // Derived stats, clamped as documented in src/data/stats.ts.
-  const table = modTableFor(config.stats, sources);
   const multAt = (mask: number, source = ATTACK_SOURCE): number =>
     table.damage(rowKey(mask, source));
   const damage = num(values.damage);
-  const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
-  const allMult = fx.allDamageMult;
-  const hitMult = fx.hitMult * allMult;
-  const averageCrit = fx.steadyAimEvery > 0 ? 1 / fx.steadyAimEvery : clamp01(values.critChance);
+  const forceCritEvery = signature.forceCritEvery;
+  const averageCrit = forceCritEvery > 0 ? 1 / forceCritEvery : clamp01(values.critChance);
   const expectedHit =
     values.damage *
-    ((1 - averageCrit) * multAt(HIT) * hitMult +
-      averageCrit * critMultiplier * multAt(HIT | CRIT) * hitMult);
+    ((1 - averageCrit) * multAt(HIT) * legacyHitMult +
+      averageCrit * values.critMultiplier * multAt(HIT | CRIT) * legacyHitMult);
 
-  const projectileEstimate = mul(damage, multAt(HIT) * hitMult);
+  const projectileEstimate = mul(damage, multAt(HIT) * legacyHitMult);
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
-  const maxLife = fx.maxLife ?? values.maxLife;
+  const maxLife = flags.maxLife ?? values.maxLife;
   const player = {
     x: HALF_WIDTH,
     y: HALF_HEIGHT,
@@ -306,7 +303,7 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
 
   const ctx: RunContext = {
     data,
-    fx,
+    build,
     spawnRng,
     splitRng,
     combatRng,
@@ -325,15 +322,13 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     hitRows: new Int32Array(4).fill(-1),
     damage,
     burnDamage: values.burnDamage,
-    burnTicks: Math.max(0, values.burnDuration * fx.burnDurationMult * TICK_RATE),
-    burnCap: fx.burnUncapped ? UNCAPPED_BURN_STACKS : Math.max(1, Math.floor(values.burnMaxStacks)),
-    burnMult: multAt(BURN, burnCredit) * allMult,
-    burnCritMult: multAt(BURN | CRIT, burnCredit) * allMult,
-    hitMult,
-    chainCount: Math.max(0, values.chainCount * fx.chainCountMult),
-    chainRetention: clamp01(values.chainRetention - fx.chainRetentionPenalty),
+    burnTicks: Math.max(0, values.burnDuration * TICK_RATE),
+    burnCap: flags.burnRings ? UNCAPPED_BURN_STACKS : Math.max(1, Math.floor(values.burnMaxStacks)),
+    burnMult: multAt(BURN, burnCredit),
+    burnCritMult: multAt(BURN | CRIT, burnCredit),
+    chainCount: Math.max(0, values.chainCount),
+    chainRetention: clamp01(values.chainRetention),
     projectileCount: Math.max(1, values.projectileCount),
-    pandemicRadiusSq: fx.pandemicRadius ** 2,
     chainRangeSq: Math.max(0, values.chainRange) ** 2,
     attackInterval: values.attackSpeed > 0 ? TICK_RATE / values.attackSpeed : Infinity,
     projectileStep: values.projectileSpeed * DT,
@@ -348,6 +343,7 @@ export function createRunContext(config: RunConfig, data: GameData): RunContext 
     state,
     events: [],
     grid: createEnemyGrid(),
+    killScratch: { origin: -1 },
     spreadTargets: [],
 
     open: [],

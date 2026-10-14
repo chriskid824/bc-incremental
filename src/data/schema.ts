@@ -168,6 +168,7 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         id: z.literal('overload'),
         chainCountMultiplier: finite,
         retentionPenalty: finite,
+        chainMore: finite.exactOptional(),
       })
       .readonly(),
     z.strictObject({ id: z.literal('glassCannon'), damageMore: finite }).readonly(),

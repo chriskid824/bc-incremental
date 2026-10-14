@@ -1,12 +1,11 @@
 /**
  * Death and drops (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2–3). Kills resolve
- * inline, at the hit or burn tick that kills: pandemic spread, drops and split children
- * happen at once, so later hits of the same tick can reach the children. The death step of
- * the tick order only compacts the entity arrays.
+ * inline, at the hit or burn tick that kills: the rule modules' onKill hooks (pandemic's
+ * spread), drops and split children happen at once, so later hits of the same tick can reach
+ * the children. The death step of the tick order only compacts the entity arrays.
  */
 
 import { add, mul, num } from '../../core/num';
-import { spreadBurns } from './burn';
 import type { Enemy, Projectile, RunContext } from './context';
 import { split } from './spawn';
 
@@ -17,8 +16,17 @@ export function removeEnemy(ctx: RunContext, enemy: Enemy): void {
   ctx.enemiesDirty = true;
 }
 
-export function killEnemy(ctx: RunContext, enemy: Enemy): void {
-  if (ctx.pandemicRadiusSq > 0) spreadBurns(ctx, enemy);
+/**
+ * Kills the enemy. `origin` is the trigger whose damage killed it, −1 for emitter hits and DoT
+ * kills. The onKill hooks run first, while the enemy is still alive and burning.
+ */
+export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number): void {
+  const onKill = ctx.build.hooks.onKill;
+  if (onKill.length !== 0) {
+    const kill = ctx.killScratch;
+    kill.origin = origin;
+    for (const hook of onKill) hook(ctx, enemy, kill);
+  }
   removeEnemy(ctx, enemy);
   ctx.kills++;
   const def = enemy.def;

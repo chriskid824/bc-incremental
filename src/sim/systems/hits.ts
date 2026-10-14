@@ -114,15 +114,16 @@ function hitEnemy(
   fromY: number | null,
   steady: boolean,
 ): void {
-  const fx = ctx.fx;
+  const build = ctx.build;
   const table = ctx.table;
   // The crit roll reads the hit's row without the crit tag, the rest the row of its outcome.
   const plain = chainIndex > 0 ? HIT | CHAIN : HIT;
   const slot = chainIndex > 0 ? 2 : 0;
   const plainRow = hitRow(ctx, slot, plain);
   // steadyAim turns random crits off, Static Focus's per-jump chance included.
-  const chance =
-    fx.steadyAimEvery > 0 ? 0 : clamp01(statAt(table, plainRow, CRIT_CHANCE, chainIndex));
+  const chance = build.flags.randomCrits
+    ? clamp01(statAt(table, plainRow, CRIT_CHANCE, chainIndex))
+    : 0;
   const crit =
     ctx.combatRng.chance(chance) || steady || statAt(table, plainRow, CRIT_ALWAYS, chainIndex) > 0;
   const mask = crit ? plain | CRIT : plain;
@@ -131,12 +132,10 @@ function hitEnemy(
   const ignites =
     ctx.combatRng.chance(clamp01(statAt(table, row, IGNITE_CHANCE, chainIndex))) ||
     statAt(table, row, IGNITE_ALWAYS, chainIndex) > 0;
-  const critMultiplier = crit
-    ? statAt(table, row, CRIT_MULTIPLIER, chainIndex) * fx.critMultiplierMult
-    : 1;
+  const critMultiplier = crit ? statAt(table, row, CRIT_MULTIPLIER, chainIndex) : 1;
   const baseHit = mul(ctx.damage, critMultiplier * retention);
   const amount = assertFinite(
-    mul(baseHit, statAt(table, row, DAMAGE, chainIndex) * ctx.hitMult),
+    mul(baseHit, statAt(table, row, DAMAGE, chainIndex) * build.legacyHitMult),
     'hit damage',
   );
   enemy.hp = sub(enemy.hp, amount);
@@ -157,7 +156,7 @@ function hitEnemy(
     fromY,
   });
   if (lte(enemy.hp, ZERO)) {
-    killEnemy(ctx, enemy);
+    killEnemy(ctx, enemy, -1);
   } else if (ignites && ctx.burnTicks > 0) {
     addBurn(
       ctx,

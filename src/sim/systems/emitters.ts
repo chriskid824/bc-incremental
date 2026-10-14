@@ -1,7 +1,7 @@
 /**
  * Emitters (docs/v3/implementation-plan-v3.md §2.15): the signature attack. Due attacks fire
  * homing projectiles at targets picked by src/sim/targeting.ts; the projectiles system moves
- * them and resolves their hits.
+ * them and resolves their hits. The rule modules' tick hooks run after the attacks.
  */
 
 import { pickTargetInGrid } from '../targeting';
@@ -37,9 +37,14 @@ export function attack(ctx: RunContext): void {
   }
 }
 
+/** The rule modules' tick hooks, after this tick's attacks (src/sim/rules/module.ts). */
+export function runTickHooks(ctx: RunContext): void {
+  for (const hook of ctx.build.hooks.tick) hook(ctx);
+}
+
 function fire(ctx: RunContext, target: Enemy): void {
   const player = ctx.player;
-  const fx = ctx.fx;
+  const every = ctx.build.signature.forceCritEvery;
   ctx.shots++;
   target.inbound++;
   const projectile: Projectile = {
@@ -49,7 +54,7 @@ function fire(ctx: RunContext, target: Enemy): void {
     prevX: player.x,
     prevY: player.y,
     targetId: target.id,
-    steady: fx.steadyAimEvery > 0 && ctx.shots % fx.steadyAimEvery === 0,
+    steady: every > 0 && ctx.shots % every === 0,
     alive: true,
     target,
   };

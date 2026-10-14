@@ -8,8 +8,7 @@ import { DAMAGE_TAG_BIT, isBehaviourModifier } from '../data/stats';
 import type { DamageTag } from '../data/tags';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
-import { damageRow } from '../sim/build/modTable';
-import { compileRules } from '../sim/rules';
+import { centerDamage, compileBuild } from '../sim/build/compile';
 
 /** Flat values of these stats are fractions shown as percentages (0.05 → 5%). */
 const PERCENT_STATS: ReadonlySet<StatId> = new Set([
@@ -82,53 +81,49 @@ const pct = (value: number): string => `${trim(value * 100)}%`;
 
 /**
  * The few stats that tell builds apart, for the talent screen's summary. Values are what the
- * simulation plays with once keystone rules apply (src/sim/systems/ and rules.ts): hit
- * damage is a non-crit primary hit, a crit hit is one primary crit, a burn stack is what a
- * non-crit hit ignites, the first chain jump is a non-crit jump, and steadyAim replaces the crit
- * chance with its every-Nth-shot rhythm. Damage reads each instance's damage row, so tagged
- * modifiers (Searing Crits' non-crit half included) count. Each archetype's nodes move at least
- * one line.
+ * simulation plays with once keystone rules apply (src/sim/build/compile.ts and
+ * src/sim/systems/): hit damage is a non-crit primary hit, a crit hit is one primary crit, a burn
+ * stack is what a non-crit hit ignites, the first chain jump is a non-crit jump, and steadyAim
+ * replaces the crit chance with its every-Nth-shot rhythm. Damage reads each instance's damage
+ * row, so tagged modifiers (Searing Crits' non-crit half included) and rule-added ones (Glass
+ * Cannon's) count. Each archetype's nodes move at least one line.
  */
 export function describeBuild(stats: StatBlock, rules: readonly RuleSpec[] = []): BuildLine[] {
-  const { values } = stats;
-  const multAt = (mask: number): number => damageRow(stats, mask);
+  const build = compileBuild(stats, rules);
+  const { values, flags, legacyHitMult } = build;
+  const multAt = (mask: number): number => centerDamage(build, mask);
   const { hit: HIT, crit: CRIT, burn: BURN, chain: CHAIN } = DAMAGE_TAG_BIT;
-  const fx = compileRules(rules);
-  const plainHitMult = fx.hitMult * fx.allDamageMult;
-  const critMultiplier = values.critMultiplier * fx.critMultiplierMult;
-  const hit = values.damage * multAt(HIT) * plainHitMult;
-  const critHit =
-    values.damage * critMultiplier * multAt(HIT | CRIT) * fx.hitMult * fx.allDamageMult;
-  const burnPerSecond = values.damage * values.burnDamage * multAt(BURN) * fx.allDamageMult;
-  const retention = Math.min(1, Math.max(0, values.chainRetention - fx.chainRetentionPenalty));
-  const chainJump = values.damage * retention * multAt(HIT | CHAIN) * plainHitMult;
+  const hit = values.damage * multAt(HIT) * legacyHitMult;
+  const critHit = values.damage * values.critMultiplier * multAt(HIT | CRIT) * legacyHitMult;
+  const burnPerSecond = values.damage * values.burnDamage * multAt(BURN);
+  const retention = Math.min(1, Math.max(0, values.chainRetention));
+  const chainJump = values.damage * retention * multAt(HIT | CHAIN) * legacyHitMult;
+  const every = build.signature.forceCritEvery;
   const crit =
-    fx.steadyAimEvery > 0
-      ? t('build.critEveryNth', { n: fx.steadyAimEvery })
-      : pct(Math.min(1, values.critChance));
+    every > 0 ? t('build.critEveryNth', { n: every }) : pct(Math.min(1, values.critChance));
   const short = (value: number): string => formatNum(num(value), { format: 'short' });
   return [
     { label: t('stat.damage.hit'), value: short(hit) },
     { label: t('stat.attackSpeed'), value: `${trim(values.attackSpeed)}/s` },
     { label: t('stat.projectileCount'), value: trim(values.projectileCount) },
     { label: t('stat.critChance'), value: crit },
-    { label: t('stat.critMultiplier'), value: pct(critMultiplier) },
+    { label: t('stat.critMultiplier'), value: pct(values.critMultiplier) },
     { label: t('build.critHit'), value: short(critHit) },
     { label: t('stat.igniteChance'), value: pct(Math.min(1, values.igniteChance)) },
     { label: t('build.burnPerStack'), value: `${short(burnPerSecond)}/s` },
     {
       label: t('stat.burnDuration'),
-      value: trim(Math.max(0, values.burnDuration * fx.burnDurationMult)),
+      value: trim(Math.max(0, values.burnDuration)),
     },
     {
       label: t('stat.burnMaxStacks'),
-      value: fx.burnUncapped ? '∞' : String(Math.max(1, Math.floor(values.burnMaxStacks))),
+      value: flags.burnRings ? '∞' : String(Math.max(1, Math.floor(values.burnMaxStacks))),
     },
     {
       label: t('stat.chainCount'),
-      value: trim(Math.max(0, values.chainCount * fx.chainCountMult)),
+      value: trim(Math.max(0, values.chainCount)),
     },
     { label: t('build.chainJump'), value: short(chainJump) },
-    { label: t('stat.maxLife'), value: trim(fx.maxLife ?? values.maxLife) },
+    { label: t('stat.maxLife'), value: trim(flags.maxLife ?? values.maxLife) },
   ];
 }

@@ -14,7 +14,8 @@ import {
   statBlockFor,
 } from '../meta';
 import type { MetaState } from '../meta';
-import { damageRow, MAX_RUN_SECONDS, TICK_RATE } from '../sim';
+import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
+import { damageRow } from '../sim/testing';
 import {
   FAILED_START_RATIO,
   RESULT_FRAME_MAX_MS,
@@ -90,9 +91,22 @@ describe('Session', () => {
     expect(run.config.seed).toBe(1000);
     expect(run.config.startWave).toBe(1);
     expect(run.config.mode).toBe('auto');
-    const { stats } = run.config;
-    expect(run.typicalHit).toBe(stats.values.damage * damageRow(stats, DAMAGE_TAG_BIT.hit));
+    const { stats, rules } = run.config;
+    expect(run.typicalHit).toBe(stats.values.damage * damageRow(stats, DAMAGE_TAG_BIT.hit, rules));
     expect(() => session.start()).toThrow();
+  });
+
+  it('scales damage numbers by the hit row, Searing Crits and Glass Cannon included', () => {
+    const { session, meta } = createSession();
+    meta.allocated.add('searingCrits');
+    meta.allocated.add('glassCannon');
+    session.start();
+    const { stats, rules } = session.run.config;
+    const hit = DAMAGE_TAG_BIT.hit;
+    // Searing Crits halves non-crit hits; Glass Cannon is a rule whose ×2 reaches every row.
+    expect(damageRow(stats, hit)).toBe(0.5);
+    expect(damageRow(stats, hit, rules)).toBe(0.5 * 2);
+    expect(session.run.typicalHit).toBe(stats.values.damage * damageRow(stats, hit, rules));
   });
 
   it('settles a finished run, saves and shows the result', () => {
