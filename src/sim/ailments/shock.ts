@@ -19,11 +19,14 @@ export function holdsShock(enemy: Enemy, now: number): boolean {
 }
 
 /**
- * Damage the enemy takes per unit dealt: 1 + shockEffect × its shock stacks. Hits and damage
- * over time take it once the enemy is shocked (`shockStacks !== 0 && shockUntil > now`).
+ * Damage the enemy takes per unit dealt: 1 + frozenDamageTaken while it is frozen (frost.ts)
+ * + shockEffect × its shock stacks. Hits and damage over time take it once the enemy is shocked
+ * or frozen (`(shockStacks !== 0 && shockUntil > now) || frozenUntil > now`).
  */
 export function takenMult(ctx: RunContext, enemy: Enemy): number {
-  return 1 + ctx.shockEffect * activeShockStacks(enemy, ctx.now);
+  const now = ctx.now;
+  const frozen = enemy.frozenUntil > now ? ctx.frozenDamageTaken : 0;
+  return 1 + frozen + ctx.shockEffect * activeShockStacks(enemy, now);
 }
 
 /**

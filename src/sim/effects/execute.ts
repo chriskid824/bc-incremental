@@ -7,12 +7,13 @@
  *
  * Effect hits go through hitWithPayload like any hit, with the effect's payload (its tags and
  * source, the effects stream, no flags) at the entry's depth and origin, so their kills and
- * triggers follow the same rules. Area queries write to ctx.effectTargets; effects never nest,
- * and transfers at a kill use ctx.spreadTargets.
+ * triggers follow the same rules. A shatter's hits (SHATTER_TRIGGER) take the payload of the
+ * source its entry is credited to, and deal their share of the victim's max life. Area queries
+ * write to ctx.effectTargets; effects never nest, and transfers at a kill use ctx.spreadTargets.
  */
 
-import { add, mul, num, ZERO } from '../../core/num';
-import type { AppliedAilment, EffectKind, EffectSpec } from '../../data/triggers';
+import { add, mul, num, toNumber, ZERO } from '../../core/num';
+import type { AppliedAilment } from '../../data/triggers';
 import {
   ailmentDps,
   applyBurn,
@@ -22,21 +23,28 @@ import {
   spreadPoison,
 } from '../ailments/apply';
 import { addBleed } from '../ailments/bleed';
+import { addFrost } from '../ailments/frost';
 import { addShock } from '../ailments/shock';
 import { hitWithPayload } from '../combat/hit';
-import { SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
+import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
 import { rebuildGrid } from '../systems/grid';
+import { raiseFreeze } from './centerEvents';
 import { fireApplied, fireOne } from './dispatch';
 import { dequeue } from './queue';
 import type { EffectEntry } from './queue';
 import { EFFECTS_PER_TICK, EVENT } from './types';
-import type { CompiledEffect, CompiledTrigger } from './types';
+import type {
+  CompiledEffect,
+  CompiledEffectKind,
+  CompiledEffectSpec,
+  CompiledTrigger,
+} from './types';
 
-type Executor<K extends EffectKind> = (
+type Executor<K extends CompiledEffectKind> = (
   ctx: RunContext,
-  spec: Extract<EffectSpec, { kind: K }>,
+  spec: Extract<CompiledEffectSpec, { kind: K }>,
   fx: CompiledEffect,
   entry: Readonly<EffectEntry>,
 ) => void;
@@ -133,7 +141,41 @@ function hitArea(
   }
 }
 
-const EFFECTS: { readonly [K in EffectKind]: Executor<K> } = {
+/** `amount` of frost from the effect's credit on `enemy`, which may freeze it. */
+function frostOne(
+  ctx: RunContext,
+  enemy: Enemy,
+  amount: number,
+  entry: Readonly<EffectEntry>,
+): void {
+  if (addFrost(ctx, enemy, amount, entry.source)) {
+    raiseFreeze(ctx, enemy, entry.depth, entry.origin, 0);
+  }
+}
+
+/**
+ * The payload of shatter hits credited to `source`, from the shatter effect `fx`: no crit, no
+ * ailments, no flags; filled on first use (RunContext.shatterPayloads).
+ */
+function shatterPayload(ctx: RunContext, fx: CompiledEffect, source: number): Payload {
+  const cached = ctx.shatterPayloads[source];
+  if (cached !== undefined && cached !== null) return cached;
+  const payload = createPayload({
+    baseDamage: fx.baseDamage,
+    tags: fx.tags,
+    source,
+    flags: 0,
+    rng: ctx.effectsRng,
+    chains: false,
+    rollsAilments: false,
+    canCrit: false,
+    damageMode: PCT_MAX_HP,
+  });
+  ctx.shatterPayloads[source] = payload;
+  return payload;
+}
+
+const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   applyAilment(ctx, spec, fx, entry) {
     const ailment = spec.ailment;
     if (durationOf(ctx, ailment) <= 0) return;
@@ -182,6 +224,16 @@ const EFFECTS: { readonly [K in EffectKind]: Executor<K> } = {
     // this one this tick query the pushed positions.
     rebuildGrid(ctx);
   },
+  addFrost(ctx, spec, fx, entry) {
+    if (spec.radius === undefined) {
+      const target = liveTarget(entry);
+      if (target !== null) frostOne(ctx, target, spec.amount, entry);
+      return;
+    }
+    const targets = ctx.effectTargets;
+    const count = Math.min(within(ctx, fx, entry.x, entry.y), spec.maxTargets ?? Infinity);
+    for (let i = 0; i < count; i++) frostOne(ctx, targets[i] as Enemy, spec.amount, entry);
+  },
   heal(ctx, spec) {
     const player = ctx.player;
     player.life = Math.min(player.maxLife, player.life + spec.lifePct * player.maxLife);
@@ -190,11 +242,27 @@ const EFFECTS: { readonly [K in EffectKind]: Executor<K> } = {
     const state = ctx.state;
     state.shards = add(state.shards, mul(num(entry.value), spec.fraction));
   },
+  // The victim (dead and gone) at the entry's position: shatterDamage of its max life (the
+  // entry's value) to every alive enemy within shatterRadius, credited to the entry's source.
+  shatter(ctx, _spec, fx, entry) {
+    const radius = ctx.shatterRadius;
+    ctx.events.push({ type: 'shatter', x: entry.x, y: entry.y, radius });
+    const p = shatterPayload(ctx, fx, entry.source);
+    const scale = toNumber(mul(num(entry.value), ctx.shatterDamage));
+    const targets = ctx.effectTargets;
+    const count = within(ctx, fx, entry.x, entry.y);
+    for (let i = 0; i < count; i++) {
+      const enemy = targets[i] as Enemy;
+      if (enemy.alive) {
+        hitWithPayload(ctx, enemy, p, 0, scale, null, null, false, entry.depth, entry.origin);
+      }
+    }
+  },
 };
 
 type AnyExecutor = (
   ctx: RunContext,
-  spec: EffectSpec,
+  spec: CompiledEffectSpec,
   fx: CompiledEffect,
   entry: Readonly<EffectEntry>,
 ) => void;

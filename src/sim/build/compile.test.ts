@@ -3,6 +3,7 @@ import type { RuleSpec } from '../../data/rules';
 import { SCOPED_STATS } from '../../data/stats';
 import type { Modifier } from '../../data/stats';
 import { TAG } from '../../data/tags';
+import { SHATTER_TRIGGER, shatterTrigger } from '../effects/types';
 import type { TestModule } from '../rules';
 import { damageRow, makeStats, maskProbeMods } from '../testing';
 import { centerDamage, centerStat, compileBuild } from './compile';
@@ -33,6 +34,11 @@ describe('compileBuild', () => {
       maxLife: null,
       burnRings: false,
       bleedMoveMult: 3,
+      frostImmuneTicks: 180,
+      bossLockTicks: 252,
+      bossMinGapTicks: 0,
+      globalSlow: 0,
+      shatterMult: 1,
     });
     expect(build.signature).toEqual({ forceCritEvery: 0, counts: 'shot' });
     expect(build.hooks).toEqual({
@@ -43,7 +49,9 @@ describe('compileBuild', () => {
       modifyDamage: [],
       onCenterEvent: [],
     });
-    expect(build.triggers).toEqual([]);
+    // Only the shatter's entry, which cannot freeze and so listens to nothing.
+    expect(build.triggers).toEqual([shatterTrigger(false, 0)]);
+    expect(build.triggers[SHATTER_TRIGGER]?.on).toBe(-1);
     expect(build.effects).toEqual([]);
     expect(build.triggersOn.every((list) => list.length === 0)).toBe(true);
     expect(build.sources.names).toEqual(['center']);

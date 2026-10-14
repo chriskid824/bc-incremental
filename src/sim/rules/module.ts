@@ -178,7 +178,10 @@ export type HookName = keyof Hooks;
 
 /**
  * A rule module without a RuleSpec, for tests only: compiled after the rule modules, with the
- * center as its source, as one module instance. createSimulation(config, data, testModules)
- * passes them on; RunConfig has no such field, so content cannot reach it.
+ * center as its source, or the source id in its `source` property, as one module instance.
+ * createSimulation(config, data, testModules) passes them on; RunConfig has no such field, so
+ * content cannot reach it.
  */
-export type TestModule = (b: BuildCompiler, source: number) => void;
+export type TestModule = ((b: BuildCompiler, source: number) => void) & {
+  readonly source?: string;
+};

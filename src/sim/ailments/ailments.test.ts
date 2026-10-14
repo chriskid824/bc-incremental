@@ -471,7 +471,9 @@ describe('ailmentTick', () => {
 
   it('fires on the steps of its interval, the same steps for every poisoned enemy', () => {
     const ctx = spawned(makeStats({}, [], center(tickTrigger(1), tickTrigger(0.25))));
-    expect(ctx.build.triggers.map((t) => t.stepEvery)).toEqual([4, 1]);
+    const [every4, every1] = ctx.build.triggersOn[EVENT.ailmentTick] as Int32Array;
+    const triggers = ctx.build.triggers;
+    expect([every4, every1].map((i) => triggers[i as number]?.stepEvery)).toEqual([4, 1]);
     const [a, b, c] = [enemyAt(ctx, 0), enemyAt(ctx, 1), enemyAt(ctx, 2)];
     ctx.now = 20;
     applyPoison(ctx, a, num(1), 260, 0, CENTER, 1);
@@ -493,10 +495,10 @@ describe('ailmentTick', () => {
     const range = (from: number, to: number) =>
       Array.from({ length: to - from + 1 }, (_, i) => from + i);
     // a holds poison over steps 2–17 (ticks 30–255), b over 4–19 (ticks 60–285).
-    expect(stepsOf(0, a)).toEqual([4, 8, 12, 16]);
-    expect(stepsOf(0, b)).toEqual([4, 8, 12, 16]);
-    expect(stepsOf(1, a)).toEqual(range(2, 17));
-    expect(stepsOf(1, b)).toEqual(range(4, 19));
+    expect(stepsOf(every4 as number, a)).toEqual([4, 8, 12, 16]);
+    expect(stepsOf(every4 as number, b)).toEqual([4, 8, 12, 16]);
+    expect(stepsOf(every1 as number, a)).toEqual(range(2, 17));
+    expect(stepsOf(every1 as number, b)).toEqual(range(4, 19));
     expect(fired.filter(([, , id]) => id === c.id)).toEqual([]);
   });
 });
@@ -528,11 +530,13 @@ describe('ailmentApplied', () => {
       ),
     );
     expect(ctx.appliedListeners).toBe(true);
+    const [onBurn] = ctx.build.triggersOn[EVENT.ailmentApplied] as Int32Array;
+    const [onHit] = ctx.build.triggersOn[EVENT.hit] as Int32Array;
     const [a] = [enemyAt(ctx, 0)];
     const payload = (ctx.emitters[0] as EmitterRuntime).payload;
     hitWithPayload(ctx, a, payload, 0, 1, null, null, false, 0, -1);
     // The ignition fires the burn trigger; the hit trigger queues its poison.
-    expect(drain(ctx).sort()).toEqual([0, 2]);
+    expect(drain(ctx)).toEqual([onBurn, onHit]);
     // Running the queue applies the poison, which fires the poison trigger, whose heal joins
     // the same tick's run: three effects.
     runEffectQueue(ctx);
@@ -570,10 +574,12 @@ describe('ailmentApplied', () => {
     const payload = (ctx.emitters[0] as EmitterRuntime).payload;
     const a = enemyAt(ctx, 0);
     hitWithPayload(ctx, a, payload, 0, 1, null, null, false, 0, -1);
-    expect(drain(ctx)).toEqual([1, 2, 3]);
-    expect(ctx.build.triggersOn[EVENT.ailmentApplied]).toHaveLength(4);
-    const applied = ctx.events.filter((e) => e.type === 'ailmentApplied');
-    expect(applied.map((e) => (e as { ailment: string }).ailment)).toEqual([
+    const applied = [...(ctx.build.triggersOn[EVENT.ailmentApplied] as Int32Array)];
+    expect(applied).toHaveLength(4);
+    // Every trigger but the first (burn's).
+    expect(drain(ctx)).toEqual(applied.slice(1));
+    const events = ctx.events.filter((e) => e.type === 'ailmentApplied');
+    expect(events.map((e) => (e as { ailment: string }).ailment)).toEqual([
       'poison',
       'bleed',
       'shock',

@@ -801,7 +801,10 @@ describe('periodic and targetless events', () => {
     const fired = (tag: number): number[] =>
       ticksOf(ticks, (event) => isEffectHit(event) && (event.tags & tag) !== 0);
     // The first firing is staggered by trigger index: period + index mod period.
-    const [eight, five] = compileBuild(stats, []).triggers as [CompiledTrigger, CompiledTrigger];
+    const build = compileBuild(stats, []);
+    const [eight, five] = [...(build.triggersOn[EVENT.periodic] as Int32Array)].map(
+      (i) => build.triggers[i] as CompiledTrigger,
+    ) as [CompiledTrigger, CompiledTrigger];
     expect([eight.periodTicks, five.periodTicks]).toEqual([480, 300]);
     const expected = (t: CompiledTrigger): number[] => {
       const out: number[] = [];
@@ -891,7 +894,9 @@ describe('calibration coefficients (A19)', () => {
         b.addTrigger('center', chanceTrigger(0.4), 4);
       },
     ]);
-    const [half, clamped] = build.triggers as [CompiledTrigger, CompiledTrigger];
+    const [half, clamped] = [...(build.triggersOn[EVENT.hit] as Int32Array)].map(
+      (i) => build.triggers[i] as CompiledTrigger,
+    ) as [CompiledTrigger, CompiledTrigger];
     expect([half.chance, half.coef, clamped.chance, clamped.coef]).toEqual([0.2, 0.5, 1, 4]);
     expect(build.effects[half.effectStart]?.spec).toMatchObject({ damagePct: 0.25 });
     expect(build.effects[clamped.effectStart]?.spec).toMatchObject({ damagePct: 2 });
@@ -1034,7 +1039,7 @@ describe('rule module hooks', () => {
     expect(eventsOf(doubled.ticks, 'burnTick')).toEqual(eventsOf(plain.ticks, 'burnTick'));
   });
 
-  it('raises center events only with SIGNATURE in their flags (rule 8)', () => {
+  it('raises center events only with SIGNATURE in their flags (rule 8), freeze excepted', () => {
     const seen: unknown[] = [];
     const module: TestModule = (b) =>
       b.hook('onCenterEvent', (_ctx, ev) => {
@@ -1055,6 +1060,12 @@ describe('rule module hooks', () => {
         x: 5,
         y: 6,
       },
+    ]);
+    // A chill meter fills from any frost: its freeze is raised without SIGNATURE.
+    seen.length = 0;
+    emitCenterEvent(ctx, EVENT.freeze, 0, -1, target, 7, 8, HIT_EVENT);
+    expect(seen).toEqual([
+      { event: EVENT.freeze, depth: 0, origin: -1, flags: HIT_EVENT, target, x: 7, y: 8 },
     ]);
   });
 });

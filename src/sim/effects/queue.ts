@@ -46,7 +46,7 @@ export interface EffectEntry {
   /** Where the event happened: its enemy's position, or the player's. */
   x: number;
   y: number;
-  /** The event's value: a kill's drop for gainShards, else 0. */
+  /** The event's value: a kill's drop for gainShards, a shatter's victim's max life, else 0. */
   value: number;
   /** The event's enemy; null for events without one and for kills. */
   target: Enemy | null;
@@ -184,8 +184,14 @@ export interface PendingKill {
   origin: number;
   /** The kill's flags: the killing hit's, the ailments held, the kill kind. */
   flags: number;
-  /** The victim's drop for a trigger with gainShards; ZERO otherwise. */
+  /**
+   * The victim's drop for a trigger with gainShards, its max life for SHATTER_TRIGGER; ZERO
+   * otherwise.
+   */
   value: Num;
-  /** Source to credit instead of the trigger's own; −1 for the trigger's. */
+  /**
+   * Source to credit instead of the trigger's own (SHATTER_TRIGGER: the credit of the frost that
+   * froze the victim); −1 for the trigger's.
+   */
   source: number;
 }

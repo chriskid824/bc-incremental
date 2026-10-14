@@ -525,6 +525,17 @@ describe('trigger validation', () => {
             },
           ],
         },
+        {
+          on: 'freeze',
+          when: [{ targetKind: 'boss' }, { targetHas: 'shock' }],
+          do: [{ kind: 'addFrost', amount: 0.5, radius: 90, maxTargets: 5 }, explode],
+        },
+        {
+          on: 'shatter',
+          when: [{ victimHas: 'burn' }, { hitIs: 'crit' }],
+          do: [{ kind: 'nova', radius: 90, damagePct: 0.3, at: 'event' }],
+        },
+        { on: 'hit', when: [{ targetHas: 'frozen' }], do: [{ kind: 'addFrost', amount: 0.1 }] },
       ),
     ).toEqual([]);
   });
@@ -557,11 +568,11 @@ describe('trigger validation', () => {
   });
 
   it('rejects an event the simulation does not raise yet', () => {
-    expect(triggerIssues({ on: 'freeze', do: [explode] })).toEqual([
-      `${at} event 'freeze' is not raised by the simulation yet`,
+    expect(triggerIssues({ on: 'explode', do: [heal] })).toEqual([
+      `${at} event 'explode' is not raised by the simulation yet`,
     ]);
-    expect(triggerIssues({ on: 'shatter', do: [heal] })).toEqual([
-      `${at} event 'shatter' is not raised by the simulation yet`,
+    expect(triggerIssues({ on: 'chainJump', do: [heal] })).toEqual([
+      `${at} event 'chainJump' is not raised by the simulation yet`,
     ]);
   });
 
@@ -627,6 +638,9 @@ describe('trigger validation', () => {
       `${at} do[0] gainShards only runs on kill events (on hit)`,
     ]);
     expect(triggerIssues({ on: 'diedWithAilment', do: [shards] })).toEqual([]);
+    expect(triggerIssues({ on: 'shatter', do: [shards] })).toEqual([
+      `${at} do[0] gainShards only runs on kill events (on shatter)`,
+    ]);
   });
 
   it('rejects effects that need the enemy on events without one', () => {
@@ -648,6 +662,22 @@ describe('trigger validation', () => {
     expect(triggerIssues({ on: 'kill', do: [{ kind: 'applyAilment', ailment: 'burn' }] })).toEqual([
       `${at} do[0] applyAilment needs a radius on 'kill' events, whose enemy is dead`,
     ]);
+    // So do a shatter's, its transfers included: shatter triggers never run at the kill.
+    expect(
+      triggerIssues({
+        on: 'shatter',
+        do: [
+          { kind: 'addFrost', amount: 0.5 },
+          { kind: 'spreadAilment', ailment: 'burn', radius: 100 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] addFrost needs a radius on 'shatter' events, whose enemy is dead`,
+      `${at} do[1] spreadAilment needs the event's enemy, which is gone when 'shatter' triggers run`,
+    ]);
+    expect(
+      triggerIssues({ on: 'periodic', every: 1, do: [{ kind: 'addFrost', amount: 1 }] }),
+    ).toEqual([`${at} do[0] addFrost needs the event's enemy, which 'periodic' events have not`]);
     // A touching enemy leaks (or dies) at its touch, before the contact trigger's effects run.
     expect(
       triggerIssues({
@@ -716,6 +746,8 @@ describe('trigger validation', () => {
           { kind: 'applyAilment', ailment: 'burn', stacks: 0, maxTargets: 2 },
           { kind: 'spreadAilment', ailment: 'burn', radius: 100, effect: 1.5 },
           { kind: 'push', distance: 0, radius: 100 },
+          { kind: 'addFrost', amount: 0, maxTargets: 2 },
+          { kind: 'addFrost', amount: 0.2, radius: -5, maxTargets: 1.5 },
         ],
       }),
     ).toEqual([
@@ -726,6 +758,10 @@ describe('trigger validation', () => {
       `${at} do[1] maxTargets needs a radius`,
       `${at} do[2] effect must be in [0, 1] (got 1.5)`,
       `${at} do[3] distance must be > 0 (got 0)`,
+      `${at} do[4] amount must be > 0 (got 0)`,
+      `${at} do[4] maxTargets needs a radius`,
+      `${at} do[5] radius must be > 0 (got -5)`,
+      `${at} do[5] maxTargets must be a positive integer (got 1.5)`,
     ]);
     expect(triggerIssues({ on: 'hit', do: [] })).toEqual([`${at} needs at least one effect`]);
     expect(

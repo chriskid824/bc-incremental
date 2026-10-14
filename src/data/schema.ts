@@ -253,6 +253,14 @@ export const EffectSpecSchema = exact<EffectSpec>()(
       })
       .readonly(),
     z.strictObject({ kind: z.literal('push'), distance: finite, radius: finite }).readonly(),
+    z
+      .strictObject({
+        kind: z.literal('addFrost'),
+        amount: finite,
+        radius: finite.exactOptional(),
+        maxTargets: finite.exactOptional(),
+      })
+      .readonly(),
     z.strictObject({ kind: z.literal('heal'), lifePct: finite }).readonly(),
     z.strictObject({ kind: z.literal('gainShards'), fraction: finite }).readonly(),
   ]),

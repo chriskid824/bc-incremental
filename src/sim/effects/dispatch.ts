@@ -10,6 +10,7 @@
  * (CompiledTrigger.inline) run their effects at once, while the victim still holds its
  * ailments; the others are recorded as pending kills and dispatched at the tick's death step,
  * sorted by victim id and trigger index, so their effects run in the next tick's effect phase.
+ * A frozen victim's shatter (SHATTER_TRIGGER) and the shatter triggers are pending kills too.
  *
  * Transfer triggers skip the depth gate and fire at any kill depth, as M1's Pandemic spread did
  * (Hoshi's call, 2026-10-14): they deal no damage, and the stacks they move keep their end and
@@ -22,12 +23,13 @@ import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
 import type { AppliedAilment } from '../../data/triggers';
 import { conditionsMet } from '../build/eval';
+import { ailmentCredit } from '../build/sources';
 import type { Enemy, RunContext } from '../systems/context';
 import { runEffect } from './execute';
 import { appliedFlag, HELD_MASK, SIGNATURE } from './flags';
 import { enqueue } from './queue';
 import type { PendingKill } from './queue';
-import { EVENT, MAX_DEPTH } from './types';
+import { EVENT, MAX_DEPTH, SHATTER_TRIGGER } from './types';
 import type { CompiledTrigger } from './types';
 
 /**
@@ -54,6 +56,34 @@ export function fire(
   }
   for (let n = 0; n < list.length; n++) {
     fireOne(ctx, list[n] as number, depth, origin, target, x, y, flags, value, -1);
+  }
+}
+
+/**
+ * fire, leaving out the triggers marked 1 in `skip` (by trigger index): a freeze over the
+ * payload limit (src/sim/effects/centerEvents.ts).
+ */
+export function fireExcept(
+  ctx: RunContext,
+  event: number,
+  skip: Uint8Array,
+  depth: number,
+  origin: number,
+  target: Enemy | null,
+  x: number,
+  y: number,
+  flags: number,
+  value: Num,
+): void {
+  const list = ctx.build.triggersOn[event] as Int32Array;
+  if (list.length === 0) return;
+  if (depth >= MAX_DEPTH) {
+    ctx.counters.triggerDepthCapped++;
+    return;
+  }
+  for (let n = 0; n < list.length; n++) {
+    const i = list[n] as number;
+    if (skip[i] !== 1) fireOne(ctx, i, depth, origin, target, x, y, flags, value, -1);
   }
 }
 
@@ -174,7 +204,9 @@ export function fireInlineKill(
 /**
  * Records the kill's pending triggers (RunContext.killPending), except the one whose damage
  * killed (rule 3) and, for a victim that held no ailment, diedWithAilment's. `drop` is the
- * victim's shard drop, the value of triggers with gainShards.
+ * victim's shard drop, the value of triggers with gainShards. SHATTER_TRIGGER is recorded only
+ * for a frozen victim, with its max life as the value and the credit of the frost that froze it
+ * as the source, and the shatter triggers with it; a kill by a shatter records neither.
  */
 export function recordPendingKills(
   ctx: RunContext,
@@ -185,26 +217,66 @@ export function recordPendingKills(
 ): void {
   const list = ctx.killPending;
   const triggers = ctx.build.triggers;
-  const pending = ctx.pendingKills;
   for (let n = 0; n < list.length; n++) {
     const i = list[n] as number;
     if (i === origin) continue;
     const t = triggers[i] as CompiledTrigger;
-    if (t.on === EVENT.diedWithAilment && (flags & HELD_MASK) === 0) continue;
-    let entry = pending[ctx.pendingCount];
-    if (entry === undefined) {
-      entry = { trigger: 0, victim, depth: 0, origin: -1, flags: 0, value: ZERO, source: -1 };
-      pending.push(entry);
+    if (i === SHATTER_TRIGGER) {
+      if (victim.frozenUntil > ctx.now) recordShatter(ctx, victim, origin, flags, drop);
+      continue;
     }
-    ctx.pendingCount++;
-    entry.trigger = i;
-    entry.victim = victim;
-    entry.depth = victim.killDepth;
-    entry.origin = origin;
-    entry.flags = flags;
-    entry.value = t.takesDrop ? drop : ZERO;
-    entry.source = -1;
+    if (t.on === EVENT.diedWithAilment && (flags & HELD_MASK) === 0) continue;
+    record(ctx, i, victim, origin, flags, t.takesDrop ? drop : ZERO, -1);
   }
+}
+
+/** The shatter of a frozen victim: SHATTER_TRIGGER's pending kill, then the shatter triggers'. */
+function recordShatter(
+  ctx: RunContext,
+  victim: Enemy,
+  origin: number,
+  flags: number,
+  drop: Num,
+): void {
+  const credit = ailmentCredit(ctx.sources, ctx.attribution, 'frost', victim.frostApplier);
+  record(ctx, SHATTER_TRIGGER, victim, origin, flags, victim.maxHp, credit);
+  const list = ctx.shatterTriggers;
+  const triggers = ctx.build.triggers;
+  for (let n = 0; n < list.length; n++) {
+    const i = list[n] as number;
+    if (i === origin) continue;
+    const t = triggers[i] as CompiledTrigger;
+    record(ctx, i, victim, origin, flags, t.takesDrop ? drop : ZERO, -1);
+  }
+}
+
+/**
+ * Adds a pending kill of trigger `i`, reusing an entry, with its value and its source (−1: the
+ * trigger's own).
+ */
+function record(
+  ctx: RunContext,
+  i: number,
+  victim: Enemy,
+  origin: number,
+  flags: number,
+  value: Num,
+  source: number,
+): void {
+  const pending = ctx.pendingKills;
+  let entry = pending[ctx.pendingCount];
+  if (entry === undefined) {
+    entry = { trigger: 0, victim, depth: 0, origin: -1, flags: 0, value: ZERO, source: -1 };
+    pending.push(entry);
+  }
+  ctx.pendingCount++;
+  entry.trigger = i;
+  entry.victim = victim;
+  entry.depth = victim.killDepth;
+  entry.origin = origin;
+  entry.flags = flags;
+  entry.value = value;
+  entry.source = source;
 }
 
 const before = (a: PendingKill, b: PendingKill): boolean =>

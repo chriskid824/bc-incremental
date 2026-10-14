@@ -16,8 +16,9 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
 /**
  * What a scaling modifier counts, read per damage instance. `chainJump`: the instance's chain
  * jump index, 0 for the primary hit. `targetBurnStacks`, `targetPoisonStacks`,
- * `targetShockStacks`: the stacks of that ailment on the instance's target. `targetDistance`:
- * how far the target is from the player, in arena units.
+ * `targetShockStacks`: the stacks of that ailment on the instance's target. `targetFrost`: the
+ * target's chill meter, 0 to 1 (a frozen enemy reads 1). `targetDistance`: how far the target is
+ * from the player, in arena units.
  * `lifeLostPct`: the fraction of the player's max life missing, 0 to 1. A target variable reads
  * 0 without a target (estimates outside a run). The simulation reads each variable through a
  * registry typed over this list (src/sim/build/eval.ts), so a new variable lands with its reader.
@@ -29,6 +30,7 @@ export const SCALING_VARS = [
   'lifeLostPct',
   'targetPoisonStacks',
   'targetShockStacks',
+  'targetFrost',
 ] as const;
 export type ScalingVar = (typeof SCALING_VARS)[number];
 
@@ -92,6 +94,10 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  *   stacks (spreadAilment) applies nothing.
  * - ailmentTick: a damage-over-time step (every 0.25 s) of an enemy holding the ailment, every
  *   `every` seconds, at that enemy.
+ * - freeze: an enemy's chill meter filled, at that enemy: a normal enemy froze, or a boss's meter
+ *   emptied (a boss never freezes). It needs no signature hit.
+ * - shatter: a frozen enemy died and shattered (its triggers run at the next tick, like kill's);
+ *   an enemy killed by a shatter does not shatter.
  */
 export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
   'hit',
@@ -105,6 +111,8 @@ export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>
   'contact',
   'ailmentApplied',
   'ailmentTick',
+  'freeze',
+  'shatter',
 ]);
 
 /** Events without an enemy target: their effects start at the player. */
@@ -114,8 +122,11 @@ export const TARGETLESS_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEve
   'heroHit',
 ]);
 
-/** Ailments a condition can ask an enemy about (targetHas, victimHas). */
-export const HELD_AILMENTS = ['burn', 'poison', 'bleed', 'shock'] as const;
+/**
+ * Ailments a condition can ask an enemy about (targetHas, victimHas). frost: its chill meter is
+ * above 0; frozen: it is frozen (a frozen enemy holds frost too).
+ */
+export const HELD_AILMENTS = ['burn', 'poison', 'bleed', 'shock', 'frost', 'frozen'] as const;
 export type HeldAilment = (typeof HELD_AILMENTS)[number];
 
 /** Ailments whose stacks a condition can count (stacksAtLeast). */
@@ -150,7 +161,7 @@ export type HitKind = (typeof HIT_KINDS)[number];
  * A condition on the enemy an event or a damage instance targets; never met without a target.
  * targetHas: the enemy holds the ailment (burn: one of its burn stacks has not ended yet;
  * poison: it has poison damage left to take; bleed: its bleed has not ended; shock: its shock
- * has not worn off).
+ * has not worn off; frost: its chill meter is above 0, or it is frozen; frozen: it is frozen).
  * targetHpBelow: its hp is below this fraction of its max hp. stacksAtLeast: it carries at least
  * this many stacks of the ailment.
  */
@@ -192,8 +203,9 @@ const TARGETED: readonly TriggerEventId[] = [
   'contact',
   'ailmentApplied',
   'ailmentTick',
+  'freeze',
 ];
-const KILLS: readonly TriggerEventId[] = ['kill', 'diedWithAilment'];
+const KILLS: readonly TriggerEventId[] = ['kill', 'diedWithAilment', 'shatter'];
 
 /**
  * Where each condition is allowed: the trigger events it can be checked on, and 'modifier' for
@@ -250,6 +262,8 @@ interface NovaSpec extends DamagePart {
  * - explode: hits up to `maxTargets` enemies within `radius` of the event.
  * - nova: hits every enemy within `radius` of the player, or of the event with at 'event'.
  * - push: moves the enemies within `radius` of the event `distance` further from the player.
+ * - addFrost: adds `amount` to the chill meter of the event's enemy, or of up to `maxTargets`
+ *   enemies within `radius` of the event.
  * - heal: the player regains `lifePct` of max life.
  * - gainShards: the dying enemy's shard drop again, × `fraction` (kill events only).
  */
@@ -279,6 +293,12 @@ export type EffectSpec =
   | ExplodeSpec
   | NovaSpec
   | { readonly kind: 'push'; readonly distance: number; readonly radius: number }
+  | {
+      readonly kind: 'addFrost';
+      readonly amount: number;
+      readonly radius?: number;
+      readonly maxTargets?: number;
+    }
   | { readonly kind: 'heal'; readonly lifePct: number }
   | { readonly kind: 'gainShards'; readonly fraction: number };
 export type EffectKind = EffectSpec['kind'];
@@ -301,6 +321,7 @@ export const COEF_FIELDS: {
   explode: ['damagePct'],
   nova: ['damagePct'],
   push: [],
+  addFrost: [],
   heal: [],
   gainShards: [],
 };

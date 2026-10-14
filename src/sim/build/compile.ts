@@ -6,8 +6,8 @@
  * triggers, effects and hooks. The result holds the final stat values, the ModTable of the
  * build's scoped modifiers followed by the rule-added ones, the run's damage sources and ailment
  * attribution, the hook lists, the emitters, the signature's first, and the triggers with their
- * effects: the build's own (StatBlock.triggers) first, then the modules', in compile order
- * (src/sim/effects/types.ts).
+ * effects: the built-in shatter (SHATTER_TRIGGER) first, then the build's own
+ * (StatBlock.triggers), then the modules', in compile order (src/sim/effects/types.ts).
  *
  * The source table, the attribution's outer sources and the ModTable rows grow while a run
  * uses them, so createRunContext compiles a fresh build for every run. The talent screen and
@@ -22,7 +22,14 @@ import type { Modifier, StatBlock, StatId } from '../../data/stats';
 import type { TagMask } from '../../data/tags';
 import { TRIGGER_EVENTS } from '../../data/triggers';
 import type { EffectSpec, TriggerSpec } from '../../data/triggers';
-import { compileEffect, compileTrigger, moduleTrigger } from '../effects/types';
+import {
+  compileEffect,
+  compileTrigger,
+  moduleTrigger,
+  SHATTER_TRIGGER,
+  shatterEffect,
+  shatterTrigger,
+} from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import type { EmitterSpec } from '../emitters/types';
 import { RULE_MODULES, SIGNATURES } from '../rules';
@@ -52,6 +59,21 @@ export interface BuildFlags {
   burnRings: boolean;
   /** Bleed damage multiplier while the bleeding enemy moves (docs/v3/game-design-v3.md §4.3). */
   bleedMoveMult: number;
+  /**
+   * Frost (src/sim/ailments/frost.ts, docs/v3/game-design-v3.md §1.3): ticks after a freeze
+   * during which frost adds nothing; ticks a boss's meter stays locked once it fills, at least
+   * bossMinGapTicks; and a slow every enemy always has, 0 to 1. Absolute Zero sets them.
+   */
+  frostImmuneTicks: number;
+  bossLockTicks: number;
+  bossMinGapTicks: number;
+  globalSlow: number;
+  /**
+   * The only build-wide factor on shatter damage, which takes no untagged more such as 強化∞
+   * (docs/v3/game-design-v3.md §2.1): glassCannon multiplies it by 1 + damageMore as it adds
+   * its more.
+   */
+  shatterMult: number;
 }
 
 /** Parameters of the signature attack. */
@@ -76,9 +98,14 @@ export interface CompiledBuild {
   readonly signature: Readonly<SignatureParams>;
   /** Each hook's functions, in the order the modules added them. */
   readonly hooks: { readonly [K in HookName]: readonly Hooks[K][] };
+  /** The trigger index of the module instance that added each hook, in the same order. */
+  readonly hookOwners: { readonly [K in HookName]: readonly number[] };
   /** The run's emitters; index 0 is the signature attack. */
   readonly emitters: readonly EmitterSpec[];
-  /** Every trigger, by trigger index; a module instance's entry listens to no event. */
+  /**
+   * Every trigger, by trigger index: SHATTER_TRIGGER first, which listens to kill only when the
+   * build can freeze; a module instance's entry listens to no event.
+   */
   readonly triggers: readonly CompiledTrigger[];
   /** Per TRIGGER_EVENTS ordinal, the indices of the triggers listening to it, in order. */
   readonly triggersOn: readonly Int32Array[];
@@ -149,6 +176,11 @@ export function compileBuild(
     maxLife: null,
     burnRings: false,
     bleedMoveMult: 3,
+    frostImmuneTicks: 180,
+    bossLockTicks: 252,
+    bossMinGapTicks: 0,
+    globalSlow: 0,
+    shatterMult: 1,
   };
   const params: SignatureParams = { forceCritEvery: 0, counts: 'shot' };
   const hooks: { [K in HookName]: Hooks[K][] } = {
@@ -159,7 +191,16 @@ export function compileBuild(
     modifyDamage: [],
     onCenterEvent: [],
   };
-  const triggers: CompiledTrigger[] = [];
+  const hookOwners: { [K in HookName]: number[] } = {
+    tick: [],
+    onKill: [],
+    onAttack: [],
+    onHit: [],
+    modifyDamage: [],
+    onCenterEvent: [],
+  };
+  // SHATTER_TRIGGER's index; its entry is decided once every module has compiled.
+  const triggers: CompiledTrigger[] = [shatterTrigger(false, 0)];
   const effects: CompiledEffect[] = [];
   const addTrigger = (source: number, spec: TriggerSpec, coef: number): void => {
     triggers.push(compileTrigger(triggers.length, spec, source, coef, effects.length));
@@ -204,6 +245,7 @@ export function compileBuild(
         instance = triggers.length;
         triggers.push(moduleTrigger(instance, instanceSource));
       }
+      hookOwners[name].push(instance);
       return instance;
     },
     addTrigger(source, spec, coef = 1) {
@@ -220,12 +262,26 @@ export function compileBuild(
   for (const id of new Set(rules.map((rule) => rule.id))) {
     compileInstance(CENTER, () => compileRule(id, rules, compiler, CENTER));
   }
-  for (const module of testModules) compileInstance(CENTER, () => module(compiler, CENTER));
+  for (const module of testModules) {
+    const source = module.source === undefined ? CENTER : sources.index(module.source);
+    compileInstance(source, () => module(compiler, source));
+  }
+  // Shatter listens to kills only when something can fill a chill meter: frost on hit, or an
+  // addFrost effect, a trigger's or one a module compiled.
+  const scoped = [...stats.scoped, ...added];
+  const canFreeze =
+    values.frostOnHit > 0 ||
+    scoped.some((mod) => mod.stat === 'frostOnHit' && mod.value > 0) ||
+    effects.some((fx) => fx.kind === 'addFrost');
+  if (canFreeze) {
+    triggers[SHATTER_TRIGGER] = shatterTrigger(true, effects.length);
+    effects.push(shatterEffect(Math.max(0, values.shatterRadius)));
+  }
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
   );
 
-  const mods = compileMods([...stats.scoped, ...added], sources);
+  const mods = compileMods(scoped, sources);
   const scopedOf = (perStat: Readonly<Record<StatId, number>>): Float64Array =>
     Float64Array.from(SCOPED_STATS, (stat) => perStat[stat]);
   const table = new ModTable(mods, scopedOf(stats.base), scopedOf(postScale), scopedOf(postOffset));
@@ -238,6 +294,7 @@ export function compileBuild(
     flags,
     signature: params,
     hooks,
+    hookOwners,
     emitters: [signatureEmitter(signature.id, signature)],
     triggers,
     triggersOn,

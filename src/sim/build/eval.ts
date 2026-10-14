@@ -19,6 +19,7 @@ import type {
   TriggerEventId,
 } from '../../data/triggers';
 import { holdsBleed } from '../ailments/bleed';
+import { frostMeter, holdsFrost, holdsFrozen } from '../ailments/frost';
 import { holdsBurn, liveBurnStacks } from '../ailments/records';
 import { holdsPoison, livePoisonStacks } from '../ailments/rings';
 import { activeShockStacks, holdsShock } from '../ailments/shock';
@@ -85,6 +86,8 @@ const HELD_READERS: {
   poison: holdsPoison,
   bleed: holdsBleed,
   shock: holdsShock,
+  frost: holdsFrost,
+  frozen: holdsFrozen,
 };
 
 /** The stacks the enemy carries of each ailment a condition can count, at tick `now`. */
@@ -121,6 +124,7 @@ const SCALING_READERS: { readonly [K in ScalingVar]: (ev: Readonly<EvalInput>) =
   lifeLostPct: (ev) => 1 - ev.playerLifeFrac,
   targetPoisonStacks: (ev) => (ev.target === null ? 0 : livePoisonStacks(ev.target, ev.now)),
   targetShockStacks: (ev) => (ev.target === null ? 0 : activeShockStacks(ev.target, ev.now)),
+  targetFrost: (ev) => (ev.target === null ? 0 : frostMeter(ev.target, ev.now)),
 };
 
 /** A ScalingSpec compiled for per-instance evaluation. */
@@ -315,4 +319,36 @@ function evalDynamic(table: ModTable, at: number, stat: number, ev: Readonly<Eva
     ? increased * more
     : flat * increased * more * (table.postScale[stat] as number) +
         (table.postOffset[stat] as number);
+}
+
+/**
+ * The damage factor of a shatter's hit (src/sim/effects/execute.ts) in ModTable row `row` for
+ * the instance `ev`: `mult` (BuildFlags.shatterMult) × (1 + Σincreased) × Π(1 + more) over the
+ * row's dynamic damage entries scoped to the center or a fusion (CompiledMod.shatterOk) whose
+ * conditions hold. The row's static parts and every other entry are left out, so a shatter
+ * never takes an untagged or static more (docs/v3/game-design-v3.md §2.1).
+ */
+export function pctMaxHpFactor(
+  table: ModTable,
+  row: number,
+  ev: Readonly<EvalInput>,
+  mult: number,
+): number {
+  const at = row * S + DAMAGE;
+  const count = table.dynCount[at] as number;
+  if (count === 0) return mult;
+  const { mods, dyn } = table;
+  let inc = 0;
+  let more = 1;
+  const start = table.dynStart[at] as number;
+  for (let i = start; i < start + count; i++) {
+    const mod = mods[dyn[i] as number] as CompiledMod;
+    if (!mod.shatterOk) continue;
+    if (mod.cond !== null && !conditionsMet(mod.cond, ev.target, ev.now, 0)) continue;
+    const scaling = mod.scale;
+    const c = scaling === null ? mod.value : scaledValue(mod.value, scaling, scaling.read(ev));
+    if (mod.kind === INCREASED) inc += c;
+    else if (mod.kind !== FLAT) more *= 1 + c;
+  }
+  return mult * (1 + inc) * more;
 }

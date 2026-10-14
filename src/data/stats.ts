@@ -76,6 +76,21 @@ export const STAT_IDS = [
    * (src/sim/build/compile.ts BuildFlags.bleedMoveMult).
    */
   'bleedStationaryMult',
+  /**
+   * Frost each hit adds to the enemy's chill meter. A full meter (1) freezes a normal enemy; a
+   * boss never freezes, its meter empties instead.
+   */
+  'frostOnHit',
+  /** Slow at a full chill meter, e.g. 0.3 = 30%; a boss is slowed 0.15 less. */
+  'frostSlowCap',
+  /** Freeze duration in seconds. */
+  'freezeDuration',
+  /** A frozen enemy that dies shatters: this fraction of its max life to the enemies around it. */
+  'shatterDamage',
+  /** Shatter radius in arena units. */
+  'shatterRadius',
+  /** Extra damage a frozen enemy takes, e.g. 0.3 = +30%. */
+  'frozenDamageTaken',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -115,6 +130,12 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   bleedAlways: 0,
   shockAlways: 0,
   bleedStationaryMult: 1,
+  frostOnHit: 0,
+  frostSlowCap: 0.3,
+  freezeDuration: 1.2,
+  shatterDamage: 0.15,
+  shatterRadius: 90,
+  frozenDamageTaken: 0.3,
 };
 
 /**
@@ -140,6 +161,7 @@ export const SCOPED_STATS = [
   'poisonAlways',
   'bleedAlways',
   'shockAlways',
+  'frostOnHit',
 ] as const satisfies readonly StatId[];
 export type ScopedStat = (typeof SCOPED_STATS)[number];
 

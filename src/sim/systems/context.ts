@@ -12,6 +12,7 @@ import { createStreams } from '../../core/rng';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
 import { doomed } from '../ailments/apply';
+import { BOSS_SLOW_CAP_OFFSET } from '../ailments/frost';
 import { RingPool } from '../ailments/rings';
 import { compileBuild } from '../build/compile';
 import type { CompiledBuild } from '../build/compile';
@@ -19,8 +20,9 @@ import { statAt, staticInput } from '../build/eval';
 import type { EvalInput } from '../build/eval';
 import type { ModTable } from '../build/modTable';
 import { SCOPED_INDEX } from '../build/modTable';
-import { ailmentCredit, MAX_SOURCES } from '../build/sources';
+import { ailmentCredit, MAX_SOURCES, SOURCE_CLASS_ORDINAL } from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
+import { FREEZE_PAYLOADS } from '../effects/centerEvents';
 import { createEffectEntry, createEffectQueue } from '../effects/queue';
 import type { EffectEntry, EffectQueue, PendingKill, TriggerState } from '../effects/queue';
 import { EVENT } from '../effects/types';
@@ -59,6 +61,7 @@ import { createEnemyGrid } from './grid';
 
 const DAMAGE = SCOPED_INDEX.damage;
 const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
+const FUSION = SOURCE_CLASS_ORDINAL.fusion;
 
 const HALF_WIDTH = ARENA_WIDTH / 2;
 const HALF_HEIGHT = ARENA_HEIGHT / 2;
@@ -153,6 +156,15 @@ export interface Enemy extends EnemyState {
   /** Shock stacks (src/sim/ailments/shock.ts), all of which wear off at shockUntil. */
   shockStacks: number;
   shockUntil: number;
+  /**
+   * Its chill meter (src/sim/ailments/frost.ts), 0 to 1 and 0 while frozen (read it through
+   * frostMeter); the tick its freeze ends (0 for none); the tick before which frost adds
+   * nothing; and the source of the frost that froze it, which its shatter is credited from.
+   */
+  frost: number;
+  frozenUntil: number;
+  frostLockUntil: number;
+  frostApplier: number;
   /** Serial of the last attack that hit this enemy, so chains skip it. */
   hitMark: number;
   /** Projectiles in flight towards this enemy (see src/sim/targeting.ts). */
@@ -247,6 +259,27 @@ export interface RunContext {
    * 0 somewhere. Without it, hits skip those rolls, which would draw nothing.
    */
   readonly rollsDots: boolean;
+  /**
+   * Frost (src/sim/ailments/frost.ts): the slow at a full meter, a normal enemy's and a boss's,
+   * and the slow every enemy has (BuildFlags.globalSlow), each 0 to 1; ticks a freeze lasts,
+   * then frost adds nothing for frostImmuneTicks; ticks a boss's filled meter stays locked; the
+   * extra damage a frozen enemy takes.
+   */
+  readonly frostSlowCap: number;
+  readonly bossFrostSlowCap: number;
+  readonly globalSlow: number;
+  readonly freezeTicks: number;
+  readonly frostImmuneTicks: number;
+  readonly bossFrostLockTicks: number;
+  readonly frozenDamageTaken: number;
+  /** A shatter's share of the victim's max life, and its radius. */
+  readonly shatterDamage: number;
+  readonly shatterRadius: number;
+  /**
+   * Some hit adds frost: frostOnHit or a modifier of it is not 0 somewhere. Without it, hits
+   * skip reading it.
+   */
+  readonly hitsFrost: boolean;
   readonly chainCount: number;
   readonly chainRetention: number;
   readonly projectileCount: number;
@@ -289,6 +322,18 @@ export interface RunContext {
   readonly hitListeners: boolean;
   /** Some ailmentApplied trigger listens: applications dispatch. */
   readonly appliedListeners: boolean;
+  /** The shatter triggers, recorded with a frozen victim's shatter, in order. */
+  readonly shatterTriggers: Int32Array;
+  /**
+   * Per credited source index, the payload of shatter hits credited to it, filled on first use
+   * (src/sim/effects/execute.ts).
+   */
+  readonly shatterPayloads: (Payload | null)[];
+  /**
+   * The freeze payload limit (src/sim/effects/centerEvents.ts); null when no fusion's trigger or
+   * hook listens to freezes.
+   */
+  readonly freezeLimiter: FreezeLimiter | null;
   /** Triggers on kill or diedWithAilment that run at the kill (transfers), in trigger order. */
   readonly killInline: Int32Array;
   /** The other triggers on kill or diedWithAilment, recorded as pending kills, in order. */
@@ -340,6 +385,11 @@ export interface RunContext {
    * enemy bleeds, and movement skips counting bleeding enemies' moves.
    */
   bleedApplied: boolean;
+  /**
+   * Some frost has reached an enemy's meter this run (src/sim/ailments/frost.ts): until then,
+   * without a global slow, movement skips slowing enemies.
+   */
+  frostApplied: boolean;
 
   // ---- Waves ----
   /** Started waves that are not cleared yet, in wave order. */
@@ -394,6 +444,19 @@ export interface RunContext {
 }
 
 /**
+ * The freeze payload limit's state: which triggers (by trigger index) and onCenterEvent hooks
+ * (by hook index) are a fusion's, and a ring of the ticks of the last freezes whose fusion
+ * payloads ran, `count` of them, the oldest at `next` once full.
+ */
+export interface FreezeLimiter {
+  readonly fusionTrigger: Uint8Array;
+  readonly fusionHook: Uint8Array;
+  readonly ticks: Float64Array;
+  next: number;
+  count: number;
+}
+
+/**
  * One ailment's damage of one DoT step on one enemy, split by the sources it is credited to:
  * source[0 .. n) and amount[0 .. n).
  */
@@ -430,7 +493,8 @@ export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= F
  * that of a hit of the payload, so only its burn row is read.
  */
 function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
-  if (fx.tags === 0) return null;
+  // A shatter's payload depends on its credit (RunContext.shatterPayloads).
+  if (fx.tags === 0 || fx.kind === 'shatter') return null;
   const hits = fx.kind !== 'applyAilment';
   return createPayload({
     baseDamage: fx.baseDamage,
@@ -552,6 +616,18 @@ export function createRunContext(
     (triggersOn[EVENT.hit] as Int32Array).length !== 0 ||
     (triggersOn[EVENT.crit] as Int32Array).length !== 0 ||
     hooks.onHit.length !== 0;
+  const hitsFrost =
+    values.frostOnHit !== 0 || build.mods.some((mod) => mod.stat === SCOPED_INDEX.frostOnHit);
+  // The freeze payload limit gates the fusions' triggers and hooks on freeze.
+  const fusionOf = (t: CompiledTrigger): number => (sources.cls[t.source] === FUSION ? 1 : 0);
+  const fusionTrigger = Uint8Array.from(triggers, fusionOf);
+  const fusionHook = Uint8Array.from(build.hookOwners.onCenterEvent, (i) =>
+    fusionOf(triggers[i] as CompiledTrigger),
+  );
+  const freezeFusions =
+    (triggersOn[EVENT.freeze] as Int32Array).some((i) => fusionTrigger[i] === 1) ||
+    fusionHook.includes(1);
+  const frostSlowCap = clamp01(values.frostSlowCap);
 
   const taken = {} as Record<EnemyId, { hits: number; damage: number }>;
   for (const id of ENEMY_IDS) taken[id] = { hits: 0, damage: 0 };
@@ -593,6 +669,16 @@ export function createRunContext(
     shockCap: Math.max(0, Math.floor(values.shockMaxStacks)),
     shockTicks: Math.max(0, values.shockDuration * TICK_RATE),
     rollsDots,
+    frostSlowCap,
+    bossFrostSlowCap: clamp01(values.frostSlowCap - BOSS_SLOW_CAP_OFFSET),
+    globalSlow: clamp01(flags.globalSlow),
+    freezeTicks: Math.max(0, values.freezeDuration * TICK_RATE),
+    frostImmuneTicks: Math.max(0, flags.frostImmuneTicks),
+    bossFrostLockTicks: Math.max(0, flags.bossLockTicks, flags.bossMinGapTicks),
+    frozenDamageTaken: values.frozenDamageTaken,
+    shatterDamage: values.shatterDamage,
+    shatterRadius: Math.max(0, values.shatterRadius),
+    hitsFrost,
     chainCount: Math.max(0, values.chainCount),
     chainRetention: clamp01(values.chainRetention),
     projectileCount: Math.max(1, values.projectileCount),
@@ -616,6 +702,17 @@ export function createRunContext(
     effectPayloads,
     hitListeners,
     appliedListeners: (triggersOn[EVENT.ailmentApplied] as Int32Array).length !== 0,
+    shatterTriggers: triggersOn[EVENT.shatter] as Int32Array,
+    shatterPayloads: new Array<Payload | null>(MAX_SOURCES).fill(null),
+    freezeLimiter: freezeFusions
+      ? {
+          fusionTrigger,
+          fusionHook,
+          ticks: new Float64Array(FREEZE_PAYLOADS),
+          next: 0,
+          count: 0,
+        }
+      : null,
     killInline,
     killPending,
     killListeners: killInline.length !== 0 || killPending.length !== 0 || hooks.onKill.length !== 0,
@@ -653,6 +750,7 @@ export function createRunContext(
     rings: new RingPool(),
     dotParts: { n: 0, source: new Int32Array(6), amount: new Array<Num>(6).fill(ZERO) },
     bleedApplied: false,
+    frostApplied: false,
 
     open: [],
     current: null,

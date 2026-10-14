@@ -73,6 +73,11 @@ function effectNumbers(effect: EffectSpec): string[][] {
       return [[percent(effect.damagePct)]];
     case 'push':
       return [];
+    case 'addFrost':
+      return [
+        [percent(effect.amount)],
+        ...(effect.maxTargets === undefined ? [] : [[String(effect.maxTargets)]]),
+      ];
     case 'heal':
       return [[percent(effect.lifePct)]];
     case 'gainShards':

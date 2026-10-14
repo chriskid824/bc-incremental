@@ -11,22 +11,32 @@
  * - at most EFFECTS_PER_TICK effects run per tick; the rest wait for the next tick, and past
  *   EFFECT_QUEUE_HARD_CAP queued entries the newest are dropped.
  *
- * Triggers number in compile order (compileBuild): the build's data triggers, then the rule
- * modules', where a module instance takes one index of its own at its first hook (an entry that
- * listens to no event), then the test modules'.
+ * Triggers number in compile order (compileBuild): SHATTER_TRIGGER at index 0, the build's data
+ * triggers, then the rule modules', where a module instance takes one index of its own at its
+ * first hook (an entry that listens to no event), then the test modules'.
  */
 
 import type { Num } from '../../core/num';
-import { mul, num, ZERO } from '../../core/num';
+import { mul, num, ONE, ZERO } from '../../core/num';
 import { TAG, tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { COEF_FIELDS, TRANSFER_EFFECTS, TRIGGER_EVENTS, WIRED_EVENTS } from '../../data/triggers';
-import type { EffectKind, EffectSpec, TriggerEventId, TriggerSpec } from '../../data/triggers';
+import type { EffectSpec, TriggerEventId, TriggerSpec } from '../../data/triggers';
 import type { BurnSpread } from '../ailments/records';
 import { DOT_STEP_TICKS } from '../ailments/rings';
 import { compileCondition } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import { TICK_RATE } from '../types';
+
+/**
+ * The built-in shatter (docs/v3/game-design-v3.md §1.3): a frozen enemy that dies hits the
+ * enemies around it for shatterDamage of its max life. It is the trigger at this index, a kill
+ * trigger listed only when the build can freeze. Only a frozen victim's kill records it, with
+ * the victim's max life as its value and the credit of the frost that froze it as its source
+ * (recordPendingKills in dispatch.ts). Its damage carries this index as its origin, so a kill by
+ * a shatter does not shatter.
+ */
+export const SHATTER_TRIGGER = 0;
 
 /** Damage-over-time steps per second (ailmentTick's `every` counts them). */
 const STEPS_PER_SECOND = TICK_RATE / DOT_STEP_TICKS;
@@ -84,20 +94,31 @@ export interface CompiledTrigger {
   readonly takesDrop: boolean;
 }
 
+/** The built-in shatter's effect (SHATTER_TRIGGER), which no data can name. */
+export interface ShatterSpec {
+  readonly kind: 'shatter';
+}
+export type CompiledEffectSpec = EffectSpec | ShatterSpec;
+export type CompiledEffectKind = CompiledEffectSpec['kind'];
+
 export interface CompiledEffect {
-  readonly kind: EffectKind;
+  readonly kind: CompiledEffectKind;
   /** The effect's spec, its COEF_FIELDS × the trigger's coefficient (a missing field as 1). */
-  readonly spec: EffectSpec;
+  readonly spec: CompiledEffectSpec;
   /** Source index of its damage, the source of the trigger or module that compiled it. */
   readonly source: number;
   /** Its radius squared; 0 without a radius. */
   readonly radiusSq: number;
   /**
-   * Tags of its hits (explode, nova: hit, trigger and area, plus its tags and element) or of
-   * the hit an ailment it applies counts as (applyAilment: hit and trigger); 0 for the others.
+   * Tags of its hits (explode, nova: hit, trigger and area, plus its tags and element; shatter:
+   * hit, area and cold) or of the hit an ailment it applies counts as (applyAilment: hit and
+   * trigger); 0 for the others.
    */
   readonly tags: TagMask;
-  /** Damage of a hit or of the hit an applied ailment counts as: damage stat × damagePct. */
+  /**
+   * Damage of a hit or of the hit an applied ailment counts as: damage stat × damagePct; 1 for
+   * shatter, whose hits scale it by the victim's max life.
+   */
   readonly baseDamage: Num;
   /** spreadAilment's radius and effect (src/sim/ailments/apply.ts); null for the other kinds. */
   readonly spread: BurnSpread | null;
@@ -177,6 +198,35 @@ export function moduleTrigger(index: number, source: number): CompiledTrigger {
     periodTicks: 0,
     stepEvery: 0,
     takesDrop: false,
+  };
+}
+
+/**
+ * SHATTER_TRIGGER's entry: on kill with its effect at `effectStart` when the build can freeze,
+ * otherwise an entry that listens to no event and has no effect.
+ */
+export function shatterTrigger(canFreeze: boolean, effectStart: number): CompiledTrigger {
+  return {
+    ...moduleTrigger(SHATTER_TRIGGER, 0),
+    on: canFreeze ? EVENT.kill : -1,
+    effectStart: canFreeze ? effectStart : 0,
+    effectEnd: canFreeze ? effectStart + 1 : 0,
+  };
+}
+
+/**
+ * The shatter's effect: hits of tags hit, area and cold within `radius` of the victim. Its
+ * source is the center; each shatter is credited to its PendingKill's source instead.
+ */
+export function shatterEffect(radius: number): CompiledEffect {
+  return {
+    kind: 'shatter',
+    spec: { kind: 'shatter' },
+    source: 0,
+    radiusSq: radius ** 2,
+    tags: TAG.hit | TAG.area | TAG.cold,
+    baseDamage: ONE,
+    spread: null,
   };
 }
 

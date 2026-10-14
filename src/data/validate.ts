@@ -348,6 +348,8 @@ function conditionIssues(condition: Condition): string[] {
 }
 
 const KILL_EVENTS: readonly TriggerEventId[] = ['kill', 'diedWithAilment'];
+/** Events whose enemy is dead when their triggers run. */
+const DEAD_EVENTS: readonly TriggerEventId[] = [...KILL_EVENTS, 'shatter'];
 
 /** Events whose `every` is required or allowed, and what it must be. */
 function everyIssues(trigger: TriggerSpec): string[] {
@@ -450,18 +452,22 @@ function effectIssues(effect: EffectSpec, on: TriggerEventId): string[] {
       }
     }
   };
-  // The event's enemy: none on targetless events, gone once a kill trigger's effects run
-  // (transfers run at the kill, before it is gone), and gone by the time a contact trigger's
-  // effects run, since a touching enemy leaks or dies at its touch.
+  // The event's enemy: none on targetless events, gone once a kill or shatter trigger's
+  // effects run (a kill's transfers run at the kill, before it is gone; a shatter's never do),
+  // and gone by the time a contact trigger's effects run, since a touching enemy leaks or dies
+  // at its touch.
   const needsTarget =
-    (effect.kind === 'applyAilment' && effect.radius === undefined) ||
+    ((effect.kind === 'applyAilment' || effect.kind === 'addFrost') &&
+      effect.radius === undefined) ||
     effect.kind === 'spreadAilment';
   if (needsTarget && TARGETLESS_EVENTS.has(on)) {
     issues.push(`${effect.kind} needs the event's enemy, which '${on}' events have not`);
   } else if (needsTarget && on === 'contact') {
     issues.push(`${effect.kind} needs the event's enemy, which has left by the time it runs`);
-  } else if (needsTarget && effect.kind === 'applyAilment' && KILL_EVENTS.includes(on)) {
-    issues.push(`applyAilment needs a radius on '${on}' events, whose enemy is dead`);
+  } else if (needsTarget && effect.kind !== 'spreadAilment' && DEAD_EVENTS.includes(on)) {
+    issues.push(`${effect.kind} needs a radius on '${on}' events, whose enemy is dead`);
+  } else if (needsTarget && on === 'shatter') {
+    issues.push(`${effect.kind} needs the event's enemy, which is gone when '${on}' triggers run`);
   }
   switch (effect.kind) {
     case 'applyAilment':
@@ -499,6 +505,14 @@ function effectIssues(effect: EffectSpec, on: TriggerEventId): string[] {
     case 'push':
       positive('distance', effect.distance);
       positive('radius', effect.radius);
+      break;
+    case 'addFrost':
+      positive('amount', effect.amount);
+      positive('radius', effect.radius);
+      count('maxTargets', effect.maxTargets);
+      if (effect.maxTargets !== undefined && effect.radius === undefined) {
+        issues.push('maxTargets needs a radius');
+      }
       break;
     case 'heal':
       positive('lifePct', effect.lifePct);

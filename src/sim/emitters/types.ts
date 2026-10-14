@@ -38,11 +38,14 @@ export const SIGNATURE = 1;
 
 /**
  * Payload.damageMode: rows multiplies a hit by its damage row; prescaled deals baseDamage × crit
- * multiplier × scale as given, whatever the damage rows hold.
+ * multiplier × scale as given, whatever the damage rows hold; pctMaxHp, a shatter's, multiplies
+ * it by pctMaxHpFactor of its damage row only (src/sim/build/eval.ts), with scale its share of
+ * the victim's max life.
  */
 export const ROWS = 0;
 export const PRESCALED = 1;
-export type DamageMode = typeof ROWS | typeof PRESCALED;
+export const PCT_MAX_HP = 2;
+export type DamageMode = typeof ROWS | typeof PRESCALED | typeof PCT_MAX_HP;
 
 /**
  * Payload.rows slots: a hit's row without and with crit, the same for a chain jump, and the row

@@ -189,6 +189,13 @@ export type SimEvent =
       readonly y: number;
       readonly amount: Num;
     }
+  /**
+   * An enemy's chill meter filled (src/sim/ailments/frost.ts): it froze, or, a boss, its meter
+   * emptied without freezing.
+   */
+  | { readonly type: 'freeze'; readonly targetId: number; readonly boss: boolean }
+  /** A frozen enemy died at (x, y) and shattered over `radius`. */
+  | { readonly type: 'shatter'; readonly x: number; readonly y: number; readonly radius: number }
   | {
       readonly type: 'enemyKilled';
       readonly enemyId: number;

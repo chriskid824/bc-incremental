@@ -3,9 +3,9 @@
  * tick, and every BURN_TICK_INTERVAL ticks (step k = tick / 15) each alive enemy, in id order,
  * takes its damage over time: burn (its records and, under eternalFlame, its burn rings), then
  * poison (its rings), then bleed, each while it is still alive. Each kind's step is one damage
- * instance: × takenMult when shocked, through the modifyDamage hooks, then hp, the tallies of
- * the sources it is credited to and its event (burnTick, dotTick). Then the enemy's ailmentTick
- * triggers fire. The ailments themselves live in src/sim/ailments/.
+ * instance: × takenMult when shocked or frozen, through the modifyDamage hooks, then hp, the
+ * tallies of the sources it is credited to and its event (burnTick, dotTick). Then the enemy's
+ * ailmentTick triggers fire. The ailments themselves live in src/sim/ailments/.
  *
  * A kill by damage over time carries the enemy's ailment depth (Enemy.ailDepth) and no origin:
  * rule 3 is about direct damage only.
@@ -156,7 +156,7 @@ function stepDots(ctx: RunContext, enemy: Enemy, k: number, records: Num): boole
  */
 function dealDot(ctx: RunContext, enemy: Enemy, tag: TagMask, raw: Num, credit: number): boolean {
   let amount = raw;
-  if (enemy.shockStacks !== 0 && enemy.shockUntil > ctx.now) {
+  if ((enemy.shockStacks !== 0 && enemy.shockUntil > ctx.now) || enemy.frozenUntil > ctx.now) {
     amount = mul(amount, takenMult(ctx, enemy));
   }
   const parts = ctx.dotParts;

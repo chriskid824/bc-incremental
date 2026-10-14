@@ -75,6 +75,11 @@ describe('ModifierSchema', () => {
     { stat: 'damage', kind: 'increased', value: 1, scaling: { per: 'lifeLostPct', cap: 0.5 } },
     { stat: 'damage', kind: 'more', value: 0.02, scaling: { per: 'targetPoisonStacks' } },
     { stat: 'damage', kind: 'more', value: 0.1, scaling: { per: 'targetShockStacks' } },
+    { stat: 'damage', kind: 'increased', value: 0.6, scaling: { per: 'targetFrost', every: 0.1 } },
+    { stat: 'damage', kind: 'more', value: 0.15, when: [{ targetHas: 'frost' }] },
+    { stat: 'damage', kind: 'more', value: 0.3, when: [{ targetHas: 'frozen' }], scope: 'fusion' },
+    { stat: 'frostOnHit', kind: 'flat', value: 0.08 },
+    { stat: 'frostOnHit', kind: 'flat', value: 0.1, tags: ['projectile'] },
     { stat: 'damage', kind: 'more', value: 0.3, when: [{ targetHas: 'burn' }] },
     { stat: 'damage', kind: 'more', value: 0.3, when: [{ targetHas: 'poison' }] },
     { stat: 'damage', kind: 'more', value: 0.2, when: [{ targetHas: 'bleed' }] },
@@ -163,8 +168,8 @@ describe('ModifierSchema', () => {
       { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'chainJump', step: 2 } },
     ],
     [
-      'the scaling variable targetFrost, which lands with frost',
-      { stat: 'damage', kind: 'more', value: 0.1, scaling: { per: 'targetFrost' } },
+      'a frost stat that is not scoped with a tag',
+      { stat: 'frostSlowCap', kind: 'flat', value: 0.2, tags: ['hit'] },
     ],
     [
       'conditions on a stat that is not scoped',
@@ -184,8 +189,13 @@ describe('ModifierSchema', () => {
       { stat: 'damage', kind: 'more', value: 0.1, when: [{ victimHas: 'burn' }] },
     ],
     [
-      'an ailment that has no condition reader yet',
-      { stat: 'damage', kind: 'more', value: 0.1, when: [{ targetHas: 'frost' }] },
+      'frost stacks, which it has none of',
+      {
+        stat: 'damage',
+        kind: 'more',
+        value: 0.1,
+        when: [{ stacksAtLeast: { ailment: 'frost', stacks: 1 } }],
+      },
     ],
     [
       'an ailment condition on a modifier',
@@ -270,20 +280,21 @@ describe('ConditionSchema', () => {
     { killedBy: 'poison' },
     { killedBy: 'bleed' },
     ...['burn', 'poison', 'bleed', 'shock'].map((ailment) => ({ ailment })),
+    ...['frost', 'frozen'].flatMap((ailment) => [{ targetHas: ailment }, { victimHas: ailment }]),
   ])('accepts %o', (condition) => {
     expect(ConditionSchema.parse(condition)).toEqual(condition);
   });
 
   it.each([
+    // Frost is a meter, not stacks, and is never applied as an ailment.
     ...['frost', 'frozen'].flatMap((ailment) => [
-      { targetHas: ailment },
-      { victimHas: ailment },
       { stacksAtLeast: { ailment, stacks: 1 } },
+      { ailment },
+      { killedBy: ailment },
     ]),
     // Bleed keeps one bleed, so it has no stacks to count; shock kills nothing.
     { stacksAtLeast: { ailment: 'bleed', stacks: 1 } },
     { killedBy: 'shock' },
-    { ailment: 'frost' },
     { targetKind: 'minion' },
     { hitIs: 'dot' },
     { chance: 0.5, cooldownSec: 1 },
@@ -323,6 +334,8 @@ describe('EffectSpecSchema', () => {
     { kind: 'nova', radius: 200, damagePct: 1, at: 'event', element: 'lightning' },
     { kind: 'nova', radius: 200, damagePct: 1, at: 'player' },
     { kind: 'push', distance: 60, radius: 150 },
+    { kind: 'addFrost', amount: 0.2 },
+    { kind: 'addFrost', amount: 0.1, radius: 200, maxTargets: 5 },
     { kind: 'heal', lifePct: 0.05 },
     { kind: 'gainShards', fraction: 0.5 },
   ])('accepts %o', (effect) => {
@@ -350,7 +363,8 @@ describe('EffectSpecSchema', () => {
       'spreadAilment poison with an unknown key',
       { kind: 'spreadAilment', ailment: 'poison', radius: 100, targets: 3 },
     ],
-    ['addFrost', { kind: 'addFrost', amount: 0.2 }],
+    ['addFrost without an amount', { kind: 'addFrost', radius: 100 }],
+    ['addFrost with an unknown key', { kind: 'addFrost', amount: 0.2, stacks: 1 }],
     ['detonate', { kind: 'detonate', ailment: 'burn', radius: 100 }],
     ['explode without a radius', { kind: 'explode', damagePct: 0.5 }],
     ['nova at an unknown point', { kind: 'nova', radius: 100, damagePct: 1, at: 'target' }],

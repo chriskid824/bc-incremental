@@ -1,12 +1,13 @@
 /**
  * Hits (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2–3): one damage instance of a
- * payload on one enemy, shared by emitter hits and chain jumps. A hit rolls crit, then its
- * ailments (burn, poison, bleed, shock), deals damage, and kills or applies the ailments it
- * rolled, each raising ailmentApplied. Chances, the crit multiplier and the damage multiplier
- * are the scoped stats of the hit's own ModTable row (the payload's slot for its tags and
- * source), so tagged, scoped and scaling modifiers apply per hit. A shocked enemy takes more
- * (takenMult). Every damage instance, hits and damage-over-time steps alike, goes into the
- * run's tallies through tally.
+ * payload on one enemy, shared by emitter hits, chain jumps and effect hits. A hit rolls crit,
+ * then its ailments (burn, poison, bleed, shock), deals damage, and kills or applies the
+ * ailments it rolled, each raising ailmentApplied, then its frost (frostOnHit), which may
+ * freeze. Chances, the crit multiplier, the damage multiplier and frost are the scoped stats of
+ * the hit's own ModTable row (the payload's slot for its tags and source), so tagged, scoped and
+ * scaling modifiers apply per hit. A shocked or frozen enemy takes more (takenMult). Every
+ * damage instance, hits and damage-over-time steps alike, goes into the run's tallies through
+ * tally.
  *
  * A hit raises the hit and crit trigger events and calls the onHit hooks (src/sim/effects/): a
  * surviving hit once its ailments are applied, so their conditions see them; a lethal one right
@@ -20,16 +21,19 @@ import { DOT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { ailmentDps, applyBurn, applyPoison, creditOf } from '../ailments/apply';
 import { addBleed } from '../ailments/bleed';
+import { addFrost } from '../ailments/frost';
 import { addShock, takenMult } from '../ailments/shock';
-import { statAt } from '../build/eval';
+import { pctMaxHpFactor, statAt } from '../build/eval';
 import type { EvalInput } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
 import type { ModTable } from '../build/modTable';
+import { raiseFreeze } from '../effects/centerEvents';
 import { fire, fireApplied } from '../effects/dispatch';
 import { CHAIN_JUMP, CRIT_HIT, HIT_EVENT, KILL_BY_HIT, KILLED } from '../effects/flags';
 import { EVENT } from '../effects/types';
 import {
   PRESCALED,
+  ROWS,
   SLOT_BLEED,
   SLOT_BLEED_CRIT,
   SLOT_BURN,
@@ -62,6 +66,7 @@ const SHOCK_CHANCE = SCOPED_INDEX.shockChance;
 const POISON_ALWAYS = SCOPED_INDEX.poisonAlways;
 const BLEED_ALWAYS = SCOPED_INDEX.bleedAlways;
 const SHOCK_ALWAYS = SCOPED_INDEX.shockAlways;
+const FROST_ON_HIT = SCOPED_INDEX.frostOnHit;
 
 /** Bits of rollDots' result: the ailments a hit applies besides burn. */
 const POISONS = 1;
@@ -202,8 +207,14 @@ export function hitWithPayload(
   const mask = crit ? plain | CRIT : plain;
   const source = jump ? p.jumpSource : p.source;
   const flags = p.flags | HIT_EVENT | (jump ? CHAIN_JUMP : 0) | (crit ? CRIT_HIT : 0);
-  let amount = p.damageMode === PRESCALED ? base : mul(base, statAt(table, row, DAMAGE, ev));
-  if (enemy.shockStacks !== 0 && enemy.shockUntil > ctx.now) {
+  // A shatter (pctMaxHp) takes only the bounded part of its damage row (pctMaxHpFactor).
+  let amount =
+    p.damageMode === ROWS
+      ? mul(base, statAt(table, row, DAMAGE, ev))
+      : p.damageMode === PRESCALED
+        ? base
+        : mul(base, pctMaxHpFactor(table, row, ev, build.flags.shatterMult));
+  if ((enemy.shockStacks !== 0 && enemy.shockUntil > ctx.now) || enemy.frozenUntil > ctx.now) {
     amount = mul(amount, takenMult(ctx, enemy));
   }
   if (build.hooks.modifyDamage.length !== 0) {
@@ -241,6 +252,14 @@ export function hitWithPayload(
     if (ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
   }
   if (rolled !== 0) applyDots(ctx, enemy, p, base, crit, rolled, depth, origin);
+  // Builds without frost on hit skip reading it; a payload that rolls no ailments adds none.
+  if (ctx.hitsFrost && p.rollsAilments) {
+    ev.chainJump = k;
+    const frost = statAt(table, row, FROST_ON_HIT, ev);
+    if (frost > 0 && addFrost(ctx, enemy, frost, p.source)) {
+      raiseFreeze(ctx, enemy, depth, origin, flags);
+    }
+  }
   if (ctx.hitListeners) {
     dispatchHit(ctx, enemy, amount, mask, source, crit, k, depth, origin, flags);
   }

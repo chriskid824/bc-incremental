@@ -24,6 +24,8 @@
  * conditions hold per damage instance, after the static parts.
  */
 
+import { SOURCE_CLASSES, sourceClass } from '../../data/sources';
+import type { SourceClass, SourceSelector } from '../../data/sources';
 import { SCOPED_STATS } from '../../data/stats';
 import type { Modifier, ModifierKind, ScopedStat, StatBlock } from '../../data/stats';
 import { tagMask } from '../../data/tags';
@@ -72,7 +74,16 @@ export interface CompiledMod {
   readonly scale: CompiledScaling | null;
   /** The modifier's conditions (Modifier.when): a dynamic entry, applied where they all hold. */
   readonly cond: readonly CompiledCondition[] | null;
+  /**
+   * A dynamic entry scoped to the center or a fusion (the class or one fusion's id): the only
+   * kind of entry a shatter's damage takes (pctMaxHpFactor in src/sim/build/eval.ts).
+   */
+  readonly shatterOk: boolean;
 }
+
+/** The class of the sources a selector picks: the class itself, or an exact id's. */
+const selectorClass = (sel: SourceSelector): SourceClass | null =>
+  (SOURCE_CLASSES as readonly string[]).includes(sel) ? (sel as SourceClass) : sourceClass(sel);
 
 /** Evaluated per damage instance rather than folded into the rows. */
 const isDynamic = (mod: CompiledMod): boolean => mod.scale !== null || mod.cond !== null;
@@ -91,6 +102,10 @@ export function compileMods(scoped: readonly Modifier[], sources: SourceTable): 
     const all = tagMask(mod.tags ?? []);
     const none = tagMask(mod.notTags ?? []);
     const scopeOk = mod.scope === undefined ? null : sources.scopeMask(mod.scope);
+    const scale = mod.scaling === undefined ? null : compileScaling(mod.scaling);
+    const cond =
+      mod.when === undefined ? null : mod.when.map((condition) => compileCondition(condition));
+    const scopeClass = mod.scope === undefined ? null : selectorClass(mod.scope);
     return {
       stat,
       kind: KIND_CODE[mod.kind],
@@ -99,9 +114,10 @@ export function compileMods(scoped: readonly Modifier[], sources: SourceTable): 
       none,
       scopeOk,
       untagged: all === 0 && none === 0 && scopeOk === null,
-      scale: mod.scaling === undefined ? null : compileScaling(mod.scaling),
-      cond:
-        mod.when === undefined ? null : mod.when.map((condition) => compileCondition(condition)),
+      scale,
+      cond,
+      shatterOk:
+        (scale !== null || cond !== null) && (scopeClass === 'center' || scopeClass === 'fusion'),
     };
   });
 }

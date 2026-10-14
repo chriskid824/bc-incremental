@@ -5,7 +5,7 @@
  *    modules' onKill hooks, while the victim still holds its ailments;
  * 2. removal, drops, the kill event and split children, so later hits of the same tick can
  *    reach the children;
- * 3. the kill's other triggers, recorded as pending kills;
+ * 3. the kill's other triggers, recorded as pending kills (a frozen victim's shatter with them);
  * 4. its DoT rings go back to the pool (src/sim/ailments/apply.ts).
  * The death step of the tick order dispatches the pending kills (their effects run next tick),
  * then compacts the entity arrays.
