@@ -7,9 +7,10 @@
  * hooks the simulation calls at fixed points of the tick.
  */
 
-import type { RuleSpec } from '../../data/rules';
+import type { RuleSpec, SignatureSpec } from '../../data/rules';
 import type { Modifier, StatId } from '../../data/stats';
 import type { BuildFlags, SignatureParams } from '../build/compile';
+import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
 
 export interface RuleModule<P extends RuleSpec> {
@@ -57,10 +58,28 @@ export interface BuildCompiler {
   legacyHitMult: number;
 }
 
+/**
+ * A signature attack (src/data/rules.ts SignatureSpec): the emitter compileBuild puts at index 0
+ * of CompiledBuild.emitters.
+ */
+export interface SignatureModule<P extends SignatureSpec> {
+  readonly id: P['id'];
+  emitter(spec: P): EmitterSpec;
+}
+
 /** The kill an onKill hook sees; one reused object per run (RunContext.killScratch). */
 export interface KillScratch {
   /** The trigger whose damage killed; −1 for emitter hits and DoT kills. */
   origin: number;
+}
+
+/** The attack an onAttack hook sees; one reused object per run (RunContext.shotScratch). */
+export interface ShotScratch {
+  /**
+   * False before the onAttack hooks run; a hook that sets it makes every projectile of this
+   * attack steady, on top of the signature's own rhythm (SignatureParams).
+   */
+  forceCrit: boolean;
 }
 
 /** Points in the tick where the simulation calls rule modules. Hooks allocate nothing. */
@@ -69,6 +88,11 @@ export interface Hooks {
   readonly tick: (ctx: RunContext) => void;
   /** At each kill, while the victim is still alive: before removeEnemy, drops and split. */
   readonly onKill: (ctx: RunContext, victim: Enemy, kill: Readonly<KillScratch>) => void;
+  /**
+   * At each attack of an emitter, once it is counted (em.attacks includes it) and before its
+   * projectiles fire. A hook may only set shot.forceCrit.
+   */
+  readonly onAttack: (ctx: RunContext, em: Readonly<EmitterRuntime>, shot: ShotScratch) => void;
 }
 
 export type HookName = keyof Hooks;

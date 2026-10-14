@@ -152,7 +152,12 @@ export const ModifierSchema = exact<Modifier>()(
 export const RuleSpecSchema = exact<RuleSpec>()(
   z.discriminatedUnion('id', [
     z
-      .strictObject({ id: z.literal('steadyAim'), everyNth: finite, critMultiplierMore: finite })
+      .strictObject({
+        id: z.literal('steadyAim'),
+        everyNth: finite,
+        critMultiplierMore: finite,
+        counts: z.enum(['shot', 'attack']),
+      })
       .readonly(),
     z
       .strictObject({

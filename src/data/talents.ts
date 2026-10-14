@@ -200,7 +200,7 @@ export const TALENTS: readonly TalentNode[] = [
     // The crit sector's last big multiplier lives here, not on assassin and volley (§4.2).
     shardCostFactor: 3,
     modifiers: [moreDmg(1.2, 'crit'), more('attackSpeed', 0.25)],
-    rules: [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }],
+    rules: [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' }],
     archetype: 'crit',
   }),
 

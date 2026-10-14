@@ -15,7 +15,7 @@ const { critChance: CRIT_CHANCE, critMultiplier: CRIT_MULTIPLIER } = SCOPED_INDE
 const MASKS = [...Array.from({ length: 16 }, (_, mask) => mask), TAG.poison | TAG.minion];
 
 const compileWith = (stats = makeStats(), ...modules: TestModule[]) =>
-  compileBuild(stats, [], modules);
+  compileBuild(stats, [], undefined, modules);
 
 describe('compileBuild', () => {
   it('is neutral without rules', () => {
@@ -29,8 +29,8 @@ describe('compileBuild', () => {
     expect(build.values).not.toBe(stats.values);
     expect(build.mods).toHaveLength(stats.scoped.length);
     expect(build.flags).toEqual({ randomCrits: true, maxLife: null, burnRings: false });
-    expect(build.signature).toEqual({ forceCritEvery: 0 });
-    expect(build.hooks).toEqual({ tick: [], onKill: [] });
+    expect(build.signature).toEqual({ forceCritEvery: 0, counts: 'shot' });
+    expect(build.hooks).toEqual({ tick: [], onKill: [], onAttack: [] });
     expect(build.legacyHitMult).toBe(1);
     expect(build.sources.names).toEqual(['center']);
     const table = modTableFor(stats);
@@ -139,7 +139,7 @@ describe('compileBuild', () => {
       { id: 'overload', chainCountMultiplier: 1.5, retentionPenalty: 0.1 },
     ];
     const onKill = (): void => undefined;
-    const build = compileBuild(makeStats({ chainCount: 1 }), rules, [
+    const build = compileBuild(makeStats({ chainCount: 1 }), rules, undefined, [
       (b, source) => {
         // Both overload instances compiled already.
         seen.push(b.values.chainCount, source, b.source('center'), b.source('outer.lightning'));

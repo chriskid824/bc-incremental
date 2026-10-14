@@ -7,8 +7,16 @@
  */
 
 export type RuleSpec =
-  /** Every Nth shot crits, no random crits; crit multiplier gets an extra more multiplier. */
-  | { readonly id: 'steadyAim'; readonly everyNth: number; readonly critMultiplierMore: number }
+  /**
+   * Every Nth shot crits, or every shot of every Nth attack (counts); no random crits; crit
+   * multiplier gets an extra more multiplier.
+   */
+  | {
+      readonly id: 'steadyAim';
+      readonly everyNth: number;
+      readonly critMultiplierMore: number;
+      readonly counts: 'shot' | 'attack';
+    }
   /**
    * Burning enemies spread their burns on death to enemies within spreadRadius, each spread
    * stack dealing spreadEffect × the source stack's damage; hit damage gets (1 + hitMore).
@@ -43,3 +51,14 @@ export const RULE_IDS: readonly RuleId[] = [
   'overload',
   'glassCannon',
 ];
+
+/**
+ * A character's signature attack: the emitter at index 0 of the run (src/sim/rules/, SIGNATURES).
+ * M1 has one, the volley of homing projectiles.
+ */
+export type SignatureSpec = { readonly id: 'm1Volley' };
+
+export type SignatureId = SignatureSpec['id'];
+
+/** The signature attack of runs that name none (RunConfig.signature). */
+export const M1_SIGNATURE: SignatureSpec = { id: 'm1Volley' };

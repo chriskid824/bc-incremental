@@ -25,7 +25,7 @@ function talentAt(data: Mutable<GameData>, id: string): [number, Mutable<TalentN
 }
 
 const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
-  steadyAim: { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 },
+  steadyAim: { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' },
   pandemic: { id: 'pandemic', spreadRadius: 150, spreadEffect: 0.5, hitMore: -0.3 },
   eternalFlame: { id: 'eternalFlame', durationMore: -0.5 },
   overload: { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.15 },
@@ -191,11 +191,18 @@ describe('RuleSpecSchema', () => {
     }
     const chainMore = { ...SAMPLE_RULES.overload, chainMore: 3.5 };
     expect(RuleSpecSchema.parse(chainMore)).toEqual(chainMore);
+    const perAttack = { ...SAMPLE_RULES.steadyAim, counts: 'attack' };
+    expect(RuleSpecSchema.parse(perAttack)).toEqual(perAttack);
   });
 
   it.each([
     ['a rule that became data', { id: 'critsAlwaysIgnite', nonCritHitMore: -0.5 }],
     ['a missing parameter', { id: 'steadyAim', everyNth: 3 }],
+    ['a missing choice', { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }],
+    [
+      'an unknown choice',
+      { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'volley' },
+    ],
     ['a parameter of another rule', { id: 'glassCannon', damageMore: 1, hitMore: 1 }],
     ['a non-numeric parameter', { id: 'eternalFlame', durationMore: '-0.5' }],
     [

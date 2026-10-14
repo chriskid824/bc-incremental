@@ -41,7 +41,7 @@ function gridOf(items: readonly Item[]): SpatialGrid<Item> {
 
 // ---- Linear references: the scans the grid replaced, unchanged apart from the predicate ----
 
-/** nearestChainTarget before the grid (src/sim/systems/hits.ts), with any predicate. */
+/** nearestChainTarget before the grid (src/sim/combat/chain.ts), with any predicate. */
 function linearNearest(
   enemies: readonly Item[],
   x: number,

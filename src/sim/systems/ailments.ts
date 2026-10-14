@@ -5,10 +5,10 @@
 
 import { add, assertFinite, gt, lte, sub, ZERO } from '../../core/num';
 import { DAMAGE_TAG_BIT } from '../../data/stats';
+import { tally } from '../combat/hit';
 import { accrued, BURN_TICK_INTERVAL, expireBurns } from './burn';
 import type { BurnStack, Enemy, RunContext } from './context';
 import { killEnemy } from './death';
-import { tally } from './hits';
 
 const BURN = DAMAGE_TAG_BIT.burn;
 

@@ -105,7 +105,7 @@ const IGNITE_ALWAYS = SCOPED_INDEX.igniteAlways;
 /**
  * Expected damage, per point of base damage before retention, of one hit `jump` chain jumps
  * after the primary target (0 = the primary): the hit with its crit expectation plus the
- * burn it is expected to cause. Mirrors the simulation (src/sim/systems/hits.ts): the crit
+ * burn it is expected to cause. Mirrors the simulation (src/sim/combat/hit.ts): the crit
  * chance comes from the hit's row, everything else from the row of its outcome (hit|crit for
  * crits), jumps add the chain tag to the hit (not to its burn), a crit's burn is computed from
  * the crit hit with the burn|crit row, a steady shot crits on every jump, *Always stats make

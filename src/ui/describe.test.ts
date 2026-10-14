@@ -57,14 +57,16 @@ describe('describeBuild', () => {
 
   it('shows the steadyAim rhythm instead of a crit chance, with its crit multiplier', () => {
     const lines = build(
-      [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }],
+      [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' }],
       makeStats({ critChance: 0.17 }),
     );
     expect(lines[t('stat.critChance')]).toBe('Every 3 shots');
     expect(lines[t('stat.critMultiplier')]).toBe('225%');
     setLocale('zh-TW');
     expect(
-      build([{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }])[t('stat.critChance')],
+      build([{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' }])[
+        t('stat.critChance')
+      ],
     ).toBe('每 3 發一次');
   });
 

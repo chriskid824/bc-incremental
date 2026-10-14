@@ -1,12 +1,13 @@
 /**
  * Projectiles system (docs/v3/implementation-plan-v3.md §2.15): moves homing projectiles and
- * resolves each hit the moment a projectile arrives (src/sim/systems/hits.ts).
+ * resolves each attack the moment a projectile arrives: its payload's primary hit and chain
+ * (src/sim/combat/chain.ts).
  */
 
+import { chainAttack } from '../combat/chain';
 import { pickTargetInGrid } from '../targeting';
 import { focused } from './context';
 import type { Projectile, RunContext } from './context';
-import { resolveAttack } from './hits';
 
 /** Homes each projectile on its target, retargeting first if the target died. */
 export function moveProjectiles(ctx: RunContext): void {
@@ -39,7 +40,14 @@ export function moveProjectiles(ctx: RunContext): void {
       projectile.alive = false;
       ctx.projectilesDirty = true;
       target.inbound--;
-      resolveAttack(ctx, target, projectile.steady);
+      chainAttack(
+        ctx,
+        projectile.payload,
+        target,
+        ctx.chainCount,
+        projectile.steady,
+        projectile.origin,
+      );
     } else {
       const k = projectileStep / dist;
       projectile.x += dx * k;

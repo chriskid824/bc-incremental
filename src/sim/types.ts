@@ -7,7 +7,7 @@
 import type { Num } from '../core/num';
 import type { Vec2 } from '../core/vec';
 import type { EnemyId } from '../data/types';
-import type { RuleSpec } from '../data/rules';
+import type { RuleSpec, SignatureSpec } from '../data/rules';
 import type { StatBlock } from '../data/stats';
 
 export const TICK_RATE = 60;
@@ -38,6 +38,8 @@ export interface RunConfig {
   readonly seed: number;
   readonly stats: StatBlock;
   readonly rules: readonly RuleSpec[];
+  /** The signature attack; M1_SIGNATURE (src/data/rules.ts) when omitted. */
+  readonly signature?: SignatureSpec;
   /** First wave of the run (docs/GDD.md §2.2). */
   readonly startWave: number;
   readonly mode: ControlMode;

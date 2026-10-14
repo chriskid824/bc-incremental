@@ -1,17 +1,28 @@
 /**
- * The rule module of every RuleSpec id (src/data/rules.ts). The mapped type makes a rule id
- * without a module, or a module for the wrong id, a type error.
+ * The rule module of every RuleSpec id and the signature module of every SignatureSpec id
+ * (src/data/rules.ts). The mapped types make an id without a module, or a module for the wrong
+ * id, a type error.
  */
 
-import type { RuleId, RuleSpec } from '../../data/rules';
+import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { eternalFlame } from './eternalFlame';
 import { glassCannon } from './glassCannon';
-import type { RuleModule } from './module';
+import { m1Volley } from './m1Volley';
+import type { RuleModule, SignatureModule } from './module';
 import { overload } from './overload';
 import { pandemicLegacy } from './pandemicLegacy';
 import { steadyAim } from './steadyAim';
 
-export type { BuildCompiler, HookName, Hooks, KillScratch, RuleModule, TestModule } from './module';
+export type {
+  BuildCompiler,
+  HookName,
+  Hooks,
+  KillScratch,
+  RuleModule,
+  ShotScratch,
+  SignatureModule,
+  TestModule,
+} from './module';
 
 export const RULE_MODULES: {
   readonly [K in RuleId]: RuleModule<Extract<RuleSpec, { id: K }>>;
@@ -21,4 +32,10 @@ export const RULE_MODULES: {
   eternalFlame,
   overload,
   glassCannon,
+};
+
+export const SIGNATURES: {
+  readonly [K in SignatureId]: SignatureModule<Extract<SignatureSpec, { id: K }>>;
+} = {
+  m1Volley,
 };

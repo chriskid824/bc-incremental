@@ -272,7 +272,9 @@ describe('validateGameData: talents', () => {
 
   it('rejects rule parameters out of range', () => {
     const issues = issuesAfter((d) => {
-      talent(d, 'steadyAim').rules = [{ id: 'steadyAim', everyNth: 0, critMultiplierMore: -2 }];
+      talent(d, 'steadyAim').rules = [
+        { id: 'steadyAim', everyNth: 0, critMultiplierMore: -2, counts: 'shot' },
+      ];
     });
     expect(issues).toEqual([
       "talent 'steadyAim': rule 'steadyAim' everyNth must be a positive integer (got 0)",

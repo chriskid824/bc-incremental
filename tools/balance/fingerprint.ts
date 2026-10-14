@@ -74,7 +74,7 @@ const ETERNAL: RuleSpec = { id: 'eternalFlame', durationMore: -0.5 };
 
 export const RULE_SETS: Readonly<Record<string, RuleSet>> = {
   none: rulesOnly(),
-  steady: rulesOnly({ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }),
+  steady: rulesOnly({ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' }),
   pandemic: rulesOnly(PANDEMIC),
   eternal: rulesOnly(ETERNAL),
   eternalPandemic: rulesOnly(ETERNAL, PANDEMIC),

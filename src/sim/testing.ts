@@ -309,7 +309,7 @@ export const GOLDEN_BUILDS: Readonly<Record<string, GoldenBuild>> = {
   burn: golden(BURN),
   chain: golden(CHAIN),
   volley: golden(VOLLEY),
-  steady: golden(CRIT, [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }]),
+  steady: golden(CRIT, [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' }]),
   pandemic: golden(BURN, [PANDEMIC]),
   // Fast, sure ignites so stacks pile past the cap that eternalFlame lifts.
   eternalPandemic: golden({ ...BURN, igniteChance: 1, attackSpeed: 8 }, [

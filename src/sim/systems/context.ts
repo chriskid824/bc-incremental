@@ -6,19 +6,28 @@
  */
 
 import type { Num } from '../../core/num';
-import { mul, num, ZERO } from '../../core/num';
+import { mul, toNumber, ZERO } from '../../core/num';
 import type { Rng } from '../../core/rng';
 import { createStreams } from '../../core/rng';
-import { DAMAGE_TAG_BIT } from '../../data/stats';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
 import { compileBuild } from '../build/compile';
 import type { CompiledBuild } from '../build/compile';
+import { statAt } from '../build/eval';
 import type { ModTable } from '../build/modTable';
-import { ailmentCredit, CENTER, MAX_SOURCES, rowKey } from '../build/sources';
+import { SCOPED_INDEX } from '../build/modTable';
+import { ailmentCredit, MAX_SOURCES } from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
+import {
+  createEmitterRuntime,
+  emitterPayload,
+  SLOT_HIT,
+  SLOT_HIT_CRIT,
+  slotRow,
+} from '../emitters/types';
+import type { ChainBudget, EmitterRuntime, Payload } from '../emitters/types';
 import type { SpatialGrid } from '../grid';
-import type { KillScratch, TestModule } from '../rules';
+import type { KillScratch, ShotScratch, TestModule } from '../rules';
 import { FOCUS_RANGE, isCovered } from '../targeting';
 import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, MAX_RUN_SECONDS, TICK_RATE } from '../types';
 import type {
@@ -34,15 +43,11 @@ import type {
 import { doomed, UNCAPPED_BURN_STACKS } from './burn';
 import { createEnemyGrid } from './grid';
 
-const HIT = DAMAGE_TAG_BIT.hit;
-const CRIT = DAMAGE_TAG_BIT.crit;
-const BURN = DAMAGE_TAG_BIT.burn;
+const DAMAGE = SCOPED_INDEX.damage;
+const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
 
 const HALF_WIDTH = ARENA_WIDTH / 2;
 const HALF_HEIGHT = ARENA_HEIGHT / 2;
-
-/** Source of the attack's hits: the M1 attack is the center's own (src/sim/build/sources.ts). */
-export const ATTACK_SOURCE = CENTER;
 
 export interface WaveRecord {
   readonly wave: number;
@@ -96,6 +101,11 @@ export interface Enemy extends EnemyState {
 
 export interface Projectile extends ProjectileState {
   target: Enemy;
+  /** The damage it delivers: its emitter's payload. */
+  readonly payload: Payload;
+  /** Trigger depth and origin of its damage: 0 and −1 for an emitter's shots. */
+  readonly depth: number;
+  readonly origin: number;
 }
 
 export interface RunContext {
@@ -121,7 +131,7 @@ export interface RunContext {
   readonly sources: SourceTable;
   /** Who ailment damage is credited to (build.attribution); in M1 every ailment is the center's. */
   readonly attribution: AttributionPolicy;
-  /** Source credited with burn damage: every burn comes from the attack's hits. */
+  /** Source credited with burn damage: every burn comes from the signature attack's hits. */
   readonly burnCredit: number;
 
   // ---- Derived stats, clamped as documented in src/data/stats.ts ----
@@ -131,17 +141,9 @@ export interface RunContext {
    * through statAt (src/sim/build/eval.ts). The same object as build.table.
    */
   readonly table: ModTable;
-  /**
-   * ModTable rows of the attack's hits by slot (2 × chained + crit), −1 until first use. Rows
-   * keep their numbers as the table grows, so a row looked up once stays valid for the run.
-   */
-  readonly hitRows: Int32Array;
-  readonly damage: Num;
   readonly burnDamage: number;
   readonly burnTicks: number;
   readonly burnCap: number;
-  readonly burnMult: number;
-  readonly burnCritMult: number;
   readonly chainCount: number;
   readonly chainRetention: number;
   readonly projectileCount: number;
@@ -151,10 +153,20 @@ export interface RunContext {
   readonly projectileStep: number;
   readonly shardGain: number;
   readonly coreGain: number;
-  /** Average primary hit, for overkill tracking (docs/GDD.md §2.2); crits use mult[hit|crit]. */
+  /**
+   * Average primary hit of the signature attack, for overkill tracking (docs/GDD.md §2.2): its
+   * payload's hit and crit rows, crits with the crit row's multiplier.
+   */
   readonly expectedHit: number;
-  /** Damage a projectile in flight is expected to deal, for targeting: the non-crit primary hit. */
+  /**
+   * Damage a projectile in flight is expected to deal, for targeting: the signature attack's
+   * non-crit primary hit.
+   */
   readonly projectileEstimate: Num;
+
+  // ---- Emitters (src/sim/emitters/) ----
+  /** The build's emitters with their payloads and counters; index 0 is the signature attack. */
+  readonly emitters: readonly EmitterRuntime[];
 
   // ---- Entities and public state ----
   readonly enemies: Enemy[];
@@ -167,6 +179,10 @@ export interface RunContext {
   readonly grid: SpatialGrid<Enemy>;
   /** The kill the onKill hooks see, refilled at every kill (killEnemy in death.ts). */
   readonly killScratch: KillScratch;
+  /** The attack the onAttack hooks see, reset at every attack (countAttack in volley.ts). */
+  readonly shotScratch: ShotScratch;
+  /** The current attack's chain budget, reset at every attack (src/sim/combat/chain.ts). */
+  readonly chainBudget: ChainBudget;
   /**
    * spreadBurns' scratch list for the targets of one spread; only spreadBurns may use it. A
    * kill spreads burns, so a query whose targets can die needs a list of its own.
@@ -185,12 +201,8 @@ export interface RunContext {
   now: number;
   nextEnemyId: number;
   nextProjectileId: number;
+  /** Serial of the current attack's chain; enemies it already hit carry it (hitMark). */
   attackSerial: number;
-  attackTicks: number;
-  /** Projectiles fired so far, for steadyAim's every-Nth shot. */
-  shots: number;
-  /** Serial of the current attack's volley; enemies it already targets carry it. */
-  volley: number;
   lastBurnTick: number;
   enemiesDirty: boolean;
   projectilesDirty: boolean;
@@ -204,7 +216,7 @@ export interface RunContext {
   damageBurn: Num;
   damagePoison: Num;
   damageBleed: Num;
-  /** Damage dealt per source index (RunResult.damageBySource); see tally in hits.ts. */
+  /** Damage dealt per source index (RunResult.damageBySource); see tally in combat/hit.ts. */
   readonly bySource: Num[];
   maxHit: Num;
   /** Contact hits and damage per enemy type (RunResult.damageTakenBy). */
@@ -249,7 +261,7 @@ export function createRunContext(
   data: GameData,
   testModules: readonly TestModule[] = [],
 ): RunContext {
-  const build = compileBuild(config.stats, config.rules, testModules);
+  const build = compileBuild(config.stats, config.rules, config.signature, testModules);
   const { values, flags, signature, legacyHitMult, sources, attribution, table } = build;
   const {
     spawn: spawnRng,
@@ -259,20 +271,29 @@ export function createRunContext(
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
-  const burnCredit = ailmentCredit(sources, attribution, 'burn', ATTACK_SOURCE);
+  // Emitters fire on the combat stream.
+  const emitters = build.emitters.map((spec) =>
+    createEmitterRuntime(spec, emitterPayload(build, spec, combatRng)),
+  );
+  const signatureEmitter = emitters[0] as EmitterRuntime;
+  const signaturePayload = signatureEmitter.payload;
+  const burnCredit = ailmentCredit(sources, attribution, 'burn', signaturePayload.source);
 
-  // Derived stats, clamped as documented in src/data/stats.ts.
-  const multAt = (mask: number, source = ATTACK_SOURCE): number =>
-    table.damage(rowKey(mask, source));
-  const damage = num(values.damage);
+  // Derived stats, clamped as documented in src/data/stats.ts. The estimates read the signature
+  // payload's primary hit rows (rows first: filling one may grow the table's arrays).
+  const hitRow = slotRow(build, signaturePayload, SLOT_HIT);
+  const critRow = slotRow(build, signaturePayload, SLOT_HIT_CRIT);
+  const hitMult = statAt(table, hitRow, DAMAGE, 0);
+  const critHitMult = statAt(table, critRow, DAMAGE, 0);
+  const critMultiplier = statAt(table, critRow, CRIT_MULTIPLIER, 0);
   const forceCritEvery = signature.forceCritEvery;
   const averageCrit = forceCritEvery > 0 ? 1 / forceCritEvery : clamp01(values.critChance);
   const expectedHit =
-    values.damage *
-    ((1 - averageCrit) * multAt(HIT) * legacyHitMult +
-      averageCrit * values.critMultiplier * multAt(HIT | CRIT) * legacyHitMult);
+    toNumber(signaturePayload.baseDamage) *
+    ((1 - averageCrit) * hitMult * legacyHitMult +
+      averageCrit * critMultiplier * critHitMult * legacyHitMult);
 
-  const projectileEstimate = mul(damage, multAt(HIT) * legacyHitMult);
+  const projectileEstimate = mul(signaturePayload.baseDamage, hitMult * legacyHitMult);
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
@@ -319,13 +340,9 @@ export function createRunContext(
     burnCredit,
 
     table,
-    hitRows: new Int32Array(4).fill(-1),
-    damage,
     burnDamage: values.burnDamage,
     burnTicks: Math.max(0, values.burnDuration * TICK_RATE),
     burnCap: flags.burnRings ? UNCAPPED_BURN_STACKS : Math.max(1, Math.floor(values.burnMaxStacks)),
-    burnMult: multAt(BURN, burnCredit),
-    burnCritMult: multAt(BURN | CRIT, burnCredit),
     chainCount: Math.max(0, values.chainCount),
     chainRetention: clamp01(values.chainRetention),
     projectileCount: Math.max(1, values.projectileCount),
@@ -337,6 +354,8 @@ export function createRunContext(
     expectedHit,
     projectileEstimate,
 
+    emitters,
+
     enemies,
     projectiles,
     player,
@@ -344,6 +363,8 @@ export function createRunContext(
     events: [],
     grid: createEnemyGrid(),
     killScratch: { origin: -1 },
+    shotScratch: { forceCrit: false },
+    chainBudget: { hits: 0, extraJumps: 0, centerEvents: 0 },
     spreadTargets: [],
 
     open: [],
@@ -354,9 +375,6 @@ export function createRunContext(
     nextEnemyId: 1,
     nextProjectileId: 1,
     attackSerial: 0,
-    attackTicks: 0,
-    shots: 0,
-    volley: 0,
     lastBurnTick: 0,
     enemiesDirty: false,
     projectilesDirty: false,
@@ -377,9 +395,10 @@ export function createRunContext(
     runResult: null,
 
     shootable: (enemy) => !isCovered(enemy, projectileEstimate) && !doomed(ctx, enemy),
+    // The volley is the signature attack's, the only emitter that fires volleys.
     shootableInVolley: (enemy) =>
       !isCovered(enemy, projectileEstimate) &&
-      !((enemy.volleyMark === ctx.volley && !focused(enemy)) || doomed(ctx, enemy)),
+      !((enemy.volleyMark === signatureEmitter.volley && !focused(enemy)) || doomed(ctx, enemy)),
     chainable: (enemy) => enemy.hitMark !== ctx.attackSerial,
   };
   return ctx;

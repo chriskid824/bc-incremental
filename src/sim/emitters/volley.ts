@@ -1,0 +1,109 @@
+/**
+ * The volley emitter (M1's attack): due attacks fire homing projectiles at targets picked by
+ * src/sim/targeting.ts; the projectiles system moves them and resolves their hits. An attack is
+ * counted (countAttack) and then fired (fireAttack), so a repeated attack can fire without
+ * counting as an attack of its own.
+ */
+
+import { pickTargetInGrid } from '../targeting';
+import { focused, rollCount } from '../systems/context';
+import type { Enemy, Projectile, RunContext } from '../systems/context';
+import type { EmitterRuntime } from './types';
+
+/**
+ * Fires every due attack of `em`. The accumulator gains the emitter's cadence per tick; an
+ * attack is due each time it reaches the attack interval. Without a target the emitter stays
+ * ready without banking attacks: it fires on the tick a target appears.
+ */
+export function runVolley(ctx: RunContext, em: EmitterRuntime): void {
+  const grid = ctx.grid;
+  const player = ctx.player;
+  const attackInterval = ctx.attackInterval;
+  em.acc += em.cadence;
+  while (em.acc >= attackInterval) {
+    const target = pickTargetInGrid(grid, player.x, player.y, ctx.shootable, focused);
+    if (target === null) {
+      em.acc = attackInterval - em.cadence;
+      return;
+    }
+    em.acc -= attackInterval;
+    countAttack(ctx, em);
+    fireAttack(ctx, em, target, 0, -1);
+  }
+}
+
+/**
+ * Counts an attack of `em`: its attack and volley serials, steadyAim's every-Nth-attack rhythm,
+ * then the onAttack hooks, which may make the whole attack steady (ctx.shotScratch).
+ */
+export function countAttack(ctx: RunContext, em: EmitterRuntime): void {
+  em.attacks++;
+  em.volley++;
+  const { forceCritEvery, counts } = ctx.build.signature;
+  em.steadyAttack = counts === 'attack' && forceCritEvery > 0 && em.attacks % forceCritEvery === 0;
+  const shot = ctx.shotScratch;
+  shot.forceCrit = false;
+  for (const hook of ctx.build.hooks.onAttack) hook(ctx, em, shot);
+  // Dispatch position of the nthAttack triggers (C3.6).
+}
+
+/**
+ * Fires an attack of `em` at `first`: projectileCount projectiles (its fraction is the chance
+ * of one more, rolled on the payload's stream), each at its own target so they spread over
+ * enemies; extra projectiles without a target are lost. Each projectile fired counts as a shot
+ * and is steady on steadyAim's every-Nth shot, or when the whole attack is. `depth` and
+ * `origin` travel with the projectiles to their hits: 0 and −1 for an emitter's own attacks.
+ */
+export function fireAttack(
+  ctx: RunContext,
+  em: EmitterRuntime,
+  first: Enemy,
+  depth: number,
+  origin: number,
+): void {
+  const grid = ctx.grid;
+  const player = ctx.player;
+  const rng = em.payload.rng;
+  const count = rollCount(ctx.projectileCount, (c) => rng.chance(c));
+  const { forceCritEvery, counts } = ctx.build.signature;
+  const every = counts === 'shot' ? forceCritEvery : 0;
+  const steadyAttack = em.steadyAttack || ctx.shotScratch.forceCrit;
+  let target: Enemy | null = first;
+  for (let n = 0; n < count && target !== null; n++) {
+    target.volleyMark = em.volley;
+    em.shots++;
+    const steady = (every > 0 && em.shots % every === 0) || steadyAttack;
+    fire(ctx, em, target, steady, depth, origin);
+    if (n + 1 < count) {
+      target = pickTargetInGrid(grid, player.x, player.y, ctx.shootableInVolley, focused);
+    }
+  }
+}
+
+function fire(
+  ctx: RunContext,
+  em: EmitterRuntime,
+  target: Enemy,
+  steady: boolean,
+  depth: number,
+  origin: number,
+): void {
+  const player = ctx.player;
+  target.inbound++;
+  const projectile: Projectile = {
+    id: ctx.nextProjectileId++,
+    x: player.x,
+    y: player.y,
+    prevX: player.x,
+    prevY: player.y,
+    targetId: target.id,
+    steady,
+    alive: true,
+    target,
+    payload: em.payload,
+    depth,
+    origin,
+  };
+  ctx.projectiles.push(projectile);
+  ctx.events.push({ type: 'attack', projectileId: projectile.id, targetId: target.id });
+}

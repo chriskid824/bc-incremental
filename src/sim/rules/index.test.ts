@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { RULE_IDS } from '../../data/rules';
+import { M1_SIGNATURE, RULE_IDS } from '../../data/rules';
+import { TAG } from '../../data/tags';
+import { compileBuild } from '../build/compile';
 import { createSimulation } from '../simulation';
 import { makeConfig, makeStats, makeTestData, stationarySquares } from '../testing';
 import type { RunConfig, SimEvent } from '../types';
 import { NO_INPUT } from '../types';
-import { RULE_MODULES } from './index';
+import { RULE_MODULES, SIGNATURES } from './index';
 import type { TestModule } from './index';
 
 /** Steps to the end of the run, keeping each tick's events. */
@@ -19,6 +21,29 @@ describe('RULE_MODULES', () => {
   it('has the module of every rule id, under its own id', () => {
     expect(Object.keys(RULE_MODULES).sort()).toEqual([...RULE_IDS].sort());
     for (const id of RULE_IDS) expect(RULE_MODULES[id].id).toBe(id);
+  });
+});
+
+describe('SIGNATURES', () => {
+  it('has the module of every signature id, under its own id', () => {
+    expect(Object.keys(SIGNATURES)).toEqual(['m1Volley']);
+    for (const [id, module] of Object.entries(SIGNATURES)) expect(module.id).toBe(id);
+  });
+
+  it("puts the signature's emitter first: M1's volley by default", () => {
+    const volley = {
+      kind: 'volley',
+      signature: true,
+      source: 'center',
+      damagePct: 1,
+      tags: TAG.hit | TAG.projectile,
+      chains: true,
+      rollsAilments: true,
+      canCrit: true,
+    };
+    expect(compileBuild(makeStats(), []).emitters).toEqual([volley]);
+    expect(compileBuild(makeStats(), [], M1_SIGNATURE).emitters).toEqual([volley]);
+    expect(SIGNATURES.m1Volley.emitter(M1_SIGNATURE)).toEqual(volley);
   });
 });
 

@@ -1,10 +1,11 @@
 /**
- * compileBuild: a build's stat block and rules compiled into what one run reads
- * (docs/v3/implementation-plan-v3.md §2.7). The rule modules (src/sim/rules/) run once, in the
- * order their ids first appear in the rules, each with all of its instances; they scale and
+ * compileBuild: a build's stat block, rules and signature attack compiled into what one run
+ * reads (docs/v3/implementation-plan-v3.md §2.7). The rule modules (src/sim/rules/) run once, in
+ * the order their ids first appear in the rules, each with all of its instances; they scale and
  * offset stats, add modifiers, set flags and the signature attack's parameters, and add hooks.
  * The result holds the final stat values, the ModTable of the build's scoped modifiers followed
- * by the rule-added ones, the run's damage sources and ailment attribution, and the hook lists.
+ * by the rule-added ones, the run's damage sources and ailment attribution, the hook lists and
+ * the emitters, the signature's first.
  *
  * The source table, the attribution's outer sources and the ModTable rows grow while a run
  * uses them, so createRunContext compiles a fresh build for every run. The talent screen and
@@ -12,11 +13,13 @@
  * one into a run.
  */
 
-import type { RuleId, RuleSpec } from '../../data/rules';
+import { M1_SIGNATURE } from '../../data/rules';
+import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { isScopedStat, SCOPED_STATS, STAT_IDS } from '../../data/stats';
 import type { Modifier, StatBlock, StatId } from '../../data/stats';
 import type { TagMask } from '../../data/tags';
-import { RULE_MODULES } from '../rules';
+import type { EmitterSpec } from '../emitters/types';
+import { RULE_MODULES, SIGNATURES } from '../rules';
 import type { BuildCompiler, HookName, Hooks, TestModule } from '../rules';
 import { statAt } from './eval';
 import { compileMods, ModTable } from './modTable';
@@ -45,8 +48,10 @@ export interface BuildFlags {
 
 /** Parameters of the signature attack. */
 export interface SignatureParams {
-  /** Every Nth shot crits (steadyAim); 0 when off. */
+  /** Every Nth shot, or every shot of every Nth attack (counts), crits (steadyAim); 0 when off. */
   forceCritEvery: number;
+  /** What forceCritEvery counts: projectiles fired, or attacks. */
+  counts: 'shot' | 'attack';
 }
 
 export interface CompiledBuild {
@@ -68,6 +73,8 @@ export interface CompiledBuild {
    * until pandemic becomes data (C3.7).
    */
   readonly legacyHitMult: number;
+  /** The run's emitters; index 0 is the signature attack. */
+  readonly emitters: readonly EmitterSpec[];
 }
 
 function compileRule<K extends RuleId>(
@@ -95,13 +102,21 @@ function addedModifierIssue(mod: Modifier): string | null {
     : null;
 }
 
+function signatureEmitter<K extends SignatureId>(
+  id: K,
+  spec: Extract<SignatureSpec, { id: K }>,
+): EmitterSpec {
+  return SIGNATURES[id].emitter(spec);
+}
+
 /**
- * Compiles `stats` with `rules` for one run. testModules are for tests only (TestModule); they
- * compile after the rule modules.
+ * Compiles `stats` with `rules` and the `signature` attack for one run. testModules are for
+ * tests only (TestModule); they compile after the rule modules.
  */
 export function compileBuild(
   stats: StatBlock,
   rules: readonly RuleSpec[],
+  signature: SignatureSpec = M1_SIGNATURE,
   testModules: readonly TestModule[] = [],
 ): CompiledBuild {
   const sources = createSourceTable();
@@ -121,8 +136,8 @@ export function compileBuild(
   };
   const added: Modifier[] = [];
   const flags: BuildFlags = { randomCrits: true, maxLife: null, burnRings: false };
-  const signature: SignatureParams = { forceCritEvery: 0 };
-  const hooks: { [K in HookName]: Hooks[K][] } = { tick: [], onKill: [] };
+  const params: SignatureParams = { forceCritEvery: 0, counts: 'shot' };
+  const hooks: { [K in HookName]: Hooks[K][] } = { tick: [], onKill: [], onAttack: [] };
 
   const compiler: BuildCompiler = {
     values,
@@ -143,7 +158,7 @@ export function compileBuild(
       added.push(mod);
     },
     flags,
-    signature: () => signature,
+    signature: () => params,
     source: (name) => sources.index(name),
     hook(name, fn) {
       hooks[name].push(fn);
@@ -166,9 +181,10 @@ export function compileBuild(
     sources,
     attribution: createAttribution(M1_CENTER_AILMENTS),
     flags,
-    signature,
+    signature: params,
     hooks,
     legacyHitMult: compiler.legacyHitMult,
+    emitters: [signatureEmitter(signature.id, signature)],
   };
 }
 

@@ -62,7 +62,9 @@ describe('effectiveHit', () => {
     );
     // steadyAim: one crit in three, crit multiplier × 1.5.
     expect(
-      effectiveHit(stats, [{ id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 }]),
+      effectiveHit(stats, [
+        { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' },
+      ]),
     ).toBeCloseTo(10 * (2 / 3 + (1 / 3) * 3), 12);
   });
 
@@ -119,7 +121,9 @@ describe('attackDamage and crowdDps', () => {
     ]);
     expect(attackDamage(perJump)).toBeCloseTo(10 * (1 + retention * (0.5 + 0.5 * 2)), 12);
     expect(
-      attackDamage(stats, [{ id: 'steadyAim', everyNth: 2, critMultiplierMore: 0 }]),
+      attackDamage(stats, [
+        { id: 'steadyAim', everyNth: 2, critMultiplierMore: 0, counts: 'shot' },
+      ]),
     ).toBeCloseTo(10 * (1 + retention) * (0.5 + 0.5 * 2), 12);
   });
 });

@@ -7,7 +7,7 @@ import { SCOPED_INDEX } from '../build/modTable';
 import { eventsOf, makeConfig, makeStats, recordRun, stationarySquares } from '../testing';
 
 const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
-const STEADY: RuleSpec = { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5 };
+const STEADY: RuleSpec = { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'shot' };
 
 /** Crit multiplier +1 per chain jump: a dynamic entry, read through evalDynamic. */
 const PER_JUMP: Modifier = {
@@ -35,14 +35,18 @@ describe('steadyAim', () => {
 
   it('turns random crits off and merges instances: smallest N, multipliers multiply', () => {
     const rules: RuleSpec[] = [
-      { id: 'steadyAim', everyNth: 5, critMultiplierMore: 0.5 },
-      { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.25 },
+      { id: 'steadyAim', everyNth: 5, critMultiplierMore: 0.5, counts: 'shot' },
+      { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.25, counts: 'attack' },
+      { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0, counts: 'shot' },
     ];
     const build = compileBuild(makeStats({ critMultiplier: 2 }), rules);
     expect(build.flags.randomCrits).toBe(false);
-    expect(build.signature.forceCritEvery).toBe(3);
+    // What N counts comes with the smallest N, from its first instance.
+    expect(build.signature).toEqual({ forceCritEvery: 3, counts: 'attack' });
     expect(build.values.critMultiplier).toBe(2 * (1.5 * 1.25));
-    expect(compileBuild(makeStats(), []).flags.randomCrits).toBe(true);
+    const plain = compileBuild(makeStats(), []);
+    expect(plain.flags.randomCrits).toBe(true);
+    expect(plain.signature).toEqual({ forceCritEvery: 0, counts: 'shot' });
   });
 
   it('multiplies static and dynamic crit multiplier entries alike', () => {
@@ -77,7 +81,9 @@ describe('steadyAim', () => {
       },
       [{ stat: 'critAlways', kind: 'flat', value: 1, tags: ['chain'] }, PER_JUMP],
     );
-    const rules: RuleSpec[] = [{ id: 'steadyAim', everyNth: 1000, critMultiplierMore: 0.5 }];
+    const rules: RuleSpec[] = [
+      { id: 'steadyAim', everyNth: 1000, critMultiplierMore: 0.5, counts: 'shot' },
+    ];
     const { ticks } = recordRun(makeConfig({ stats, rules, maxTicks: 300 }), stationarySquares(4));
     const hits = eventsOf(ticks, 'hit');
     expect(hits.some((hit) => hit.chainIndex === 2)).toBe(true);

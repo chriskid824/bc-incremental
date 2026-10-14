@@ -25,7 +25,7 @@ import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
 import type { TestModule } from './rules';
 import { compact } from './systems/death';
-import { attack, runTickHooks } from './systems/emitters';
+import { runEmitters, runTickHooks } from './systems/emitters';
 import { rebuildGrid } from './systems/grid';
 import { moveEnemies } from './systems/movement';
 import { moveProjectiles } from './systems/projectiles';
@@ -90,10 +90,10 @@ export function createSimulation(
    * 3. movement: every enemy walks towards the player (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
    * 5. contact: enemies that reached the player hit it and leak (contact.ts).
-   * 6. emitters: due attacks fire projectiles, then the rule modules' tick hooks run
-   *    (emitters.ts).
+   * 6. emitters: each emitter's due attacks are counted, with the onAttack hooks, and fire
+   *    projectiles; then the rule modules' tick hooks run (emitters.ts, src/sim/emitters/).
    * 7. projectiles: move, retarget, and hit on arrival (projectiles.ts). Hits and chains
-   *    (hits.ts) and kills with their onKill hooks, drops and splits (death.ts) resolve
+   *    (src/sim/combat/) and kills with their onKill hooks, drops and splits (death.ts) resolve
    *    inline.
    * 8. ailments: burn stacks expire; burn damage every BURN_TICK_INTERVAL (ailments.ts).
    * 9. death: compact dead enemies and projectiles (death.ts), after the last grid query.
@@ -113,7 +113,7 @@ export function createSimulation(
     rebuildGrid(ctx);
     resolveContacts(ctx);
     if (ctx.player.life > 0) {
-      attack(ctx);
+      runEmitters(ctx);
       runTickHooks(ctx);
       moveProjectiles(ctx);
       updateBurns(ctx);

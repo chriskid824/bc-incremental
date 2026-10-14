@@ -341,7 +341,11 @@ describe('damage sources', () => {
         hits++;
         total += event.amount;
         expect(event.source).toBe(0);
-        const tags = TAG.hit | (event.crit ? TAG.crit : 0) | (event.chainIndex > 0 ? TAG.chain : 0);
+        // Primary hits are projectile hits; a jump drops the geometry and adds chain (D1).
+        const tags =
+          TAG.hit |
+          (event.chainIndex > 0 ? TAG.chain : TAG.projectile) |
+          (event.crit ? TAG.crit : 0);
         expect(event.tags).toBe(tags);
       }
     }
@@ -1382,7 +1386,9 @@ describe('bridge notables and Searing Crits as data', () => {
       { damage: 10, critChance: 0, chainCount: 1, chainRange: 5000, attackSpeed: 10 },
       [{ stat: 'critChance', kind: 'flat', value: 1, scaling: { per: 'chainJump' } }],
     );
-    const rules: RuleSpec[] = [{ id: 'steadyAim', everyNth: 1000, critMultiplierMore: 0 }];
+    const rules: RuleSpec[] = [
+      { id: 'steadyAim', everyNth: 1000, critMultiplierMore: 0, counts: 'shot' },
+    ];
     const hits = eventsOf(run({ stats, rules }, stationarySquares(4)).ticks, 'hit');
     expect(hits.some((hit) => hit.chainIndex > 0)).toBe(true);
     expect(hits.every((hit) => !hit.crit)).toBe(true);
