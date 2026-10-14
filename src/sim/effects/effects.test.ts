@@ -1049,6 +1049,8 @@ describe('rule module hooks', () => {
       });
     const ctx = spawned(makeStats(), stationarySquares(1), [module]);
     const target = ctx.enemies[0] as Enemy;
+    // The producer's part of the scratch: no list, as these events are raised here.
+    const noList = { radius: 0, list: [], listCount: 0, fromX: 0, fromY: 0 };
     emitCenterEvent(ctx, EVENT.chainJump, 1, -1, target, 5, 6, HIT_EVENT);
     expect(seen).toEqual([]);
     emitCenterEvent(ctx, EVENT.chainJump, 1, 2, target, 5, 6, HIT_EVENT | SIGNATURE);
@@ -1061,13 +1063,23 @@ describe('rule module hooks', () => {
         target,
         x: 5,
         y: 6,
+        ...noList,
       },
     ]);
     // A chill meter fills from any frost: its freeze is raised without SIGNATURE.
     seen.length = 0;
     emitCenterEvent(ctx, EVENT.freeze, 0, -1, target, 7, 8, HIT_EVENT);
     expect(seen).toEqual([
-      { event: EVENT.freeze, depth: 0, origin: -1, flags: HIT_EVENT, target, x: 7, y: 8 },
+      {
+        event: EVENT.freeze,
+        depth: 0,
+        origin: -1,
+        flags: HIT_EVENT,
+        target,
+        x: 7,
+        y: 8,
+        ...noList,
+      },
     ]);
   });
 });

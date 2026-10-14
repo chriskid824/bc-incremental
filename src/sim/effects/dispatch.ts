@@ -6,7 +6,9 @@
  * (select.ts), then the chance, rolled on the trigger stream. A trigger stopped by its selector,
  * which found no enemy to pick, rolls nothing and keeps its cooldown, but its nthAttack count
  * has counted the event, as with a failed condition. fire() and fireOne() only queue, pick and
- * roll, so a hit can dispatch mid-resolution without re-entering anything.
+ * roll, so a hit can dispatch mid-resolution without re-entering anything. A trigger without a
+ * selector on a center event with a list (explode, freeze) queues each effect that applies a
+ * status to its target alone once per alive enemy of the list (src/sim/effects/centerEvents.ts).
  *
  * Kills dispatch in two parts (killEnemy in src/sim/systems/death.ts): transfer triggers
  * (CompiledTrigger.inline) run their effects at once, while the victim still holds its
@@ -33,7 +35,10 @@ import { enqueue } from './queue';
 import type { PendingKill } from './queue';
 import { select } from './select';
 import { EVENT, MAX_DEPTH, SHATTER_TRIGGER } from './types';
-import type { CompiledTrigger } from './types';
+import type { CompiledEffect, CompiledTrigger } from './types';
+
+const EXPLODE = EVENT.explode;
+const FREEZE = EVENT.freeze;
 
 /**
  * Event `event` (TRIGGER_EVENTS ordinal) at depth `depth`, from damage of trigger `origin` (−1
@@ -119,7 +124,7 @@ export function fireApplied(
 /**
  * Trigger `i` on an event: if it passes its gates, queues its effects at depth + 1 with origin
  * `i`, credited to `source` (−1: the trigger's own source), on the enemy its selector picked or
- * else on the event's.
+ * else on the event's; on a center event with a list, without a selector, fanned out (fanOut).
  */
 export function fireOne(
   ctx: RunContext,
@@ -140,9 +145,48 @@ export function fireOne(
   const t = passes(ctx, i, origin, target, flags, x, y);
   if (t === null) return;
   const credit = source >= 0 ? source : t.source;
+  const listEvent = t.on === EXPLODE || t.on === FREEZE;
+  if (listEvent && t.selector === null && ctx.centerScratch.listCount > 0) {
+    fanOut(ctx, t, depth + 1, credit, target, x, y, value, flags);
+    return;
+  }
   const on = t.selector !== null ? ctx.selected : target;
   for (let e = t.effectStart; e < t.effectEnd; e++) {
     enqueue(ctx, e, depth + 1, i, credit, on, x, y, value, flags);
+  }
+}
+
+/**
+ * The effects of trigger `t`, fired on a center event whose list the scratch holds, queued at
+ * `depth` in effect order: each that applies a status to its target alone
+ * (CompiledEffect.fanout) once per alive enemy of the list, at that enemy, and each other once,
+ * on the event's enemy at its point.
+ */
+function fanOut(
+  ctx: RunContext,
+  t: CompiledTrigger,
+  depth: number,
+  credit: number,
+  target: Enemy | null,
+  x: number,
+  y: number,
+  value: Num,
+  flags: number,
+): void {
+  const scratch = ctx.centerScratch;
+  const list = scratch.list;
+  const count = scratch.listCount;
+  const effects = ctx.build.effects;
+  const i = t.index;
+  for (let e = t.effectStart; e < t.effectEnd; e++) {
+    if (!(effects[e] as CompiledEffect).fanout) {
+      enqueue(ctx, e, depth, i, credit, target, x, y, value, flags);
+      continue;
+    }
+    for (let j = 0; j < count; j++) {
+      const enemy = list[j] as Enemy;
+      if (enemy.alive) enqueue(ctx, e, depth, i, credit, enemy, enemy.x, enemy.y, value, flags);
+    }
   }
 }
 

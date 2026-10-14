@@ -19,3 +19,11 @@ export const PROJECTILE_CAP = 512;
 export const SHOT_MEMORY = 16;
 /** Ticks a small projectile lives: 2 s. */
 export const SMALL_PROJECTILE_TICKS = 120;
+/**
+ * Enemies a center event's list holds at most (CenterEventScratch.list): a freeze's is the
+ * frozen enemy and up to four others near it; explode's, which comes later in C4, the first of
+ * the bomb's blast.
+ */
+export const LIST_MAX = 5;
+/** How far from a frozen enemy the others of its freeze's list are (raiseFreeze). */
+export const FREEZE_LIST_RADIUS = 90;

@@ -22,7 +22,8 @@ import type { ModTable } from '../build/modTable';
 import { SCOPED_INDEX } from '../build/modTable';
 import { ailmentCredit, MAX_SOURCES, SOURCE_CLASS_ORDINAL } from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
-import { FREEZE_PAYLOADS } from '../effects/centerEvents';
+import { createCenterEventState, FREEZE_PAYLOADS } from '../effects/centerEvents';
+import type { CenterEventState } from '../effects/centerEvents';
 import { createEffectEntry, createEffectQueue } from '../effects/queue';
 import type { EffectEntry, EffectQueue, PendingKill, TriggerState } from '../effects/queue';
 import { createSelectionScratch, selectable } from '../effects/select';
@@ -355,6 +356,11 @@ export interface RunContext {
    * hook listens to freezes.
    */
   readonly freezeLimiter: FreezeLimiter | null;
+  /**
+   * Who listens to each center event, whether its list is read, and the freeze list's query
+   * scratch (src/sim/effects/centerEvents.ts).
+   */
+  readonly centerEvents: CenterEventState;
   /** Triggers on kill or diedWithAilment that run at the kill (transfers), in trigger order. */
   readonly killInline: Int32Array;
   /** The other triggers on kill or diedWithAilment, recorded as pending kills, in order. */
@@ -790,6 +796,7 @@ export function createRunContext(
           count: 0,
         }
       : null,
+    centerEvents: createCenterEventState(build),
     killInline,
     killPending,
     killListeners: killInline.length !== 0 || killPending.length !== 0 || hooks.onKill.length !== 0,
@@ -822,7 +829,20 @@ export function createRunContext(
       flags: 0,
       amount: ZERO,
     },
-    centerScratch: { event: 0, depth: 0, origin: -1, flags: 0, target: null, x: 0, y: 0 },
+    centerScratch: {
+      event: 0,
+      depth: 0,
+      origin: -1,
+      flags: 0,
+      target: null,
+      x: 0,
+      y: 0,
+      radius: 0,
+      list: [],
+      listCount: 0,
+      fromX: 0,
+      fromY: 0,
+    },
     shotScratch: { forceCrit: false },
     chainBudget: { hits: 0, extraJumps: 0, centerEvents: 0 },
     spreadTargets: [],

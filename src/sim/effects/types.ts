@@ -136,6 +136,12 @@ export interface CompiledEffect {
   readonly atTarget: boolean;
   /** Its trigger's selector picks 'player': the effect centers on the player, with no target. */
   readonly atPlayer: boolean;
+  /**
+   * It applies a status to its target alone (applyAilment and addFrost without a radius): on a
+   * center event with a list, a trigger without a selector queues it once per alive enemy of
+   * the list (fireOne in dispatch.ts).
+   */
+  readonly fanout: boolean;
 }
 
 /**
@@ -245,6 +251,7 @@ export function shatterEffect(radius: number): CompiledEffect {
     spread: null,
     atTarget: false,
     atPlayer: false,
+    fanout: false,
   };
 }
 
@@ -275,6 +282,7 @@ export function compileEffect(
   let tags = 0;
   let baseDamage = ZERO;
   let spread: BurnSpread | null = null;
+  let fanout = false;
   switch (scaled.kind) {
     case 'explode':
     case 'nova':
@@ -289,9 +297,13 @@ export function compileEffect(
     case 'applyAilment':
       tags = TAG.hit | TAG.trigger;
       baseDamage = mul(num(damage), scaled.damagePct ?? 1);
+      fanout = scaled.radius === undefined;
       break;
     case 'spreadAilment':
       spread = { radius, radiusSq: radius ** 2, effect: scaled.effect ?? 1 };
+      break;
+    case 'addFrost':
+      fanout = scaled.radius === undefined;
       break;
     default:
       break;
@@ -306,5 +318,6 @@ export function compileEffect(
     spread,
     atTarget: target !== undefined && target.pick !== 'player',
     atPlayer: target !== undefined && target.pick === 'player',
+    fanout,
   };
 }

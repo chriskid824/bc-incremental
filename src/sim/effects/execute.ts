@@ -13,7 +13,10 @@
  * source, the effects stream, no flags) at the entry's depth and origin, so their kills and
  * triggers follow the same rules. A shatter's hits (SHATTER_TRIGGER) take the payload of the
  * source its entry is credited to, and deal their share of the victim's max life. Area queries
- * write to ctx.effectTargets; effects never nest, and transfers at a kill use ctx.spreadTargets.
+ * write to ctx.effectTargets, which nothing an executor's hits reach writes while it walks them:
+ * effects never nest, transfers at a kill use ctx.spreadTargets, and a freeze takes its list
+ * from ctx.centerEvents.freezeTargets into the center-event scratch, whose triggers and hooks
+ * only queue (src/sim/effects/centerEvents.ts).
  */
 
 import { add, mul, num, toNumber, ZERO } from '../../core/num';

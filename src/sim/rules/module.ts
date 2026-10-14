@@ -139,7 +139,11 @@ export interface HitScratch {
   amount: Num;
 }
 
-/** The center event an onCenterEvent hook sees (RunContext.centerScratch). */
+/**
+ * The center event an onCenterEvent hook sees (RunContext.centerScratch). Its producer fills
+ * the list and its radius before raising it (src/sim/effects/centerEvents.ts); emitCenterEvent
+ * fills the rest for the hooks.
+ */
 export interface CenterEventScratch {
   /** Its CENTER_EVENTS ordinal. */
   event: number;
@@ -150,6 +154,20 @@ export interface CenterEventScratch {
   target: Enemy | null;
   x: number;
   y: number;
+  /** The radius its list was taken in: FREEZE_LIST_RADIUS (src/sim/caps.ts) for a freeze's. */
+  radius: number;
+  /**
+   * The event's enemies, list[0 .. listCount), at most LIST_MAX: a freeze's is the frozen
+   * enemy, then up to four others within FREEZE_LIST_RADIUS of it, in id order. Entries from
+   * listCount on are left over from earlier events. The effects of its triggers that apply a
+   * status fan out over the alive ones (CompiledEffect.fanout).
+   */
+  readonly list: Enemy[];
+  /** 0 for an event without a list. */
+  listCount: number;
+  /** A chain jump's start, the enemy it jumped from; chainJump comes later in C4. */
+  fromX: number;
+  fromY: number;
 }
 
 /** Points in the tick where the simulation calls rule modules. Hooks allocate nothing. */

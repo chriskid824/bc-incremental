@@ -246,6 +246,55 @@ const SELECTOR_STATS = makeStats(
   },
 );
 
+/**
+ * C4.5's center-event lists: hits fill chill meters fast, and each freeze takes its list. One
+ * center trigger with a cooldown fans two poison stacks out over the list and explodes once at
+ * the frozen enemy; a chance trigger fans a full meter of frost out, so freezes freeze others; a
+ * selector trigger shocks the nearest other enemy once; and a fusion's trigger fans a burn out,
+ * which the freeze payload limit stops a few times.
+ */
+const FREEZE_LIST_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'center',
+    {
+      on: 'freeze',
+      when: [{ cooldownSec: 0.25 }],
+      do: [
+        { kind: 'applyAilment', ailment: 'poison', stacks: 2 },
+        { kind: 'explode', radius: 70, damagePct: 0.6 },
+      ],
+    },
+  ],
+  ['center', { on: 'freeze', when: [{ chance: 0.5 }], do: [{ kind: 'addFrost', amount: 1 }] }],
+  [
+    'center',
+    {
+      on: 'freeze',
+      target: { pick: 'nearest', excludeEventTarget: true, range: 150 },
+      do: [{ kind: 'applyAilment', ailment: 'shock', stacks: 2 }],
+    },
+  ],
+  ['fusion.ice.fire', { on: 'freeze', do: [{ kind: 'applyAilment', ailment: 'burn' }] }],
+];
+const FREEZE_LIST_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    frostOnHit: 0.5,
+    chainCount: 1,
+    attackSpeed: 6,
+    projectileCount: 2,
+  },
+  maskProbeMods(),
+  {
+    triggers: FREEZE_LIST_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -263,6 +312,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'selector',
     config: { stats: SELECTOR_STATS, rules: [], startWave: 12 },
     expected: ['62d9c47cf2de42fb', '04b079428053ba81'],
+  },
+  {
+    name: 'freezeList',
+    config: { stats: FREEZE_LIST_STATS, rules: [], startWave: 12 },
+    expected: ['ae018a4f73b2c1f4', '0490a9498a7123b6'],
   },
 ];
 
