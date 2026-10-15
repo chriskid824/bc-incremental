@@ -42,7 +42,7 @@ describe('compileBuild', () => {
       globalSlow: 0,
       shatterMult: 1,
     });
-    expect(build.signature).toEqual({ forceCritEvery: 0, counts: 'shot' });
+    expect(build.signature).toEqual({ forceCritEvery: 0, counts: 'shot', lob: null });
     expect(build.hooks).toEqual({
       tick: [],
       onKill: [],

@@ -1,15 +1,17 @@
 /**
  * compileBuild: a build's stat block, rules and signature attack compiled into what one run
- * reads (docs/v3/implementation-plan-v3.md §2.7). The rule modules (src/sim/rules/) run once, in
- * the order their ids first appear in the rules, each with all of its instances; they scale and
- * offset stats, add modifiers, set flags and the signature attack's parameters, and add
- * triggers, effects and hooks. The result holds the final stat values, the ModTable of the
- * build's scoped modifiers followed by the rule-added ones, the run's damage sources and ailment
- * attribution, the hook lists, the emitters: the signature's first, then the emitter grants, the
- * build's (StatBlock.emitters) and the modules', one per kind, source and key; the triggers with
- * their effects: the built-in shatter (SHATTER_TRIGGER) first, then the build's own
- * (StatBlock.triggers), then the modules', in compile order (src/sim/effects/types.ts); and the
- * build's damage conversions, which the ModTable lists per hit row (src/sim/combat/convert.ts).
+ * reads (docs/v3/implementation-plan-v3.md §2.7). The signature's module compiles first, after
+ * the build's own triggers, when it has changes of its own (SignatureModule.compile); then the
+ * rule modules (src/sim/rules/) run once, in the order their ids first appear in the rules, each
+ * with all of its instances. Both scale and offset stats, add modifiers, set flags and the
+ * signature attack's parameters, and add triggers, effects and hooks. The result holds the final
+ * stat values, the ModTable of the build's scoped modifiers followed by the module-added ones,
+ * the run's damage sources and ailment attribution, the hook lists, the emitters: the
+ * signature's first, then the emitter grants, the build's (StatBlock.emitters) and the modules',
+ * one per kind, source and key; the triggers with their effects: the built-in shatter
+ * (SHATTER_TRIGGER) first, then the build's own (StatBlock.triggers), then the modules', in
+ * compile order (src/sim/effects/types.ts); and the build's damage conversions, which the
+ * ModTable lists per hit row (src/sim/combat/convert.ts).
  *
  * The source table, the attribution's outer sources and the ModTable rows grow while a run
  * uses them, so createRunContext compiles a fresh build for every run. The talent screen and
@@ -85,15 +87,41 @@ export interface BuildFlags {
 export interface SignatureParams {
   /** Every Nth shot, or every shot of every Nth attack (counts), crits (steadyAim); 0 when off. */
   forceCritEvery: number;
-  /** What forceCritEvery counts: projectiles fired, or attacks. */
+  /** What forceCritEvery counts: shots fired (projectiles, bombs), or attacks. */
   counts: 'shot' | 'attack';
+  /** The lob's (magmaBomb, src/sim/emitters/lob.ts); null for another signature. */
+  lob: LobParams | null;
+}
+
+/**
+ * The lob's parameters, which its signature module sets to these neutral values: no far throws,
+ * no volcano, no chain blasts, fire zones that do not slow. The lob's forms change them.
+ */
+export interface LobParams {
+  /** Every Nth bomb is thrown at the farthest enemy instead; 0 for none. */
+  farThrowEvery: number;
+  /** Giant bombs on a period of their own in place of the others, with their factors; or null. */
+  volcano: { periodSec: number; radiusMult: number; damageMult: number } | null;
+  /**
+   * Explosions of the enemies a bomb's explosion kills, perBomb at most, of `radius` and
+   * damagePct, run as `effect` (an effect index) from trigger `trigger`; or null.
+   */
+  chainBlast: {
+    radius: number;
+    damagePct: number;
+    perBomb: number;
+    trigger: number;
+    effect: number;
+  } | null;
+  /** The bombs' fire zones (火地): their slow on the enemies in them, 0 to 1. */
+  zone: { slow: number };
 }
 
 export interface CompiledBuild {
   /** Every stat's final value: StatBlock.values after the rules' scaleStat and offsetStat. */
   readonly values: Readonly<Record<StatId, number>>;
   readonly table: ModTable;
-  /** The ModTable's modifiers: StatBlock.scoped in data order, then the rule-added ones. */
+  /** The ModTable's modifiers: StatBlock.scoped in data order, then the module-added ones. */
   readonly mods: readonly CompiledMod[];
   /** The run's source ids; index 0 is 'center'. */
   readonly sources: SourceTable;
@@ -154,6 +182,16 @@ function signatureEmitter<K extends SignatureId>(
   return SIGNATURES[id].emitter(spec);
 }
 
+/** The signature module's own changes to the build, if it has any (SignatureModule.compile). */
+function compileSignature<K extends SignatureId>(
+  id: K,
+  spec: Extract<SignatureSpec, { id: K }>,
+  b: BuildCompiler,
+  source: number,
+): void {
+  SIGNATURES[id].compile?.(b, spec, source);
+}
+
 /**
  * The emitters of the grants, in grant order, the first of each kind, source and key
  * (grantKey): a node grants each emitter once, and nodes of one source that grant the same one
@@ -208,7 +246,7 @@ export function compileBuild(
     globalSlow: 0,
     shatterMult: 1,
   };
-  const params: SignatureParams = { forceCritEvery: 0, counts: 'shot' };
+  const params: SignatureParams = { forceCritEvery: 0, counts: 'shot', lob: null };
   const hooks: { [K in HookName]: Hooks[K][] } = {
     tick: [],
     onKill: [],
@@ -289,6 +327,8 @@ export function compileBuild(
   };
 
   for (const { source, spec } of stats.triggers) addTrigger(sources.index(source), spec, 1);
+  // The signature's changes come before the rules', whose scaleStat calls then scale them too.
+  compileInstance(CENTER, () => compileSignature(signature.id, signature, compiler, CENTER));
   // Every rule is credited to the center until characters give rules their own sources.
   for (const id of new Set(rules.map((rule) => rule.id))) {
     compileInstance(CENTER, () => compileRule(id, rules, compiler, CENTER));

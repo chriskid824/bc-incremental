@@ -8,6 +8,7 @@ import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/ru
 import { eternalFlame } from './eternalFlame';
 import { glassCannon } from './glassCannon';
 import { m1Volley } from './m1Volley';
+import { magmaBomb } from './magmaBomb';
 import type { RuleModule, SignatureModule } from './module';
 import { overload } from './overload';
 import { steadyAim } from './steadyAim';
@@ -40,4 +41,5 @@ export const SIGNATURES: {
   readonly [K in SignatureId]: SignatureModule<Extract<SignatureSpec, { id: K }>>;
 } = {
   m1Volley,
+  magmaBomb,
 };

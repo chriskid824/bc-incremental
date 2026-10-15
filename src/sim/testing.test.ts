@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../core/rng';
 import { targetDamage } from '../data/curve';
+import type { Modifier } from '../data/stats';
 import type { Enemy } from './systems/context';
 import {
   makeStats,
@@ -166,6 +167,9 @@ describe('stress fixture', () => {
     expect(stats.values.damage).toBe(targetDamage(STRESS_START_WAVE) / 2.5);
     expect(stats.values.attackSpeed).toBe(32);
     expect(stats.values.maxLife).toBe(1e12);
+    expect(stats.scoped).toEqual([]);
+    const frost: Modifier = { stat: 'frostOnHit', kind: 'flat', value: 0.3, tags: ['area'] };
+    expect(stressStats({}, undefined, [frost]).scoped).toEqual([frost]);
     const data = stressData();
     expect(data.waves.rules.map((r) => [r.enemy, r.base, r.perWave])).toEqual([
       ['triangle', 18, 0],

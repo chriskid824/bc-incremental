@@ -3,9 +3,9 @@
  * EmitterSpec says what an emitter is; each run gives it an EmitterRuntime with its counters and
  * a Payload, the compiled form of its damage: base damage, tags, credit sources, RNG stream,
  * flags and the ModTable rows of its hits and ailments, cached by slot. The signature attack is
- * the emitter at index 0 (CompiledBuild.emitters); M1's is the volley (volley.ts). The talent
- * nodes' emitter grants (src/data/emitters.ts) follow it, such as thorns, whose hits the contact
- * stage deals (src/sim/systems/contact.ts).
+ * the emitter at index 0 (CompiledBuild.emitters); M1's is the volley (volley.ts), 熔核's the lob
+ * (lob.ts). The talent nodes' emitter grants (src/data/emitters.ts) follow it, such as thorns,
+ * whose hits the contact stage deals (src/sim/systems/contact.ts).
  */
 
 import type { Num } from '../../core/num';
@@ -13,10 +13,11 @@ import { mul, num } from '../../core/num';
 import type { Rng } from '../../core/rng';
 import { THORNS_DAMAGE_PCT } from '../../data/emitters';
 import type { EmitterGrant } from '../../data/emitters';
-import { ailmentMask, jumpMask, TAG } from '../../data/tags';
+import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { CompiledBuild } from '../build/compile';
 import { ailmentCredit, rowKey } from '../build/sources';
+import type { RunContext } from '../systems/context';
 import { TICK_RATE } from '../types';
 
 /** What every emitter kind has: how its payload is made (emitterPayload). */
@@ -40,6 +41,27 @@ export interface VolleySpec extends EmitterBase {
 }
 
 /**
+ * Lobs bombs (lob.ts): projectileCount of them a firing, each flying flightTicks to a point by a
+ * crowded spot, where it explodes over `radius` and leaves a fire zone (`zone`,
+ * src/sim/systems/zones.ts) that deals damagePctPerSec of the damage stat a second to the
+ * enemies in it for durationSec.
+ */
+export interface LobSpec extends EmitterBase {
+  readonly kind: 'lob';
+  /** Firings a second at BASE_ATTACK_SPEED. */
+  readonly baseRate: number;
+  /** The explosion's radius. */
+  readonly radius: number;
+  /** Ticks from a bomb's launch to its landing. */
+  readonly flightTicks: number;
+  readonly zone: {
+    readonly radius: number;
+    readonly durationSec: number;
+    readonly damagePctPerSec: number;
+  };
+}
+
+/**
  * A thorns grant: hits each enemy that touches the player before it deals its contact damage
  * (src/sim/systems/contact.ts). It never attacks on its own.
  */
@@ -48,7 +70,7 @@ export interface ThornsSpec extends EmitterBase {
 }
 
 /** What an emitter is; `kind` says how it deals its damage. */
-export type EmitterSpec = VolleySpec | ThornsSpec;
+export type EmitterSpec = VolleySpec | LobSpec | ThornsSpec;
 
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
@@ -75,6 +97,13 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
  * share its bit (full layout in src/sim/effects/flags.ts).
  */
 export const SIGNATURE = 1;
+/**
+ * The bit of Payload.flags that makes every hit of a pulse payload ignite, its roll still drawn
+ * (hitPulse, src/sim/systems/zones.ts): set on 火地's, the lob's fire zones (Payload.zoneVariant).
+ * It rides into the hits' dispatch flags, where no condition reads it, and kills drop it
+ * (HIT_BITS); bit 20 of the layout in src/sim/effects/flags.ts.
+ */
+export const ALWAYS_IGNITES = 1 << 20;
 
 /**
  * Payload.damageMode: rows multiplies a hit by its damage row; prescaled deals baseDamage × crit
@@ -118,7 +147,7 @@ export interface Payload {
    * and rows. The payload itself while the sources match.
    */
   readonly extraJumpPayload: Payload;
-  /** SIGNATURE for the signature emitter's payload. */
+  /** SIGNATURE for the signature emitter's payload; ALWAYS_IGNITES for 火地's. */
   readonly flags: number;
   /** Stream of its rolls: combat for emitters. */
   readonly rng: Rng;
@@ -129,6 +158,8 @@ export interface Payload {
   readonly damageMode: DamageMode;
   /** ModTable row of each slot (SLOT_*), −1 until first use (slotRow). */
   readonly rows: Int32Array;
+  /** The payload of the zone each attack of it leaves: a lob's fire zone (火地); null for none. */
+  readonly zoneVariant: Payload | null;
   /**
    * A pulse's payload (a zone's): its hits add to the pulse's tally (PulseAcc) instead of each
    * raising a hit event, and the pulse raises one pulse event (src/sim/systems/zones.ts).
@@ -136,7 +167,10 @@ export interface Payload {
   readonly aggregate: boolean;
 }
 
-/** What a payload is made of; jumpSource defaults to source, aggregate to false. */
+/**
+ * What a payload is made of; jumpSource defaults to source, zoneVariant to null, aggregate to
+ * false.
+ */
 export interface PayloadSpec {
   readonly baseDamage: Num;
   readonly tags: TagMask;
@@ -148,6 +182,7 @@ export interface PayloadSpec {
   readonly rollsAilments: boolean;
   readonly canCrit: boolean;
   readonly damageMode: DamageMode;
+  readonly zoneVariant?: Payload | null;
   readonly aggregate?: boolean;
 }
 
@@ -167,13 +202,17 @@ export function createPayload(spec: PayloadSpec): Payload {
     canCrit: spec.canCrit,
     damageMode: spec.damageMode,
     rows: new Int32Array(SLOT_COUNT).fill(-1),
+    zoneVariant: spec.zoneVariant ?? null,
     aggregate: spec.aggregate ?? false,
   };
   payload.extraJumpPayload = payload;
   return payload;
 }
 
-/** The payload of an emitter: its share of the damage stat, its tags and source, on `rng`. */
+/**
+ * The payload of an emitter: its share of the damage stat, its tags and source, on `rng`; a
+ * lob's carries its fire zone's (lobZonePayload).
+ */
 export function emitterPayload(build: CompiledBuild, spec: EmitterSpec, rng: Rng): Payload {
   return createPayload({
     baseDamage: mul(num(build.values.damage), spec.damagePct),
@@ -185,6 +224,29 @@ export function emitterPayload(build: CompiledBuild, spec: EmitterSpec, rng: Rng
     rollsAilments: spec.rollsAilments,
     canCrit: spec.canCrit,
     damageMode: ROWS,
+    zoneVariant: spec.kind === 'lob' ? lobZonePayload(build, spec, rng) : null,
+  });
+}
+
+/**
+ * The payload of a lob's fire zones (火地): the damage stat, which each zone scales by its
+ * damagePctPerSec, tagged hit and zone with the lob's element, credited to the lob's source, on
+ * `rng`. Its pulse hits crit and roll ailments as other hits do (Hoshi's Q4 (B)), and every one
+ * ignites, its roll still drawn (ALWAYS_IGNITES, Hoshi's Q4/F1). It is not the signature's: its
+ * hits carry no SIGNATURE and raise no center event.
+ */
+function lobZonePayload(build: CompiledBuild, spec: LobSpec, rng: Rng): Payload {
+  return createPayload({
+    baseDamage: num(build.values.damage),
+    tags: TAG.hit | TAG.zone | (spec.tags & ELEMENT_MASK),
+    source: build.sources.index(spec.source),
+    flags: ALWAYS_IGNITES,
+    rng,
+    chains: false,
+    rollsAilments: true,
+    canCrit: true,
+    damageMode: ROWS,
+    aggregate: true,
   });
 }
 
@@ -206,6 +268,8 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
   switch (spec.kind) {
     case 'volley':
       return periodTicks((VOLLEY_RATE * build.values.attackSpeed) / BASE_ATTACK_SPEED);
+    case 'lob':
+      return periodTicks((spec.baseRate * build.values.attackSpeed) / BASE_ATTACK_SPEED);
     case 'thorns':
       // Its hits come with the contacts, not on a period.
       return Infinity;
@@ -226,7 +290,7 @@ export interface EmitterRuntime {
   interval: number;
   /** Ticks accumulated towards the next attack, cadence per tick. */
   acc: number;
-  /** Projectiles fired, for steadyAim's every-Nth shot. */
+  /** Shots fired (a volley's projectiles, a lob's bombs), for steadyAim's every-Nth shot. */
   shots: number;
   /** Attacks made, for steadyAim's every-Nth attack; nthAttack triggers count in TriggerState. */
   attacks: number;
@@ -256,6 +320,22 @@ export function createEmitterRuntime(
     steadyAttack: false,
     cadence: 1,
   };
+}
+
+/**
+ * Counts one shot of a counted attack of `em` (a bomb; the volley counts its projectiles in
+ * fireAttack itself, by the same rule) and tells whether it is steady: steadyAim's every-Nth
+ * shot, or every shot of a steady attack (EmitterRuntime.steadyAttack, or an onAttack hook's
+ * ShotScratch.forceCrit). A shot that PROJECTILE_CAP refuses still counts.
+ */
+export function nextShotSteady(ctx: RunContext, em: EmitterRuntime): boolean {
+  em.shots++;
+  const { forceCritEvery, counts } = ctx.build.signature;
+  return (
+    (counts === 'shot' && forceCritEvery > 0 && em.shots % forceCritEvery === 0) ||
+    em.steadyAttack ||
+    ctx.shotScratch.forceCrit
+  );
 }
 
 /**

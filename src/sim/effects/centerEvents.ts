@@ -4,17 +4,20 @@
  * raises them (rule 8): an event without SIGNATURE in its flags raises nothing, and neither does
  * one with REPEAT, a repeat of the signature attack. Freeze is the exception: a chill meter fills
  * from any frost, and its freeze is raised all the same. The producers: freeze (raiseFreeze,
- * once src/sim/ailments/frost.ts's addFrost fills a meter); explode and chainJump come later in
- * C4. Each calls emitCenterEvent, which returns at once when no trigger and no onCenterEvent
- * hook listens to the event (RunContext.centerEvents).
+ * once src/sim/ailments/frost.ts's addFrost fills a meter) and explode (each signature bomb's
+ * landing, src/sim/emitters/lob.ts); chainJump comes later in C4. Each calls emitCenterEvent,
+ * which returns at once when no trigger and no onCenterEvent hook listens to the event
+ * (RunContext.centerEvents).
  *
  * An event can carry a list of enemies (CenterEventScratch.list), which its producer fills right
  * before raising it: a freeze's is the frozen enemy and up to LIST_MAX − 1 others within
  * FREEZE_LIST_RADIUS of it, in id order, taken only when a trigger or a hook reads it
- * (CenterEventState.listNeeded). A trigger without a selector on explode or freeze queues each of
- * its effects that applies a status to its target alone (CompiledEffect.fanout) once per alive
- * enemy of the list, and its other effects once (fireOne in dispatch.ts): one chance roll and
- * one cooldown per firing all the same.
+ * (CenterEventState.listNeeded); an explode's, the first LIST_MAX enemies its explosion hit, in
+ * id order, written on every landing. emitCenterEvent never clears a list, so every producer of
+ * an event that fans out writes its own. A trigger without a selector on explode or freeze
+ * queues each of its effects that applies a status to its target alone (CompiledEffect.fanout)
+ * once per alive enemy of the list, and its other effects once (fireOne in dispatch.ts): one
+ * chance roll and one cooldown per firing all the same.
  *
  * A freeze's fusion payloads are rate-limited (docs/v3/game-design-v3.md §5.3): the fusion-class
  * listeners of a freeze (triggers and onCenterEvent hooks credited to a fusion) run for at most

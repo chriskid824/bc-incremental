@@ -400,6 +400,79 @@ const ZONE_STATS = makeStats(
   },
 );
 
+/**
+ * C4.7's magma bombs: the lob, fast, 2.5 bombs a firing (two, and a third on a drawn chance),
+ * with steadyAim on every fourth bomb, ignites, a chain jump and enough frost that its hits
+ * freeze; a projectile-tagged damage probe beside maskProbeMods() tells the explosions' hits
+ * (hit, area and projectile) from their chain jumps and their fire zones' hits. Its explode
+ * triggers fan two poison stacks out over the blast's list on a cooldown, shock the struck enemy
+ * when it burns, and now and then set off a nova at the landing point; a fire kill trigger's
+ * explosions raise no explode. A test module makes the fire zones slow.
+ */
+const MAGMA_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'center',
+    {
+      on: 'explode',
+      when: [{ cooldownSec: 0.5 }],
+      do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'explode',
+      when: [{ targetHas: 'burn' }],
+      do: [{ kind: 'applyAilment', ailment: 'shock', stacks: 1 }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'explode',
+      when: [{ chance: 0.3 }],
+      do: [{ kind: 'nova', radius: 100, damagePct: 0.5, at: 'event' }],
+    },
+  ],
+  [
+    'outer.fire',
+    { on: 'kill', when: [{ chance: 0.2 }], do: [{ kind: 'explode', radius: 80, damagePct: 0.8 }] },
+  ],
+];
+const PROJECTILE_PROBE: Modifier = {
+  stat: 'damage',
+  kind: 'increased',
+  value: 0.11,
+  tags: ['projectile'],
+};
+const MAGMA_STATS = makeStats(
+  {
+    damage: 8,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1,
+    frostOnHit: 0.35,
+    attackSpeed: 6,
+    projectileCount: 3.5,
+  },
+  [...maskProbeMods(), PROJECTILE_PROBE],
+  {
+    triggers: MAGMA_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
+/** A test module that gives the lob's fire zones a 30% slow (LobParams.zone). */
+function slowFireModule(): TestModule {
+  return (b) => {
+    const lob = b.signature().lob;
+    if (lob !== null) lob.zone.slow = 0.3;
+  };
+}
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -411,22 +484,33 @@ const ENTRIES: readonly GoldenC4Entry[] = [
   {
     name: 'thorns',
     config: { stats: THORNS_STATS, rules: [], startWave: 12 },
-    expected: ['9a4af4a9ea58986a', 'be2d89ddac3465ef'],
+    expected: ['1c1cd0d3599dd96f', 'ed95f74a4c91e215'],
   },
   {
     name: 'selector',
     config: { stats: SELECTOR_STATS, rules: [], startWave: 12 },
-    expected: ['62d9c47cf2de42fb', '04b079428053ba81'],
+    expected: ['99d18b8ccc385a7d', '24db421f1d9a6487'],
   },
   {
     name: 'freezeList',
     config: { stats: FREEZE_LIST_STATS, rules: [], startWave: 12 },
-    expected: ['ae018a4f73b2c1f4', '0490a9498a7123b6'],
+    expected: ['fdeaad52c97e75ea', 'fcecca54bd30e778'],
   },
   {
     name: 'zones',
     config: { stats: ZONE_STATS, rules: [], startWave: 12 },
-    expected: ['6220a6c8531d208f', '66117c4efc76354a'],
+    expected: ['8c2d9225a55992ad', '3e6d00ae23ad0068'],
+  },
+  {
+    name: 'magmaBomb',
+    config: {
+      stats: MAGMA_STATS,
+      rules: [{ id: 'steadyAim', everyNth: 4, critMultiplierMore: 0.5, counts: 'shot' }],
+      signature: { id: 'magmaBomb' },
+      startWave: 12,
+    },
+    modules: () => [slowFireModule()],
+    expected: ['0da35025faedd08b', '334e99690a535150'],
   },
 ];
 

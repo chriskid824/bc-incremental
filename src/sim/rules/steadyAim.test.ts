@@ -42,11 +42,11 @@ describe('steadyAim', () => {
     const build = compileBuild(makeStats({ critMultiplier: 2 }), rules);
     expect(build.flags.randomCrits).toBe(false);
     // What N counts comes with the smallest N, from its first instance.
-    expect(build.signature).toEqual({ forceCritEvery: 3, counts: 'attack' });
+    expect(build.signature).toEqual({ forceCritEvery: 3, counts: 'attack', lob: null });
     expect(build.values.critMultiplier).toBe(2 * (1.5 * 1.25));
     const plain = compileBuild(makeStats(), []);
     expect(plain.flags.randomCrits).toBe(true);
-    expect(plain.signature).toEqual({ forceCritEvery: 0, counts: 'shot' });
+    expect(plain.signature).toEqual({ forceCritEvery: 0, counts: 'shot', lob: null });
   });
 
   it('multiplies static and dynamic crit multiplier entries alike', () => {

@@ -26,7 +26,7 @@ describe('RULE_MODULES', () => {
 
 describe('SIGNATURES', () => {
   it('has the module of every signature id, under its own id', () => {
-    expect(Object.keys(SIGNATURES)).toEqual(['m1Volley']);
+    expect(Object.keys(SIGNATURES)).toEqual(['m1Volley', 'magmaBomb']);
     for (const [id, module] of Object.entries(SIGNATURES)) expect(module.id).toBe(id);
   });
 
@@ -43,7 +43,7 @@ describe('SIGNATURES', () => {
     };
     expect(compileBuild(makeStats(), []).emitters).toEqual([volley]);
     expect(compileBuild(makeStats(), [], M1_SIGNATURE).emitters).toEqual([volley]);
-    expect(SIGNATURES.m1Volley.emitter(M1_SIGNATURE)).toEqual(volley);
+    expect(SIGNATURES.m1Volley.emitter({ id: 'm1Volley' })).toEqual(volley);
   });
 });
 

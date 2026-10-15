@@ -241,6 +241,43 @@ export type SimEvent =
   /** A frozen enemy died at (x, y) and shattered over `radius`. */
   | { readonly type: 'shatter'; readonly x: number; readonly y: number; readonly radius: number }
   /**
+   * An explode or nova effect (src/sim/effects/execute.ts) went off at (x, y) over `radius`,
+   * before its hits.
+   */
+  | {
+      readonly type: 'burst';
+      readonly kind: 'explode' | 'nova';
+      readonly x: number;
+      readonly y: number;
+      readonly radius: number;
+    }
+  /**
+   * A bomb of the signature attack (src/sim/emitters/lob.ts), shot `id`, was lobbed from
+   * (fromX, fromY) to land at (x, y) on tick `landAt`; `form` is its ShotPoolState.form.
+   */
+  | {
+      readonly type: 'lob';
+      readonly id: number;
+      readonly fromX: number;
+      readonly fromY: number;
+      readonly x: number;
+      readonly y: number;
+      readonly landAt: number;
+      readonly form: number;
+    }
+  /**
+   * A bomb exploded at (x, y) over `radius`, after its hits and its chain: it hit `count`
+   * enemies, the one nearest the point (`primaryId`) as its primary hit; −1 when it hit none.
+   */
+  | {
+      readonly type: 'explosion';
+      readonly x: number;
+      readonly y: number;
+      readonly radius: number;
+      readonly primaryId: number;
+      readonly count: number;
+    }
+  /**
    * A ground zone appeared at (x, y), credited to `source`; it lasts until tick `expiresAt`. A
    * signature zone is the signature attack's own.
    */

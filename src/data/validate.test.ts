@@ -540,6 +540,11 @@ describe('trigger validation', () => {
           do: [{ kind: 'nova', radius: 90, damagePct: 0.3, at: 'event' }],
         },
         { on: 'hit', when: [{ targetHas: 'frozen' }], do: [{ kind: 'addFrost', amount: 0.1 }] },
+        {
+          on: 'explode',
+          when: [{ targetHas: 'burn' }, { cooldownSec: 0.5 }],
+          do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }, explode],
+        },
       ),
     ).toEqual([]);
   });
@@ -572,8 +577,8 @@ describe('trigger validation', () => {
   });
 
   it('rejects an event the simulation does not raise yet', () => {
-    expect(triggerIssues({ on: 'explode', do: [heal] })).toEqual([
-      `${at} event 'explode' is not raised by the simulation yet`,
+    expect(triggerIssues({ on: 'droneImpact', do: [heal] })).toEqual([
+      `${at} event 'droneImpact' is not raised by the simulation yet`,
     ]);
     expect(triggerIssues({ on: 'chainJump', do: [heal] })).toEqual([
       `${at} event 'chainJump' is not raised by the simulation yet`,

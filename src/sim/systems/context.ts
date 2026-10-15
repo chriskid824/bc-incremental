@@ -65,7 +65,7 @@ import { createEnemyGrid } from './grid';
 import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
 import { isToughType } from './spawn';
-import { createPulseAcc, createZonePool } from './systemState';
+import { createLobState, createPulseAcc, createZonePool } from './systemState';
 import type { SystemState } from './systemState';
 
 const DAMAGE = SCOPED_INDEX.damage;
@@ -399,7 +399,7 @@ export interface RunContext {
   readonly selection: SelectionScratch;
 
   // ---- Systems with state of their own (src/sim/systems/systemState.ts) ----
-  /** One member per system: the pulse tally and the zone pool. */
+  /** One member per system: the pulse tally, the zone pool and the lob. */
   readonly sys: SystemState;
 
   // ---- Entities and public state ----
@@ -697,12 +697,16 @@ export function createRunContext(
   const killInline = Int32Array.from(killTriggers.filter((t) => t.inline).map((t) => t.index));
   const killPending = Int32Array.from(killTriggers.filter((t) => !t.inline).map((t) => t.index));
   const effectPayloads = effects.map((fx) => effectPayload(fx, effectsRng));
-  // Who burn damage can be credited to: the applier of every payload whose hits ignite, and of
-  // every applyAilment and groundZone burn.
+  // Who burn damage can be credited to: the applier of every payload whose hits ignite, an
+  // emitter's zone payload among them (Payload.zoneVariant), and of every applyAilment and
+  // groundZone burn.
   const burnCredits = new Set<number>();
   for (const emitter of emitters) {
-    if (emitter.payload.rollsAilments) {
-      burnCredits.add(ailmentCredit(sources, attribution, 'burn', emitter.payload.source));
+    const p = emitter.payload;
+    if (p.rollsAilments) burnCredits.add(ailmentCredit(sources, attribution, 'burn', p.source));
+    const zone = p.zoneVariant;
+    if (zone !== null && zone.rollsAilments) {
+      burnCredits.add(ailmentCredit(sources, attribution, 'burn', zone.source));
     }
   }
   effects.forEach((fx, i) => {
@@ -835,7 +839,7 @@ export function createRunContext(
     budgetStreak: 0,
     selected: null,
     selection: createSelectionScratch(),
-    sys: { pulse: createPulseAcc(), zones },
+    sys: { pulse: createPulseAcc(), zones, lob: createLobState() },
 
     enemies,
     projectiles,

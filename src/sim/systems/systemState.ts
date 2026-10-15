@@ -15,6 +15,7 @@ import { IN_ZONE } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import { MAX_SOURCES } from '../build/sources';
 import type { Payload } from '../emitters/types';
+import type { GridPoint } from '../grid';
 import type { ZonePoolState } from '../types';
 import type { Enemy } from './context';
 
@@ -24,6 +25,8 @@ export interface SystemState {
   readonly pulse: PulseAcc;
   /** The ground zones (src/sim/systems/zones.ts), also SimState.zones. */
   readonly zones: ZonePool;
+  /** The lob's aim and landing (src/sim/emitters/lob.ts). */
+  readonly lob: LobState;
 }
 
 /**
@@ -148,5 +151,50 @@ export function createZonePool(build: CompiledBuild): ZonePool {
     slowApplied: false,
     stampSources,
     targets: [],
+  };
+}
+
+/**
+ * The lob's aim and landing scratch (RunContext.sys.lob, src/sim/emitters/lob.ts). A firing's
+ * one dense scan fills block, counts and aimed; each bomb it aims adds its enemy to picked.
+ */
+export interface LobState {
+  /** The current bomb's landing point: the aim writes it, the launch reads it. */
+  x: number;
+  y: number;
+  /** The dense scan's densest point: its own, not the selectors' (RunContext.selection). */
+  readonly dense: GridPoint;
+  /** A landing's within() output: the enemies its explosion hits. */
+  readonly blast: Enemy[];
+  /** The firing's candidates: the alive enemies of the densest block, in source order. */
+  readonly block: Enemy[];
+  /** Alive enemies within the explosion's radius of each candidate, block[i]'s at i. */
+  readonly counts: number[];
+  /** 1 when a bomb of this firing aimed at block[i]; the scan writes 0 for each candidate. */
+  readonly aimed: number[];
+  /** The enemies this firing's bombs aimed at, in order: picked[0 .. picks). */
+  readonly picked: Enemy[];
+  picks: number;
+  /** The firing's candidates, block[0 .. m); −1 before its dense scan. */
+  m: number;
+  /** The explosion's radius, squared, and SALVO_SEPARATION radii, squared: set per firing. */
+  radiusSq: number;
+  sepSq: number;
+}
+
+export function createLobState(): LobState {
+  return {
+    x: 0,
+    y: 0,
+    dense: { x: 0, y: 0 },
+    blast: [],
+    block: [],
+    counts: [],
+    aimed: [],
+    picked: [],
+    picks: 0,
+    m: -1,
+    radiusSq: 0,
+    sepSq: 0,
   };
 }

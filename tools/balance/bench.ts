@@ -25,11 +25,15 @@
  *   C4 design §7). A stress-family scenario ignores --start-wave, and its report adds its
  *   workload: one untimed run's average alive over ticks 301–1800, its peaks and its counters.
  * - stress: the stress family's gated scenario (the STRESS gate of docs/v3 C4 design §0.5),
- *   grown with the C4 systems. v1 (C4.6) adds four ground zone triggers on the signature's hits,
- *   one source each, which hold about 64 live effect zones: 'outer.fire', 'outer.ice' (slowing)
- *   and 'outer.poison' (poison only) on hits, 'outer.aura' on crits. Their zones kill few enough
- *   that stressStats' damage keeps the alive band. Its report adds the zone workload: pulses,
- *   zone hits and hits per pulse, and the average live effect zones over ticks 301–1800.
+ *   grown with the C4 systems. v1 (C4.6) added four ground zone triggers on M1's hits, which
+ *   held about 64 live effect zones. v2 (C4.7) is the heaviest plausible 熔核 (R1-12, docs/v3
+ *   C4 design §7.3): magmaBomb at 12 bombs a second, 6 firings of 2, with 熔核's own zone
+ *   sources on their own events (爐光 and 瘟爆 on explode, 毒雲 on a poisoned enemy's kill),
+ *   霜焰's explosion frost and slowing fire zones, and poison rolls; a third of stressStats'
+ *   damage keeps the alive band. Its report adds the zone workload: zones created per source,
+ *   pulses, zone hits and hits per pulse, and the average live effect and signature zones over
+ *   ticks 301–1800; and the bombs: bombs a second and per firing, explosions and their hits,
+ *   freezes, ignites and µs per firing's lob aim.
  *
  *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress]
  *     [--runs 50]
@@ -55,10 +59,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadGameData, targetDamage } from '../../src/data';
 import type { GameData, StatBlock } from '../../src/data';
-import type { StatExtras } from '../../src/data/stats';
+import type { Modifier, StatExtras } from '../../src/data/stats';
 import type { TriggerSpec } from '../../src/data/triggers';
 import { COUNTER_IDS, createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { CounterId, RunConfig } from '../../src/sim';
+import { aimDense, beginAim } from '../../src/sim/emitters/lob';
 import type { TestModule } from '../../src/sim/rules';
 import {
   centerTriggers,
@@ -139,32 +144,28 @@ interface Scenario {
 }
 
 /**
- * stress v1's zone triggers (docs/v3 C4 design §7.3), each on the signature's hits only, so
- * zone hits never trigger them (L2), and each able to hold its source's 16 zones at stressM1's
- * rates (about 24 hits and 6 crits a second).
+ * stress v2's zone sources (R1, docs/v3 C4 design §7.3), 熔核's own on their own events: 爐光
+ * leaves a zone where each bomb explodes, 瘟爆 poisons each explosion's list, and 毒雲 leaves a
+ * poison cloud where a poisoned enemy dies. Zone hits raise none of these events, so zones never
+ * feed zones (L2).
  */
-const STRESS_ZONE_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+const R1_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
   [
-    'outer.fire',
+    'fusion.fire.aura',
     {
-      on: 'hit',
-      when: [{ hitIs: 'signature' }],
-      do: [{ kind: 'groundZone', radius: 40, durationSec: 1, damagePctPerSec: 0.2 }],
+      on: 'explode',
+      do: [{ kind: 'groundZone', radius: 80, durationSec: 2, damagePctPerSec: 0.25 }],
     },
   ],
   [
-    'outer.ice',
-    {
-      on: 'hit',
-      when: [{ hitIs: 'signature' }],
-      do: [{ kind: 'groundZone', radius: 80, durationSec: 2, damagePctPerSec: 0.05, slow: 0.3 }],
-    },
+    'fusion.fire.poison',
+    { on: 'explode', do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
   ],
   [
     'outer.poison',
     {
-      on: 'hit',
-      when: [{ hitIs: 'signature' }],
+      on: 'kill',
+      when: [{ victimHas: 'poison' }],
       do: [
         {
           kind: 'groundZone',
@@ -177,19 +178,36 @@ const STRESS_ZONE_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
       ],
     },
   ],
-  [
-    'outer.aura',
-    {
-      on: 'crit',
-      when: [{ hitIs: 'signature' }],
-      do: [{ kind: 'groundZone', radius: 80, durationSec: 3, damagePctPerSec: 0.1 }],
-    },
-  ],
 ];
-const STRESS_EXTRAS: StatExtras = {
-  triggers: STRESS_ZONE_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+const R1_EXTRAS: StatExtras = {
+  triggers: R1_TRIGGERS.map(([source, spec]) => ({ source, spec })),
   conversions: [],
   emitters: [],
+};
+
+/** 霜焰's frost on the explosion hits, and 爐光's bonus on the enemies in its zones. */
+const R1_SCOPED: readonly Modifier[] = [
+  {
+    stat: 'frostOnHit',
+    kind: 'flat',
+    value: 0.3,
+    scope: 'center',
+    tags: ['area'],
+    notTags: ['trigger'],
+  },
+  {
+    stat: 'damage',
+    kind: 'increased',
+    value: 0.2,
+    scope: 'center',
+    when: [{ inZone: 'fusion.fire.aura' }],
+  },
+];
+
+/** 霜焰's 霜火地: the bombs' fire zones slow by 30%, as its B1 module will set. */
+const FROST_FIRE: TestModule = (b) => {
+  const lob = b.signature().lob;
+  if (lob !== null) lob.zone.slow = 0.3;
 };
 
 /** The poisonBoss scenario's poison chance per variant. */
@@ -363,8 +381,25 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   },
   // About 300 alive from tick 300 on, under M1's attack (docs/v3 C4 design §7.2).
   stressM1: stressScenario(() => ({ stats: stressStats(), rules: [] })),
-  // v1 (C4.6): stressM1 plus the zones; stressStats' damage keeps 287 alive at seed 1.
-  stress: stressScenario(() => ({ stats: stressStats({}, STRESS_EXTRAS), rules: [] })),
+  // v2 (C4.7): R1-12, 6 firings of 2 bombs a second; a third of stressStats' damage keeps the
+  // alive band.
+  stress: stressScenario(
+    () => ({
+      stats: stressStats(
+        {
+          attackSpeed: 16,
+          projectileCount: 3,
+          poisonChance: 0.3,
+          damage: targetDamage(STRESS_START_WAVE) / 7.5,
+        },
+        R1_EXTRAS,
+        R1_SCOPED,
+      ),
+      rules: [],
+      signature: { id: 'magmaBomb' },
+    }),
+    [FROST_FIRE],
+  ),
 };
 
 function positiveInt(name: string, text: string, min = 1): number {
@@ -412,18 +447,34 @@ interface Workload {
   /** Alive enemies after each tick past ALIVE_FROM_TICK, averaged. */
   readonly averageAlive: number;
   readonly peakAlive: number;
-  /** Most projectiles in flight after a tick. */
-  readonly peakProjectiles: number;
+  /** Most projectiles and shot pool shots (bombs among them) in flight after a tick (N7). */
+  readonly peakShots: number;
   readonly kills: number;
+  /** Zones created, by source name: the signature's under 'signature'. */
+  readonly zonesBySource: readonly (readonly [string, number])[];
   /** Zones created, zone pulses, and the hits of the pulses: in all and the most in one. */
   readonly zones: number;
   readonly pulses: number;
   readonly zoneHits: number;
   readonly peakPulseHits: number;
-  /** Live effect zones (not the signature's) after each tick past ALIVE_FROM_TICK, averaged. */
+  /** Live effect and signature zones after each tick past ALIVE_FROM_TICK, averaged. */
   readonly averageEffectZones: number;
+  readonly averageSignatureZones: number;
+  /** Bombs lobbed, and the ticks that lobbed any: each one firing. */
+  readonly bombs: number;
+  readonly firings: number;
+  /** Explosions, and the enemies their blasts hit. */
+  readonly explosions: number;
+  readonly explosionHits: number;
+  /** freeze and ignite events. */
+  readonly freezes: number;
+  readonly ignites: number;
+  /** Simulated seconds of the run. */
+  readonly seconds: number;
   /** The run's counters that are not 0, in COUNTER_IDS order. */
   readonly counters: readonly (readonly [CounterId, number])[];
+  /** Microseconds per firing's lob aim (lobAimMicros); null when the signature is not the lob. */
+  readonly lobAimMicros: number | null;
 }
 
 /** The workload of an untimed run of `config`. */
@@ -437,46 +488,136 @@ function measureWorkload(
   let aliveSum = 0;
   let aliveTicks = 0;
   let peakAlive = 0;
-  let peakProjectiles = 0;
+  let peakShots = 0;
+  const bySource = new Map<string, number>();
   let zones = 0;
   let pulses = 0;
   let zoneHits = 0;
   let peakPulseHits = 0;
   let effectZoneSum = 0;
+  let signatureZoneSum = 0;
+  let bombs = 0;
+  let firings = 0;
+  let explosions = 0;
+  let explosionHits = 0;
+  let freezes = 0;
+  let ignites = 0;
   while (!state.finished) {
+    let lobbed = false;
     for (const event of sim.step(NO_INPUT)) {
-      if (event.type === 'zone') zones++;
-      else if (event.type === 'pulse' && event.kind === 'zone') {
-        pulses++;
-        zoneHits += event.hits;
-        if (event.hits > peakPulseHits) peakPulseHits = event.hits;
+      switch (event.type) {
+        case 'zone': {
+          zones++;
+          const name = event.signature ? 'signature' : (state.sources[event.source] ?? '?');
+          bySource.set(name, (bySource.get(name) ?? 0) + 1);
+          break;
+        }
+        case 'pulse':
+          if (event.kind === 'zone') {
+            pulses++;
+            zoneHits += event.hits;
+            if (event.hits > peakPulseHits) peakPulseHits = event.hits;
+          }
+          break;
+        case 'lob':
+          bombs++;
+          lobbed = true;
+          break;
+        case 'explosion':
+          explosions++;
+          explosionHits += event.count;
+          break;
+        case 'freeze':
+          freezes++;
+          break;
+        case 'ignite':
+          ignites++;
+          break;
+        default:
+          break;
       }
     }
+    if (lobbed) firings++;
     let alive = 0;
     for (const enemy of state.enemies) if (enemy.alive) alive++;
     if (state.tick > ALIVE_FROM_TICK) {
       aliveSum += alive;
       aliveTicks++;
-      for (let i = 0; i < state.zoneCount; i++) if (state.zones.signature[i] === 0) effectZoneSum++;
+      for (let i = 0; i < state.zoneCount; i++) {
+        if (state.zones.signature[i] === 0) effectZoneSum++;
+        else signatureZoneSum++;
+      }
     }
     if (alive > peakAlive) peakAlive = alive;
-    if (state.projectiles.length > peakProjectiles) peakProjectiles = state.projectiles.length;
+    const shots = state.projectiles.length + state.shotCount;
+    if (shots > peakShots) peakShots = shots;
   }
   const result = sim.result();
   return {
     averageAlive: aliveTicks === 0 ? NaN : aliveSum / aliveTicks,
     peakAlive,
-    peakProjectiles,
+    peakShots,
     kills: result.kills,
+    zonesBySource: [...bySource],
     zones,
     pulses,
     zoneHits,
     peakPulseHits,
     averageEffectZones: aliveTicks === 0 ? NaN : effectZoneSum / aliveTicks,
+    averageSignatureZones: aliveTicks === 0 ? NaN : signatureZoneSum / aliveTicks,
+    bombs,
+    firings,
+    explosions,
+    explosionHits,
+    freezes,
+    ignites,
+    seconds: result.ticks / TICK_RATE,
     counters: COUNTER_IDS.filter((id) => result.counters[id] !== 0).map(
       (id) => [id, result.counters[id]] as const,
     ),
+    lobAimMicros: lobAimMicros(config, data, testModules),
   };
+}
+
+/** Ticks between two timings of a firing's lob aim past ALIVE_FROM_TICK, and the repeats of each. */
+const AIM_EVERY_TICKS = 30;
+const AIMS_PER_TIMING = 50;
+
+/**
+ * Microseconds per firing's lob aim (beginAim, then aimDense for each of its bombs,
+ * src/sim/emitters/lob.ts) in another untimed run of `config`, whose signature is magmaBomb;
+ * printed, not asserted (docs/v3 C4 design §4.5, R23). Every AIM_EVERY_TICKS ticks past
+ * ALIVE_FROM_TICK, after the tick's attacks, a test module times AIMS_PER_TIMING aims of a firing
+ * of ceil(projectileCount) bombs. An aim rewrites only the lob's aim scratch (ctx.sys.lob), which
+ * the next firing's aim writes anew, and the grid's last densest block, which every reader
+ * finds anew; it draws nothing. Null for another signature.
+ */
+function lobAimMicros(
+  config: RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[],
+): number | null {
+  if (config.signature?.id !== 'magmaBomb') return null;
+  let ms = 0;
+  let aims = 0;
+  const timer: TestModule = (b) =>
+    b.hook('tick', (ctx) => {
+      const em = ctx.emitters[0];
+      if (ctx.now <= ALIVE_FROM_TICK || ctx.now % AIM_EVERY_TICKS !== 0 || em === undefined) {
+        return;
+      }
+      const bombs = Math.ceil(ctx.projectileCount);
+      const start = performance.now();
+      for (let i = 0; i < AIMS_PER_TIMING; i++) {
+        beginAim(ctx, em);
+        for (let n = 0; n < bombs; n++) if (aimDense(ctx, em) === null) break;
+      }
+      ms += performance.now() - start;
+      aims += AIMS_PER_TIMING;
+    });
+  const sim = createSimulation(config, data, [...testModules, timer]);
+  while (!sim.state.finished) sim.step(NO_INPUT);
+  return aims === 0 ? null : (ms * 1000) / aims;
 }
 
 /** The workload as report text: everything but the average alive. */
@@ -485,16 +626,33 @@ function workloadText(workload: Workload): string {
     workload.counters.length === 0
       ? 'none'
       : workload.counters.map(([id, value]) => `${id} ${value}`).join(', ');
+  const perSecond = (n: number): string => (n / workload.seconds).toFixed(1);
+  const bombs =
+    workload.bombs === 0
+      ? ''
+      : `${workload.bombs} bombs (${perSecond(workload.bombs)}/s, ` +
+        `${(workload.bombs / workload.firings).toFixed(2)} per firing), ` +
+        `${workload.explosions} explosions (` +
+        `${(workload.explosions === 0 ? 0 : workload.explosionHits / workload.explosions).toFixed(2)} ` +
+        `hits each), `;
   const zones =
     workload.zones === 0
       ? ''
-      : `${workload.zones} zones, average ${workload.averageEffectZones.toFixed(1)} live ` +
-        `effect zones, ${workload.pulses} pulses, ${workload.zoneHits} zone hits ` +
+      : `${workload.zones} zones (` +
+        workload.zonesBySource.map(([source, n]) => `${source} ${n}`).join(', ') +
+        `), average ${workload.averageEffectZones.toFixed(1)} live effect zones and ` +
+        `${workload.averageSignatureZones.toFixed(1)} live signature zones, ` +
+        `${workload.pulses} pulses, ${workload.zoneHits} zone hits ` +
         `(${(workload.pulses === 0 ? 0 : workload.zoneHits / workload.pulses).toFixed(2)} ` +
         `a pulse, at most ${workload.peakPulseHits}), `;
+  const aim =
+    workload.lobAimMicros === null
+      ? ''
+      : `, ${workload.lobAimMicros.toFixed(2)} µs per firing's lob aim`;
   return (
-    `peak ${workload.peakAlive} alive, peak ${workload.peakProjectiles} projectiles, ` +
-    `${workload.kills} kills, ${zones}counters: ${counters}`
+    `peak ${workload.peakAlive} alive, peak ${workload.peakShots} shots, ` +
+    `${workload.kills} kills, ${bombs}${zones}${workload.freezes} freezes, ` +
+    `${workload.ignites} ignites, counters: ${counters}${aim}`
   );
 }
 

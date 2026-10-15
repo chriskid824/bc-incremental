@@ -43,7 +43,12 @@ export const RULE_IDS: readonly RuleId[] = ['steadyAim', 'eternalFlame', 'overlo
  */
 export type SignatureSpec =
   /** M1's volley of homing projectiles. */
-  { readonly id: 'm1Volley' };
+  | { readonly id: 'm1Volley' }
+  /**
+   * 熔核's magma bombs: lobbed at the most crowded spots, they explode where they land and each
+   * leaves a fire zone (src/sim/emitters/lob.ts).
+   */
+  | { readonly id: 'magmaBomb' };
 
 export type SignatureId = SignatureSpec['id'];
 

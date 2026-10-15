@@ -100,8 +100,13 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  *   emptied (a boss never freezes). It needs no signature hit.
  * - shatter: a frozen enemy died and shattered (its triggers run at the next tick, like kill's);
  *   an enemy killed by a shatter does not shatter.
+ * - explode: a bomb of the signature attack (magmaBomb) landed and exploded, after its hits and
+ *   its chain, at its landing point; the target is the enemy nearest that point among those it
+ *   hit, none when it hit nothing. Its list is the first enemies of the blast, by id. Each bomb
+ *   raises its own.
  */
 export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
+  'explode',
   'hit',
   'crit',
   'kill',
@@ -201,6 +206,7 @@ export const conditionKey = (condition: Condition): ConditionKey =>
 
 /** Events with an enemy target, on which target conditions can be checked. */
 const TARGETED: readonly TriggerEventId[] = [
+  'explode',
   'hit',
   'crit',
   'nthAttack',

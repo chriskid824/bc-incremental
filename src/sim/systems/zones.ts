@@ -1,8 +1,9 @@
 /**
  * Ground zones (docs/v3 C4 design D17, §4.10): areas that pulse every PULSE_TICKS for a whole
  * number of pulses, in the zone pool (ZonePool, RunContext.sys.zones, also SimState.zones). A
- * groundZone effect adds an effect zone (src/sim/effects/execute.ts); the signature attack's
- * own zones come later in C4 and have a pool share of their own.
+ * groundZone effect adds an effect zone (src/sim/effects/execute.ts), a lob's bomb a signature
+ * zone (火地, src/sim/emitters/lob.ts), the signature attack's own, which has a pool share of its
+ * own.
  *
  * Pulses (C8): a zone of id `id` created at tick c with n pulses pulses on the ticks t of
  * (c, c + PULSE_TICKS × n] with t ≡ id (mod PULSE_TICKS), exactly n of them, whichever stage of
@@ -12,8 +13,9 @@
  * enemy it did not kill: its ailment stacks, its frost, its slow and, for a source an inZone
  * condition names, the inZone mark. A pulse's hits roll and apply their ailments as any hit does
  * (ignite, poison, bleed, shock, then frostOnHit), before the terms, except that at the burn
- * records cap their burns replace only weaker stacks (Hoshi's Q4/F4). They raise no hit events:
- * they add to the pulse's tally (PulseAcc), and the pulse raises one pulse event
+ * records cap their burns replace only weaker stacks (Hoshi's Q4/F4), and that every hit of a
+ * payload with ALWAYS_IGNITES (火地's) ignites, its roll still drawn (Q4/F1). They raise no hit
+ * events: they add to the pulse's tally (PulseAcc), and the pulse raises one pulse event
  * (Payload.aggregate); the ailments they apply raise theirs.
  *
  * Caps (K5): a source keeps at most ZONE_SOURCE_CAP effect zones, the pool ZONE_CAP of them and
@@ -48,6 +50,7 @@ import { applyStacks, durationOf, frostOne } from '../effects/execute';
 import { CRIT_HIT, HIT_EVENT, SIGNATURE } from '../effects/flags';
 import { EVENT, MAX_DEPTH } from '../effects/types';
 import {
+  ALWAYS_IGNITES,
   PRESCALED,
   ROWS,
   SLOT_BURN,
@@ -140,13 +143,13 @@ export function addZone(
     z.frost[i] = (spec.addFrostPerSec ?? 0) / PULSES_PER_SECOND;
     z.slow[i] = spec.slow ?? 0;
   } else {
-    // A signature zone's only term is its slow, which the signature's parameters set once they
-    // exist (C4.7); none until then.
+    // A signature zone's only term is its slow: the lob's fire zones' (LobParams.zone).
+    const lob = ctx.build.signature.lob;
     z.ailment[i] = -1;
     z.stacks[i] = 0;
     z.ailmentPct[i] = 0;
     z.frost[i] = 0;
-    z.slow[i] = 0;
+    z.slow[i] = lob === null ? 0 : lob.zone.slow;
   }
   if (signature) z.liveSignature++;
   else {
@@ -337,7 +340,8 @@ function quietDispatch(ctx: RunContext, crit: boolean, depth: number): void {
  * no caller flags, reading the rows hoistPulseRows put in `acc`. It rolls and applies the
  * payload's ailments as hitWithPayload does, in its order and through its rollDots and
  * applyDots, except that its burn goes through applyPulseBurn: at the records cap it replaces
- * only a weaker stack, and a burn refused there fires nothing. A quiet pulse's hit leaves
+ * only a weaker stack, and a burn refused there fires nothing; and that a payload with
+ * ALWAYS_IGNITES ignites on every hit, after its roll is drawn. A quiet pulse's hit leaves
  * dispatchHit to quietDispatch, which keeps only its counts. The differential tests in
  * zones.test.ts hold them equal wherever no burn is refused.
  */
@@ -361,10 +365,11 @@ export function hitPulse(
     build.flags.randomCrits && p.canCrit ? clamp01(statAt(table, plainRow, CRIT_CHANCE, ev)) : 0;
   const crit = p.canCrit && (p.rng.chance(chance) || statAt(table, plainRow, CRIT_ALWAYS, ev) > 0);
   const row = crit ? acc.critRow : plainRow;
-  // An *Always stat forces the outcome after the roll is drawn.
+  // An *Always stat, or 火地's ALWAYS_IGNITES, forces the outcome after the roll is drawn.
   const ignites =
     p.rollsAilments &&
     (p.rng.chance(clamp01(statAt(table, row, IGNITE_CHANCE, ev))) ||
+      (p.flags & ALWAYS_IGNITES) !== 0 ||
       statAt(table, row, IGNITE_ALWAYS, ev) > 0);
   // Builds that cannot poison, bleed or shock skip the rolls, which would draw nothing.
   const rolled = ctx.rollsDots && p.rollsAilments ? rollDots(p, table, row, ev) : 0;

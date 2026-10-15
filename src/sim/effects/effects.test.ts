@@ -785,6 +785,28 @@ describe('the effect queue', () => {
     expect(ones.counters.effectBudgetStreakMax).toBe(1);
     expect(twos.counters.effectBudgetStreakMax).toBe(2);
   });
+
+  it('pushes one burst for each explode and nova, before its hits (F14)', () => {
+    let explode = -1;
+    let nova = -1;
+    const module: TestModule = (b) => {
+      explode = b.addEffect('center', { kind: 'explode', radius: 1, damagePct: 0.01 });
+      nova = b.addEffect('center', { kind: 'nova', radius: 5000, damagePct: 0.01 });
+    };
+    const ctx = spawned(makeStats(NO_ROLLS), stationarySquares(3), [module]);
+    const [first] = ctx.enemies as [Enemy];
+    ctx.events.length = 0;
+    enqueue(ctx, explode, 1, -1, 0, first, first.x, first.y, ZERO, 0);
+    enqueue(ctx, nova, 1, -1, 0, null, 0, 0, ZERO, 0);
+    runEffectQueue(ctx);
+    const { x, y } = ctx.player;
+    expect(ctx.events.filter((event) => event.type === 'burst' || event.type === 'hit')).toEqual([
+      { type: 'burst', kind: 'explode', x: first.x, y: first.y, radius: 1 },
+      expect.objectContaining({ type: 'hit', targetId: first.id }),
+      { type: 'burst', kind: 'nova', x, y, radius: 5000 },
+      ...ctx.enemies.map((enemy) => expect.objectContaining({ type: 'hit', targetId: enemy.id })),
+    ]);
+  });
 });
 
 describe('periodic and targetless events', () => {

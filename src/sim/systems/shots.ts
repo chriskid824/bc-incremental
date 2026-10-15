@@ -8,20 +8,22 @@
  *   left, else it ends.
  * - homing: at projectileSpeed towards its target, which it hits on arrival; when the target
  *   dies first it turns to the alive enemy nearest to it, or fizzles when there is none.
- * - lobbed: to a fixed point, where it arrives at its `until` tick.
+ * - lobbed: to a fixed point, where it arrives at its `until` tick; a lob's bomb lands there
+ *   (src/sim/emitters/lob.ts).
  * Straight and homing shots expire at their `until` tick.
  *
  * Slots 0 .. count − 1 hold the shots in flight, in id order. Their ids come from the volley's
  * projectile counter, so the projectile stage steps both lists in one id order
  * (src/sim/systems/projectiles.ts). A shot that ends keeps its slot until the end of that stage,
  * which compacts the pool in order; nothing spawns during it. A shot's hits are not an attack:
- * they carry no chain, no attack serial and no PRIMARY. The volley's projectiles and the pool
- * share PROJECTILE_CAP (src/sim/caps.ts).
+ * they carry no chain, no attack serial and no PRIMARY; a bomb's landing is one, which lob.ts
+ * runs. The volley's projectiles and the pool share PROJECTILE_CAP (src/sim/caps.ts).
  */
 
 import { PROJECTILE_CAP, SHOT_MEMORY } from '../caps';
 import { hitWithPayload } from '../combat/hit';
-import type { Payload } from '../emitters/types';
+import { land } from '../emitters/lob';
+import type { EmitterRuntime, Payload } from '../emitters/types';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import type { ShotPoolState } from '../types';
 import type { Enemy, RunContext } from './context';
@@ -182,11 +184,17 @@ export function spawnShot(
 
 /** One tick of the shot in slot `s` (the projectile stage, in id order). */
 export function stepShot(ctx: RunContext, s: number): void {
-  const motion = ctx.shots.motion[s];
+  const shots = ctx.shots;
+  const motion = shots.motion[s];
   if (motion === MOTION_STRAIGHT) stepStraight(ctx, s);
   else if (motion === MOTION_HOMING) stepHoming(ctx, s);
-  // A lobbed shot does nothing in flight and ends where it arrives.
-  else if (ctx.now >= (ctx.shots.until[s] as number)) endShot(ctx.shots, s);
+  else if (ctx.now >= (shots.until[s] as number)) {
+    // A lobbed shot does nothing in flight and ends where it arrives, where a lob's bomb lands.
+    const owner = shots.owner[s] as number;
+    const spec = owner >= 0 ? (ctx.emitters[owner] as EmitterRuntime).spec : null;
+    if (spec !== null && spec.kind === 'lob') land(ctx, s, spec);
+    endShot(shots, s);
+  }
 }
 
 /** Drops the shots that ended, keeping the others in order; at the end of the stage. */

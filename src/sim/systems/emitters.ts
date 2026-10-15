@@ -5,6 +5,7 @@
  * null, which another stage runs (thorns in the contact stage, segments).
  */
 
+import { runLob } from '../emitters/lob';
 import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
 import { runVolley } from '../emitters/volley';
 import type { RunContext } from './context';
@@ -18,6 +19,7 @@ export type EmitterStep = (ctx: RunContext, em: EmitterRuntime) => void;
  */
 export const EMITTER_STEPS: { readonly [K in EmitterSpec['kind']]: EmitterStep | null } = {
   volley: runVolley,
+  lob: runLob,
   // Its hits come with the contacts (src/sim/systems/contact.ts).
   thorns: null,
 };

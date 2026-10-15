@@ -542,11 +542,12 @@ export const stressData = (): GameData =>
 /**
  * The stress build: bench.ts's normal build, immortal, but with its frontier at the stress start
  * wave itself (normal's is ten waves past its start wave), so enemies pile up; `values` override
- * its stats, `extras` add triggers, conversions and emitter grants.
+ * its stats, `extras` add triggers, conversions and emitter grants, `scoped` scoped modifiers.
  */
 export const stressStats = (
   values: Partial<Record<StatId, number>> = {},
   extras?: StatExtras,
+  scoped: readonly Modifier[] = [],
 ): StatBlock =>
   makeStats(
     {
@@ -559,6 +560,6 @@ export const stressStats = (
       maxLife: 1e12,
       ...values,
     },
-    [],
+    scoped,
     extras,
   );

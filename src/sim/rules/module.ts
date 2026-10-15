@@ -88,6 +88,12 @@ export interface BuildCompiler {
 export interface SignatureModule<P extends SignatureSpec> {
   readonly id: P['id'];
   emitter(spec: P): EmitterSpec;
+  /**
+   * The attack's own changes to the build, credited to `source`: compiled once per run after the
+   * build's triggers and before the rule modules, as a module instance of its own. It may set
+   * its member of the signature's parameters (BuildCompiler.signature).
+   */
+  compile?(b: BuildCompiler, spec: P, source: number): void;
 }
 
 /** The kill an onKill hook sees; one reused object per run (RunContext.killScratch). */
@@ -154,11 +160,15 @@ export interface CenterEventScratch {
   target: Enemy | null;
   x: number;
   y: number;
-  /** The radius its list was taken in: FREEZE_LIST_RADIUS (src/sim/caps.ts) for a freeze's. */
+  /**
+   * The radius its list was taken in: FREEZE_LIST_RADIUS (src/sim/caps.ts) for a freeze's, the
+   * explosion's for an explode's. Read it only with a list.
+   */
   radius: number;
   /**
    * The event's enemies, list[0 .. listCount), at most LIST_MAX: a freeze's is the frozen
-   * enemy, then up to four others within FREEZE_LIST_RADIUS of it, in id order. Entries from
+   * enemy, then up to four others within FREEZE_LIST_RADIUS of it, in id order; an explode's the
+   * first enemies its explosion hit, in id order, the dead among them kept. Entries from
    * listCount on are left over from earlier events. The effects of its triggers that apply a
    * status fan out over the alive ones (CompiledEffect.fanout).
    */

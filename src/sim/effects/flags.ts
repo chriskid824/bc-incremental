@@ -14,7 +14,10 @@
  * - 11–14: the kill kind, one bit per KillKind from KILL_KIND_SHIFT: hit and burn (C3.6); poison
  *   and bleed (C3.8);
  * - 15–17: the kind an ailmentApplied event applied, its AilmentKind ordinal + 1 (C3.8);
- * - 18: PRIMARY, 19: REPEAT (C4.1).
+ * - 18: PRIMARY, 19: REPEAT (C4.1);
+ * - 20: ALWAYS_IGNITES, a Payload.flags bit of 火地's payloads that only hitPulse reads (C4.7,
+ *   src/sim/emitters/types.ts); it rides into their hits' events, where no condition reads it,
+ *   and is not in HIT_BITS.
  */
 
 import { AILMENT_KINDS, HELD_AILMENTS, KILL_KINDS } from '../../data/triggers';
