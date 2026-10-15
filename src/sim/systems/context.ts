@@ -575,14 +575,16 @@ export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= F
  * The payload of an effect that hits (explode, nova), applies an ailment (applyAilment) or makes
  * a zone (groundZone), on the effects stream: its tags and source, no flags, never chaining. An
  * applied ailment's damage is that of a hit of the payload, so only its burn row is read. A
- * zone's pulses aggregate their hits, which can crit and roll no ailments: the zone applies its
- * own terms (src/sim/systems/zones.ts).
+ * zone's pulses aggregate their hits, which crit and roll ailments as any hit does, before the
+ * zone applies its own terms (src/sim/systems/zones.ts); a zone without damage hits nothing, so
+ * its payload rolls none.
  */
 function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
+  const spec = fx.spec;
   // A shatter's payload depends on its credit (RunContext.shatterPayloads).
-  if (fx.tags === 0 || fx.kind === 'shatter') return null;
-  const zone = fx.kind === 'groundZone';
-  const hits = fx.kind !== 'applyAilment';
+  if (fx.tags === 0 || spec.kind === 'shatter') return null;
+  const zone = spec.kind === 'groundZone';
+  const hits = spec.kind !== 'applyAilment';
   return createPayload({
     baseDamage: fx.baseDamage,
     tags: fx.tags,
@@ -590,7 +592,7 @@ function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
     flags: 0,
     rng,
     chains: false,
-    rollsAilments: hits && !zone,
+    rollsAilments: hits && (!zone || spec.damagePctPerSec > 0),
     canCrit: hits,
     damageMode: ROWS,
     aggregate: zone,

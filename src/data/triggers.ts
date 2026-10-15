@@ -310,11 +310,12 @@ interface NovaSpec extends DamagePart {
  * A ground zone (src/sim/systems/zones.ts): it pulses every 0.25 s for `durationSec`, rounded to
  * whole pulses (one at least). Each pulse hits every enemy within `radius` for damagePctPerSec ×
  * 0.25 of the damage stat (0: no hit), tagged hit and zone plus its tags and element; its hits
- * can crit and roll no ailments. Then each enemy takes the zone's own terms: `ailmentStacks`
- * (default 1) of `ailment`, each as an applyAilment of damagePct `ailmentDamagePct` (default 1)
- * would apply it; addFrostPerSec × 0.25 of frost; and `slow`, which holds 16 ticks past the pulse
- * (the strongest live one counts, with frost the larger slow). A source keeps at most 16 zones,
- * the oldest giving way; inZone conditions read the zones of the source they name.
+ * crit and roll ailments as any hit does. Then each enemy takes the zone's own terms:
+ * `ailmentStacks` (default 1) of `ailment`, each as an applyAilment of damagePct
+ * `ailmentDamagePct` (default 1) would apply it; addFrostPerSec × 0.25 of frost; and `slow`,
+ * which holds 16 ticks past the pulse (the strongest live one counts, with frost the larger
+ * slow). A source keeps at most 16 zones, the oldest giving way; inZone conditions read the zones
+ * of the source they name.
  */
 export interface GroundZoneSpec {
   readonly kind: 'groundZone';

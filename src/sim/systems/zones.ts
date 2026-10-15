@@ -10,8 +10,10 @@
  * first zone stage at or past its last tick. Each pulse hits every alive enemy within the zone
  * with its payload at its scale (none at scale 0), then applies the zone's own terms to each
  * enemy it did not kill: its ailment stacks, its frost, its slow and, for a source an inZone
- * condition names, the inZone mark. A pulse's hits raise no hit events: they add to the pulse's
- * tally (PulseAcc), and the pulse raises one pulse event (Payload.aggregate).
+ * condition names, the inZone mark. A pulse's hits roll and apply their ailments as any hit does
+ * (ignite, poison, bleed, shock, then frostOnHit), before the terms. They raise no hit events:
+ * they add to the pulse's tally (PulseAcc), and the pulse raises one pulse event
+ * (Payload.aggregate); the ailments they apply raise theirs.
  *
  * Caps (K5): a source keeps at most ZONE_SOURCE_CAP effect zones, the pool ZONE_CAP of them and
  * SIGNATURE_ZONE_CAP signature zones. A new effect zone of a source at its cap evicts that
@@ -31,16 +33,28 @@ import type { Num } from '../../core/num';
 import { TAG } from '../../data/tags';
 import { APPLIED_AILMENTS } from '../../data/triggers';
 import type { AppliedAilment, GroundZoneSpec } from '../../data/triggers';
+import { applyBurn, creditOf } from '../ailments/apply';
+import { addFrost } from '../ailments/frost';
 import { takenMult } from '../ailments/shock';
 import { pctMaxHpFactor, statAt } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
 import { PULSE_TICKS, SIGNATURE_ZONE_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../caps';
 import { convertHit } from '../combat/convert';
-import { applyHitDamage, dispatchHit, modifyDamage } from '../combat/hit';
+import { applyDots, applyHitDamage, dispatchHit, modifyDamage, rollDots } from '../combat/hit';
+import { raiseFreeze } from '../effects/centerEvents';
+import { fireApplied } from '../effects/dispatch';
 import { applyStacks, durationOf, frostOne } from '../effects/execute';
 import { CRIT_HIT, HIT_EVENT, SIGNATURE } from '../effects/flags';
 import { EVENT, MAX_DEPTH } from '../effects/types';
-import { PRESCALED, ROWS, SLOT_HIT, SLOT_HIT_CRIT, slotRow } from '../emitters/types';
+import {
+  PRESCALED,
+  ROWS,
+  SLOT_BURN,
+  SLOT_BURN_CRIT,
+  SLOT_HIT,
+  SLOT_HIT_CRIT,
+  slotRow,
+} from '../emitters/types';
 import type { CompiledTrigger } from '../effects/types';
 import type { Payload } from '../emitters/types';
 import { TICK_RATE } from '../types';
@@ -54,6 +68,9 @@ const DAMAGE = SCOPED_INDEX.damage;
 const CRIT_CHANCE = SCOPED_INDEX.critChance;
 const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
 const CRIT_ALWAYS = SCOPED_INDEX.critAlways;
+const IGNITE_CHANCE = SCOPED_INDEX.igniteChance;
+const IGNITE_ALWAYS = SCOPED_INDEX.igniteAlways;
+const FROST_ON_HIT = SCOPED_INDEX.frostOnHit;
 const EV_HIT = EVENT.hit;
 const EV_CRIT = EVENT.crit;
 
@@ -315,9 +332,10 @@ function quietDispatch(ctx: RunContext, crit: boolean, depth: number): void {
 
 /**
  * A pulse's hit of payload `p` on `enemy` at `scale`, added to the pulse's tally `acc`: what
- * hitWithPayload (src/sim/combat/hit.ts) does for a primary hit that is not forced to crit,
- * with no caller flags and a payload that rolls no ailments, reading the rows hoistPulseRows put
- * in `acc`; a quiet pulse's hit leaves dispatchHit to quietDispatch, which keeps only its
+ * hitWithPayload (src/sim/combat/hit.ts) does for a primary hit that is not forced to crit, with
+ * no caller flags, reading the rows hoistPulseRows put in `acc`. It rolls and applies the
+ * payload's ailments as hitWithPayload does, in its order and through its rollDots and
+ * applyDots; a quiet pulse's hit leaves dispatchHit to quietDispatch, which keeps only its
  * counts. The differential tests in zones.test.ts hold them equal.
  */
 export function hitPulse(
@@ -340,6 +358,13 @@ export function hitPulse(
     build.flags.randomCrits && p.canCrit ? clamp01(statAt(table, plainRow, CRIT_CHANCE, ev)) : 0;
   const crit = p.canCrit && (p.rng.chance(chance) || statAt(table, plainRow, CRIT_ALWAYS, ev) > 0);
   const row = crit ? acc.critRow : plainRow;
+  // An *Always stat forces the outcome after the roll is drawn.
+  const ignites =
+    p.rollsAilments &&
+    (p.rng.chance(clamp01(statAt(table, row, IGNITE_CHANCE, ev))) ||
+      statAt(table, row, IGNITE_ALWAYS, ev) > 0);
+  // Builds that cannot poison, bleed or shock skip the rolls, which would draw nothing.
+  const rolled = ctx.rollsDots && p.rollsAilments ? rollDots(p, table, row, ev) : 0;
   const critMultiplier = crit ? statAt(table, row, CRIT_MULTIPLIER, ev) : 1;
   const base = mul(p.baseDamage, critMultiplier * scale);
   const mask = crit ? p.tags | CRIT : p.tags;
@@ -376,6 +401,29 @@ export function hitPulse(
     acc,
   );
   if (!enemy.alive) return;
+  if (ignites && ctx.burnTicks > 0) {
+    // The burn's damage is the hit's before its damage row, as hitWithPayload's.
+    ev.chainJump = 0;
+    const burnRow = slotRow(build, p, crit ? SLOT_BURN_CRIT : SLOT_BURN);
+    applyBurn(
+      ctx,
+      enemy,
+      mul(base, ctx.burnDamage * statAt(table, burnRow, DAMAGE, ev)),
+      ctx.now + ctx.burnTicks,
+      depth,
+      creditOf(ctx, 'burn', p),
+      1,
+    );
+    if (ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
+  }
+  if (rolled !== 0) applyDots(ctx, enemy, p, base, crit, rolled, depth, origin);
+  if (ctx.hitsFrost && p.rollsAilments) {
+    const frost = statAt(table, row, FROST_ON_HIT, ev);
+    if (frost > 0 && addFrost(ctx, enemy, frost, p.source)) {
+      raiseFreeze(ctx, enemy, depth, origin, flags);
+    }
+  }
+  // Quiet covers the hit and crit triggers only: the ailments above raised their own.
   if (ctx.hitListeners) {
     if (acc.quiet) quietDispatch(ctx, crit, depth);
     else dispatchHit(ctx, enemy, amount, mask, source, crit, 0, depth, origin, flags);

@@ -299,7 +299,8 @@ const FREEZE_LIST_STATS = makeStats(
  * C4.6's ground zones: the volley's hits drop burning fire zones (a source's 16 bind, so they
  * evict), crits drop slowing, chilling ice zones that also mark enemies for a damage more, kills
  * drop poison-only zones, half the freezes drop small cold zones, and every second an aura zone
- * lands on the densest spot and marks enemies for a center explode.
+ * lands on the densest spot and marks enemies for a center explode. The damaging zones' hits
+ * ignite and chill like the volley's (igniteChance, frostOnHit; re-recorded by C4.6c).
  */
 const ZONE_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
   [
@@ -423,7 +424,7 @@ const ENTRIES: readonly GoldenC4Entry[] = [
   {
     name: 'zones',
     config: { stats: ZONE_STATS, rules: [], startWave: 12 },
-    expected: ['f091aa790dacbed5', '06f2ea6ccd3beb26'],
+    expected: ['60a425bda0f6d4e8', '186c143c036195a8'],
   },
 ];
 

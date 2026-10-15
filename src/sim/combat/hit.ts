@@ -119,7 +119,12 @@ function tallyParts(ctx: RunContext, source: number, amount: Num): void {
  * The poison, bleed and shock rolls of a hit with ModTable row `row`, in that order: each is its
  * chance's roll (drawn even when its always stat decides) or its always stat above 0.
  */
-function rollDots(p: Payload, table: ModTable, row: number, ev: Readonly<EvalInput>): number {
+export function rollDots(
+  p: Payload,
+  table: ModTable,
+  row: number,
+  ev: Readonly<EvalInput>,
+): number {
   let rolled = 0;
   const rng = p.rng;
   if (
@@ -147,7 +152,7 @@ function rollDots(p: Payload, table: ModTable, row: number, ev: Readonly<EvalInp
  * Applies the poison, bleed and shock a hit of `base` (crit or not) rolled (rollDots), each
  * credited from the payload's source, and raises ailmentApplied for each that landed.
  */
-function applyDots(
+export function applyDots(
   ctx: RunContext,
   enemy: Enemy,
   p: Payload,

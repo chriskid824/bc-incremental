@@ -4,6 +4,7 @@ import type { Num } from '../../core/num';
 import { createStreams } from '../../core/rng';
 import type { Modifier, StatBlock, StatId } from '../../data/stats';
 import type { GroundZoneSpec, TriggerSpec } from '../../data/triggers';
+import { applyBurn } from '../ailments/apply';
 import { enemySlow } from '../ailments/frost';
 import { compileCondition, conditionsMet, IN_ZONE } from '../build/eval';
 import { PULSE_TICKS, SIGNATURE_ZONE_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../caps';
@@ -25,6 +26,20 @@ import { moveEnemies } from './movement';
 import { addZone, hitPulse, hoistPulseRows, stepZones } from './zones';
 
 type PulseEvent = Extract<SimEvent, { type: 'pulse' }>;
+
+/** Every hit ailment chance at .5. */
+const HALF = {
+  critChance: 0.5,
+  igniteChance: 0.5,
+  poisonChance: 0.5,
+  bleedChance: 0.5,
+  shockChance: 0.5,
+} as const;
+
+/** The always stats of every hit ailment, on every hit. */
+const ALWAYS: readonly Modifier[] = (
+  ['igniteAlways', 'poisonAlways', 'bleedAlways', 'shockAlways'] as const
+).map((stat) => ({ stat, kind: 'flat', value: 1 }));
 
 /** The first data trigger's index, after SHATTER_TRIGGER. */
 const FIRST = SHATTER_TRIGGER + 1;
@@ -126,6 +141,15 @@ const pulsesOf = (events: readonly SimEvent[]): PulseEvent[] =>
   events.filter((event): event is PulseEvent => event.type === 'pulse');
 
 const mod15 = (n: number): number => ((n % PULSE_TICKS) + PULSE_TICKS) % PULSE_TICKS;
+
+/** The effect, depth and origin of each queued entry, in queue order. */
+const queuedOf = (ctx: RunContext): number[][] => {
+  const q = ctx.effectQueue;
+  return Array.from({ length: q.size }, (_, n) => {
+    const at = (q.head + n) & q.capMask;
+    return [q.effect[at] as number, q.depth[at] as number, q.origin[at] as number];
+  });
+};
 
 describe('zone pulses (C8)', () => {
   it.each(['before', 'after'] as const)(
@@ -341,27 +365,61 @@ describe('zone hits and terms', () => {
     ]);
   });
 
-  it('draws only the crit rolls of its hits, on the effects stream', () => {
-    const values = {
-      critChance: 0.5,
-      igniteChance: 0.5,
-      poisonChance: 0.5,
-      bleedChance: 0.5,
-      shockChance: 0.5,
-      frostOnHit: 0.3,
-    };
+  it('rolls crit, ignite, poison, bleed and shock per enemy in id order, on the effects stream', () => {
+    const values = { ...HALF, frostOnHit: 0.3 };
     const placed = [0, 10, 20, 30, 40].map((dx) => near(dx, 0));
     const ctx = placedEnemies(placed, { stats: zoneStats([idle(ZONE)], values) });
     const twin = placedEnemies(placed, { stats: zoneStats([idle(ZONE)], values) });
     runAt(ctx, effectOf(ctx, 0));
     const [pulse] = pulsesOf(untilPulse(ctx));
     expect(pulse?.hits).toBe(5);
+    // The twin replays the pulse's draws: per enemy, its crit, ignite, poison, bleed and shock.
+    const rolls = Array.from({ length: 25 }, () => twin.effectsRng.chance(0.5));
+    expect(rngPositions(ctx)).toEqual(rngPositions(twin));
+    expect(new Set(rolls)).toEqual(new Set([true, false]));
+    ctx.enemies.forEach((e, k) => {
+      const [crit, ignite, poison, bleed, shock] = rolls.slice(5 * k, 5 * k + 5);
+      expect(pulse?.crits.includes(e.id), `enemy ${e.id}`).toBe(crit);
+      expect([e.burnStacks, e.poisonStacks, e.bleedUntil > 0, e.shockStacks, e.frost]).toEqual([
+        ignite ? 1 : 0,
+        poison ? 1 : 0,
+        bleed,
+        shock ? 1 : 0,
+        0.3,
+      ]);
+    });
+  });
+
+  it.each([
+    ['0', 0, []],
+    ['1', 1, []],
+    ['0 with every always stat', 0, ALWAYS],
+  ] as const)('draws only its crit rolls with every ailment chance at %s', (_, chance, scoped) => {
+    const values = {
+      critChance: 0.5,
+      igniteChance: chance,
+      poisonChance: chance,
+      bleedChance: chance,
+      shockChance: chance,
+    };
+    // A projectile-only poison chance makes the build roll its dots, at 0 on the zone's hits.
+    const mods: Modifier[] = [
+      { stat: 'poisonChance', kind: 'flat', value: 0.5, tags: ['projectile'] },
+      ...scoped,
+    ];
+    const placed = [0, 10, 20, 30, 40].map((dx) => near(dx, 0));
+    const ctx = placedEnemies(placed, { stats: zoneStats([idle(ZONE)], values, mods) });
+    const twin = placedEnemies(placed, { stats: zoneStats([idle(ZONE)], values, mods) });
+    expect(ctx.rollsDots).toBe(true);
+    runAt(ctx, effectOf(ctx, 0));
+    expect(pulsesOf(untilPulse(ctx))[0]?.hits).toBe(5);
     for (let n = 0; n < 5; n++) twin.effectsRng.chance(0.5);
     expect(rngPositions(ctx)).toEqual(rngPositions(twin));
+    const applies = chance === 1 || scoped.length > 0;
     for (const e of ctx.enemies) {
-      expect([e.burnStacks, e.poisonStacks, e.bleedUntil, e.shockStacks, e.frost]).toEqual([
-        0, 0, 0, 0, 0,
-      ]);
+      expect([e.burnStacks, e.poisonStacks, e.bleedUntil > 0, e.shockStacks]).toEqual(
+        applies ? [1, 1, true, 1] : [0, 0, false, 0],
+      );
     }
   });
 
@@ -435,6 +493,200 @@ describe('zone hits and terms', () => {
       effectOf(ctx, 1),
       2,
       FIRST + 1,
+    ]);
+  });
+});
+
+describe('zone hit ailments (Q4 B)', () => {
+  const heal: TriggerSpec['do'] = [{ kind: 'heal', lifePct: 0.01 }];
+
+  /** zoneStats, with each trigger of its own source. */
+  const sourced = (
+    triggers: readonly (readonly [string, TriggerSpec])[],
+    values: Partial<Record<StatId, number>> = {},
+  ): StatBlock =>
+    makeStats({ damage: 400, critChance: 0, critMultiplier: 2, ...values }, [], {
+      triggers: triggers.map(([source, spec]) => ({ source, spec })),
+      conversions: [],
+      emitters: [],
+    });
+
+  it('a zone without damage rolls nothing, adds no burn credit and applies only its term', () => {
+    const spec: GroundZoneSpec = { ...ZONE, damagePctPerSec: 0, ailment: 'poison' };
+    // A fusion zone, whose ignites would be credited apart from the signature's.
+    const ctx = placedEnemies([near(0, 0), near(10, 0)], {
+      stats: sourced([['fusion.fire.poison', idle(spec)]], { ...HALF, frostOnHit: 0.3 }),
+    });
+    const effect = effectOf(ctx, 0);
+    const p = ctx.effectPayloads[effect] as Payload;
+    expect([p.aggregate, p.rollsAilments]).toEqual([true, false]);
+    // The signature stays the build's only burn applier.
+    expect(ctx.burnMixed).toBe(false);
+    runAt(ctx, effect);
+    const before = rngPositions(ctx);
+    untilPhase(ctx, 1);
+    expect(rngPositions(ctx)).toEqual(before);
+    for (const e of ctx.enemies) {
+      expect([
+        e.hitMark,
+        e.burnStacks,
+        e.poisonStacks,
+        e.bleedUntil,
+        e.shockStacks,
+        e.frost,
+      ]).toEqual([0, 0, 1, 0, 0, 0]);
+    }
+  });
+
+  it.each([
+    ['fusion.fire.aura', 1, true],
+    ['fusion.fire.aura', 0, false],
+    ['outer.fire', 1, false],
+    ['outer.fire', 0, false],
+  ] as const)(
+    'a %s zone of damagePctPerSec %i beside the signature mixes the burn credits: %s',
+    (source, damagePctPerSec, mixed) => {
+      const spec: GroundZoneSpec = { ...ZONE, damagePctPerSec };
+      const ctx = placedEnemies([], { stats: sourced([[source, idle(spec)]]) });
+      const p = ctx.effectPayloads[effectOf(ctx, 0)] as Payload;
+      expect(p.rollsAilments).toBe(damagePctPerSec > 0);
+      // A damaging zone is a burn applier; only a fusion's credit differs from the signature's
+      // (ailmentCredit gives every other applier's burns the same credit).
+      expect(ctx.burnMixed).toBe(mixed);
+    },
+  );
+
+  it('raises the ailment events of hitWithPayload on a copy, no hit event, and a hit-only total', () => {
+    const values = { ...HALF, frostOnHit: 0.3 };
+    const placed = [0, 10, 20, 30, 40, 45].map((dx) => near(dx, 0));
+    const ctx = placedEnemies(placed, { stats: zoneStats([idle(ZONE)], values) });
+    const copy = placedEnemies(placed, { stats: zoneStats([idle(ZONE)], values) });
+    runAt(ctx, effectOf(ctx, 0));
+    const before = ctx.enemies.map((e) => e.hp);
+    const events = untilPulse(ctx);
+    // The copy's hits: at the pulse's tick and scale, at the zone's depth 0 from no trigger.
+    copy.now = ctx.now;
+    const p = copy.effectPayloads[effectOf(copy, 0)] as Payload;
+    for (const e of copy.enemies) hitWithPayload(copy, e, p, 0, 0.25, null, null, false, 0, -1);
+    expect(events.filter((event) => event.type !== 'pulse')).toEqual(copy.events);
+    expect(ctx.enemies.map((e) => e.hp)).toEqual(copy.enemies.map((e) => e.hp));
+    expect(events.some((event) => event.type === 'hit')).toBe(false);
+    const count = (type: SimEvent['type']): number =>
+      events.filter((event) => event.type === type).length;
+    const held = (has: (e: Enemy) => boolean): number => ctx.enemies.filter(has).length;
+    expect(count('ignite')).toBe(held((e) => e.burnStacks > 0));
+    expect(count('ailmentApplied')).toBe(
+      held((e) => e.poisonStacks > 0) +
+        held((e) => e.bleedUntil > 0) +
+        held((e) => e.shockStacks > 0),
+    );
+    expect([count('ignite'), count('ailmentApplied')].every((n) => n > 0)).toBe(true);
+    // The pulse's total is what its hits took; the burns they lit deal theirs at the burn step.
+    const pulse = pulsesOf(events)[0] as PulseEvent;
+    let lost: Num = ZERO;
+    ctx.enemies.forEach((e, n) => {
+      lost = add(lost, sub(before[n] as Num, e.hp));
+    });
+    expect(pulse.total).toBe(lost);
+    expect(toNumber(pulse.total)).toBe(100 * 6 + 100 * pulse.crits.length);
+  });
+
+  it.each([1, MAX_DEPTH])(
+    'a zone at depth %i queues the ailmentApplied triggers its ignites fire one deeper, not its own',
+    (depth) => {
+      const onBurn: TriggerSpec['when'] = [{ ailment: 'burn' }];
+      const ctx = placedEnemies([near(0, 0), near(10, 0)], {
+        stats: zoneStats(
+          [
+            { on: 'ailmentApplied', when: onBurn, do: [ZONE] },
+            { on: 'ailmentApplied', when: onBurn, do: heal },
+          ],
+          { igniteChance: 1 },
+        ),
+      });
+      // The zone of the first trigger, made by its entry at `depth`: that trigger is the origin
+      // of its hits' ignites, so rule 3 keeps it from firing on them.
+      runAt(ctx, effectOf(ctx, 0), Z.x, Z.y, { depth, origin: FIRST });
+      untilPulse(ctx);
+      expect(ctx.enemies.map((e) => e.burnStacks)).toEqual([1, 1]);
+      const heals = [effectOf(ctx, 1), depth + 1, FIRST + 1];
+      expect(queuedOf(ctx)).toEqual(depth < MAX_DEPTH ? [heals, heals] : []);
+    },
+  );
+
+  it('applies the rolled ailments of a quiet pulse, and they fire their triggers', () => {
+    const ctx = placedEnemies([near(0, 0), near(10, 0)], {
+      stats: zoneStats(
+        [
+          idle(ZONE),
+          { on: 'hit', when: [{ hitIs: 'signature' }], do: heal },
+          { on: 'ailmentApplied', when: [{ ailment: 'burn' }], do: heal },
+        ],
+        { igniteChance: 1 },
+      ),
+    });
+    runAt(ctx, effectOf(ctx, 0));
+    const events = untilPulse(ctx);
+    expect(ctx.sys.pulse.quiet).toBe(true);
+    expect(ctx.enemies.map((e) => e.burnStacks)).toEqual([1, 1]);
+    expect(events.filter((event) => event.type === 'ignite')).toHaveLength(2);
+    // The ailmentApplied trigger queues a heal per ignite; the hit trigger takes no zone hit.
+    const heals = [effectOf(ctx, 2), 1, FIRST + 2];
+    expect(queuedOf(ctx)).toEqual([heals, heals]);
+  });
+
+  it.each([1, 2])(
+    'a damaging poison zone of %i stacks adds its hit’s rolled stack, then its own',
+    (stacks) => {
+      const spec: GroundZoneSpec = { ...ZONE, ailment: 'poison', ailmentStacks: stacks };
+      const ctx = placedEnemies([near(0, 0), near(10, 0)], {
+        stats: zoneStats([idle(spec)], { igniteChance: 0, poisonChance: 1 }),
+      });
+      runAt(ctx, effectOf(ctx, 0));
+      for (let pulse = 1; pulse <= 2; pulse++) {
+        const events = untilPulse(ctx);
+        for (const e of ctx.enemies) {
+          expect(e.poisonStacks).toBe(pulse * (1 + stacks));
+          const applied = events.flatMap((event) =>
+            event.type === 'ailmentApplied' && event.targetId === e.id ? [event.stacks] : [],
+          );
+          // The roll's stack comes first: 1 then 1 + stacks, not stacks then 1 + stacks.
+          const first = (pulse - 1) * (1 + stacks);
+          expect(applied).toEqual([first + 1, first + 1 + stacks]);
+        }
+      }
+    },
+  );
+
+  it('freezes each enemy once a pulse through frostOnHit 1 and a frost term', () => {
+    const spec: GroundZoneSpec = { ...ZONE, addFrostPerSec: 2 };
+    const ctx = placedEnemies([near(0, 0), near(10, 0)], {
+      stats: zoneStats([idle(spec)], { igniteChance: 0, frostOnHit: 1 }),
+    });
+    runAt(ctx, effectOf(ctx, 0));
+    const events = untilPulse(ctx);
+    // frostOnHit fills each meter, before the term; a frozen enemy takes no more frost.
+    const freezes = events.flatMap((event) => (event.type === 'freeze' ? [event.targetId] : []));
+    expect(freezes).toEqual([1, 2]);
+    for (const e of ctx.enemies) expect(e.frozenUntil).toBeGreaterThan(ctx.now);
+  });
+
+  it('replaces the burn with the least damage left when its ignite meets the records cap', () => {
+    const ctx = placedEnemies([near(0, 0)], {
+      stats: zoneStats([idle(ZONE)], { igniteChance: 1, burnMaxStacks: 2 }),
+    });
+    const e = enemy(ctx, 1);
+    applyBurn(ctx, e, num(1000), 600, 0, ctx.burnCredit, 1);
+    applyBurn(ctx, e, num(1), 600, 0, ctx.burnCredit, 1);
+    runAt(ctx, effectOf(ctx, 0));
+    const events = untilPulse(ctx);
+    // The zone's burn: its hit's 100 × burnDamage, for burnDuration.
+    expect(e.burns.map((stack) => [toNumber(stack.dps), stack.end])).toEqual([
+      [1000, 600],
+      [100 * ctx.burnDamage, ctx.now + ctx.burnTicks],
+    ]);
+    expect(events.filter((event) => event.type === 'ignite')).toEqual([
+      { type: 'ignite', targetId: 1, stacks: 2 },
     ]);
   });
 });
@@ -616,24 +868,108 @@ describe('the zone stage', () => {
 });
 
 describe('hitPulse', () => {
-  /** A seeded run of fixtures: random hp, shock and freeze, crits, hooks and listeners. */
-  const FIXTURES = Array.from({ length: 24 }, (_, n) => n);
+  /**
+   * A seeded run of fixtures: random hp, shock and freeze, crits, hooks and listeners, and from
+   * C4.6c the rolls of rollsOf.
+   */
+  const FIXTURES = Array.from({ length: 48 }, (_, n) => n);
+  /** The chances of the rolls: 0 and 1 draw nothing, .3 and .7 draw one chance each. */
+  const CHANCES = [0, 0.3, 0.7, 1] as const;
+  const heal: TriggerSpec['do'] = [{ kind: 'heal', lifePct: 0.01 }];
+  /**
+   * Modifiers that set the burn row apart from the hit row and a crit's rows from a plain hit's:
+   * a burn reads its damage on its own slot row, a crit's burn on the crit one, and a crit's
+   * frostOnHit on the crit row.
+   */
+  const ROW_MODS: readonly Modifier[] = [
+    { stat: 'damage', kind: 'more', value: 1, tags: ['burn'] },
+    { stat: 'damage', kind: 'more', value: 0.5, tags: ['burn', 'crit'] },
+    { stat: 'frostOnHit', kind: 'flat', value: 0.2, tags: ['crit'] },
+  ];
+
+  /**
+   * The rolls of fixture n (C4.6c, Q4 (B)): crit, ignite, poison, bleed and shock chances from
+   * CHANCES, each taking every value, and crit every pair with ignite and with shock, in any 16
+   * fixtures in a row; the always rows on every seventh; frostOnHit 0, .3 or 1, with a freeze
+   * listener when above 0; an ailmentApplied trigger on one ailment; the burn and crit rows told
+   * apart (ROW_MODS) on half; burn rings (eternalFlame) on five fixtures in ten; burnMaxStacks 2
+   * on every third, whose even enemies start at that cap; and a payload copy that rolls no
+   * ailments on every fifth.
+   */
+  function rollsOf(n: number) {
+    const [a, b] = [n % 4, Math.floor(n / 4) % 4];
+    const chance = (k: number): number => CHANCES[(a + k * b) % 4] as number;
+    const frostOnHit = [0, 0.3, 1][Math.floor(n / 2) % 3] as number;
+    const capped = n % 3 === 1;
+    const ailment = (['burn', 'poison', 'bleed', 'shock'] as const)[Math.floor(n / 3) % 4];
+    const listeners: TriggerSpec[] = [
+      { on: 'ailmentApplied', when: [{ ailment: ailment ?? 'burn' }], do: heal },
+    ];
+    if (frostOnHit > 0) listeners.push({ on: 'freeze', do: heal });
+    return {
+      values: {
+        critChance: chance(0),
+        igniteChance: chance(1),
+        poisonChance: chance(2),
+        bleedChance: chance(3),
+        shockChance: CHANCES[b] as number,
+        frostOnHit,
+        ...(capped ? { burnMaxStacks: 2 } : {}),
+      },
+      scoped: [...(n % 7 === 3 ? ALWAYS : []), ...(Math.floor(n / 3) % 2 === 1 ? ROW_MODS : [])],
+      rules: Math.floor(n / 5) % 2 === 1 ? [{ id: 'eternalFlame' as const, durationMore: 0 }] : [],
+      listeners,
+      /** The payload hitPulse and hitWithPayload both take. */
+      payload: (p: Payload): Payload => (n % 5 === 4 ? { ...p, rollsAilments: false } : p),
+      /** Burns of dps 1000 and 1 on every even enemy: the cap, where an ignite replaces the 1. */
+      prepare(ctx: RunContext): void {
+        if (!capped) return;
+        ctx.enemies.forEach((e, k) => {
+          if (k % 2 !== 0) return;
+          applyBurn(ctx, e, num(1000), 600, 0, ctx.burnCredit, 1);
+          applyBurn(ctx, e, num(1), 600, 0, ctx.burnCredit, 1);
+        });
+        ctx.events.length = 0;
+      },
+    };
+  }
+
+  /**
+   * What the rolls change, beside each test's own list: the enemies whole, the ring pool (its
+   * arrays as strings, which compare far faster), the queued entries and the applied flags.
+   */
+  const rolledState = (ctx: RunContext) => ({
+    enemies: ctx.enemies.map(({ def: _def, rec: _rec, ...e }) => e),
+    rings: Object.entries(ctx.rings).map(([key, v]: [string, unknown]) => [
+      key,
+      ArrayBuffer.isView(v) ? String(v) : v,
+    ]),
+    queued: queuedOf(ctx),
+    applied: [ctx.bleedApplied, ctx.frostApplied],
+    freezeLimiter: ctx.freezeLimiter,
+    damage: [ctx.damageBurn, ctx.damagePoison, ctx.damageBleed],
+  });
 
   it.each(FIXTURES)('equals hitWithPayload on an aggregate payload (fixture %i)', (n) => {
     const r = createStreams(1000 + n).spawn;
+    const rolls = rollsOf(n);
     const values = {
-      critChance: [0, 0.4, 1][n % 3] as number,
+      ...rolls.values,
       critMultiplier: 1.5 + r.next(),
       frozenDamageTaken: 0.5,
       shockEffect: 0.2,
     };
-    const scoped: Modifier[] =
-      n % 4 === 0 ? [{ stat: 'damage', kind: 'more', value: 0.5, tags: ['zone'] }] : [];
+    const scoped: Modifier[] = [
+      ...(n % 4 === 0
+        ? [{ stat: 'damage', kind: 'more', value: 0.5, tags: ['zone'] } as const]
+        : []),
+      ...rolls.scoped,
+    ];
     const conversions =
       n % 5 === 0 ? [{ source: 'center', spec: { to: 'cold' as const, fraction: 0.4 } }] : [];
-    const triggers: TriggerSpec[] = [idle(ZONE)];
-    if (n % 2 === 1) triggers.push({ on: 'hit', do: [{ kind: 'heal', lifePct: 0.01 }] });
-    if (n % 3 === 2) triggers.push({ on: 'crit', do: [{ kind: 'heal', lifePct: 0.01 }] });
+    const triggers: TriggerSpec[] = [idle(ZONE), ...rolls.listeners];
+    if (n % 2 === 1) triggers.push({ on: 'hit', do: heal });
+    if (n % 3 === 2) triggers.push({ on: 'crit', do: heal });
     const hooks: TestModule[] =
       n % 6 === 1
         ? [(b) => b.hook('modifyDamage', (_ctx, _hit, amount) => add(amount, num(7)))]
@@ -641,12 +977,23 @@ describe('hitPulse', () => {
     const placed = Array.from({ length: 10 }, (_, k) =>
       near(4 * k, 0, { hp: Math.round(50 + r.next() * 300) }),
     );
+    // On every fourth from 2 the zone is a fusion's, whose burns are credited apart (burnMixed).
+    const fused = n % 4 === 2;
     const make = (): RunContext => {
       const stats = makeStats({ damage: 400, ...values }, scoped, {
         ...centerTriggers(triggers),
+        triggers: triggers.map((spec, k) => ({
+          source: fused && k === 0 ? 'fusion.fire.aura' : 'center',
+          spec,
+        })),
         conversions,
       });
-      const ctx = placedEnemies(placed, { stats, modules: hooks, seed: 7 + n });
+      const ctx = placedEnemies(placed, {
+        stats,
+        rules: rolls.rules,
+        modules: hooks,
+        seed: 7 + n,
+      });
       ctx.enemies.forEach((e, k) => {
         if (k % 3 === 0) {
           e.shockStacks = 2;
@@ -654,14 +1001,15 @@ describe('hitPulse', () => {
         }
         if (k % 4 === 1) e.frozenUntil = 1000;
       });
+      rolls.prepare(ctx);
       return ctx;
     };
     const a = make();
     const b = make();
     const scale = 0.25 + r.next();
-    const pa = a.effectPayloads[effectOf(a, 0)] as Payload;
-    const pb = b.effectPayloads[effectOf(b, 0)] as Payload;
-    expect(pa.aggregate).toBe(true);
+    const pa = rolls.payload(a.effectPayloads[effectOf(a, 0)] as Payload);
+    const pb = rolls.payload(b.effectPayloads[effectOf(b, 0)] as Payload);
+    expect([pa.aggregate, a.burnMixed]).toEqual([true, fused]);
     hoistPulseRows(a, a.sys.pulse, pa);
     for (let k = 0; k < a.enemies.length; k++) {
       const [ea, eb] = [a.enemies[k] as Enemy, b.enemies[k] as Enemy];
@@ -677,6 +1025,8 @@ describe('hitPulse', () => {
       events: ctx.events.slice(),
       queue: ctx.effectQueue.size,
       life: ctx.player.life,
+      counters: { ...ctx.counters },
+      ...rolledState(ctx),
     });
     expect(state(a)).toEqual(state(b));
     expect(a.events.some((event) => event.type === 'hit')).toBe(false);
@@ -687,32 +1037,36 @@ describe('hitPulse', () => {
     'equals hitWithPayload when every hit and crit trigger takes only signature hits (fixture %i)',
     (n) => {
       const r = createStreams(2000 + n).spawn;
-      const heal: TriggerSpec['do'] = [{ kind: 'heal', lifePct: 0.01 }];
+      const rolls = rollsOf(n);
       const triggers: TriggerSpec[] = [idle(ZONE)];
-      // Hit triggers, crit triggers or both; crit chance 0, .4 or 1; depth 1 or MAX_DEPTH, at
-      // which fire counts each listened event in triggerDepthCapped: every mix in 18 fixtures.
-      const listens = Math.floor(n / 6) % 3;
+      // Hit triggers, crit triggers or both; crit chance from CHANCES; depth 1 or MAX_DEPTH, at
+      // which fire counts each listened event in triggerDepthCapped: every mix in 24 fixtures.
+      const listens = n % 3;
       if (listens !== 2) triggers.push({ on: 'hit', when: [{ hitIs: 'signature' }], do: heal });
       if (listens !== 1) triggers.push({ on: 'crit', when: [{ hitIs: 'signature' }], do: heal });
-      const critChance = [0, 0.4, 1][Math.floor(n / 2) % 3] as number;
-      const depth = n % 2 === 0 ? 1 : MAX_DEPTH;
+      const depth = Math.floor(n / 12) % 2 === 0 ? 1 : MAX_DEPTH;
+      // The rolls' ailmentApplied and freeze triggers, which quiet leaves alone, queue at depth 1
+      // only: at MAX_DEPTH their events would count in triggerDepthCapped too.
+      if (depth === 1) triggers.push(...rolls.listeners);
       // Some survive their hit, whose dispatch is the quiet one, and some die of it.
       const placed = Array.from({ length: 10 }, (_, k) =>
         near(4 * k, 0, { hp: Math.round(50 + r.next() * 600) }),
       );
       const make = (): RunContext => {
         const stats = makeStats(
-          { damage: 400, critChance, critMultiplier: 2 },
-          [],
+          { damage: 400, critMultiplier: 2, ...rolls.values },
+          rolls.scoped,
           centerTriggers(triggers),
         );
-        return placedEnemies(placed, { stats, seed: 11 + n });
+        const ctx = placedEnemies(placed, { stats, rules: rolls.rules, seed: 11 + n });
+        rolls.prepare(ctx);
+        return ctx;
       };
       const a = make();
       const b = make();
       const scale = 0.1 + 0.6 * r.next();
-      const pa = a.effectPayloads[effectOf(a, 0)] as Payload;
-      const pb = b.effectPayloads[effectOf(b, 0)] as Payload;
+      const pa = rolls.payload(a.effectPayloads[effectOf(a, 0)] as Payload);
+      const pb = rolls.payload(b.effectPayloads[effectOf(b, 0)] as Payload);
       hoistPulseRows(a, a.sys.pulse, pa);
       expect(a.sys.pulse.quiet).toBe(true);
       for (let k = 0; k < a.enemies.length; k++) {
@@ -732,6 +1086,7 @@ describe('hitPulse', () => {
         events: ctx.events.slice(),
         queue: ctx.effectQueue.size,
         triggerState: [ctx.triggerState.readyAt.slice(), ctx.triggerState.count.slice()],
+        ...rolledState(ctx),
       });
       expect(state(a)).toEqual(state(b));
       // Each hit's events, lethal or not, reach fire once: at MAX_DEPTH each listened one counts.
@@ -776,8 +1131,11 @@ describe('zone pool against a model (K5, C8)', () => {
     'raises the model events, in order, through evictions, expiry and reused slots (seed %i)',
     (seed) => {
       const r = createStreams(seed).spawn;
-      // One enemy in every zone; it never dies, so each pulse hits it once.
-      const ctx = placedEnemies([near(0, 0, { hp: 1e15 })], { stats: zoneStats([idle(ZONE)]) });
+      // One enemy in every zone; it never dies, so each pulse hits it once. Its hits roll no
+      // ailment (igniteChance 0), so each pulse raises its pulse event only.
+      const ctx = placedEnemies([near(0, 0, { hp: 1e15 })], {
+        stats: zoneStats([idle(ZONE)], { igniteChance: 0 }),
+      });
       const effect = effectOf(ctx, 0);
       const p = ctx.effectPayloads[effect] as Payload;
       const zones = ctx.sys.zones;
