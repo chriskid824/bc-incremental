@@ -6,13 +6,14 @@ import type { Modifier, StatBlock, StatId } from '../../data/stats';
 import type { GroundZoneSpec, TriggerSpec } from '../../data/triggers';
 import { applyBurn } from '../ailments/apply';
 import { enemySlow } from '../ailments/frost';
+import { RING_POISON } from '../ailments/rings';
 import { compileCondition, conditionsMet, IN_ZONE } from '../build/eval';
 import { PULSE_TICKS, SIGNATURE_ZONE_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../caps';
 import { hitWithPayload } from '../combat/hit';
 import { createEffectEntry } from '../effects/queue';
 import { runEffect, runEffectQueue } from '../effects/execute';
-import { SIGNATURE } from '../effects/flags';
-import { MAX_DEPTH, SHATTER_TRIGGER } from '../effects/types';
+import { CRIT_HIT, HIT_EVENT, SIGNATURE } from '../effects/flags';
+import { EVENT, MAX_DEPTH, SHATTER_TRIGGER } from '../effects/types';
 import type { CompiledTrigger } from '../effects/types';
 import type { Payload } from '../emitters/types';
 import type { TestModule } from '../rules';
@@ -445,6 +446,25 @@ describe('zone hits and terms', () => {
     expect(enemy(ctx, 1).alive).toBe(pulse.crits.includes(1) ? false : true);
   });
 
+  it('lists only its own crits in each pulse event, fewer than its hits and than the last’s', () => {
+    // Hits on normal enemies crit, the boss's never; enemy 2 dies of the first pulse's crit.
+    const onNormal: Modifier = {
+      stat: 'critChance',
+      kind: 'flat',
+      value: 1,
+      when: [{ targetKind: 'normal' }],
+    };
+    const placed = [near(0, 0), near(10, 0, { hp: 150 }), near(20, 0, { type: 'boss' })];
+    const ctx = placedEnemies(placed, { stats: zoneStats([idle(ZONE)], {}, [onNormal]) });
+    runAt(ctx, effectOf(ctx, 0));
+    expect(pulsesOf(untilPulse(ctx))).toMatchObject([{ hits: 3, crits: [1, 2] }]);
+    expect(enemy(ctx, 2).alive).toBe(false);
+    // Each pulse counts its crits from 0 and its event takes crits[0 .. critCount): not
+    // [1, 2, 1] (the last pulse's count kept), nor [1, 2] (the stale 2 past it).
+    expect(pulsesOf(untilPulse(ctx))).toMatchObject([{ hits: 2, crits: [1] }]);
+    expect(ctx.sys.pulse.crits).toEqual([1, 2]);
+  });
+
   it('hits every enemy within it exactly once a pulse while it freezes them (P11)', () => {
     const spec: GroundZoneSpec = { ...ZONE, radius: 90, addFrostPerSec: 8 };
     const crowd = Array.from({ length: 12 }, (_, n) =>
@@ -510,6 +530,16 @@ describe('zone hit ailments (Q4 B)', () => {
       conversions: [],
       emitters: [],
     });
+
+  /** Every hit ailment on crits only: its chance at 1, or its always stat. */
+  const ON_CRITS = {
+    chances: (['igniteChance', 'poisonChance', 'bleedChance', 'shockChance'] as const).map(
+      (stat): Modifier => ({ stat, kind: 'flat', value: 1, tags: ['crit'] }),
+    ),
+    'always stats': ALWAYS.map((mod): Modifier => ({ ...mod, tags: ['crit'] })),
+  };
+  /** Every hit ailment chance at 0 (BASE_STATS has igniteChance .1). */
+  const NO_AILMENTS = { igniteChance: 0, poisonChance: 0, bleedChance: 0, shockChance: 0 };
 
   it('a zone without damage rolls nothing, adds no burn credit and applies only its term', () => {
     const spec: GroundZoneSpec = { ...ZONE, damagePctPerSec: 0, ailment: 'poison' };
@@ -687,6 +717,86 @@ describe('zone hit ailments (Q4 B)', () => {
     ]);
     expect(events.filter((event) => event.type === 'ignite')).toEqual([
       { type: 'ignite', targetId: 1, stacks: 2 },
+    ]);
+  });
+
+  it.each([
+    ['chances', 0],
+    ['chances', 1],
+    ['always stats', 0],
+    ['always stats', 1],
+  ] as const)(
+    'rolls its ailments on the row of the crit roll’s outcome: %s on crits, crit chance %i',
+    (kind, critChance) => {
+      const ctx = placedEnemies([near(0, 0), near(10, 0)], {
+        stats: zoneStats([idle(ZONE)], { ...NO_AILMENTS, critChance }, ON_CRITS[kind]),
+      });
+      expect(ctx.rollsDots).toBe(true);
+      runAt(ctx, effectOf(ctx, 0));
+      const [pulse] = pulsesOf(untilPulse(ctx));
+      expect(pulse?.crits).toEqual(critChance === 1 ? [1, 2] : []);
+      // Ignite, then poison, bleed and shock (rollDots), read on the crit row: only crits apply.
+      for (const e of ctx.enemies) {
+        expect([e.burnStacks, e.poisonStacks, e.bleedUntil > 0, e.shockStacks]).toEqual(
+          critChance === 1 ? [1, 1, true, 1] : [0, 0, false, 0],
+        );
+      }
+    },
+  );
+
+  it('applies a crit’s poison and bleed on their crit rows', () => {
+    // A crit's poison and bleed deal 'more 1', past the crit multiplier (2) of its base.
+    const scoped = (['poison', 'bleed'] as const).map((dot): Modifier => ({
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      tags: [dot, 'crit'],
+    }));
+    const dots = (critChance: number): number[] => {
+      const ctx = placedEnemies([near(0, 0)], {
+        stats: zoneStats(
+          [idle(ZONE)],
+          { ...NO_AILMENTS, critChance, poisonChance: 1, bleedChance: 1 },
+          scoped,
+        ),
+      });
+      runAt(ctx, effectOf(ctx, 0));
+      untilPulse(ctx);
+      const e = enemy(ctx, 1);
+      // The damage the poison ring (the center's) has yet to deal, and the bleed's dps.
+      return [ctx.rings.remaining[e.rings[RING_POISON] as number] as number, toNumber(e.bleedDps)];
+    };
+    const plain = dots(0);
+    expect(plain.every((n) => n > 0)).toBe(true);
+    expect(dots(1)).toEqual(plain.map((n) => 4 * n));
+  });
+
+  it('raises a freeze with its hit’s flags, which carry CRIT_HIT on a crit', () => {
+    // No trigger condition on freeze reads hit flags (hitIs takes hit, crit and kill events);
+    // an onCenterEvent hook sees them.
+    const freezes = (critChance: number): [number, boolean, boolean][] => {
+      const seen: [number, boolean, boolean][] = [];
+      const spy: TestModule = (b) =>
+        b.hook('onCenterEvent', (_ctx, ev) => {
+          if (ev.event !== EVENT.freeze) return;
+          const flags = ev.flags;
+          seen.push([ev.target?.id ?? 0, (flags & HIT_EVENT) !== 0, (flags & CRIT_HIT) !== 0]);
+        });
+      const ctx = placedEnemies([near(0, 0), near(10, 0)], {
+        stats: zoneStats([idle(ZONE)], { ...NO_AILMENTS, critChance, frostOnHit: 1 }),
+        modules: [spy],
+      });
+      runAt(ctx, effectOf(ctx, 0));
+      untilPulse(ctx);
+      return seen;
+    };
+    expect(freezes(0)).toEqual([
+      [1, true, false],
+      [2, true, false],
+    ]);
+    expect(freezes(1)).toEqual([
+      [1, true, true],
+      [2, true, true],
     ]);
   });
 });
