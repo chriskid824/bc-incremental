@@ -31,11 +31,45 @@ export type RuleSpec =
       readonly chainMore?: number;
     }
   /** All damage gets (1 + damageMore); max life becomes 1. */
-  | { readonly id: 'glassCannon'; readonly damageMore: number };
+  | { readonly id: 'glassCannon'; readonly damageMore: number }
+  /**
+   * 遠投 (magmaBomb): every `every`th bomb is thrown at the farthest enemy in the arena instead
+   * of a crowded spot. Of several instances, the smallest `every`.
+   */
+  | { readonly id: 'farThrow'; readonly every: number }
+  /**
+   * 火山 (magmaBomb): the bombs are thrown every periodSec at the base attack speed instead, each
+   * of radiusMult × the radius (its fire zone too) and damageMult × the damage of its explosion
+   * hits. The first instance's.
+   */
+  | {
+      readonly id: 'volcano';
+      readonly periodSec: number;
+      readonly radiusMult: number;
+      readonly damageMult: number;
+    }
+  /**
+   * 連環爆 (magmaBomb): an enemy a bomb's explosion kills explodes too, at most perBomb of them a
+   * bomb: radius and damagePct of the damage stat. The first instance's.
+   */
+  | {
+      readonly id: 'chainBlast';
+      readonly radius: number;
+      readonly damagePct: number;
+      readonly perBomb: number;
+    };
 
 export type RuleId = RuleSpec['id'];
 
-export const RULE_IDS: readonly RuleId[] = ['steadyAim', 'eternalFlame', 'overload', 'glassCannon'];
+export const RULE_IDS: readonly RuleId[] = [
+  'steadyAim',
+  'eternalFlame',
+  'overload',
+  'glassCannon',
+  'farThrow',
+  'volcano',
+  'chainBlast',
+];
 
 /**
  * A character's signature attack: the emitter at index 0 of the run (src/sim/rules/, SIGNATURES),

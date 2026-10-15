@@ -363,6 +363,23 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       })
       .readonly(),
     z.strictObject({ id: z.literal('glassCannon'), damageMore: finite }).readonly(),
+    z.strictObject({ id: z.literal('farThrow'), every: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('volcano'),
+        periodSec: finite,
+        radiusMult: finite,
+        damageMult: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('chainBlast'),
+        radius: finite,
+        damagePct: finite,
+        perBomb: finite,
+      })
+      .readonly(),
   ]),
 );
 

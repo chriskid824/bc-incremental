@@ -13,9 +13,9 @@ import { liveStacks } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
 import { PROJECTILE_CAP, SIGNATURE_ZONE_CAP } from '../caps';
 import { runEffect, runEffectQueue } from '../effects/execute';
-import { HIT_EVENT, PRIMARY, SIGNATURE } from '../effects/flags';
+import { HIT_EVENT, PRIMARY, REPEAT, SIGNATURE } from '../effects/flags';
 import { createEffectEntry, dequeue } from '../effects/queue';
-import { EVENT, SHATTER_TRIGGER } from '../effects/types';
+import { EVENT, MAX_DEPTH, SHATTER_TRIGGER } from '../effects/types';
 import type { CompiledTrigger } from '../effects/types';
 import type { TestModule } from '../rules';
 import { magmaBomb } from '../rules/magmaBomb';
@@ -38,7 +38,17 @@ import {
 import type { PlacedEnemy } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, NO_INPUT, TICK_RATE } from '../types';
 import type { SimEvent } from '../types';
-import { aimDense, beginAim, launch, LOB_NORMAL, runLob } from './lob';
+import {
+  aimDense,
+  aimFar,
+  beginAim,
+  isFar,
+  launch,
+  LOB_FAR,
+  LOB_NORMAL,
+  LOB_VOLCANO,
+  runLob,
+} from './lob';
 import { ALWAYS_IGNITES } from './types';
 import type { EmitterRuntime, EmitterSpec, LobSpec, Payload } from './types';
 
@@ -129,14 +139,22 @@ const fire = (ctx: RunContext): void => {
 
 /**
  * Lobs a bomb of the signature at `at`, landing FLIGHT ticks from now, its hits at `depth` from
- * trigger `origin` (0 and −1, the emitter's own, by default).
+ * trigger `origin` (0 and −1, the emitter's own, by default), of form `form` and payload `p`
+ * (a normal bomb of the emitter's payload by default).
  */
-const launchAt = (ctx: RunContext, at: { x: number; y: number }, depth = 0, origin = -1): void => {
+const launchAt = (
+  ctx: RunContext,
+  at: { x: number; y: number },
+  depth = 0,
+  origin = -1,
+  form = LOB_NORMAL,
+  p: Payload = lobOf(ctx).payload,
+): void => {
   const em = lobOf(ctx);
   const ls = ctx.sys.lob;
   ls.x = at.x;
   ls.y = at.y;
-  launch(ctx, em, em.payload, LOB_NORMAL, false, depth, origin);
+  launch(ctx, em, p, form, false, depth, origin);
 };
 
 /**
@@ -1402,5 +1420,539 @@ describe('the explode center event', () => {
     const first = runOnce();
     expect(eventsOf([first], 'explosion').length).toBeGreaterThan(10);
     expect(runOnce()).toEqual(first);
+  });
+});
+
+const FAR_THROW = (every = 4): RuleSpec => ({ id: 'farThrow', every });
+const VOLCANO: RuleSpec = { id: 'volcano', periodSec: 3, radiusMult: 3, damageMult: 5 };
+const CHAIN_BLAST = (perBomb = 2): RuleSpec => ({
+  id: 'chainBlast',
+  radius: 40,
+  damagePct: 0.5,
+  perBomb,
+});
+
+/** The form of each lob event of `ctx`'s events, firing by firing of `firings` firings. */
+function formsByFiring(ctx: RunContext, firings: number): number[][] {
+  return Array.from({ length: firings }, () => {
+    ctx.events.length = 0;
+    fire(ctx);
+    return eventsOf([ctx.events], 'lob').map((lob) => lob.form);
+  });
+}
+
+/** The ids of the enemies each lob event of `events` lands on, by its rounded landing point. */
+function landedOn(ctx: RunContext, events: readonly SimEvent[]): number[] {
+  return eventsOf([events], 'lob').map((lob) => {
+    const at = ctx.enemies.find(
+      (e) => Math.round(e.x) === Math.round(lob.x) && Math.round(e.y) === Math.round(lob.y),
+    );
+    return at === undefined ? -1 : at.id;
+  });
+}
+
+describe('遠投 (farThrow; C10, Q3 (B))', () => {
+  /** SALVO, then two far enemies inside the arena (7: 966 away, 8: 888) and one outside it. */
+  const FAR_FIELD: readonly PlacedEnemy[] = [
+    ...SALVO,
+    { x: 100, y: 100 },
+    { x: 200, y: 1000 },
+    { x: -50, y: 540 },
+  ];
+  const N = LOB_NORMAL;
+  const F = LOB_FAR;
+
+  it('counts the shot a bomb will be: every Nth, none at 0', () => {
+    const lob = { farThrowEvery: 4, volcano: null, chainBlast: null, zone: { slow: 0 } };
+    expect([1, 2, 3, 4, 5, 8, 12].map((s) => isFar(lob, s))).toEqual([
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+    ]);
+    expect(isFar({ ...lob, farThrowEvery: 0 }, 4)).toBe(false);
+  });
+
+  it('throws counted bombs 4, 8 and 12 far, one bomb a firing (C10)', () => {
+    const ctx = bombs(FAR_FIELD, { rules: [FAR_THROW()] });
+    const before = rngPositions(ctx);
+    const events: SimEvent[] = [];
+    const forms = Array.from({ length: 12 }, () => {
+      ctx.events.length = 0;
+      fire(ctx);
+      events.push(...ctx.events);
+      return eventsOf([ctx.events], 'lob').map((lob) => lob.form);
+    });
+    expect(forms).toEqual([[N], [N], [N], [F], [N], [N], [N], [F], [N], [N], [N], [F]]);
+    // At the densest enemy, 2, or the farthest inside the arena, 7; never 9, outside it.
+    expect(landedOn(ctx, events)).toEqual([2, 2, 2, 7, 2, 2, 2, 7, 2, 2, 2, 7]);
+    expect([lobOf(ctx).attacks, lobOf(ctx).shots]).toEqual([12, 12]);
+    expect(rngPositions(ctx)).toEqual(before);
+  });
+
+  it('throws the second bombs of firings 2, 4 and 6 far at projectileCount 3, one bomb’s rhythm at 2', () => {
+    const two = bombs(FAR_FIELD, { values: { projectileCount: 3 }, rules: [FAR_THROW()] });
+    expect(formsByFiring(two, 6)).toEqual([
+      [N, N],
+      [N, F],
+      [N, N],
+      [N, F],
+      [N, N],
+      [N, F],
+    ]);
+    const one = bombs(FAR_FIELD, { values: { projectileCount: 2 }, rules: [FAR_THROW()] });
+    expect(formsByFiring(one, 8)).toEqual([[N], [N], [N], [F], [N], [N], [N], [F]]);
+  });
+
+  it('aims two far bombs of one firing at the farthest and the second farthest (projectileCount 9)', () => {
+    const ctx = bombs(FAR_FIELD, { values: { projectileCount: 9 }, rules: [FAR_THROW()] });
+    fire(ctx);
+    // Eight bombs: dense at SALVO's 2, 4 and 1, far at 7, dense at 3, 5 and 6, far at 8.
+    expect(eventsOf([ctx.events], 'lob').map((lob) => lob.form)).toEqual([N, N, N, F, N, N, N, F]);
+    expect(landedOn(ctx, ctx.events)).toEqual([2, 4, 1, 7, 3, 5, 6, 8]);
+    expect([lobOf(ctx).attacks, lobOf(ctx).shots]).toEqual([1, 8]);
+  });
+
+  it('skips the enemies this firing aimed at already, dense bombs’ included', () => {
+    // A dense block of the three farthest enemies; 4 stands nearer, alone.
+    const ctx = bombs(
+      [
+        { x: 100, y: 100 },
+        { x: 130, y: 100 },
+        { x: 100, y: 130 },
+        { x: 1500, y: 540 },
+      ],
+      { values: { projectileCount: 5 }, rules: [FAR_THROW()] },
+    );
+    fire(ctx);
+    expect(eventsOf([ctx.events], 'lob').map((lob) => lob.form)).toEqual([N, N, N, F]);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 2, 3, 4]);
+  });
+
+  /**
+   * One dense block: a trio, 1, 2 and 3, each with 3 enemies within 60, and a pair 150 to the
+   * right, 4 and 5, each with 2. 1 is the farthest from the player and the first of the densest;
+   * only 4 and 5 stand 2 radii from it.
+   */
+  const TRIO_PAIR: readonly PlacedEnemy[] = [
+    { x: 100, y: 100 },
+    { x: 130, y: 100 },
+    { x: 100, y: 130 },
+    { x: 250, y: 100 },
+    { x: 280, y: 100 },
+  ];
+
+  it('keeps the dense bombs 2 radii from a far bomb’s enemy, as from any aimed enemy (D10)', () => {
+    // 4 is the best candidate 2 radii from 1. Every 3rd at 2 bombs a firing: the second
+    // firing's first bomb is far.
+    const ctx = bombs(TRIO_PAIR, { values: { projectileCount: 3 }, rules: [FAR_THROW(3)] });
+    fire(ctx);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 4]);
+    ctx.events.length = 0;
+    fire(ctx);
+    expect(eventsOf([ctx.events], 'lob').map((lob) => lob.form)).toEqual([F, N]);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 4]);
+  });
+
+  it('lets a dense bomb aim at the far bomb’s enemy again once none 2 radii apart is left (Q3/F15)', () => {
+    // Three bombs a firing, every 4th far. Firing 1 is dense: 1, then 4, then (none 2 radii
+    // from both) the best not aimed at, 2. Firing 2's first bomb is far, at 1, which is not
+    // marked aimed: its second goes to 4 as before, and its third to the best candidate no
+    // dense bomb aimed at, 1 again, not 2.
+    const ctx = bombs(TRIO_PAIR, { values: { projectileCount: 4 }, rules: [FAR_THROW()] });
+    fire(ctx);
+    expect(eventsOf([ctx.events], 'lob').map((lob) => lob.form)).toEqual([N, N, N]);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 4, 2]);
+    ctx.events.length = 0;
+    fire(ctx);
+    expect(eventsOf([ctx.events], 'lob').map((lob) => lob.form)).toEqual([F, N, N]);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 4, 1]);
+    expect([lobOf(ctx).attacks, lobOf(ctx).shots]).toEqual([2, 6]);
+  });
+
+  it('lets a dense bomb aim again at the enemy of a far bomb thrown after the dense scan (Q3/F15)', () => {
+    // A trio within one radius of each other, 1 the farthest from the player, then 2. Three
+    // bombs a firing, every 2nd far: dense at 1, far at 2 (1 aimed at already), then, none 2
+    // radii from both, dense at the best candidate no dense bomb aimed at: 2 again, not 3.
+    const ctx = bombs(
+      [
+        { x: 100, y: 100 },
+        { x: 110, y: 90 },
+        { x: 120, y: 110 },
+      ],
+      { values: { projectileCount: 4 }, rules: [FAR_THROW(2)] },
+    );
+    fire(ctx);
+    expect(eventsOf([ctx.events], 'lob').map((lob) => lob.form)).toEqual([N, F, N]);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 2, 2]);
+    expect([lobOf(ctx).attacks, lobOf(ctx).shots]).toEqual([1, 3]);
+  });
+
+  it('aims at the farthest alive enemy inside the arena, edges included, the lower id on ties', () => {
+    const ctx = bombs([
+      { x: 1460, y: 540 },
+      { x: -1, y: 540 },
+      { x: 0, y: 540 },
+      { x: 960, y: 1081 },
+      { x: 1921, y: 540 },
+      { x: 960, y: -1 },
+      { x: 460, y: 540 },
+    ]);
+    const em = lobOf(ctx);
+    const before = rngPositions(ctx);
+    beginAim(ctx, em);
+    const order = Array.from({ length: 4 }, () => aimFar(ctx, em)?.id ?? null);
+    // 3 at x = 0, 960 away; then 1 and 7, both 500 away, the lower id first; then none.
+    expect(order).toEqual([3, 1, 7, null]);
+    expect(ctx.sys.lob.picked.slice(0, ctx.sys.lob.picks).map((e) => e.id)).toEqual([3, 1, 7]);
+    expect(rngPositions(ctx)).toEqual(before);
+    // The dead are skipped; a new firing forgets the picks.
+    enemy(ctx, 3).alive = false;
+    beginAim(ctx, em);
+    expect(aimFar(ctx, em)).toBe(enemy(ctx, 1));
+  });
+
+  it('counts an enemy on the arena’s right and bottom edges as inside it', () => {
+    const ctx = bombs([
+      { x: 1460, y: 540 },
+      { x: ARENA_WIDTH, y: 540 },
+      { x: 960, y: ARENA_HEIGHT },
+    ]);
+    const em = lobOf(ctx);
+    beginAim(ctx, em);
+    // 2, 960 away; then 3, 540; then 1, 500.
+    expect(Array.from({ length: 3 }, () => aimFar(ctx, em)?.id ?? null)).toEqual([2, 3, 1]);
+  });
+
+  it('leads a far bomb’s enemy as a dense bomb’s', () => {
+    const ctx = bombs([{ x: 160, y: 540, speed: 60 }], { rules: [FAR_THROW()] });
+    const em = lobOf(ctx);
+    beginAim(ctx, em);
+    expect(aimFar(ctx, em)).toBe(enemy(ctx, 1));
+    // 800 from the player, 24 ticks of 1 closer.
+    expect(ctx.sys.lob.x).toBeCloseTo(P.x - 776, 9);
+    expect(ctx.sys.lob.y).toBeCloseTo(P.y, 9);
+  });
+
+  it('holds a firing whose first bomb is far while no enemy is inside the arena, and loses a later one', () => {
+    const outside = bombs([{ x: -40, y: 540 }], { rules: [FAR_THROW()] });
+    const em = lobOf(outside);
+    em.shots = 3;
+    for (let i = 0; i < 50; i++) runLob(outside, em);
+    expect([em.attacks, em.shots, outside.shots.count]).toEqual([0, 3, 0]);
+    expect(em.acc).toBe(em.interval - em.cadence);
+    // One enemy, two bombs, every 2nd far: the far one finds only the enemy aimed at already.
+    const lone = bombs([near(0, 0)], { values: { projectileCount: 3 }, rules: [FAR_THROW(2)] });
+    fire(lone);
+    expect(eventsOf([lone.events], 'lob').map((lob) => lob.form)).toEqual([N]);
+    expect([lobOf(lone).attacks, lobOf(lone).shots]).toEqual([1, 1]);
+  });
+
+  it('ends a firing at a later far bomb that finds no enemy, though a dense candidate is left (§4.5)', () => {
+    // 1 inside the arena; 2 outside it, 140 to its left, in the same dense block and 2 radii
+    // from 1. Two bombs a firing, every 2nd far: the first, dense, takes 1 (the lower id of two
+    // equal counts); the second, far, finds no enemy in the arena but 1, aimed at already, and
+    // is lost: not aimed dense at 2, not thrown, not counted.
+    const ctx = bombs(
+      [
+        { x: 100, y: 540 },
+        { x: -40, y: 540 },
+      ],
+      { values: { projectileCount: 3 }, rules: [FAR_THROW(2)] },
+    );
+    fire(ctx);
+    expect(eventsOf([ctx.events], 'lob').map((lob) => lob.form)).toEqual([N]);
+    expect(landedOn(ctx, ctx.events)).toEqual([1]);
+    expect([lobOf(ctx).attacks, lobOf(ctx).shots]).toEqual([1, 1]);
+  });
+});
+
+describe('火山 (volcano; K22, Q3 (B))', () => {
+  /**
+   * One dense block: 1, 2 and 3 have three enemies within 180 each, 4 and 5 two. 4 stands 230
+   * from 1, 5 exactly 360 (2 × 3 radii).
+   */
+  const ERUPTION: readonly PlacedEnemy[] = [
+    { x: 1170, y: 450 },
+    { x: 1190, y: 450 },
+    { x: 1210, y: 450 },
+    { x: 1400, y: 450 },
+    { x: 1530, y: 450 },
+  ];
+
+  it('fires every 180 ticks at the base attack speed, faster with attack speed, whatever projectileCount', () => {
+    expect(lobOf(bombs([], { rules: [VOLCANO] })).interval).toBe(180);
+    expect(lobOf(bombs([], { rules: [VOLCANO], values: { attackSpeed: 6 } })).interval).toBe(120);
+    expect(lobOf(bombs([], { rules: [VOLCANO], values: { attackSpeed: 8 } })).interval).toBe(90);
+    expect(lobOf(bombs([], { rules: [VOLCANO], values: { projectileCount: 5 } })).interval).toBe(
+      180,
+    );
+    const slow: RuleSpec = { id: 'volcano', periodSec: 2, radiusMult: 3, damageMult: 5 };
+    expect(lobOf(bombs([], { rules: [slow] })).interval).toBe(120);
+    const ctx = bombs([near(0, 0)], { rules: [VOLCANO] });
+    const em = lobOf(ctx);
+    const ticks: number[] = [];
+    for (let tick = 1; tick <= 400; tick++) {
+      const before = em.attacks;
+      runLob(ctx, em);
+      if (em.attacks > before) ticks.push(tick);
+    }
+    expect(ticks).toEqual([180, 360]);
+  });
+
+  it('throws two giant bombs a period at projectileCount 3, aimed 2 × 3 radii apart', () => {
+    const ctx = bombs(ERUPTION, { values: { projectileCount: 3 }, rules: [VOLCANO] });
+    const em = lobOf(ctx);
+    beginAim(ctx, em);
+    expect([ctx.sys.lob.radiusSq, ctx.sys.lob.sepSq]).toEqual([180 * 180, 360 * 360]);
+    fire(ctx);
+    expect(eventsOf([ctx.events], 'lob').map((lob) => lob.form)).toEqual([
+      LOB_VOLCANO,
+      LOB_VOLCANO,
+    ]);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 5]);
+    expect(Array.from(ctx.shots.scale.subarray(0, 2))).toEqual([5, 5]);
+    // Normal bombs, 2 radii of 60 apart, take 4.
+    const normal = bombs(ERUPTION, { values: { projectileCount: 3 } });
+    fire(normal);
+    expect(landedOn(normal, normal.events)).toEqual([1, 4]);
+    expect(Array.from(normal.shots.scale.subarray(0, 2))).toEqual([1, 1]);
+  });
+
+  it('explodes 3× as wide at 5× the damage, its chain and 火地 unscaled but 火地 3× as wide', () => {
+    const run = (form: number) => {
+      const spy = watch();
+      // 1 and 2 are in either blast, 3 only in the giant one, which chains to 4 instead.
+      const ctx = bombs([near(0, 0), near(20, 0), near(150, 0), near(220, 0)], {
+        values: { chainCount: 1 },
+        rules: [VOLCANO],
+        modules: [spy.module],
+      });
+      launchAt(ctx, L, 0, -1, form);
+      const landAt = landAll(ctx);
+      const landed = [...ctx.events];
+      const hits = eventsOf([landed], 'hit');
+      const pulses = eventsOf([zoneTicks(ctx, landAt, landAt + 30)], 'pulse');
+      return {
+        explosion: eventsOf([landed], 'explosion')[0],
+        zone: eventsOf([landed], 'zone')[0],
+        explode: spy.centers.find((seen) => seen.event === EVENT.explode),
+        hits: hits.map((hit) => [hit.targetId, hit.chainIndex, toNumber(hit.amount)]),
+        pulse: pulses.map((pulse) => toNumber(pulse.total) / pulse.hits),
+        pulseHits: pulses.map((pulse) => pulse.hits),
+      };
+    };
+    const normal = run(LOB_NORMAL);
+    const giant = run(LOB_VOLCANO);
+    expect(normal.explosion).toMatchObject({ radius: 60, primaryId: 1, count: 2 });
+    expect(giant.explosion).toMatchObject({ radius: 180, primaryId: 1, count: 3 });
+    expect([normal.zone?.radius, giant.zone?.radius]).toEqual([60, 180]);
+    expect([normal.explode?.radius, giant.explode?.radius]).toEqual([60, 180]);
+    const [hit] = normal.hits;
+    const amount = hit?.[2] as number;
+    expect(normal.hits).toEqual([
+      [1, 0, amount],
+      [2, 0, amount],
+      [3, 1, normal.hits[2]?.[2]],
+    ]);
+    const jump = normal.hits[2]?.[2] as number;
+    expect(giant.hits).toEqual([
+      [1, 0, amount * 5],
+      [2, 0, amount * 5],
+      [3, 0, amount * 5],
+      [4, 1, jump],
+    ]);
+    // Two pulses: the giant 火地 hits 1, 2 and 3, each at the normal one's damage.
+    expect(normal.pulseHits).toEqual([2, 2]);
+    expect(giant.pulseHits).toEqual([3, 3]);
+    expect(giant.pulse).toEqual(normal.pulse);
+  });
+
+  it('aims every 4th bomb far under 遠投, a giant bomb as well', () => {
+    const ctx = bombs([...ERUPTION, { x: 100, y: 100 }], {
+      values: { projectileCount: 3 },
+      rules: [VOLCANO, FAR_THROW()],
+    });
+    const events: SimEvent[] = [];
+    for (let f = 0; f < 2; f++) {
+      ctx.events.length = 0;
+      fire(ctx);
+      events.push(...ctx.events);
+    }
+    expect(eventsOf([events], 'lob').map((lob) => lob.form)).toEqual([
+      LOB_VOLCANO,
+      LOB_VOLCANO,
+      LOB_VOLCANO,
+      LOB_VOLCANO,
+    ]);
+    expect(landedOn(ctx, events)).toEqual([1, 5, 1, 6]);
+    expect(Array.from(ctx.shots.scale.subarray(0, 4))).toEqual([5, 5, 5, 5]);
+  });
+});
+
+describe('連環爆 (chainBlast; C12, R25)', () => {
+  /** The chainBlast trigger of `ctx`'s build and its effect. */
+  const blastOf = (ctx: RunContext): { trigger: number; effect: number } => {
+    const chainBlast = ctx.build.signature.lob?.chainBlast;
+    if (chainBlast === undefined || chainBlast === null) throw new Error('no chainBlast');
+    return { trigger: chainBlast.trigger, effect: chainBlast.effect };
+  };
+
+  /** [effect, depth, origin, target id or −1, x, y, flags] of each queued entry, dequeued. */
+  function drain(ctx: RunContext): number[][] {
+    const entry = createEffectEntry();
+    const seen: number[][] = [];
+    while (ctx.effectQueue.size > 0) {
+      dequeue(ctx.effectQueue, entry);
+      seen.push([
+        entry.effect,
+        entry.depth,
+        entry.origin,
+        entry.target === null ? -1 : entry.target.id,
+        entry.x,
+        entry.y,
+        entry.flags,
+      ]);
+    }
+    return seen;
+  }
+
+  it('queues an explosion at each of the first 2 enemies its explosion kills, in hit order', () => {
+    const ctx = bombs(
+      [
+        near(0, 0, { hp: 1 }),
+        near(10, 0, { hp: 1 }),
+        near(20, 0, { hp: 1 }),
+        near(-10, 0, { hp: 1 }),
+      ],
+      { rules: [CHAIN_BLAST()] },
+    );
+    const { trigger, effect } = blastOf(ctx);
+    const event = ctx.sys.lob.event;
+    bombAt(ctx);
+    expect(ctx.enemies.every((e) => !e.alive)).toBe(true);
+    expect(drain(ctx)).toEqual([
+      [effect, 1, trigger, -1, L.x, L.y, 0],
+      [effect, 1, trigger, -1, L.x + 10, L.y, 0],
+    ]);
+    // One event object, rewritten per kill.
+    expect(ctx.sys.lob.event).toBe(event);
+    expect(event).toEqual({ target: null, x: L.x + 10, y: L.y, depth: 0, origin: -1, flags: 0 });
+  });
+
+  it('queues each explosion right after its victim’s hit, before the next hit’s effects (§4.6)', () => {
+    // A hit trigger's explode beside 連環爆; the bomb hits and kills 1, then 2.
+    const ctx = bombs([near(0, 0, { hp: 1 }), near(10, 0, { hp: 1 })], {
+      triggers: [{ on: 'hit', do: [{ kind: 'explode', radius: 120, damagePct: 1 }] }],
+      rules: [CHAIN_BLAST()],
+    });
+    const { effect } = blastOf(ctx);
+    bombAt(ctx);
+    expect(drain(ctx).map((seen) => [seen[0] === effect ? 'blast' : 'hit', seen[4]])).toEqual([
+      ['hit', L.x],
+      ['blast', L.x],
+      ['hit', L.x + 10],
+      ['blast', L.x + 10],
+    ]);
+  });
+
+  it('queues up to perBomb of them a bomb', () => {
+    const placed = [near(0, 0, { hp: 1 }), near(10, 0, { hp: 1 }), near(20, 0, { hp: 1 })];
+    const counted = (perBomb: number): number => {
+      const ctx = bombs(placed, { rules: [CHAIN_BLAST(perBomb)] });
+      bombAt(ctx);
+      return drain(ctx).length;
+    };
+    expect([counted(1), counted(2), counted(3), counted(5)]).toEqual([1, 2, 3, 3]);
+  });
+
+  it('queues up to 4 for a firing of 2 bombs, 2 a bomb (projectileCount 3)', () => {
+    // Two groups of three 150 apart in one dense block.
+    const ctx = bombs(
+      [1300, 1310, 1320, 1450, 1460, 1470].map((x) => ({ x, y: 500, hp: 1 })),
+      { values: { projectileCount: 3 }, rules: [CHAIN_BLAST()] },
+    );
+    fire(ctx);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 4]);
+    landAll(ctx);
+    expect(ctx.enemies.every((e) => !e.alive)).toBe(true);
+    expect(drain(ctx).map((seen) => [seen[4], seen[5]])).toEqual([
+      [1300, 500],
+      [1310, 500],
+      [1450, 500],
+      [1460, 500],
+    ]);
+  });
+
+  it('counts only its explosion’s kills: not its chain’s, nor enemies dead before it lands', () => {
+    // 1 survives as the primary; 2 dies in the explosion, 3 to the chain; 4 is dead already.
+    const ctx = bombs(
+      [near(0, 0), near(30, 0, { hp: 1 }), near(150, 0, { hp: 1 }), near(-20, 0, { hp: 1 })],
+      { values: { chainCount: 1 }, rules: [CHAIN_BLAST()] },
+    );
+    enemy(ctx, 4).alive = false;
+    bombAt(ctx);
+    expect([2, 3].map((id) => enemy(ctx, id).alive)).toEqual([false, false]);
+    expect(drain(ctx).map((seen) => seen[4])).toEqual([L.x + 30]);
+  });
+
+  it('explodes at 40 for 50% of the damage, hit, trigger and area, and raises no explode', () => {
+    const spy = watch();
+    // The bomb kills 1; its explosion kills 2, 35 from it and out of the bomb's reach, whose
+    // death queues nothing more.
+    const ctx = bombs([near(50, 0, { hp: 1 }), near(85, 0, { hp: 1 }), near(0, 200)], {
+      values: { damage: 10 },
+      rules: [CHAIN_BLAST()],
+      modules: [spy.module],
+    });
+    bombAt(ctx);
+    expect(ctx.effectQueue.size).toBe(1);
+    ctx.events.length = 0;
+    runEffectQueue(ctx);
+    expect(enemy(ctx, 2).alive).toBe(false);
+    expect(ctx.effectQueue.size).toBe(0);
+    expect(eventsOf([ctx.events], 'burst')).toEqual([
+      { type: 'burst', kind: 'explode', x: L.x + 50, y: L.y, radius: 40 },
+    ]);
+    const hits = eventsOf([ctx.events], 'hit');
+    expect(hits.map((hit) => [hit.targetId, hit.tags, toNumber(hit.amount)])).toEqual([
+      [2, TAG.hit | TAG.trigger | TAG.area, 5],
+    ]);
+    expect(spy.centers.filter((seen) => seen.event === EVENT.explode)).toHaveLength(1);
+  });
+
+  it('queues at the bomb’s depth + 1 from its own trigger, not on its own damage, and counts the depth cap', () => {
+    /**
+     * The depths of the entries a bomb launched at `depth` from `origin` (the form's own
+     * trigger for 'own') queues, all from the form's trigger, and the depth-capped count.
+     */
+    const queued = (depth: number, origin: number | 'own') => {
+      const ctx = bombs([near(0, 0, { hp: 1 })], { rules: [CHAIN_BLAST()] });
+      const { trigger } = blastOf(ctx);
+      launchAt(ctx, L, depth, origin === 'own' ? trigger : origin);
+      landAll(ctx);
+      const entries = drain(ctx);
+      expect(entries.every((entry) => entry[2] === trigger)).toBe(true);
+      return { depths: entries.map((entry) => entry[1]), capped: ctx.counters.triggerDepthCapped };
+    };
+    expect(queued(0, -1)).toEqual({ depths: [1], capped: 0 });
+    expect(queued(2, SHATTER_TRIGGER)).toEqual({ depths: [3], capped: 0 });
+    // Rule 3: not on its own explosion's damage.
+    expect(queued(1, 'own')).toEqual({ depths: [], capped: 0 });
+    expect(queued(MAX_DEPTH, -1)).toEqual({ depths: [], capped: 1 });
+  });
+
+  it('queues none for a repeat’s bomb (REPEAT)', () => {
+    const ctx = bombs([near(0, 0, { hp: 1 }), near(10, 0, { hp: 1 })], {
+      rules: [CHAIN_BLAST()],
+    });
+    const p = lobOf(ctx).payload;
+    launchAt(ctx, L, 0, -1, LOB_NORMAL, { ...p, flags: p.flags | REPEAT });
+    landAll(ctx);
+    expect(ctx.enemies.every((e) => !e.alive)).toBe(true);
+    expect(ctx.effectQueue.size).toBe(0);
   });
 });

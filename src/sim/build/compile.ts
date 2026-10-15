@@ -89,13 +89,16 @@ export interface SignatureParams {
   forceCritEvery: number;
   /** What forceCritEvery counts: shots fired (projectiles, bombs), or attacks. */
   counts: 'shot' | 'attack';
+  /** The run's signature attack, which the forms' compile errors name. */
+  id: SignatureSpec['id'];
   /** The lob's (magmaBomb, src/sim/emitters/lob.ts); null for another signature. */
   lob: LobParams | null;
 }
 
 /**
  * The lob's parameters, which its signature module sets to these neutral values: no far throws,
- * no volcano, no chain blasts, fire zones that do not slow. The lob's forms change them.
+ * no volcano, no chain blasts, fire zones that do not slow. The lob's forms change them
+ * (src/sim/rules/lobForms.ts).
  */
 export interface LobParams {
   /** Every Nth bomb is thrown at the farthest enemy instead; 0 for none. */
@@ -246,7 +249,12 @@ export function compileBuild(
     globalSlow: 0,
     shatterMult: 1,
   };
-  const params: SignatureParams = { forceCritEvery: 0, counts: 'shot', lob: null };
+  const params: SignatureParams = {
+    forceCritEvery: 0,
+    counts: 'shot',
+    id: signature.id,
+    lob: null,
+  };
   const hooks: { [K in HookName]: Hooks[K][] } = {
     tick: [],
     onKill: [],
@@ -275,13 +283,20 @@ export function compileBuild(
     }
   };
   // The module instance being compiled, its source and its trigger index (−1 until its first
-  // hook).
+  // hook or instanceTrigger call).
   let instanceSource = CENTER;
   let instance = -1;
   const compileInstance = (source: number, compile: () => void): void => {
     instanceSource = source;
     instance = -1;
     compile();
+  };
+  const instanceTrigger = (): number => {
+    if (instance < 0) {
+      instance = triggers.length;
+      triggers.push(moduleTrigger(instance, instanceSource));
+    }
+    return instance;
   };
 
   const compiler: BuildCompiler = {
@@ -307,13 +322,11 @@ export function compileBuild(
     source: (name) => sources.index(name),
     hook(name, fn) {
       hooks[name].push(fn);
-      if (instance < 0) {
-        instance = triggers.length;
-        triggers.push(moduleTrigger(instance, instanceSource));
-      }
-      hookOwners[name].push(instance);
-      return instance;
+      const owner = instanceTrigger();
+      hookOwners[name].push(owner);
+      return owner;
     },
+    instanceTrigger,
     addTrigger(source, spec, coef = 1) {
       addTrigger(sources.index(source), spec, coef);
     },

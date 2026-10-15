@@ -7,9 +7,10 @@
  * effects and emitters, and registers hooks the simulation calls at fixed points of the tick.
  *
  * Each module instance (one compile call, or one TestModule) is one trigger of the build: its
- * first hook() takes it a trigger index, which every hook of the instance shares. Hooks deal
- * damage or apply ailments only by queueing their effects (enqueueModuleEffect in api.ts) with
- * that index as the origin, so the instance never fires on its own damage (rule 3).
+ * first hook() or instanceTrigger() takes it a trigger index, which every hook of the instance
+ * shares. Hooks deal damage or apply ailments only by queueing their effects
+ * (enqueueModuleEffect in api.ts) with that index as the origin, so the instance never fires on
+ * its own damage (rule 3).
  */
 
 import type { Num } from '../../core/num';
@@ -60,9 +61,15 @@ export interface BuildCompiler {
   source(name: string): number;
   /**
    * Adds a hook; hooks of one name run in the order they were added. Returns the instance's
-   * trigger index, taken at its first hook() call: the origin of what its hooks queue.
+   * trigger index (instanceTrigger): the origin of what its hooks queue.
    */
   hook<K extends HookName>(name: K, fn: Hooks[K]): number;
+  /**
+   * The instance's trigger index, taken at its first hook() or instanceTrigger() call and shared
+   * by both, without adding a hook: for an instance whose effects the simulation queues for it
+   * (enqueueModuleEffect), as the lob queues 連環爆's.
+   */
+  instanceTrigger(): number;
   /**
    * Adds a trigger credited to source `source`, with its chance and COEF_FIELDS × coef
    * (default 1). It takes the next trigger index, like a data trigger.

@@ -40,6 +40,9 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   eternalFlame: { id: 'eternalFlame', durationMore: -0.5 },
   overload: { id: 'overload', chainCountMultiplier: 2, retentionPenalty: 0.15 },
   glassCannon: { id: 'glassCannon', damageMore: 1 },
+  farThrow: { id: 'farThrow', every: 4 },
+  volcano: { id: 'volcano', periodSec: 3, radiusMult: 3, damageMult: 5 },
+  chainBlast: { id: 'chainBlast', radius: 40, damagePct: 0.5, perBomb: 2 },
 };
 
 describe('ModifierSchema', () => {
@@ -553,6 +556,12 @@ describe('RuleSpecSchema', () => {
       { id: 'steadyAim', everyNth: 3, critMultiplierMore: 0.5, counts: 'volley' },
     ],
     ['a parameter of another rule', { id: 'glassCannon', damageMore: 1, durationMore: 1 }],
+    ['a lob form missing a parameter', { id: 'volcano', periodSec: 3, radiusMult: 3 }],
+    ['a lob form with the params name', { id: 'farThrow', farThrowEvery: 4 }],
+    [
+      'a lob form with its compiled fields',
+      { id: 'chainBlast', radius: 40, damagePct: 0.5, perBomb: 2, trigger: 1, effect: 0 },
+    ],
     ['a non-numeric parameter', { id: 'eternalFlame', durationMore: '-0.5' }],
     [
       'an undefined optional parameter',

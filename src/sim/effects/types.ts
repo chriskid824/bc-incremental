@@ -13,7 +13,8 @@
  *
  * Triggers number in compile order (compileBuild): SHATTER_TRIGGER at index 0, the build's data
  * triggers, then the rule modules', where a module instance takes one index of its own at its
- * first hook (an entry that listens to no event), then the test modules'.
+ * first hook or instanceTrigger call (an entry that listens to no event), then the test
+ * modules'.
  */
 
 import type { Num } from '../../core/num';

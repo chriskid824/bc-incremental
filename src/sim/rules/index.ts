@@ -7,6 +7,7 @@
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { eternalFlame } from './eternalFlame';
 import { glassCannon } from './glassCannon';
+import { chainBlast, farThrow, volcano } from './lobForms';
 import { m1Volley } from './m1Volley';
 import { magmaBomb } from './magmaBomb';
 import type { RuleModule, SignatureModule } from './module';
@@ -35,6 +36,9 @@ export const RULE_MODULES: {
   eternalFlame,
   overload,
   glassCannon,
+  farThrow,
+  volcano,
+  chainBlast,
 };
 
 export const SIGNATURES: {

@@ -5,8 +5,8 @@
  * the alive enemies of the densest block of grid cells, each counted once per firing: the first
  * bomb aims at the candidate with the most alive enemies within the explosion's radius of it,
  * each later one at the best candidate at least SALVO_SEPARATION radii from every enemy this
- * firing aimed at, else at the best one not aimed at yet; a bomb with no candidate left is not
- * thrown. A bomb flies to where its enemy will be when it lands.
+ * firing aimed at, else at the best one no dense bomb of it aimed at yet; a bomb with no
+ * candidate left is not thrown. A bomb flies to where its enemy will be when it lands.
  *
  * A bomb is a lobbed shot of the shot pool (src/sim/systems/shots.ts) that flies flightTicks to a
  * fixed point and lands there in the projectile stage (land), as one attack of its own
@@ -16,28 +16,44 @@
  * the first LIST_MAX enemies of the blast as its list (src/sim/effects/centerEvents.ts), and the
  * bomb's fire zone (火地), in the signature's share of the zone pool (src/sim/systems/zones.ts).
  * Aiming and landing draw nothing; ties go to the first in source (id) order.
+ *
+ * Its forms (LobParams, src/sim/rules/lobForms.ts) change that: under 遠投 every Nth bomb counted
+ * (em.shots) aims at the farthest enemy in the arena that the firing has not aimed at (aimFar),
+ * one its later dense bombs keep SALVO_SEPARATION radii from but, as it is not marked aimed, may
+ * aim at again once no candidate that far is left (Q3/F15); under 火山 the lob fires on a period
+ * of its own (emitterInterval) and its bombs are giant ones, of radiusMult × the radius (their
+ * aim, separation and fire zone too) and damageMult × the damage of their explosion hits, not of
+ * their chains or fire zones; under 連環爆 an enemy a bomb's explosion kills explodes in turn, an
+ * effect queued for the form (enqueueModuleEffect), at most perBomb of them a bomb.
  */
 
 import { enemySlow } from '../ailments/frost';
+import type { LobParams } from '../build/compile';
 import { sizeOf } from '../build/size';
 import { LIST_MAX } from '../caps';
 import { beginAttack, chainFrom, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { emitCenterEvent } from '../effects/centerEvents';
-import { PRIMARY } from '../effects/flags';
+import { PRIMARY, REPEAT } from '../effects/flags';
 import { EVENT } from '../effects/types';
+import { enqueueModuleEffect } from '../rules/api';
 import { rollCount } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { MOTION_LOB, spawnShot } from '../systems/shots';
 import { addZone, PULSES_PER_SECOND } from '../systems/zones';
+import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import { nextShotSteady } from './types';
 import type { EmitterRuntime, LobSpec, Payload } from './types';
 import { countAttack } from './volley';
 
 const EXPLODE = EVENT.explode;
 
-/** A normal bomb's form (ShotPoolState.form, the lob event's form). */
+/** A bomb's form (ShotPoolState.form, the lob event's form): a normal bomb, */
 export const LOB_NORMAL = 0;
+/** a giant bomb of 火山 (LobParams.volcano), far or not, */
+export const LOB_VOLCANO = 1;
+/** and a normal bomb thrown far (遠投, LobParams.farThrowEvery). */
+export const LOB_FAR = 2;
 
 /**
  * How far apart a firing's bombs aim, in explosion radii: a later bomb aims at least this far
@@ -47,17 +63,29 @@ export const LOB_NORMAL = 0;
 export const SALVO_SEPARATION = 2;
 
 /**
+ * Whether the bomb that will be counted shot `s` of the lob (em.shots after it) is thrown far:
+ * every farThrowEvery-th, none when 0.
+ */
+export function isFar(lob: LobParams, s: number): boolean {
+  return lob.farThrowEvery > 0 && s % lob.farThrowEvery === 0;
+}
+
+/**
  * Fires every due firing of `em`, a lob. The accumulator gains the emitter's cadence per tick; a
  * firing is due each time it reaches the emitter's interval. With no enemy alive the emitter
  * stays ready without banking firings, as the volley does (runVolley): it fires on the tick an
  * enemy appears.
  */
 export function runLob(ctx: RunContext, em: EmitterRuntime): void {
+  const lob = ctx.build.signature.lob as LobParams;
+  const giant = lob.volcano !== null;
   const interval = em.interval;
   em.acc += em.cadence;
   while (em.acc >= interval) {
     beginAim(ctx, em);
-    const target = aimDense(ctx, em);
+    // Each bomb aims far or dense by the shot it will be counted as.
+    let far = isFar(lob, em.shots + 1);
+    const target = far ? aimFar(ctx, em) : aimDense(ctx, em);
     if (target === null) {
       em.acc = interval - em.cadence;
       return;
@@ -69,17 +97,26 @@ export function runLob(ctx: RunContext, em: EmitterRuntime): void {
     const rng = em.payload.rng;
     const bombs = rollCount(ctx.projectileCount, (c) => rng.chance(c));
     for (let b = 0; b < bombs; b++) {
-      // The first bomb's point is aimed already; a later bomb without a candidate is lost.
-      if (b > 0 && aimDense(ctx, em) === null) break;
-      launch(ctx, em, em.payload, LOB_NORMAL, nextShotSteady(ctx, em), 0, -1);
+      // The first bomb's point is aimed already; a later bomb without an enemy is lost.
+      if (b > 0) {
+        far = isFar(lob, em.shots + 1);
+        if ((far ? aimFar(ctx, em) : aimDense(ctx, em)) === null) break;
+      }
+      const form = giant ? LOB_VOLCANO : far ? LOB_FAR : LOB_NORMAL;
+      launch(ctx, em, em.payload, form, nextShotSteady(ctx, em), 0, -1);
     }
   }
 }
 
-/** Starts the aim of a firing of `em`: its radii, no dense scan yet, no enemy aimed at. */
+/**
+ * Starts the aim of a firing of `em`: its radii (火山's giant ones under LobParams.volcano), no
+ * dense scan yet, no enemy aimed at.
+ */
 export function beginAim(ctx: RunContext, em: EmitterRuntime): void {
   const ls = ctx.sys.lob;
-  const radius = sizeOf(ctx.build, (em.spec as LobSpec).radius);
+  const volcano = (ctx.build.signature.lob as LobParams).volcano;
+  const radius =
+    sizeOf(ctx.build, (em.spec as LobSpec).radius) * (volcano === null ? 1 : volcano.radiusMult);
   const separation = SALVO_SEPARATION * radius;
   ls.radiusSq = radius * radius;
   ls.sepSq = separation * separation;
@@ -88,10 +125,12 @@ export function beginAim(ctx: RunContext, em: EmitterRuntime): void {
 }
 
 /**
- * Aims the next bomb of the current firing of `em`, a lob: of the firing's candidates not aimed
- * at yet, the one with the most alive enemies within the explosion's radius of it that is at
- * least SALVO_SEPARATION radii from every enemy the firing aimed at, else the one with the most;
- * the first in source order on ties. The firing's first aim scans the densest 3 × 3 block of
+ * Aims the next bomb of the current firing of `em`, a lob: of the firing's candidates no dense
+ * bomb of it aimed at yet, the one with the most alive enemies within the explosion's radius of
+ * it that is at least SALVO_SEPARATION radii from every enemy the firing aimed at, else the one
+ * with the most; the first in source order on ties. A far bomb's enemy (aimFar) counts for the
+ * distance but is not marked aimed, so the fallback may aim at it again and two bombs of one
+ * firing can land on it (Q3/F15). The firing's first aim scans the densest 3 × 3 block of
  * grid cells (grid.densest, its own point in ctx.sys.lob.dense) and counts each candidate; the
  * later aims read only those copies. Writes the landing point to ctx.sys.lob (lead) and returns
  * the enemy; null when no candidate is left. Draws nothing.
@@ -142,7 +181,7 @@ export function aimDense(ctx: RunContext, em: EmitterRuntime): Enemy | null {
     pick = i;
   }
   if (pick < 0) {
-    // None that far apart: the best not aimed at yet.
+    // None that far apart: the best no dense bomb aimed at yet, a far bomb's enemy included.
     for (let i = 0; i < m; i++) {
       const count = counts[i] as number;
       if (aimed[i] === 0 && count > best) {
@@ -154,6 +193,43 @@ export function aimDense(ctx: RunContext, em: EmitterRuntime): Enemy | null {
   if (pick < 0) return null;
   aimed[pick] = 1;
   const target = block[pick] as Enemy;
+  picked[ls.picks++] = target;
+  lead(ctx, em.spec as LobSpec, target);
+  return target;
+}
+
+/**
+ * Aims the next bomb of the current firing of `em`, a lob, far (遠投): at the alive enemy
+ * farthest from the player whose center is inside the arena, of those no bomb of this firing
+ * aimed at; the first in id order on ties. Writes the landing point to ctx.sys.lob (lead) and
+ * returns the enemy; null when there is none. Draws nothing. It adds the enemy to picked but
+ * not to aimed, so a later dense bomb may aim at it again (aimDense, Q3/F15).
+ */
+export function aimFar(ctx: RunContext, em: EmitterRuntime): Enemy | null {
+  const ls = ctx.sys.lob;
+  const picked = ls.picked;
+  const picks = ls.picks;
+  const enemies = ctx.enemies;
+  let target: Enemy | null = null;
+  let best = -1;
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i] as Enemy;
+    if (!enemy.alive || enemy.dist <= best) continue;
+    const x = enemy.x;
+    const y = enemy.y;
+    if (x < 0 || x > ARENA_WIDTH || y < 0 || y > ARENA_HEIGHT) continue;
+    let aimed = false;
+    for (let j = 0; j < picks; j++) {
+      if (picked[j] === enemy) {
+        aimed = true;
+        break;
+      }
+    }
+    if (aimed) continue;
+    best = enemy.dist;
+    target = enemy;
+  }
+  if (target === null) return null;
   picked[ls.picks++] = target;
   lead(ctx, em.spec as LobSpec, target);
   return target;
@@ -175,9 +251,10 @@ function lead(ctx: RunContext, spec: LobSpec, target: Enemy): void {
 
 /**
  * Launches a bomb of `em`, a lob, of payload `p` from the player to ctx.sys.lob's point, where
- * it lands flightTicks later; `form` is its ShotPoolState.form, `steady` makes every hit of it
- * crit, and `depth` and `origin` are its hits' (0 and −1 for the emitter's own bombs).
- * PROJECTILE_CAP may refuse it (spawnShot).
+ * it lands flightTicks later; `form` is its ShotPoolState.form (a LOB_VOLCANO bomb's scale is
+ * 火山's damageMult, any other's 1), `steady` makes every hit of it crit, and `depth` and
+ * `origin` are its hits' (0 and −1 for the emitter's own bombs). PROJECTILE_CAP may refuse it
+ * (spawnShot).
  */
 export function launch(
   ctx: RunContext,
@@ -194,6 +271,8 @@ export function launch(
   const x = ls.x;
   const y = ls.y;
   const landAt = ctx.now + spec.flightTicks;
+  const volcano = (ctx.build.signature.lob as LobParams).volcano;
+  const scale = form === LOB_VOLCANO && volcano !== null ? volcano.damageMult : 1;
   const s = spawnShot(
     ctx,
     MOTION_LOB,
@@ -203,7 +282,7 @@ export function launch(
     player.y,
     landAt,
     p,
-    1,
+    scale,
     0,
     0,
     depth,
@@ -225,10 +304,13 @@ export function launch(
  * at its landing tick), as one attack. Its explosion hits the enemies alive within its radius of
  * the landing point, in id order, at the bomb's scale: the one nearest the point, the first in
  * id order on ties, takes the primary hit (PRIMARY), the only one that counts in the attack's
- * chain budget, and its chain follows. Then the explosion event; the explode center event at the
- * point, on the primary (null when the bomb hit nothing), its list the first LIST_MAX enemies of
- * the blast by id, the dead kept; and the bomb's fire zone (Payload.zoneVariant). The caller
- * ends the shot.
+ * chain budget, and its chain follows. Under 連環爆 each enemy an explosion hit kills, up to
+ * perBomb of them, queues the form's explosion at its point as it dies; a repeat's bomb (REPEAT)
+ * queues none. Then the explosion event; the explode center event at the point, on the primary
+ * (null when the bomb hit nothing), its list the first LIST_MAX enemies of the blast by id, the
+ * dead kept; and the bomb's fire zone (Payload.zoneVariant). A giant bomb (LOB_VOLCANO) has
+ * radiusMult × the radius and the fire zone's radius; its chain and its fire zone keep the
+ * payload's damage. The caller ends the shot.
  */
 export function land(ctx: RunContext, s: number, spec: LobSpec): void {
   const shots = ctx.shots;
@@ -240,9 +322,13 @@ export function land(ctx: RunContext, s: number, spec: LobSpec): void {
   const depth = shots.depth[s] as number;
   const origin = shots.origin[s] as number;
   const build = ctx.build;
-  const radius = sizeOf(build, spec.radius);
+  const lob = build.signature.lob as LobParams;
+  const volcano = lob.volcano;
+  const grow = shots.form[s] === LOB_VOLCANO && volcano !== null ? volcano.radiusMult : 1;
+  const radius = sizeOf(build, spec.radius) * grow;
   beginAttack(ctx);
-  const blast = ctx.sys.lob.blast;
+  const ls = ctx.sys.lob;
+  const blast = ls.blast;
   const budget = ctx.chainBudget;
   // within() returns alive enemies only, so the primary is the nearest alive one.
   const n = ctx.grid.within(x, y, radius * radius, blast);
@@ -258,6 +344,9 @@ export function land(ctx: RunContext, s: number, spec: LobSpec): void {
       primary = enemy;
     }
   }
+  // 連環爆: this explosion's own kills, in hit order; not its chain's, nor a repeat bomb's.
+  const chainBlast = (p.flags & REPEAT) === 0 ? lob.chainBlast : null;
+  let blasts = 0;
   for (let i = 0; i < n; i++) {
     const enemy = blast[i] as Enemy;
     if (!enemy.alive) continue;
@@ -276,6 +365,16 @@ export function land(ctx: RunContext, s: number, spec: LobSpec): void {
       origin,
       isPrimary ? PRIMARY : 0,
     );
+    if (chainBlast !== null && !enemy.alive && blasts < chainBlast.perBomb) {
+      // At the victim's point, which is dead: no target. The queue copies the event's fields.
+      const ev = ls.event;
+      ev.x = enemy.x;
+      ev.y = enemy.y;
+      ev.depth = depth;
+      ev.origin = origin;
+      enqueueModuleEffect(ctx, chainBlast.trigger, chainBlast.effect, ev);
+      blasts++;
+    }
   }
   // Its victims carry the attack's serial, so the chain passes over them.
   if (primary !== null && p.chains) {
@@ -301,7 +400,7 @@ export function land(ctx: RunContext, s: number, spec: LobSpec): void {
       true,
       x,
       y,
-      sizeOf(build, zone.radius),
+      sizeOf(build, zone.radius) * grow,
       Math.max(1, Math.round(zone.durationSec * PULSES_PER_SECOND)),
       zonePayload,
       zone.damagePctPerSec / PULSES_PER_SECOND,

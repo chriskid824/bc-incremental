@@ -383,6 +383,33 @@ function ruleIssues(rule: RuleSpec): string[] {
     case 'glassCannon':
       more('damageMore', rule.damageMore);
       break;
+    case 'farThrow':
+      if (!(Number.isInteger(rule.every) && rule.every >= 2)) {
+        issues.push(`farThrowEvery must be an integer >= 2 (got ${rule.every})`);
+      }
+      break;
+    case 'volcano':
+      // A period of 0 would make the lob's interval 0 ticks, a firing loop without end.
+      if (!(rule.periodSec > 0)) {
+        issues.push(`volcano.periodSec must be > 0 (got ${rule.periodSec})`);
+      }
+      if (!(rule.radiusMult >= 1)) {
+        issues.push(`volcano.radiusMult must be >= 1 (got ${rule.radiusMult})`);
+      }
+      if (!(rule.damageMult > 0)) {
+        issues.push(`volcano.damageMult must be > 0 (got ${rule.damageMult})`);
+      }
+      break;
+    case 'chainBlast':
+      // Its explosions are explode effects: the explode ranges.
+      if (!(rule.radius > 0)) issues.push(`chainBlast.radius must be > 0 (got ${rule.radius})`);
+      if (!(rule.damagePct >= 0)) {
+        issues.push(`chainBlast.damagePct must be >= 0 (got ${rule.damagePct})`);
+      }
+      if (!isPositiveInt(rule.perBomb)) {
+        issues.push(`chainBlast.perBomb must be a positive integer (got ${rule.perBomb})`);
+      }
+      break;
   }
   return issues;
 }
@@ -795,6 +822,9 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
       return [{ stat: 'damage', kind: 'more', value: rule.damageMore }];
     case 'steadyAim':
     case 'eternalFlame':
+    case 'farThrow':
+    case 'volcano':
+    case 'chainBlast':
       return [];
   }
 }

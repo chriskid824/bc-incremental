@@ -268,8 +268,13 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
   switch (spec.kind) {
     case 'volley':
       return periodTicks((VOLLEY_RATE * build.values.attackSpeed) / BASE_ATTACK_SPEED);
-    case 'lob':
-      return periodTicks((spec.baseRate * build.values.attackSpeed) / BASE_ATTACK_SPEED);
+    case 'lob': {
+      // 火山 fires every periodSec at the base attack speed, in place of the lob's rate.
+      const volcano = build.signature.lob?.volcano ?? null;
+      return volcano === null
+        ? periodTicks((spec.baseRate * build.values.attackSpeed) / BASE_ATTACK_SPEED)
+        : periodTicks(build.values.attackSpeed / BASE_ATTACK_SPEED / volcano.periodSec);
+    }
     case 'thorns':
       // Its hits come with the contacts, not on a period.
       return Infinity;

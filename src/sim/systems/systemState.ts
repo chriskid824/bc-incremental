@@ -170,7 +170,10 @@ export interface LobState {
   readonly block: Enemy[];
   /** Alive enemies within the explosion's radius of each candidate, block[i]'s at i. */
   readonly counts: number[];
-  /** 1 when a bomb of this firing aimed at block[i]; the scan writes 0 for each candidate. */
+  /**
+   * 1 when a dense bomb of this firing aimed at block[i]; the scan writes 0 for each candidate.
+   * A far bomb (遠投) marks nothing, so a later dense bomb may aim at its enemy again (Q3/F15).
+   */
   readonly aimed: number[];
   /** The enemies this firing's bombs aimed at, in order: picked[0 .. picks). */
   readonly picked: Enemy[];
@@ -180,6 +183,18 @@ export interface LobState {
   /** The explosion's radius, squared, and SALVO_SEPARATION radii, squared: set per firing. */
   radiusSq: number;
   sepSq: number;
+  /**
+   * The event a landing queues a 連環爆 explosion on (a ModuleEvent, src/sim/rules/api.ts): the
+   * victim's point, no target, flags 0. Rewritten for each kill: the queue copies its fields.
+   */
+  readonly event: {
+    target: null;
+    x: number;
+    y: number;
+    depth: number;
+    origin: number;
+    flags: number;
+  };
 }
 
 export function createLobState(): LobState {
@@ -196,5 +211,6 @@ export function createLobState(): LobState {
     m: -1,
     radiusSq: 0,
     sepSq: 0,
+    event: { target: null, x: 0, y: 0, depth: 0, origin: -1, flags: 0 },
   };
 }

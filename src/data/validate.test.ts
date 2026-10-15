@@ -315,6 +315,41 @@ describe('validateGameData: talents', () => {
     ]);
   });
 
+  it('rejects lob form parameters out of range, and takes them at their edges', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'steadyAim').rules = [
+        { id: 'farThrow', every: 1 },
+        { id: 'volcano', periodSec: 0, radiusMult: 0.5, damageMult: 0 },
+        { id: 'chainBlast', radius: 0, damagePct: -0.5, perBomb: 1.5 },
+      ];
+    });
+    expect(issues).toEqual([
+      "talent 'steadyAim': rule 'farThrow' farThrowEvery must be an integer >= 2 (got 1)",
+      "talent 'steadyAim': rule 'volcano' volcano.periodSec must be > 0 (got 0)",
+      "talent 'steadyAim': rule 'volcano' volcano.radiusMult must be >= 1 (got 0.5)",
+      "talent 'steadyAim': rule 'volcano' volcano.damageMult must be > 0 (got 0)",
+      "talent 'steadyAim': rule 'chainBlast' chainBlast.radius must be > 0 (got 0)",
+      "talent 'steadyAim': rule 'chainBlast' chainBlast.damagePct must be >= 0 (got -0.5)",
+      "talent 'steadyAim': rule 'chainBlast' chainBlast.perBomb must be a positive integer (got 1.5)",
+    ]);
+    expect(
+      issuesAfter((d) => {
+        talent(d, 'steadyAim').rules = [{ id: 'farThrow', every: 2.5 }];
+      }),
+    ).toEqual([
+      "talent 'steadyAim': rule 'farThrow' farThrowEvery must be an integer >= 2 (got 2.5)",
+    ]);
+    expect(
+      issuesAfter((d) => {
+        talent(d, 'steadyAim').rules = [
+          { id: 'farThrow', every: 2 },
+          { id: 'volcano', periodSec: 0.01, radiusMult: 1, damageMult: 0.01 },
+          { id: 'chainBlast', radius: 0.01, damagePct: 0, perBomb: 1 },
+        ];
+      }),
+    ).toEqual([]);
+  });
+
   it('rejects invalid costs', () => {
     const issues = issuesAfter((d) => {
       talent(d, 'precision').coreCost = 1.5;

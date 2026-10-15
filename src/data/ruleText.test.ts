@@ -29,6 +29,12 @@ function quotedNumbers(rule: RuleSpec): string[][] {
       ];
     case 'glassCannon':
       return [[`×${1 + rule.damageMore}`]];
+    case 'farThrow':
+      return [[String(rule.every)]];
+    case 'volcano':
+      return [[String(rule.periodSec)], [`×${rule.radiusMult}`], [`×${rule.damageMult}`]];
+    case 'chainBlast':
+      return [[percent(rule.damagePct)], [String(rule.perBomb)]];
   }
 }
 

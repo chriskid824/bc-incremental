@@ -27,8 +27,9 @@ export interface ModuleEvent {
 
 /**
  * Queues effect `effectIndex` (from addEffect) for the module instance `triggerIndex` (from
- * hook()) on event `ev`, at one depth more, with the instance as its origin. Nothing is queued
- * for an event the instance's own effects raised (rule 3) or at the maximum depth.
+ * hook() or instanceTrigger(), which share it) on event `ev`, at one depth more, with the
+ * instance as its origin. Nothing is queued for an event the instance's own effects raised
+ * (rule 3) or at the maximum depth.
  */
 export function enqueueModuleEffect(
   ctx: RunContext,

@@ -7,7 +7,8 @@
  * chain follows. Then it leaves a fire zone (火地) of 60 that deals 30% of the damage stat a
  * second for 1.5 s. Its explosion hits always ignite (the igniteAlways row), and so do its fire
  * zone's hits (ALWAYS_IGNITES on their payload), their rolls still drawn; its chain jumps, which
- * keep no area tag, roll the normal chance.
+ * keep no area tag, roll the normal chance. Its forms, 遠投, 火山 and 連環爆, are rules of their
+ * own that change its lob params (src/sim/rules/lobForms.ts).
  */
 
 import type { SignatureSpec } from '../../data/rules';

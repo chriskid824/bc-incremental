@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { mul, num } from '../core/num';
+import type { RuleSpec } from '../data/rules';
 import type { Modifier } from '../data/stats';
 import { TAG } from '../data/tags';
 import type { TriggerSpec } from '../data/triggers';
@@ -465,6 +466,23 @@ const MAGMA_STATS = makeStats(
   },
 );
 
+/**
+ * C4.8's lob forms at projectileCount 3, two bombs a firing: C4.7's magma bombs (their stats at
+ * that count, their triggers and probes) with 遠投 on every fourth bomb and 連環爆, whose
+ * explosions are effects that raise no explode; and, for `volcano`, 火山's giant bombs every
+ * 120 ticks at attack speed 6, every fourth thrown far.
+ */
+const LOB_FORM_STATS = makeStats(
+  { ...MAGMA_STATS.values, projectileCount: 3 },
+  [...maskProbeMods(), PROJECTILE_PROBE],
+  {
+    triggers: MAGMA_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+const FAR_THROW: RuleSpec = { id: 'farThrow', every: 4 };
+
 /** A test module that gives the lob's fire zones a 30% slow (LobParams.zone). */
 function slowFireModule(): TestModule {
   return (b) => {
@@ -511,6 +529,26 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     },
     modules: () => [slowFireModule()],
     expected: ['0da35025faedd08b', '334e99690a535150'],
+  },
+  {
+    name: 'lobForms',
+    config: {
+      stats: LOB_FORM_STATS,
+      rules: [FAR_THROW, { id: 'chainBlast', radius: 40, damagePct: 0.5, perBomb: 2 }],
+      signature: { id: 'magmaBomb' },
+      startWave: 12,
+    },
+    expected: ['60a1953db6c61037', 'cce99037eda62095'],
+  },
+  {
+    name: 'volcano',
+    config: {
+      stats: LOB_FORM_STATS,
+      rules: [{ id: 'volcano', periodSec: 3, radiusMult: 3, damageMult: 5 }, FAR_THROW],
+      signature: { id: 'magmaBomb' },
+      startWave: 12,
+    },
+    expected: ['24277606333be1f9', 'afa4bc2dec7da67c'],
   },
 ];
 
