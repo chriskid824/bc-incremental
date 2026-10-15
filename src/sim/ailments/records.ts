@@ -157,9 +157,10 @@ export function addBurn(
 }
 
 /**
- * addBurn for a zone or aura pulse hit's burn (Hoshi's Q4/F4): at the cap it replaces the stack
- * with the least remaining damage only when its own, dps × (end − now), is larger. Otherwise it
- * returns false and changes nothing: no stack, banked damage, depth, credit or event.
+ * addBurn for a burn a zone causes (Hoshi's Q4/F4; applyPulseBurn, src/sim/ailments/apply.ts):
+ * a zone or aura pulse hit's burn, or one stack of a zone's own burn term. At the cap it replaces
+ * the stack with the least remaining damage only when its own, dps × (end − now), is larger.
+ * Otherwise it returns false and changes nothing: no stack, banked damage, depth, credit or event.
  */
 export function addBurnIfStronger(
   ctx: RunContext,

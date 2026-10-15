@@ -98,8 +98,8 @@ const centerY = (ctx: RunContext, fx: CompiledEffect, entry: Readonly<EffectEntr
  * `stacks` stacks of `ailment` from payload `p` on `enemy`, each as a hit of damage `base` would
  * apply it, through p's rows and credit (bleed keeps the strongest, so more stacks add nothing),
  * then its ailmentApplied event, at `depth` from trigger `origin`. The applyAilment executor
- * passes its payload's base damage; a zone, its payload's base × ailmentDamagePct
- * (src/sim/systems/zones.ts).
+ * passes its payload's base damage; a zone's poison, bleed or shock term, its payload's base ×
+ * ailmentDamagePct (src/sim/systems/zones.ts, whose burn term takes applyBurnTerm instead).
  */
 export function applyStacks(
   ctx: RunContext,

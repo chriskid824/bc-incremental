@@ -12,10 +12,11 @@ import { compileCondition, conditionsMet, IN_ZONE } from '../build/eval';
 import { PULSE_TICKS, SIGNATURE_ZONE_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../caps';
 import { hitWithPayload } from '../combat/hit';
 import { createEffectEntry } from '../effects/queue';
-import { runEffect, runEffectQueue } from '../effects/execute';
-import { CRIT_HIT, HIT_EVENT, SIGNATURE } from '../effects/flags';
+import { applyStacks, runEffect, runEffectQueue } from '../effects/execute';
+import { appliedFlag, CRIT_HIT, HIT_EVENT, SIGNATURE } from '../effects/flags';
 import { EVENT, MAX_DEPTH, SHATTER_TRIGGER } from '../effects/types';
 import type { CompiledTrigger } from '../effects/types';
+import { ALWAYS_IGNITES } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { TestModule } from '../rules';
 import { centerTriggers, makeStats, placedEnemies, rngPositions } from '../testing';
@@ -366,6 +367,26 @@ describe('zone hits and terms', () => {
       [effectOf(ctx, 1), 2, FIRST + 1],
     ]);
   });
+
+  it.each([1, MAX_DEPTH])(
+    'a poison term made at depth %i queues the ailmentApplied triggers it fires one deeper, not its own',
+    (depth) => {
+      const onPoison: TriggerSpec['when'] = [{ ailment: 'poison' }];
+      const spec: GroundZoneSpec = { ...ZONE, damagePctPerSec: 0, ailment: 'poison' };
+      const ctx = placedEnemies([near(0, 0)], {
+        stats: zoneStats([
+          { on: 'ailmentApplied', when: onPoison, do: [spec] },
+          { on: 'ailmentApplied', when: onPoison, do: [{ kind: 'heal', lifePct: 0.1 }] },
+        ]),
+      });
+      // The first trigger is the origin of its zone's poison, so rule 3 keeps it from firing.
+      runAt(ctx, effectOf(ctx, 0), Z.x, Z.y, { depth, origin: FIRST });
+      untilPhase(ctx, 1);
+      expect([enemy(ctx, 1).poisonStacks, enemy(ctx, 1).ailDepth]).toEqual([1, depth]);
+      const heals = [effectOf(ctx, 1), depth + 1, FIRST + 1];
+      expect(queuedOf(ctx)).toEqual(depth < MAX_DEPTH ? [heals] : []);
+    },
+  );
 
   it('rolls crit, ignite, poison, bleed and shock per enemy in id order, on the effects stream', () => {
     const values = { ...HALF, frostOnHit: 0.3 };
@@ -830,6 +851,49 @@ describe('zone pulse burns at the records cap (Q4/F4)', () => {
     return placedEnemies([near(0, 0)], { stats, rules });
   }
 
+  /**
+   * One enemy, or the enemies `placed`, in a status-only zone (the first data trigger's ZONE) of
+   * `source`, a fusion's unless named, whose burn term applies `stacks` stacks at
+   * ailmentDamagePct `pct`, at a records cap of `cap`, with these stat `values` and scoped
+   * modifiers; an ailmentApplied trigger on burns.
+   */
+  function termCapped(
+    stacks: number,
+    cap = 2,
+    {
+      rules = [],
+      source = 'fusion.fire.aura',
+      pct = 1,
+      values = {},
+      scoped = [],
+      placed = [near(0, 0)],
+    }: {
+      rules?: readonly RuleSpec[];
+      source?: string;
+      pct?: number;
+      values?: Partial<Record<StatId, number>>;
+      scoped?: readonly Modifier[];
+      placed?: readonly PlacedEnemy[];
+    } = {},
+  ): RunContext {
+    const term: GroundZoneSpec = {
+      ...ZONE,
+      damagePctPerSec: 0,
+      ailment: 'burn',
+      ailmentStacks: stacks,
+      ailmentDamagePct: pct,
+    };
+    const stats = makeStats({ damage: 400, critChance: 0, burnMaxStacks: cap, ...values }, scoped, {
+      triggers: [
+        { source, spec: idle(term) },
+        { source: 'center', spec: { on: 'ailmentApplied', when: [{ ailment: 'burn' }], do: heal } },
+      ],
+      conversions: [],
+      emitters: [],
+    });
+    return placedEnemies(placed, { stats, rules });
+  }
+
   /** A burn stack of `dps` until tick `end` on the enemy, at depth 2, with the center's credit. */
   const burn = (ctx: RunContext, dps: Num | number, end = 600, depth = 2): void =>
     applyBurn(
@@ -855,6 +919,13 @@ describe('zone pulse burns at the records cap (Q4/F4)', () => {
   const ignites = (events: readonly SimEvent[]): SimEvent[] =>
     events.filter((event) => event.type === 'ignite');
 
+  /** The ring pool, its typed arrays as strings. */
+  const ringsOf = (c: RunContext) =>
+    Object.entries(c.rings).map(([key, v]: [string, unknown]) => [
+      key,
+      ArrayBuffer.isView(v) ? String(v) : v,
+    ]);
+
   /** The heal the ailmentApplied trigger queues for a burn of the zone's (depth 0). */
   const healOf = (ctx: RunContext): number[] => [effectOf(ctx, 1), 1, FIRST + 1];
 
@@ -866,8 +937,25 @@ describe('zone pulse burns at the records cap (Q4/F4)', () => {
     hitWithPayload(copy, enemy(copy, 1), p, 0, 0.25, null, null, false, 0, -1);
   }
 
+  /**
+   * applyStacks' `stacks` burn stacks of the zone's payload at ailmentDamagePct `pct` on `copy`'s
+   * enemy at tick `now`, at the zone's depth: the as-built rule of the applyAilment executor.
+   */
+  function termCopy(copy: RunContext, now: number, stacks: number, pct = 1): void {
+    copy.now = now;
+    copy.events.length = 0;
+    const p = copy.effectPayloads[effectOf(copy, 0)] as Payload;
+    applyStacks(copy, 'burn', enemy(copy, 1), p, mul(p.baseDamage, pct), stacks, 0, -1);
+  }
+
+  /** The flags each queued entry carries, in queue order. */
+  const queuedFlags = (ctx: RunContext): number[] => {
+    const q = ctx.effectQueue;
+    return Array.from({ length: q.size }, (_, n) => q.flags[(q.head + n) & q.capMask] as number);
+  };
+
   /** Ticks to zone `id`'s next pulse; `before` runs in that tick, before the zone stage. */
-  function atPulse(ctx: RunContext, id: number, before: () => void): SimEvent[] {
+  function atPulse(ctx: RunContext, id: number, before?: () => void): SimEvent[] {
     while (mod15(ctx.now + 1) !== mod15(id)) tick(ctx);
     return tick(ctx, before);
   }
@@ -1015,13 +1103,6 @@ describe('zone pulse burns at the records cap (Q4/F4)', () => {
       },
     ],
     [
-      'a zone’s own burn term',
-      (ctx: RunContext): void => {
-        runAt(ctx, effectOf(ctx, 3));
-        untilPhase(ctx, 1);
-      },
-    ],
-    [
       'a hitWithPayload ignite',
       (ctx: RunContext): void => {
         const p = ctx.effectPayloads[effectOf(ctx, 0)] as Payload;
@@ -1029,13 +1110,8 @@ describe('zone pulse burns at the records cap (Q4/F4)', () => {
       },
     ],
   ])('%s still replaces the weakest stack at the cap, though weaker', (_, apply) => {
-    const ctx = capped(
-      [],
-      [
-        idle({ kind: 'applyAilment', ailment: 'burn', damagePct: 1 }),
-        idle({ ...ZONE, damagePctPerSec: 0, ailment: 'burn' }),
-      ],
-    );
+    // A zone's own burn term takes the pulse burns' rule (its tests below).
+    const ctx = capped([], [idle({ kind: 'applyAilment', ailment: 'burn', damagePct: 1 })]);
     burn(ctx, 1000);
     burn(ctx, 500);
     apply(ctx);
@@ -1058,17 +1134,405 @@ describe('zone pulse burns at the records cap (Q4/F4)', () => {
     runAt(ctx, effectOf(ctx, 0));
     const events = untilPulse(ctx);
     hitCopy(copy, ctx.now);
-    const ringsOf = (c: RunContext) =>
-      Object.entries(c.rings).map(([key, v]: [string, unknown]) => [
-        key,
-        ArrayBuffer.isView(v) ? String(v) : v,
-      ]);
     expect(enemy(ctx, 1).burnStacks).toBe(4);
     expect(burnState(enemy(ctx, 1))).toEqual(burnState(enemy(copy, 1)));
     expect(ringsOf(ctx)).toEqual(ringsOf(copy));
     expect(events.filter((event) => event.type !== 'pulse')).toEqual(copy.events);
     expect(ignites(events)).toEqual([{ type: 'ignite', targetId: 1, stacks: 4 }]);
     expect(queuedOf(ctx)).toEqual([healOf(ctx)]);
+  });
+
+  it.each([
+    ['a pulse hit’s burn', (): RunContext => capped()],
+    ['a burn term’s stack', (): RunContext => termCapped(1)],
+  ])('%s weighs the weakest stack’s damage left, not its whole total', (_, make) => {
+    // The new burn, D dps for burnTicks from the pulse's tick, read off a twin below the cap.
+    const twin = make();
+    runAt(twin, effectOf(twin, 0));
+    const at = untilPhase(twin, 1);
+    const lit = enemy(twin, 1).burns[0] as BurnStack;
+    expect([twin.burnTicks, lit.start, lit.end]).toEqual([72, at, at + 72]);
+    // 1.125 × D for 72 ticks, applied 8 ticks before the pulse, has 64 × 1.125 × D = 72 × D
+    // left there, the new burn's whole total, while its own whole total is 81 × D.
+    const strong = mul(lit.dps, 1.125);
+    expect(mul(strong, 64)).toBe(mul(lit.dps, 72));
+    expect(mul(strong, 72)).toBeGreaterThan(mul(lit.dps, 72));
+    /** The pulse's tick, at a cap of 2: 1000 dps, then that stack applied `ago` ticks before. */
+    const run = (ago: number) => {
+      const ctx = make();
+      runAt(ctx, effectOf(ctx, 0));
+      burn(ctx, 1000);
+      while (ctx.now < at - ago) tick(ctx);
+      burn(ctx, strong, ctx.now + ctx.burnTicks);
+      let events: SimEvent[] = [];
+      while (ctx.now < at) events = tick(ctx);
+      return { e: enemy(ctx, 1), events, queued: queuedOf(ctx), heal: healOf(ctx) };
+    };
+    // As much damage left as the new burn's: refused.
+    const equal = run(8);
+    expect(equal.e.burns.map((stack) => [stack.dps, stack.start])).toEqual([
+      [1000, 1],
+      [strong, at - 8],
+    ]);
+    expect(ignites(equal.events)).toEqual([]);
+    expect(equal.queued).toEqual([]);
+    // A tick less left: replaced, the trigger fired.
+    const less = run(9);
+    expect(less.e.burns.map((stack) => [stack.dps, stack.start])).toEqual([
+      [1000, 1],
+      [lit.dps, at],
+    ]);
+    expect(ignites(less.events)).toHaveLength(1);
+    expect(less.queued).toEqual([less.heal]);
+  });
+
+  describe('a zone’s own burn term', () => {
+    it('refuses a stack with less damage than every stack has left: nothing changes, fires or draws', () => {
+      // The term's stack, 600 dps for 72 ticks, has less total than 1000 or 500 dps for 584
+      // ticks, and more than 1 dps for 584.
+      const twin = (weak: number) => {
+        const ctx = termCapped(1);
+        burn(ctx, 1000);
+        burn(ctx, weak);
+        runAt(ctx, effectOf(ctx, 0));
+        const e = enemy(ctx, 1);
+        const before = { state: burnState(e), rng: rngPositions(ctx) };
+        return { ctx, e, before, events: atPulse(ctx, 1) };
+      };
+      const refused = twin(500);
+      const accepted = twin(1);
+      // Accepted: the 1-dps stack replaced by the term's, at its depth, with its credit.
+      const now = accepted.ctx.now;
+      expect(now).toBe(1 + PULSE_TICKS);
+      const [kept, lit] = accepted.e.burns as [BurnStack, BurnStack];
+      expect(toNumber(kept.dps)).toBe(1000);
+      expect([toNumber(lit.dps), lit.end, lit.depth]).toEqual([
+        400 * accepted.ctx.burnDamage,
+        now + accepted.ctx.burnTicks,
+        0,
+      ]);
+      expect(accepted.e.burnFusionCredit).toBe(lit.source);
+      expect(toNumber(accepted.e.burnPending)).toBeGreaterThan(0);
+      expect(accepted.events).toEqual([{ type: 'ignite', targetId: 1, stacks: 2 }]);
+      expect(queuedOf(accepted.ctx)).toEqual([healOf(accepted.ctx)]);
+      // Refused: no stack, bank, depth or credit moves, and no ignite event or trigger.
+      expect(refused.ctx.now).toBe(now);
+      expect(refused.before.state.burnFusionCredit).toBe(-1);
+      expect(burnState(refused.e)).toEqual(refused.before.state);
+      expect(refused.events).toEqual([]);
+      expect(queuedOf(refused.ctx)).toEqual([]);
+      // A term draws nothing, applied or refused.
+      expect(rngPositions(refused.ctx)).toEqual(refused.before.rng);
+      expect(rngPositions(accepted.ctx)).toEqual(accepted.before.rng);
+    });
+
+    it('replaces the weakest stack with a stronger one, as applyStacks does on a copy', () => {
+      const make = (): RunContext => {
+        const ctx = termCapped(1);
+        burn(ctx, 1000);
+        burn(ctx, 1);
+        return ctx;
+      };
+      const ctx = make();
+      const copy = make();
+      runAt(ctx, effectOf(ctx, 0));
+      // A payload's flags do not reach the term's trigger, which fires with none, as
+      // applyStacks' does.
+      const zones = ctx.sys.zones;
+      const record = zones.record[0] as number;
+      zones.payload[record] = { ...(zones.payload[record] as Payload), flags: ALWAYS_IGNITES };
+      const events = atPulse(ctx, 1);
+      termCopy(copy, ctx.now, 1);
+      const e = enemy(ctx, 1);
+      expect(burnState(e)).toEqual(burnState(enemy(copy, 1)));
+      expect(e.burns.map((stack) => toNumber(stack.dps))).toEqual([1000, 400 * ctx.burnDamage]);
+      // The replaced stack's damage so far is banked.
+      expect(toNumber(e.burnPending)).toBeGreaterThan(0);
+      expect(events).toEqual(copy.events);
+      expect(events).toEqual([{ type: 'ignite', targetId: 1, stacks: 2 }]);
+      expect(queuedOf(ctx)).toEqual(queuedOf(copy));
+      expect(queuedOf(ctx)).toEqual([healOf(ctx)]);
+      expect(queuedFlags(ctx)).toEqual(queuedFlags(copy));
+      expect(queuedFlags(ctx)).toEqual([appliedFlag('burn')]);
+    });
+
+    it.each([
+      ['below the cap', [1000]],
+      ['at the cap, in place of a weaker stack', [1000, 1, 1000]],
+    ] as const)(
+      'takes applyStacks’ dps and credit, from base × ailmentDamagePct through the burn row, %s',
+      (_, held) => {
+        // An outer zone's term at .6, with 300% increased damage on crits: its stack is the
+        // payload's base × .6 through the burn row, not the crit row, with the burn credit of an
+        // outer applier, not the zone's source.
+        const crit: Modifier = { stat: 'damage', kind: 'increased', value: 3, tags: ['crit'] };
+        const make = (): RunContext => {
+          const ctx = termCapped(1, 3, { source: 'outer.ice', pct: 0.6, scoped: [crit] });
+          for (const dps of held) burn(ctx, dps);
+          return ctx;
+        };
+        const ctx = make();
+        const copy = make();
+        runAt(ctx, effectOf(ctx, 0));
+        const events = atPulse(ctx, 1);
+        termCopy(copy, ctx.now, 1, 0.6);
+        const e = enemy(ctx, 1);
+        const lit = e.burns[1] as BurnStack;
+        const p = ctx.effectPayloads[effectOf(ctx, 0)] as Payload;
+        expect([toNumber(lit.dps), lit.start]).toEqual([240 * ctx.burnDamage, ctx.now]);
+        expect(lit.source).not.toBe(p.source);
+        expect(burnState(e)).toEqual(burnState(enemy(copy, 1)));
+        expect(events).toEqual(copy.events);
+        expect(ignites(events)).toHaveLength(1);
+        expect(queuedOf(ctx)).toEqual([healOf(ctx)]);
+      },
+    );
+
+    it('reads its dps on each enemy, through the scoped modifiers that enemy meets', () => {
+      // 100% increased damage on bosses: the boss's stack has twice the normal enemy's dps.
+      const onBoss: Modifier = {
+        stat: 'damage',
+        kind: 'increased',
+        value: 1,
+        when: [{ targetKind: 'boss' }],
+      };
+      const placed = [near(0, 0), near(10, 0, { type: 'boss' })];
+      const ctx = termCapped(1, 2, { placed, scoped: [onBoss] });
+      const copy = termCapped(1, 2, { placed, scoped: [onBoss] });
+      runAt(ctx, effectOf(ctx, 0));
+      const events = atPulse(ctx, 1);
+      // applyStacks' stack on each enemy of the copy, in id order.
+      const ids = [1, 2];
+      copy.now = ctx.now;
+      const p = copy.effectPayloads[effectOf(copy, 0)] as Payload;
+      for (const id of ids) {
+        applyStacks(copy, 'burn', enemy(copy, id), p, p.baseDamage, 1, 0, -1);
+      }
+      const dps = (id: number): number[] =>
+        enemy(ctx, id).burns.map((stack) => toNumber(stack.dps));
+      expect(ids.map(dps)).toEqual([[400 * ctx.burnDamage], [800 * ctx.burnDamage]]);
+      const states = (c: RunContext) => ids.map((id) => burnState(enemy(c, id)));
+      expect(states(ctx)).toEqual(states(copy));
+      expect(events).toEqual(copy.events);
+      expect(queuedOf(ctx)).toEqual(queuedOf(copy));
+    });
+
+    it('checks its stacks in turn: one meeting a stack it has just placed is refused', () => {
+      // At a cap of 5, exactly two stacks have less left than one of the term's 3 stacks.
+      const make = (): RunContext => {
+        const ctx = termCapped(3, 5);
+        for (const dps of [1000, 1, 1000, 1, 1000]) burn(ctx, dps);
+        return ctx;
+      };
+      const ctx = make();
+      const copy = make();
+      runAt(ctx, effectOf(ctx, 0));
+      const rng = rngPositions(ctx);
+      const events = atPulse(ctx, 1);
+      // Its first two stacks replace the two weak ones in turn; its third has as much left as
+      // the least a stack has, one of its own, and is refused: two stacks of applyStacks.
+      termCopy(copy, ctx.now, 2);
+      const e = enemy(ctx, 1);
+      const lit = 400 * ctx.burnDamage;
+      expect(e.burns.map((stack) => [toNumber(stack.dps), stack.start])).toEqual([
+        [1000, 1],
+        [lit, ctx.now],
+        [1000, 1],
+        [lit, ctx.now],
+        [1000, 1],
+      ]);
+      expect(burnState(e)).toEqual(burnState(enemy(copy, 1)));
+      expect(events).toEqual(copy.events);
+      expect(ignites(events)).toEqual([
+        { type: 'ignite', targetId: 1, stacks: 5 },
+        { type: 'ignite', targetId: 1, stacks: 5 },
+      ]);
+      expect(queuedOf(ctx)).toEqual([healOf(ctx)]);
+      expect(rngPositions(ctx)).toEqual(rng);
+      // As built, the third replaced its sibling with its like: a third ignite.
+      const asBuilt = make();
+      termCopy(asBuilt, ctx.now, 3);
+      expect(ignites(asBuilt.events)).toHaveLength(3);
+    });
+
+    it('checks the stacks after one that fills the cap: they meet that one and are refused', () => {
+      // At a cap of 3 with two strong stacks, its first stack is added below the cap and fills
+      // it; its next two meet that stack, now the weakest, at an equal total.
+      const make = (): RunContext => {
+        const ctx = termCapped(3, 3);
+        burn(ctx, 1000);
+        burn(ctx, 1000);
+        return ctx;
+      };
+      const ctx = make();
+      const copy = make();
+      runAt(ctx, effectOf(ctx, 0));
+      const events = atPulse(ctx, 1);
+      termCopy(copy, ctx.now, 1);
+      const e = enemy(ctx, 1);
+      const lit = 400 * ctx.burnDamage;
+      expect(e.burns.map((stack) => toNumber(stack.dps))).toEqual([1000, 1000, lit]);
+      expect(burnState(e)).toEqual(burnState(enemy(copy, 1)));
+      expect(events).toEqual(copy.events);
+      expect(events).toEqual([{ type: 'ignite', targetId: 1, stacks: 3 }]);
+      expect(queuedOf(ctx)).toEqual([healOf(ctx)]);
+    });
+
+    it('comes after its zone’s hit: a damaging zone’s ignite is added first, then its stacks', () => {
+      const spec: GroundZoneSpec = { ...ZONE, ailment: 'burn', ailmentStacks: 2 };
+      const ctx = placedEnemies([near(0, 0)], {
+        stats: zoneStats([idle(spec)], { igniteChance: 1, burnMaxStacks: 5 }),
+      });
+      runAt(ctx, effectOf(ctx, 0));
+      const events = untilPulse(ctx);
+      // The hit's burn of its 100 × burnDamage, then the term's two of the payload's 400.
+      const [hit, term] = [100 * ctx.burnDamage, 400 * ctx.burnDamage];
+      expect(enemy(ctx, 1).burns.map((stack) => toNumber(stack.dps))).toEqual([hit, term, term]);
+      expect(ignites(events)).toEqual(
+        [1, 2, 3].map((stacks) => ({ type: 'ignite', targetId: 1, stacks })),
+      );
+    });
+
+    it.each([
+      ['below the cap', [600]],
+      ['beside two stacks that end on its tick', [1 + PULSE_TICKS, 1 + PULSE_TICKS, 600]],
+    ] as const)('adds its stacks %s as applyStacks does, one ignite each', (_, ends) => {
+      const make = (): RunContext => {
+        const ctx = termCapped(2, 3);
+        for (const end of ends) burn(ctx, 1000, end);
+        return ctx;
+      };
+      const ctx = make();
+      const copy = make();
+      runAt(ctx, effectOf(ctx, 0));
+      const events = atPulse(ctx, 1);
+      expect(ctx.now).toBe(1 + PULSE_TICKS);
+      termCopy(copy, ctx.now, 2);
+      const e = enemy(ctx, 1);
+      expect(burnState(e)).toEqual(burnState(enemy(copy, 1)));
+      // Ended stacks are banked and dropped, and the term's two added after the live one.
+      const lit = 400 * ctx.burnDamage;
+      expect(e.burns.map((stack) => toNumber(stack.dps))).toEqual([1000, lit, lit]);
+      expect(events).toEqual(copy.events);
+      expect(ignites(events)).toEqual([
+        { type: 'ignite', targetId: 1, stacks: 2 },
+        { type: 'ignite', targetId: 1, stacks: 3 },
+      ]);
+      expect(queuedOf(ctx)).toEqual([healOf(ctx)]);
+    });
+
+    it('joins the burn rings, which have no cap, as applyStacks does: one ignite', () => {
+      const make = (): RunContext => {
+        const ctx = termCapped(3, 2, { rules: [{ id: 'eternalFlame', durationMore: 0 }] });
+        applyBurn(ctx, enemy(ctx, 1), num(1000), 600, 2, ctx.burnCredit, 3);
+        return ctx;
+      };
+      const ctx = make();
+      const copy = make();
+      expect(ctx.burnRings).toBe(true);
+      runAt(ctx, effectOf(ctx, 0));
+      const events = atPulse(ctx, 1);
+      termCopy(copy, ctx.now, 3);
+      expect(enemy(ctx, 1).burnStacks).toBe(6);
+      expect(burnState(enemy(ctx, 1))).toEqual(burnState(enemy(copy, 1)));
+      expect(ringsOf(ctx)).toEqual(ringsOf(copy));
+      expect(events).toEqual(copy.events);
+      expect(events).toEqual([{ type: 'ignite', targetId: 1, stacks: 6 }]);
+      expect(queuedOf(ctx)).toEqual([healOf(ctx)]);
+    });
+
+    it.each([1, MAX_DEPTH])(
+      'made at depth %i, queues the ailmentApplied triggers its stacks fire one deeper, not its own',
+      (depth) => {
+        const onBurn: TriggerSpec['when'] = [{ ailment: 'burn' }];
+        const term: GroundZoneSpec = { ...ZONE, damagePctPerSec: 0, ailment: 'burn' };
+        const ctx = placedEnemies([near(0, 0)], {
+          stats: zoneStats([
+            { on: 'ailmentApplied', when: onBurn, do: [term] },
+            { on: 'ailmentApplied', when: onBurn, do: heal },
+          ]),
+        });
+        // The zone of the first trigger, made by its entry at `depth`: that trigger is the origin
+        // of its term's burns, so rule 3 keeps it from firing on them.
+        runAt(ctx, effectOf(ctx, 0), Z.x, Z.y, { depth, origin: FIRST });
+        atPulse(ctx, 1);
+        const e = enemy(ctx, 1);
+        expect([e.burnStacks, e.ailDepth]).toEqual([1, depth]);
+        const heals = [effectOf(ctx, 1), depth + 1, FIRST + 1];
+        expect(queuedOf(ctx)).toEqual(depth < MAX_DEPTH ? [heals] : []);
+      },
+    );
+
+    it('refuses a damaging zone’s weaker burn term at the cap too, raising and queuing nothing', () => {
+      const term: GroundZoneSpec = { ...ZONE, ailment: 'burn' };
+      const stats = makeStats(
+        { damage: 400, critChance: 0, burnMaxStacks: 2, igniteChance: 0 },
+        [],
+        {
+          triggers: [
+            { source: 'fusion.fire.aura', spec: idle(term) },
+            {
+              source: 'center',
+              spec: { on: 'ailmentApplied', when: [{ ailment: 'burn' }], do: heal },
+            },
+          ],
+          conversions: [],
+          emitters: [],
+        },
+      );
+      const ctx = placedEnemies([near(0, 0)], { stats });
+      burn(ctx, 1000);
+      burn(ctx, 500);
+      runAt(ctx, effectOf(ctx, 0));
+      const e = enemy(ctx, 1);
+      const before = burnState(e);
+      const events = atPulse(ctx, 1);
+      expect(events.filter((ev) => ev.type === 'pulse')).toHaveLength(1);
+      expect(ignites(events)).toEqual([]);
+      expect(burnState(e)).toEqual(before);
+      expect(queuedOf(ctx)).toEqual([]);
+    });
+
+    it('applies its burn term before its frost term (ignite, then freeze)', () => {
+      const term: GroundZoneSpec = {
+        ...ZONE,
+        damagePctPerSec: 0,
+        ailment: 'burn',
+        addFrostPerSec: 8,
+      };
+      const ctx = placedEnemies([near(0, 0)], { stats: zoneStats([idle(term)]) });
+      runAt(ctx, effectOf(ctx, 0));
+      const events = atPulse(ctx, 1);
+      const kinds = events.filter((ev) => ev.type === 'ignite' || ev.type === 'freeze');
+      expect(kinds.map((ev) => ev.type)).toEqual(['ignite', 'freeze']);
+    });
+
+    it('applies a poison term before its frost term (ailmentApplied, then freeze)', () => {
+      const term: GroundZoneSpec = {
+        ...ZONE,
+        damagePctPerSec: 0,
+        ailment: 'poison',
+        addFrostPerSec: 8,
+      };
+      const ctx = placedEnemies([near(0, 0)], { stats: zoneStats([idle(term)]) });
+      runAt(ctx, effectOf(ctx, 0));
+      const events = atPulse(ctx, 1);
+      const kinds = events.filter((ev) => ev.type === 'ailmentApplied' || ev.type === 'freeze');
+      expect(kinds.map((ev) => ev.type)).toEqual(['ailmentApplied', 'freeze']);
+    });
+
+    it('adds, raises and fires nothing in a build without burn duration', () => {
+      const ctx = termCapped(1, 2, { values: { burnDuration: 0 } });
+      expect(ctx.burnTicks).toBe(0);
+      runAt(ctx, effectOf(ctx, 0));
+      const e = enemy(ctx, 1);
+      const before = burnState(e);
+      const events = atPulse(ctx, 1);
+      expect(e.burns).toEqual([]);
+      expect(burnState(e)).toEqual(before);
+      expect(events).toEqual([]);
+      expect(queuedOf(ctx)).toEqual([]);
+    });
   });
 });
 

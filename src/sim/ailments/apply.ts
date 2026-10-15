@@ -126,9 +126,11 @@ export function applyBurn(
 }
 
 /**
- * A zone or aura pulse hit's burn (src/sim/systems/zones.ts): applyBurn's one stack, except that
- * at the records cap it replaces a stack only when stronger (addBurnIfStronger, Hoshi's Q4/F4).
- * Rings have no cap, so under burnRings it always joins one. Returns whether it was applied.
+ * `n` burn stacks a zone causes (src/sim/systems/zones.ts: a zone or aura pulse hit's one, or a
+ * zone's own burn term's): applyBurn's, except that at the records cap each stack replaces the
+ * weakest of the stacks then held, the term's earlier ones included, only when stronger
+ * (addBurnIfStronger, Hoshi's Q4/F4). Rings have no cap, so under burnRings they always join
+ * one. Returns whether any stack was applied.
  */
 export function applyPulseBurn(
   ctx: RunContext,
@@ -137,9 +139,16 @@ export function applyPulseBurn(
   end: number,
   depth: number,
   credit: number,
+  n: number,
 ): boolean {
-  if (!ctx.burnRings) return addBurnIfStronger(ctx, enemy, dps, end, depth, credit);
-  applyBurn(ctx, enemy, dps, end, depth, credit, 1);
+  if (!ctx.burnRings) {
+    let applied = false;
+    for (let s = 0; s < n; s++) {
+      if (addBurnIfStronger(ctx, enemy, dps, end, depth, credit)) applied = true;
+    }
+    return applied;
+  }
+  applyBurn(ctx, enemy, dps, end, depth, credit, n);
   return true;
 }
 

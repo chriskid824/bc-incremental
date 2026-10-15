@@ -301,8 +301,8 @@ const FREEZE_LIST_STATS = makeStats(
  * drop poison-only zones, half the freezes drop small cold zones, and every second an aura zone
  * lands on the densest spot and marks enemies for a center explode. The damaging zones' hits
  * ignite and chill like the volley's (igniteChance, frostOnHit; re-recorded by C4.6c), and the
- * fire zones' burn terms hold enemies at the burn cap, where those hits' burns replace only
- * weaker stacks (re-recorded by C4.6d).
+ * fire zones' burn terms hold enemies at the burn cap, where those hits' burns (re-recorded by
+ * C4.6d) and the terms' own stacks (by C4.7b) replace only weaker stacks.
  */
 const ZONE_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
   [
@@ -499,7 +499,7 @@ const ENTRIES: readonly GoldenC4Entry[] = [
   {
     name: 'zones',
     config: { stats: ZONE_STATS, rules: [], startWave: 12 },
-    expected: ['8c2d9225a55992ad', '3e6d00ae23ad0068'],
+    expected: ['b81f40b410726fde', '3e6d00ae23ad0068'],
   },
   {
     name: 'magmaBomb',

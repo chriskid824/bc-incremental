@@ -13,10 +13,11 @@
  * enemy it did not kill: its ailment stacks, its frost, its slow and, for a source an inZone
  * condition names, the inZone mark. A pulse's hits roll and apply their ailments as any hit does
  * (ignite, poison, bleed, shock, then frostOnHit), before the terms, except that at the burn
- * records cap their burns replace only weaker stacks (Hoshi's Q4/F4), and that every hit of a
- * payload with ALWAYS_IGNITES (火地's) ignites, its roll still drawn (Q4/F1). They raise no hit
- * events: they add to the pulse's tally (PulseAcc), and the pulse raises one pulse event
- * (Payload.aggregate); the ailments they apply raise theirs.
+ * records cap their burns, like each stack of the zone's own burn term, replace only weaker
+ * stacks (Hoshi's Q4/F4), and that every hit of a payload with ALWAYS_IGNITES (火地's) ignites,
+ * its roll still drawn (Q4/F1). They raise no hit events: they add to the pulse's tally
+ * (PulseAcc), and the pulse raises one pulse event (Payload.aggregate); the ailments they apply
+ * raise theirs.
  *
  * Caps (K5): a source keeps at most ZONE_SOURCE_CAP effect zones, the pool ZONE_CAP of them and
  * SIGNATURE_ZONE_CAP signature zones. A new effect zone of a source at its cap evicts that
@@ -36,7 +37,7 @@ import type { Num } from '../../core/num';
 import { TAG } from '../../data/tags';
 import { APPLIED_AILMENTS } from '../../data/triggers';
 import type { AppliedAilment, GroundZoneSpec } from '../../data/triggers';
-import { applyPulseBurn, creditOf } from '../ailments/apply';
+import { ailmentDps, applyPulseBurn, creditOf } from '../ailments/apply';
 import { addFrost } from '../ailments/frost';
 import { takenMult } from '../ailments/shock';
 import { pctMaxHpFactor, statAt } from '../build/eval';
@@ -256,6 +257,8 @@ function pulse(ctx: RunContext, z: ZonePool, acc: PulseAcc, s: number): void {
   const a = z.ailment[i] as number;
   const ailment = APPLIED_AILMENTS[Math.max(0, a)] as AppliedAilment;
   const ails = a >= 0 && durationOf(ctx, ailment) > 0;
+  // A burn term takes the cap rule of the zone's hits' burns (Q4/F4); other terms applyStacks'.
+  const burnTerm = ails && ailment === 'burn';
   const base: Num = ails ? mul(p.baseDamage, z.ailmentPct[i] as number) : ZERO;
   const depth = z.depth[i] as number;
   const origin = z.origin[i] as number;
@@ -271,7 +274,8 @@ function pulse(ctx: RunContext, z: ZonePool, acc: PulseAcc, s: number): void {
     if (!enemy.alive) continue;
     if (scale > 0) hitPulse(ctx, acc, enemy, p, scale, depth, origin);
     if (!enemy.alive) continue;
-    if (ails) applyStacks(ctx, ailment, enemy, p, base, stacks, depth, origin);
+    if (burnTerm) applyBurnTerm(ctx, enemy, p, base, stacks, depth, origin);
+    else if (ails) applyStacks(ctx, ailment, enemy, p, base, stacks, depth, origin);
     if (frost > 0) frostOne(ctx, enemy, frost, source, depth, origin);
     if (slow > 0) {
       const live = enemy.zoneSlowUntil > now ? enemy.zoneSlow : 0;
@@ -421,6 +425,7 @@ export function hitPulse(
       ctx.now + ctx.burnTicks,
       depth,
       creditOf(ctx, 'burn', p),
+      1,
     );
     if (applied && ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
   }
@@ -436,6 +441,27 @@ export function hitPulse(
     if (acc.quiet) quietDispatch(ctx, crit, depth);
     else dispatchHit(ctx, enemy, amount, mask, source, crit, 0, depth, origin, flags);
   }
+}
+
+/**
+ * The zone's own burn term on `enemy`: applyStacks' burn (src/sim/effects/execute.ts), with its
+ * dps, end and credit, except that at the records cap each of its `stacks` replaces only a
+ * weaker stack, checked in turn (applyPulseBurn, Q4/F4); a refused stack changes and raises
+ * nothing. Its one ailmentApplied trigger fires, with no flags, when any stack was applied.
+ */
+function applyBurnTerm(
+  ctx: RunContext,
+  enemy: Enemy,
+  p: Payload,
+  base: Num,
+  stacks: number,
+  depth: number,
+  origin: number,
+): void {
+  const dps = ailmentDps(ctx, enemy, p, SLOT_BURN, base, ctx.burnDamage);
+  const credit = creditOf(ctx, 'burn', p);
+  const applied = applyPulseBurn(ctx, enemy, dps, ctx.now + ctx.burnTicks, depth, credit, stacks);
+  if (applied && ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, 0);
 }
 
 /** Moves the zone in slot `from` to slot `to` (to < from); its record stays put. */
