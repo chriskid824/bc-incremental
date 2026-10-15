@@ -23,7 +23,7 @@ import { slotRow } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
 import { bleedLeft } from './bleed';
-import { addBurn, recordsLeft, spreadBurns } from './records';
+import { addBurn, addBurnIfStronger, recordsLeft, spreadBurns } from './records';
 import type { BurnSpread } from './records';
 import { RING_BURN, RING_POISON, RING_SLOTS } from './rings';
 
@@ -123,6 +123,24 @@ export function applyBurn(
   }
   addToRing(ctx, enemy, RING_BURN, credit, dps, end, n, depth);
   ctx.events.push({ type: 'ignite', targetId: enemy.id, stacks: enemy.burnStacks });
+}
+
+/**
+ * A zone or aura pulse hit's burn (src/sim/systems/zones.ts): applyBurn's one stack, except that
+ * at the records cap it replaces a stack only when stronger (addBurnIfStronger, Hoshi's Q4/F4).
+ * Rings have no cap, so under burnRings it always joins one. Returns whether it was applied.
+ */
+export function applyPulseBurn(
+  ctx: RunContext,
+  enemy: Enemy,
+  dps: Num,
+  end: number,
+  depth: number,
+  credit: number,
+): boolean {
+  if (!ctx.burnRings) return addBurnIfStronger(ctx, enemy, dps, end, depth, credit);
+  applyBurn(ctx, enemy, dps, end, depth, credit, 1);
+  return true;
 }
 
 /** `n` poison stacks of `dps` until tick `end`, credited to `credit`, at trigger depth `depth`. */

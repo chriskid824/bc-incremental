@@ -11,7 +11,8 @@
  * with its payload at its scale (none at scale 0), then applies the zone's own terms to each
  * enemy it did not kill: its ailment stacks, its frost, its slow and, for a source an inZone
  * condition names, the inZone mark. A pulse's hits roll and apply their ailments as any hit does
- * (ignite, poison, bleed, shock, then frostOnHit), before the terms. They raise no hit events:
+ * (ignite, poison, bleed, shock, then frostOnHit), before the terms, except that at the burn
+ * records cap their burns replace only weaker stacks (Hoshi's Q4/F4). They raise no hit events:
  * they add to the pulse's tally (PulseAcc), and the pulse raises one pulse event
  * (Payload.aggregate); the ailments they apply raise theirs.
  *
@@ -33,7 +34,7 @@ import type { Num } from '../../core/num';
 import { TAG } from '../../data/tags';
 import { APPLIED_AILMENTS } from '../../data/triggers';
 import type { AppliedAilment, GroundZoneSpec } from '../../data/triggers';
-import { applyBurn, creditOf } from '../ailments/apply';
+import { applyPulseBurn, creditOf } from '../ailments/apply';
 import { addFrost } from '../ailments/frost';
 import { takenMult } from '../ailments/shock';
 import { pctMaxHpFactor, statAt } from '../build/eval';
@@ -335,8 +336,10 @@ function quietDispatch(ctx: RunContext, crit: boolean, depth: number): void {
  * hitWithPayload (src/sim/combat/hit.ts) does for a primary hit that is not forced to crit, with
  * no caller flags, reading the rows hoistPulseRows put in `acc`. It rolls and applies the
  * payload's ailments as hitWithPayload does, in its order and through its rollDots and
- * applyDots; a quiet pulse's hit leaves dispatchHit to quietDispatch, which keeps only its
- * counts. The differential tests in zones.test.ts hold them equal.
+ * applyDots, except that its burn goes through applyPulseBurn: at the records cap it replaces
+ * only a weaker stack, and a burn refused there fires nothing. A quiet pulse's hit leaves
+ * dispatchHit to quietDispatch, which keeps only its counts. The differential tests in
+ * zones.test.ts hold them equal wherever no burn is refused.
  */
 export function hitPulse(
   ctx: RunContext,
@@ -402,19 +405,19 @@ export function hitPulse(
   );
   if (!enemy.alive) return;
   if (ignites && ctx.burnTicks > 0) {
-    // The burn's damage is the hit's before its damage row, as hitWithPayload's.
+    // The burn's damage is the hit's before its damage row, as hitWithPayload's. At the records
+    // cap it replaces only a weaker stack (Q4/F4), and a refused one changes and fires nothing.
     ev.chainJump = 0;
     const burnRow = slotRow(build, p, crit ? SLOT_BURN_CRIT : SLOT_BURN);
-    applyBurn(
+    const applied = applyPulseBurn(
       ctx,
       enemy,
       mul(base, ctx.burnDamage * statAt(table, burnRow, DAMAGE, ev)),
       ctx.now + ctx.burnTicks,
       depth,
       creditOf(ctx, 'burn', p),
-      1,
     );
-    if (ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
+    if (applied && ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
   }
   if (rolled !== 0) applyDots(ctx, enemy, p, base, crit, rolled, depth, origin);
   if (ctx.hitsFrost && p.rollsAilments) {

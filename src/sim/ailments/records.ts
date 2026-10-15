@@ -156,6 +156,36 @@ export function addBurn(
   ctx.events.push({ type: 'ignite', targetId: enemy.id, stacks: burns.length });
 }
 
+/**
+ * addBurn for a zone or aura pulse hit's burn (Hoshi's Q4/F4): at the cap it replaces the stack
+ * with the least remaining damage only when its own, dps × (end − now), is larger. Otherwise it
+ * returns false and changes nothing: no stack, banked damage, depth, credit or event.
+ */
+export function addBurnIfStronger(
+  ctx: RunContext,
+  enemy: Enemy,
+  dps: Num,
+  end: number,
+  depth: number,
+  source: number,
+): boolean {
+  const now = ctx.now;
+  if (now >= enemy.burnNextEnd) expireBurns(ctx, enemy);
+  const burns = enemy.burns;
+  if (burns.length >= ctx.burnCap) {
+    // addBurn's scan: the least remaining damage of a stack, the one it would replace.
+    let weakestLeft = mul((burns[0] as BurnStack).dps, (burns[0] as BurnStack).end - now);
+    for (let i = 1; i < burns.length; i++) {
+      const stack = burns[i] as BurnStack;
+      const left = mul(stack.dps, stack.end - now);
+      if (lt(left, weakestLeft)) weakestLeft = left;
+    }
+    if (!lt(weakestLeft, mul(dps, end - now))) return false;
+  }
+  addBurn(ctx, enemy, dps, end, depth, source);
+  return true;
+}
+
 /** How far a dying enemy's burns spread, and how strong a spread stack is. */
 export interface BurnSpread {
   readonly radius: number;

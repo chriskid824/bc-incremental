@@ -300,7 +300,9 @@ const FREEZE_LIST_STATS = makeStats(
  * evict), crits drop slowing, chilling ice zones that also mark enemies for a damage more, kills
  * drop poison-only zones, half the freezes drop small cold zones, and every second an aura zone
  * lands on the densest spot and marks enemies for a center explode. The damaging zones' hits
- * ignite and chill like the volley's (igniteChance, frostOnHit; re-recorded by C4.6c).
+ * ignite and chill like the volley's (igniteChance, frostOnHit; re-recorded by C4.6c), and the
+ * fire zones' burn terms hold enemies at the burn cap, where those hits' burns replace only
+ * weaker stacks (re-recorded by C4.6d).
  */
 const ZONE_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
   [
@@ -424,7 +426,7 @@ const ENTRIES: readonly GoldenC4Entry[] = [
   {
     name: 'zones',
     config: { stats: ZONE_STATS, rules: [], startWave: 12 },
-    expected: ['60a425bda0f6d4e8', '186c143c036195a8'],
+    expected: ['6220a6c8531d208f', '66117c4efc76354a'],
   },
 ];
 
