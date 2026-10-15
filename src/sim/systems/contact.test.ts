@@ -5,12 +5,14 @@ import type { Modifier, StatExtras } from '../../data/stats';
 import { TAG } from '../../data/tags';
 import type { TriggerSpec } from '../../data/triggers';
 import { runEffectQueue } from '../effects/execute';
+import type { EmitterRuntime } from '../emitters/types';
 import { eventsOf, makeStats, placedEnemies } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import type { SimEvent } from '../types';
 import { resolveContacts } from './contact';
 import type { Enemy, RunContext } from './context';
 import { compact } from './death';
+import { runEmitters } from './emitters';
 import { addEnemy } from './spawn';
 
 describe('contacts', () => {
@@ -87,10 +89,15 @@ describe('thorns', () => {
     const ctx = placedEnemies([], {
       stats: makeStats({}, [], granting([['outer.thorns', spikes]])),
     });
-    expect(ctx.stepEmitters.map((em) => em.spec.kind)).toEqual(['volley']);
     expect(ctx.thornsEmitters.map((em) => [em.index, em.spec.kind, em.interval])).toEqual([
       [1, 'thorns', Infinity],
     ]);
+    // The emitter stage steps the volley, whose accumulator gains its cadence (no enemy, so no
+    // attack), and passes over the thorns, whose accumulator stays 0.
+    const [volley, thorns] = ctx.emitters as [EmitterRuntime, EmitterRuntime];
+    runEmitters(ctx);
+    expect(volley.acc).toBe(volley.cadence);
+    expect(thorns.acc).toBe(0);
   });
 
   it('kills a toucher before it reaches the player: contact once, no heroHit, no leak (C3)', () => {

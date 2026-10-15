@@ -199,8 +199,9 @@ export interface EmitterRuntime {
   readonly spec: EmitterSpec;
   readonly payload: Payload;
   /**
-   * Its position in CompiledBuild.emitters (0: the signature attack); the stage lists of the run
-   * keep that order (RunContext.stepEmitters).
+   * Its position in CompiledBuild.emitters (0: the signature attack); the stages keep that order:
+   * runEmitters walks RunContext.emitters and skips the kinds whose EMITTER_STEPS entry is null,
+   * which the other stages run from their own lists (RunContext.thornsEmitters).
    */
   readonly index: number;
   /** Ticks between its attacks (emitterInterval); Infinity disables attacking. */

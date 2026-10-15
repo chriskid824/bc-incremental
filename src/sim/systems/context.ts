@@ -61,7 +61,6 @@ import type {
   SimEvent,
   SimState,
 } from '../types';
-import { EMITTER_STEPS } from './emitters';
 import { createEnemyGrid } from './grid';
 import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
@@ -315,14 +314,16 @@ export interface RunContext {
   readonly projectileEstimate: Num;
 
   // ---- Emitters (src/sim/emitters/) ----
-  /** The build's emitters with their payloads and counters; index 0 is the signature attack. */
+  /**
+   * The build's emitters with their payloads and counters; index 0 is the signature attack. The
+   * emitter stage walks them in this order, skipping the kinds another stage runs
+   * (src/sim/systems/emitters.ts).
+   */
   readonly emitters: readonly EmitterRuntime[];
   /**
-   * The emitters by the stage that runs them, each list in emitter order: the emitter stage's
-   * (src/sim/systems/emitters.ts), the contact stage's thorns (src/sim/systems/contact.ts) and
-   * the segment stage's, which come later in C4.
+   * The emitters of the kinds another stage runs, each list in emitter order: the contact stage's
+   * thorns (src/sim/systems/contact.ts) and the segment stage's, which come later in C4.
    */
-  readonly stepEmitters: readonly EmitterRuntime[];
   readonly thornsEmitters: readonly EmitterRuntime[];
   readonly segmentEmitters: readonly EmitterRuntime[];
 
@@ -605,7 +606,6 @@ export function createRunContext(
       emitterInterval(build, spec),
     ),
   );
-  const stepEmitters = emitters.filter((em) => EMITTER_STEPS[em.spec.kind] !== null);
   const thornsEmitters = emitters.filter((em) => em.spec.kind === 'thorns');
   const signatureEmitter = emitters[0] as EmitterRuntime;
   const signaturePayload = signatureEmitter.payload;
@@ -771,7 +771,6 @@ export function createRunContext(
     projectileEstimate,
 
     emitters,
-    stepEmitters,
     thornsEmitters,
     segmentEmitters: [],
 

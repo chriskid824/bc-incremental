@@ -1,7 +1,7 @@
 /**
- * Shot pool (docs/v3/implementation-plan-v3.md §2.4, §2.15): every projectile but the volley's
- * homing ones (RunContext.projectiles), in typed arrays allocated once per run. A shot moves in
- * one of three ways:
+ * Shot pool (docs/v3/implementation-plan-v3.md §2.10, §2.15, §6): every projectile but the
+ * volley's homing ones (RunContext.projectiles), in typed arrays allocated once per run. A shot
+ * moves in one of three ways:
  * - straight: at a fixed velocity, hitting each enemy its swept path touches, in the order it
  *   reaches them, until its pierce is spent. It passes through the last SHOT_MEMORY enemies it
  *   hit without hitting them again. Leaving the arena it bounces back while it has bounces

@@ -8,8 +8,11 @@ describe('simulation speed', () => {
   it('keeps the run context below 128 properties, so every run shares its hidden class', () => {
     // V8 caches the hidden class of an object literal only below 128 properties; past that each
     // createRunContext builds its own, and every ctx access in the systems goes megamorphic
-    // once a few runs have passed through them (C4.4 measured a quarter slower). Group new
-    // fields into an object of their own instead (RunContext.selection).
+    // once a few runs have passed through them (C4.4 measured a quarter slower). So add no
+    // top-level field: a system's state goes into its member of ctx.sys (SystemState, from
+    // C4.6), a per-emitter or shot buffer into the object that owns it (EmitterRuntime,
+    // ShotPool), each created with all its members in its owner's literal, as ctx.selection and
+    // ctx.centerEvents group theirs (docs/v3 C4 design §0.7).
     const ctx = createRunContext(makeConfig(), makeTestData());
     expect(Object.keys(ctx).length).toBeLessThan(128);
   });

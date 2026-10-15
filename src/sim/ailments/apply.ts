@@ -146,7 +146,8 @@ export function applyPoison(
 
 /**
  * Moves the burn or poison of `source`'s rings (first: RING_BURN or RING_POISON) to every
- * other alive enemy within `radiusSq` of it, the first `maxTargets` in id order: `f` of their
+ * other alive enemy within `radiusSq` of it, `maxTargets` of them at most: the first in id order,
+ * or with `nearest` the nearest to `source`, nearest first (ties by id). Each takes `f` of their
  * damage left and floor(sf × their live stacks) stack counts, keeping each ring's class and
  * credit, at trigger depth `depth`. A ring whose stacks have all ended moves nothing. Returns
  * the enemies reached, or −1 when `source` holds no such stack.
@@ -167,7 +168,8 @@ function spreadRings(
   // As spreadBurns: only stacks that have not ended move, and none means no spread.
   if (ringEnd(source, first) <= now) return -1;
   const from = source.rings;
-  // In id order; moving stacks kills nothing, so collecting the targets first changes nothing.
+  // In id order, or nearest first; moving stacks kills nothing, so collecting the targets first
+  // changes nothing.
   const targets = ctx.spreadTargets;
   let count = ctx.grid.within(source.x, source.y, radiusSq, targets);
   if (nearest && maxTargets < count) {

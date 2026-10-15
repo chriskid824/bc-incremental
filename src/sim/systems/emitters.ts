@@ -1,8 +1,8 @@
 /**
  * Emitters system (docs/v3/implementation-plan-v3.md §2.15): every emitter of the build that
  * attacks in this stage does, in emitter order, the signature attack first (src/sim/emitters/);
- * then the rule modules' tick hooks run. Emitters of the kinds another stage runs (thorns in the
- * contact stage, segments) are not in this stage's list (RunContext.stepEmitters).
+ * then the rule modules' tick hooks run. runEmitters skips the kinds whose EMITTER_STEPS entry is
+ * null, which another stage runs (thorns in the contact stage, segments).
  */
 
 import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
@@ -22,12 +22,16 @@ export const EMITTER_STEPS: { readonly [K in EmitterSpec['kind']]: EmitterStep |
   thorns: null,
 };
 
-/** Fires every due attack of the emitter stage's emitters, in emitter order. */
+/**
+ * Fires every due attack of the emitter stage's emitters, in emitter order (RunContext.emitters),
+ * skipping those of a kind whose step is null.
+ */
 export function runEmitters(ctx: RunContext): void {
-  const emitters = ctx.stepEmitters;
+  const emitters = ctx.emitters;
   for (let i = 0; i < emitters.length; i++) {
     const em = emitters[i] as EmitterRuntime;
-    (EMITTER_STEPS[em.spec.kind] as EmitterStep)(ctx, em);
+    const step = EMITTER_STEPS[em.spec.kind];
+    if (step !== null) step(ctx, em);
   }
 }
 

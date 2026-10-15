@@ -5,6 +5,7 @@ import { BASE_STATS } from '../../data/stats';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
 import { createRunContext } from '../systems/context';
+import { EMITTER_STEPS } from '../systems/emitters';
 import { makeConfig, makeStats, makeTestData, stationarySquares } from '../testing';
 import { NO_INPUT, TICK_RATE } from '../types';
 import type { RunConfig } from '../types';
@@ -104,8 +105,9 @@ describe('volley', () => {
         attackSpeed > 0 ? TICK_RATE / attackSpeed : Infinity,
       );
       expect(volley?.index).toBe(0);
-      expect(ctx.stepEmitters).toHaveLength(1);
-      expect(ctx.stepEmitters[0]).toBe(volley);
+      const stepped = ctx.emitters.filter((em) => EMITTER_STEPS[em.spec.kind] !== null);
+      expect(stepped).toHaveLength(1);
+      expect(stepped[0]).toBe(volley);
       expect(ctx.thornsEmitters).toEqual([]);
       expect(ctx.segmentEmitters).toEqual([]);
     }

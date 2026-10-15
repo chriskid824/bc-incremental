@@ -211,10 +211,11 @@ const noWaves = (): GameData =>
   });
 
 /**
- * A run context on tick 1 holding exactly the `placed` enemies, in order (ids 1, 2, …): each
- * at its position, with its radius, speed and hp, in the start wave's record, and the grid
- * rebuilt for the tick's queries. Nothing has moved or attacked; the events of the wave start
- * and the spawns are cleared. For tests of systems and executors that need exact geometry.
+ * A run context on tick 1 (ctx.now and state.tick both 1, as in a run) holding exactly the
+ * `placed` enemies, in order (ids 1, 2, …): each at its position, with its radius, speed and hp,
+ * in the start wave's record, and the grid rebuilt for the tick's queries. Nothing has moved or
+ * attacked; the events of the wave start and the spawns are cleared. For tests of systems and
+ * executors that need exact geometry.
  */
 export function placedEnemies(
   placed: readonly PlacedEnemy[],
@@ -229,6 +230,7 @@ export function placedEnemies(
   const data = options.data ?? noWaves();
   const ctx = createRunContext(config, data, options.modules);
   ctx.now = 1;
+  ctx.state.tick = 1;
   startDueWave(ctx);
   const rec = ctx.current as WaveRecord;
   const player = ctx.player;
@@ -538,8 +540,9 @@ export const stressData = (): GameData =>
   });
 
 /**
- * The stress build: bench.ts's normal build at the stress start wave, immortal; `values`
- * override its stats, `extras` add triggers.
+ * The stress build: bench.ts's normal build, immortal, but with its frontier at the stress start
+ * wave itself (normal's is ten waves past its start wave), so enemies pile up; `values` override
+ * its stats, `extras` add triggers, conversions and emitter grants.
  */
 export const stressStats = (
   values: Partial<Record<StatId, number>> = {},

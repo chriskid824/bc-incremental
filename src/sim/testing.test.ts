@@ -35,6 +35,7 @@ describe('placedEnemies', () => {
     ]);
     const square = makeTestData().enemies.square;
     expect(ctx.now).toBe(1);
+    expect(ctx.state.tick).toBe(1);
     expect(ctx.events).toEqual([]);
     expect(
       ctx.enemies.map((e) => [e.id, e.type, e.x, e.y, e.prevX, e.prevY, e.radius, e.hp, e.maxHp]),
@@ -159,7 +160,7 @@ describe('withinRef', () => {
 });
 
 describe('stress fixture', () => {
-  it('is the normal build at the stress start wave on waves of 18, 11 and 4 a second', () => {
+  it('is the normal build at its frontier on the start wave, on waves of 18, 11 and 4 a second', () => {
     expect(STRESS_START_WAVE).toBe(30);
     const stats = stressStats({ attackSpeed: 32 });
     expect(stats.values.damage).toBe(targetDamage(STRESS_START_WAVE) / 2.5);

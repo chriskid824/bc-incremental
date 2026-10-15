@@ -53,7 +53,7 @@ interface GoldenC4Entry {
 
 /**
  * C4.2's shot pool beside the volley: every 15 ticks, a ring of six straight shots from the
- * player (pierce 1 to 6 or without limit, bounces, one wide shot), a homing shot (steady every
+ * player (pierce 1 to 5 or without limit, bounces, one wide shot), a homing shot (steady every
  * fourth round) and a lob landing 24 ticks later, all on one payload credited to
  * outer.barrage.
  */
