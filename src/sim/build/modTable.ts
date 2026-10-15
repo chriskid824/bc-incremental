@@ -125,7 +125,8 @@ const ESTIMATE = staticInput();
 
 /**
  * Compiles StatBlock.scoped, keeping data order; scopes resolve against `sources`, which keeps
- * them current as it numbers more sources. Throws on a stat that is not scoped.
+ * them current as it numbers more sources, and an inZone condition numbers its source there.
+ * Throws on a stat that is not scoped.
  */
 export function compileMods(scoped: readonly Modifier[], sources: SourceTable): CompiledMod[] {
   return scoped.map((mod) => {
@@ -136,7 +137,9 @@ export function compileMods(scoped: readonly Modifier[], sources: SourceTable): 
     const scopeOk = mod.scope === undefined ? null : sources.scopeMask(mod.scope);
     const scale = mod.scaling === undefined ? null : compileScaling(mod.scaling);
     const cond =
-      mod.when === undefined ? null : mod.when.map((condition) => compileCondition(condition));
+      mod.when === undefined
+        ? null
+        : mod.when.map((condition) => compileCondition(condition, undefined, sources));
     const scopeClass = mod.scope === undefined ? null : selectorClass(mod.scope);
     return {
       stat,

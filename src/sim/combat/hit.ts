@@ -13,7 +13,8 @@
  * A hit raises the hit and crit trigger events and calls the onHit hooks (src/sim/effects/): a
  * surviving hit once its ailments are applied, so their conditions see them; a lethal one right
  * before the kill, on the victim as it was hit. Dispatch only queues effects, so nothing
- * re-enters a hit.
+ * re-enters a hit. The hits of a pulse's payload (Payload.aggregate, a zone's) add to the
+ * pulse's tally rather than each raising a hit event (src/sim/systems/zones.ts).
  */
 
 import type { Num } from '../../core/num';
@@ -49,6 +50,7 @@ import type { Payload } from '../emitters/types';
 import { clamp01 } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { killEnemy } from '../systems/death';
+import type { PulseAcc } from '../systems/systemState';
 import { convertHit } from './convert';
 
 const CRIT = TAG.crit;
@@ -260,6 +262,7 @@ export function hitWithPayload(
     fromX,
     fromY,
     converted,
+    p.aggregate ? ctx.sys.pulse : null,
   );
   if (!enemy.alive) return;
   if (ignites && ctx.burnTicks > 0) {
@@ -320,7 +323,7 @@ function fillHitScratch(
 }
 
 /** The hit's damage through the modifyDamage hooks, in order. */
-function modifyDamage(
+export function modifyDamage(
   ctx: RunContext,
   enemy: Enemy,
   amount: Num,
@@ -340,7 +343,7 @@ function modifyDamage(
 }
 
 /** The hit and crit events of a hit at its target, then the onHit hooks. */
-function dispatchHit(
+export function dispatchHit(
   ctx: RunContext,
   enemy: Enemy,
   amount: Num,
@@ -362,7 +365,8 @@ function dispatchHit(
 
 /**
  * Deals a hit's `amount` to `enemy`: hp, the chain's hit mark, tallies (part by part for a
- * `converted` hit) and the hit event; a lethal hit raises its events (with KILLED) and kills it.
+ * `converted` hit) and the hit event, or with `acc` (a pulse's hit) the pulse's tally instead;
+ * a lethal hit raises its events (with KILLED) and kills it.
  */
 export function applyHitDamage(
   ctx: RunContext,
@@ -378,25 +382,32 @@ export function applyHitDamage(
   fromX: number | null,
   fromY: number | null,
   converted: boolean,
+  acc: PulseAcc | null = null,
 ): void {
   enemy.hp = sub(enemy.hp, amount);
   enemy.hitMark = ctx.attackSerial;
   if (converted) tallyParts(ctx, source, amount);
   else tally(ctx, tags, source, amount);
   if (gt(amount, ctx.maxHit)) ctx.maxHit = amount;
-  ctx.events.push({
-    type: 'hit',
-    targetId: enemy.id,
-    x: enemy.x,
-    y: enemy.y,
-    amount,
-    tags,
-    source,
-    crit,
-    chainIndex,
-    fromX,
-    fromY,
-  });
+  if (acc === null) {
+    ctx.events.push({
+      type: 'hit',
+      targetId: enemy.id,
+      x: enemy.x,
+      y: enemy.y,
+      amount,
+      tags,
+      source,
+      crit,
+      chainIndex,
+      fromX,
+      fromY,
+    });
+  } else {
+    acc.hits++;
+    acc.total = add(acc.total, amount);
+    if (crit) acc.crits.push(enemy.id);
+  }
   if (lte(enemy.hp, ZERO)) {
     enemy.killDepth = depth;
     enemy.killKind = KILL_BY_HIT;

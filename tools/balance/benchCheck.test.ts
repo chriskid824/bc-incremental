@@ -211,6 +211,7 @@ describe('bench.baseline.json', () => {
       'poisonBoss (500 stacks)',
       'poisonBoss (5 stacks)',
       'stressM1',
+      'stress',
     ]);
   });
 });

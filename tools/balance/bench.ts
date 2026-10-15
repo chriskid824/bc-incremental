@@ -24,8 +24,15 @@
  *   first of the stress family, the scenarios on that fixture that the C4 systems add (docs/v3
  *   C4 design §7). A stress-family scenario ignores --start-wave, and its report adds its
  *   workload: one untimed run's average alive over ticks 301–1800, its peaks and its counters.
+ * - stress: the stress family's gated scenario (the STRESS gate of docs/v3 C4 design §0.5),
+ *   grown with the C4 systems. v1 (C4.6) adds four ground zone triggers on the signature's hits,
+ *   one source each, which hold about 64 live effect zones: 'outer.fire', 'outer.ice' (slowing)
+ *   and 'outer.poison' (poison only) on hits, 'outer.aura' on crits. Their zones kill few enough
+ *   that stressStats' damage keeps the alive band. Its report adds the zone workload: pulses,
+ *   zone hits and hits per pulse, and the average live effect zones over ticks 301–1800.
  *
- *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1] [--runs 50]
+ *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress]
+ *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>]
  *
@@ -49,6 +56,7 @@ import { parseArgs } from 'node:util';
 import { loadGameData, targetDamage } from '../../src/data';
 import type { GameData, StatBlock } from '../../src/data';
 import type { StatExtras } from '../../src/data/stats';
+import type { TriggerSpec } from '../../src/data/triggers';
 import { COUNTER_IDS, createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { CounterId, RunConfig } from '../../src/sim';
 import type { TestModule } from '../../src/sim/rules';
@@ -74,7 +82,15 @@ import {
 import type { BenchTimings, EntryTimings } from './benchCheck';
 import { quantile } from './report';
 
-const SCENARIO_IDS = ['normal', 'hits', 'ailments', 'effects', 'poisonBoss', 'stressM1'] as const;
+const SCENARIO_IDS = [
+  'normal',
+  'hits',
+  'ailments',
+  'effects',
+  'poisonBoss',
+  'stressM1',
+  'stress',
+] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
 /** The hits scenario's start wave, whatever --start-wave says. */
@@ -121,6 +137,60 @@ interface Scenario {
   /** Config of one run; runs differ only in their seed. */
   config(seed: number, startWave: number, variant: string): RunConfig;
 }
+
+/**
+ * stress v1's zone triggers (docs/v3 C4 design §7.3), each on the signature's hits only, so
+ * zone hits never trigger them (L2), and each able to hold its source's 16 zones at stressM1's
+ * rates (about 24 hits and 6 crits a second).
+ */
+const STRESS_ZONE_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'outer.fire',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'signature' }],
+      do: [{ kind: 'groundZone', radius: 40, durationSec: 1, damagePctPerSec: 0.2 }],
+    },
+  ],
+  [
+    'outer.ice',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'signature' }],
+      do: [{ kind: 'groundZone', radius: 80, durationSec: 2, damagePctPerSec: 0.05, slow: 0.3 }],
+    },
+  ],
+  [
+    'outer.poison',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'signature' }],
+      do: [
+        {
+          kind: 'groundZone',
+          radius: 60,
+          durationSec: 2,
+          damagePctPerSec: 0,
+          ailment: 'poison',
+          ailmentStacks: 1,
+        },
+      ],
+    },
+  ],
+  [
+    'outer.aura',
+    {
+      on: 'crit',
+      when: [{ hitIs: 'signature' }],
+      do: [{ kind: 'groundZone', radius: 80, durationSec: 3, damagePctPerSec: 0.1 }],
+    },
+  ],
+];
+const STRESS_EXTRAS: StatExtras = {
+  triggers: STRESS_ZONE_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+  conversions: [],
+  emitters: [],
+};
 
 /** The poisonBoss scenario's poison chance per variant. */
 const POISON_BOSS_CHANCE: Readonly<Record<string, number>> = {
@@ -293,6 +363,8 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   },
   // About 300 alive from tick 300 on, under M1's attack (docs/v3 C4 design §7.2).
   stressM1: stressScenario(() => ({ stats: stressStats(), rules: [] })),
+  // v1 (C4.6): stressM1 plus the zones; stressStats' damage keeps 287 alive at seed 1.
+  stress: stressScenario(() => ({ stats: stressStats({}, STRESS_EXTRAS), rules: [] })),
 };
 
 function positiveInt(name: string, text: string, min = 1): number {
@@ -343,6 +415,13 @@ interface Workload {
   /** Most projectiles in flight after a tick. */
   readonly peakProjectiles: number;
   readonly kills: number;
+  /** Zones created, zone pulses, and the hits of the pulses: in all and the most in one. */
+  readonly zones: number;
+  readonly pulses: number;
+  readonly zoneHits: number;
+  readonly peakPulseHits: number;
+  /** Live effect zones (not the signature's) after each tick past ALIVE_FROM_TICK, averaged. */
+  readonly averageEffectZones: number;
   /** The run's counters that are not 0, in COUNTER_IDS order. */
   readonly counters: readonly (readonly [CounterId, number])[];
 }
@@ -359,13 +438,26 @@ function measureWorkload(
   let aliveTicks = 0;
   let peakAlive = 0;
   let peakProjectiles = 0;
+  let zones = 0;
+  let pulses = 0;
+  let zoneHits = 0;
+  let peakPulseHits = 0;
+  let effectZoneSum = 0;
   while (!state.finished) {
-    sim.step(NO_INPUT);
+    for (const event of sim.step(NO_INPUT)) {
+      if (event.type === 'zone') zones++;
+      else if (event.type === 'pulse' && event.kind === 'zone') {
+        pulses++;
+        zoneHits += event.hits;
+        if (event.hits > peakPulseHits) peakPulseHits = event.hits;
+      }
+    }
     let alive = 0;
     for (const enemy of state.enemies) if (enemy.alive) alive++;
     if (state.tick > ALIVE_FROM_TICK) {
       aliveSum += alive;
       aliveTicks++;
+      for (let i = 0; i < state.zoneCount; i++) if (state.zones.signature[i] === 0) effectZoneSum++;
     }
     if (alive > peakAlive) peakAlive = alive;
     if (state.projectiles.length > peakProjectiles) peakProjectiles = state.projectiles.length;
@@ -376,6 +468,11 @@ function measureWorkload(
     peakAlive,
     peakProjectiles,
     kills: result.kills,
+    zones,
+    pulses,
+    zoneHits,
+    peakPulseHits,
+    averageEffectZones: aliveTicks === 0 ? NaN : effectZoneSum / aliveTicks,
     counters: COUNTER_IDS.filter((id) => result.counters[id] !== 0).map(
       (id) => [id, result.counters[id]] as const,
     ),
@@ -388,9 +485,16 @@ function workloadText(workload: Workload): string {
     workload.counters.length === 0
       ? 'none'
       : workload.counters.map(([id, value]) => `${id} ${value}`).join(', ');
+  const zones =
+    workload.zones === 0
+      ? ''
+      : `${workload.zones} zones, average ${workload.averageEffectZones.toFixed(1)} live ` +
+        `effect zones, ${workload.pulses} pulses, ${workload.zoneHits} zone hits ` +
+        `(${(workload.pulses === 0 ? 0 : workload.zoneHits / workload.pulses).toFixed(2)} ` +
+        `a pulse, at most ${workload.peakPulseHits}), `;
   return (
     `peak ${workload.peakAlive} alive, peak ${workload.peakProjectiles} projectiles, ` +
-    `${workload.kills} kills, counters: ${counters}`
+    `${workload.kills} kills, ${zones}counters: ${counters}`
   );
 }
 

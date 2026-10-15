@@ -7,7 +7,7 @@
 import { grantKey } from './emitters';
 import type { EmitterGrant } from './emitters';
 import type { RuleSpec } from './rules';
-import { ARCHETYPE_TAGS, sourceOfNode } from './sources';
+import { ARCHETYPE_TAGS, SOURCE_CLASSES, sourceOfNode } from './sources';
 import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
 import { DELIVERY_MASK, DOT_MASK, TAG } from './tags';
@@ -428,8 +428,20 @@ function conditionIssues(condition: Condition): string[] {
       `stacksAtLeast.stacks must be a positive integer (got ${condition.stacksAtLeast.stacks})`,
     );
   }
+  // Sources are numbered as a run first meets them, so a class has no fixed set to expand to;
+  // 'center' is both a class and its one id.
+  if ('inZone' in condition && isZoneClass(condition.inZone)) {
+    issues.push(
+      'inZone takes one source id (center, outer.<id>, fusion.<char>.<outer>), ' +
+        `not '${condition.inZone}'`,
+    );
+  }
   return issues;
 }
+
+/** A source class that is not also a single source id: every class but 'center'. */
+const isZoneClass = (selector: string): boolean =>
+  selector !== 'center' && (SOURCE_CLASSES as readonly string[]).includes(selector);
 
 /** An order (TARGET_ORDERS) ranks what a radius finds, so it needs one. */
 const orderIssue = (order: string): string =>
@@ -708,6 +720,66 @@ function effectIssues(
       // It reads the dying enemy's drop.
       if (!KILL_EVENTS.includes(on)) issues.push(`gainShards only runs on kill events (on ${on})`);
       break;
+    case 'groundZone':
+      issues.push(...groundZoneIssues(effect));
+      delivery(effect.tags);
+      break;
+  }
+  return issues;
+}
+
+/** Zone radii a groundZone accepts, in arena units. */
+const ZONE_RADIUS_MIN = 1;
+const ZONE_RADIUS_MAX = 400;
+/** The strongest slow a groundZone may apply. */
+const ZONE_SLOW_MAX = 0.9;
+
+/**
+ * Ranges of a groundZone: a radius in [1, 400], at least one pulse (0.25 s), a hit of 0 or more,
+ * ailment terms only with an ailment, a slow in (0, 0.9], and something to do.
+ */
+function groundZoneIssues(effect: Extract<EffectSpec, { kind: 'groundZone' }>): string[] {
+  const issues: string[] = [];
+  const { radius, durationSec, damagePctPerSec, slow } = effect;
+  if (!(radius >= ZONE_RADIUS_MIN && radius <= ZONE_RADIUS_MAX)) {
+    issues.push(`radius must be in [${ZONE_RADIUS_MIN}, ${ZONE_RADIUS_MAX}] (got ${radius})`);
+  }
+  if (!(durationSec >= 0.25)) {
+    issues.push(`durationSec must be >= 0.25, one pulse (got ${durationSec})`);
+  }
+  // The schema requires it too; data checked without the schema can still omit it.
+  if ((damagePctPerSec as number | undefined) === undefined) {
+    issues.push('damagePctPerSec is required; use 0 for a zone that only applies its status terms');
+  } else if (!(damagePctPerSec >= 0)) {
+    issues.push(`damagePctPerSec must be >= 0 (got ${damagePctPerSec})`);
+  }
+  if (effect.ailmentStacks !== undefined && !isPositiveInt(effect.ailmentStacks)) {
+    issues.push(`ailmentStacks must be a positive integer (got ${effect.ailmentStacks})`);
+  }
+  if (effect.ailmentDamagePct !== undefined && !(effect.ailmentDamagePct > 0)) {
+    issues.push(`ailmentDamagePct must be > 0 (got ${effect.ailmentDamagePct})`);
+  }
+  if (
+    effect.ailment === undefined &&
+    (effect.ailmentStacks !== undefined || effect.ailmentDamagePct !== undefined)
+  ) {
+    issues.push('ailmentStacks and ailmentDamagePct need ailment');
+  }
+  if (effect.addFrostPerSec !== undefined && !(effect.addFrostPerSec > 0)) {
+    issues.push(`addFrostPerSec must be > 0 (got ${effect.addFrostPerSec})`);
+  }
+  if (slow !== undefined && !(slow > 0 && slow <= ZONE_SLOW_MAX)) {
+    issues.push(`slow must be in (0, ${ZONE_SLOW_MAX}] (got ${slow})`);
+  }
+  if (
+    damagePctPerSec === 0 &&
+    effect.ailment === undefined &&
+    effect.addFrostPerSec === undefined &&
+    slow === undefined
+  ) {
+    issues.push(
+      'groundZone does nothing: give it damagePctPerSec > 0, ailment, addFrostPerSec or slow',
+    );
   }
   return issues;
 }

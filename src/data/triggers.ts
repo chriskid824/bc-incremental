@@ -8,6 +8,7 @@
  * simulation can run.
  */
 
+import type { SourceSelector } from './sources';
 import type { DamageTag } from './tags';
 
 /** Ailments an enemy can carry. The order is fixed: simulation bitsets index it. */
@@ -164,13 +165,15 @@ export type HitKind = (typeof HIT_KINDS)[number];
  * poison: it has poison damage left to take; bleed: its bleed has not ended; shock: its shock
  * has not worn off; frost: its chill meter is above 0, or it is frozen; frozen: it is frozen).
  * targetHpBelow: its hp is below this fraction of its max hp. stacksAtLeast: it carries at least
- * this many stacks of the ailment.
+ * this many stacks of the ailment. inZone: it stands in a ground zone of this source, one source
+ * id and never a class (a zone pulse marks the enemies within it for 16 ticks, groundZone).
  */
 export type TargetCondition =
   | { readonly targetHas: HeldAilment }
   | { readonly targetKind: TargetKind }
   | { readonly targetHpBelow: number }
-  | { readonly stacksAtLeast: { readonly ailment: StackAilment; readonly stacks: number } };
+  | { readonly stacksAtLeast: { readonly ailment: StackAilment; readonly stacks: number } }
+  | { readonly inZone: SourceSelector };
 
 /**
  * A condition of a trigger. chance: the trigger fires with this probability, rolled when the
@@ -220,6 +223,7 @@ export const CONDITION_CONTEXTS: Readonly<
   targetKind: ['modifier', ...TARGETED],
   targetHpBelow: ['modifier', ...TARGETED],
   stacksAtLeast: ['modifier', ...TARGETED],
+  inZone: ['modifier', ...TARGETED],
   chance: TRIGGER_EVENTS,
   cooldownSec: TRIGGER_EVENTS,
   hitIs: ['hit', 'crit', ...KILLS],
@@ -303,6 +307,33 @@ interface NovaSpec extends DamagePart {
 }
 
 /**
+ * A ground zone (src/sim/systems/zones.ts): it pulses every 0.25 s for `durationSec`, rounded to
+ * whole pulses (one at least). Each pulse hits every enemy within `radius` for damagePctPerSec ×
+ * 0.25 of the damage stat (0: no hit), tagged hit and zone plus its tags and element; its hits
+ * can crit and roll no ailments. Then each enemy takes the zone's own terms: `ailmentStacks`
+ * (default 1) of `ailment`, each as an applyAilment of damagePct `ailmentDamagePct` (default 1)
+ * would apply it; addFrostPerSec × 0.25 of frost; and `slow`, which holds 16 ticks past the pulse
+ * (the strongest live one counts, with frost the larger slow). A source keeps at most 16 zones,
+ * the oldest giving way; inZone conditions read the zones of the source they name.
+ */
+export interface GroundZoneSpec {
+  readonly kind: 'groundZone';
+  readonly radius: number;
+  readonly durationSec: number;
+  /** Required: 0 makes a zone that only applies its terms. */
+  readonly damagePctPerSec: number;
+  readonly ailment?: AppliedAilment;
+  readonly ailmentStacks?: number;
+  readonly ailmentDamagePct?: number;
+  readonly addFrostPerSec?: number;
+  readonly slow?: number;
+  /** More delivery tags of its hits: owner or geometry tags (src/data/tags.ts). */
+  readonly tags?: readonly DamageTag[];
+  /** The element its hits carry. */
+  readonly element?: 'cold' | 'lightning';
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -323,6 +354,8 @@ interface NovaSpec extends DamagePart {
  *   enemies within `radius` of the event (in `order`).
  * - heal: the player regains `lifePct` of max life.
  * - gainShards: the dying enemy's shard drop again, × `fraction` (kill events only).
+ * - groundZone: a zone of `radius` at the event's point for `durationSec`, pulsing four times a
+ *   second (GroundZoneSpec).
  */
 export type EffectSpec =
   | {
@@ -360,7 +393,8 @@ export type EffectSpec =
       readonly order?: TargetOrder;
     }
   | { readonly kind: 'heal'; readonly lifePct: number }
-  | { readonly kind: 'gainShards'; readonly fraction: number };
+  | { readonly kind: 'gainShards'; readonly fraction: number }
+  | GroundZoneSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -384,6 +418,7 @@ export const COEF_FIELDS: {
   addFrost: [],
   heal: [],
   gainShards: [],
+  groundZone: ['damagePctPerSec', 'ailmentDamagePct'],
 };
 
 /** When `on` happens and every `when` condition holds, run each effect of `do` in order. */

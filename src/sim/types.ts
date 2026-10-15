@@ -107,6 +107,23 @@ export interface ShotPoolState {
   readonly form: Uint8Array;
 }
 
+/**
+ * The zone pool (src/sim/systems/zones.ts): the ground zones in typed arrays reused from tick to
+ * tick. Slots 0 .. SimState.zoneCount − 1 hold the live zones, in id order.
+ */
+export interface ZonePoolState {
+  readonly id: Int32Array;
+  /** Its center. */
+  readonly x: Float64Array;
+  readonly y: Float64Array;
+  readonly radiusSq: Float64Array;
+  /** The tick it was created, and the tick it ends. */
+  readonly created: Int32Array;
+  readonly expiresAt: Int32Array;
+  /** 1: a signature zone (the signature attack's own), 0: an effect zone (groundZone). */
+  readonly signature: Uint8Array;
+}
+
 export interface PlayerState {
   readonly x: number;
   readonly y: number;
@@ -132,6 +149,9 @@ export interface SimState {
   /** The other projectiles; the first shotCount slots are in flight. */
   readonly shots: ShotPoolState;
   shotCount: number;
+  /** The ground zones; the first zoneCount slots are live. */
+  readonly zones: ZonePoolState;
+  zoneCount: number;
   /** Currencies collected so far this run (before skip compensation, which meta adds). */
   shards: Num;
   cores: number;
@@ -220,6 +240,35 @@ export type SimEvent =
   | { readonly type: 'freeze'; readonly targetId: number; readonly boss: boolean }
   /** A frozen enemy died at (x, y) and shattered over `radius`. */
   | { readonly type: 'shatter'; readonly x: number; readonly y: number; readonly radius: number }
+  /**
+   * A ground zone appeared at (x, y), credited to `source`; it lasts until tick `expiresAt`. A
+   * signature zone is the signature attack's own.
+   */
+  | {
+      readonly type: 'zone';
+      readonly id: number;
+      readonly x: number;
+      readonly y: number;
+      readonly radius: number;
+      readonly expiresAt: number;
+      readonly source: number;
+      readonly signature: boolean;
+    }
+  /** A ground zone ended: it expired, or a newer one evicted it at a cap (src/sim/caps.ts). */
+  | { readonly type: 'zoneEnd'; readonly id: number; readonly evicted: boolean }
+  /**
+   * One pulse, whose hits raise no hit events: `hits` enemies hit for `total` damage in all,
+   * `crits` the ids of those it crit. `id` is the zone's for kind 'zone'; the aura and segment
+   * pulses come later in C4.
+   */
+  | {
+      readonly type: 'pulse';
+      readonly kind: 'zone' | 'aura' | 'segment';
+      readonly id: number;
+      readonly hits: number;
+      readonly total: Num;
+      readonly crits: readonly number[];
+    }
   | {
       readonly type: 'enemyKilled';
       readonly enemyId: number;
@@ -278,6 +327,8 @@ export const COUNTER_IDS = [
   'chainHitsPeak',
   /** Projectiles not fired because PROJECTILE_CAP were already in flight. */
   'projectilesCapped',
+  /** Ground zones a newer one evicted at ZONE_CAP, ZONE_SOURCE_CAP or SIGNATURE_ZONE_CAP. */
+  'zonesEvicted',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

@@ -36,6 +36,7 @@ import {
 } from '../effects/flags';
 import type { Enemy } from '../systems/context';
 import type { CompiledMod, ModTable } from './modTable';
+import type { SourceTable } from './sources';
 
 /** Values per row, and the position of damage in a row (as in modTable.ts). */
 const S = SCOPED_STATS.length;
@@ -173,14 +174,19 @@ const TARGET_HP_BELOW = 2;
 const STACKS_AT_LEAST = 3;
 /** On the event's flags (src/sim/effects/flags.ts): every bit of `a` set, none of `b`. */
 const FLAGS = 4;
+/**
+ * The target stands in a zone of source index `a` (Enemy.zoneSource, src/sim/systems/zones.ts).
+ * Exported for createZonePool, which marks the sources these conditions name.
+ */
+export const IN_ZONE = 5;
 
 /**
  * A condition compiled for checking: a code and two operands. Target conditions read the
  * target (held ailment ordinal; TARGET_KINDS ordinal; hp fraction; stack ailment ordinal and
- * stacks); hitIs, victimHas and killedBy read the event's flags.
+ * stacks; zone source index); hitIs, victimHas and killedBy read the event's flags.
  */
 export interface CompiledCondition {
-  readonly code: 0 | 1 | 2 | 3 | 4;
+  readonly code: 0 | 1 | 2 | 3 | 4 | 5;
   readonly a: number;
   readonly b: number;
 }
@@ -196,9 +202,13 @@ const flagsCondition = (all: number, none = 0): CompiledCondition => ({
  * condition. chance, cooldownSec and hitIs 'signature' are properties of the trigger itself
  * (src/sim/effects/types.ts), not conditions here; they throw. The ailment condition reads the
  * applied ailment from the flags of ailmentApplied events, and whether the target holds it on
- * ailmentTick events.
+ * ailmentTick events. inZone numbers its source in `sources`, and throws without them.
  */
-export function compileCondition(condition: Condition, on?: TriggerEventId): CompiledCondition {
+export function compileCondition(
+  condition: Condition,
+  on?: TriggerEventId,
+  sources?: SourceTable,
+): CompiledCondition {
   if ('targetHas' in condition) {
     return { code: TARGET_HAS, a: HELD_AILMENTS.indexOf(condition.targetHas), b: 0 };
   }
@@ -211,6 +221,9 @@ export function compileCondition(condition: Condition, on?: TriggerEventId): Com
   if ('stacksAtLeast' in condition) {
     const { ailment, stacks } = condition.stacksAtLeast;
     return { code: STACKS_AT_LEAST, a: STACK_AILMENTS.indexOf(ailment), b: stacks };
+  }
+  if ('inZone' in condition && sources !== undefined) {
+    return { code: IN_ZONE, a: sources.index(condition.inZone), b: 0 };
   }
   if ('ailment' in condition) {
     if (on === 'ailmentApplied') {
@@ -279,6 +292,9 @@ export function conditionsMet(
         if ((stackReader[c.a] as (enemy: Enemy, now: number) => number)(target, now) < c.b) {
           return false;
         }
+        break;
+      case IN_ZONE:
+        if (target.zoneSource !== c.a || target.zoneUntil <= now) return false;
         break;
     }
   }

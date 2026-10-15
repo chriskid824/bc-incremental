@@ -285,6 +285,10 @@ describe('ConditionSchema', () => {
     { killedBy: 'bleed' },
     ...['burn', 'poison', 'bleed', 'shock'].map((ailment) => ({ ailment })),
     ...['frost', 'frozen'].flatMap((ailment) => [{ targetHas: ailment }, { victimHas: ailment }]),
+    // inZone names a source; validation rejects the classes the selector syntax also takes.
+    { inZone: 'outer.fire' },
+    { inZone: 'center' },
+    { inZone: 'fusion.fire.ice' },
   ])('accepts %o', (condition) => {
     expect(ConditionSchema.parse(condition)).toEqual(condition);
   });
@@ -302,6 +306,8 @@ describe('ConditionSchema', () => {
     { targetKind: 'minion' },
     { hitIs: 'dot' },
     { chance: 0.5, cooldownSec: 1 },
+    { inZone: 'fire' },
+    { inZone: 'outer.fire', radius: 50 },
     {},
   ])('rejects %o', (condition) => {
     expect(ConditionSchema.safeParse(condition).success).toBe(false);
@@ -352,6 +358,20 @@ describe('EffectSpecSchema', () => {
     },
     { kind: 'heal', lifePct: 0.05 },
     { kind: 'gainShards', fraction: 0.5 },
+    { kind: 'groundZone', radius: 60, durationSec: 2, damagePctPerSec: 0.2 },
+    {
+      kind: 'groundZone',
+      radius: 80,
+      durationSec: 3,
+      damagePctPerSec: 0,
+      ailment: 'poison',
+      ailmentStacks: 2,
+      ailmentDamagePct: 0.5,
+      addFrostPerSec: 0.4,
+      slow: 0.3,
+      tags: ['area'],
+      element: 'cold',
+    },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -391,8 +411,27 @@ describe('EffectSpecSchema', () => {
       'order on a burn spread',
       { kind: 'spreadAilment', ailment: 'burn', radius: 250, order: 'nearest' },
     ],
+    [
+      'groundZone with an unknown key',
+      { kind: 'groundZone', radius: 60, durationSec: 2, damagePctPerSec: 0.2, maxTargets: 3 },
+    ],
+    [
+      'groundZone applying frost as an ailment',
+      { kind: 'groundZone', radius: 60, durationSec: 2, damagePctPerSec: 0, ailment: 'frost' },
+    ],
+    ['groundZone without a duration', { kind: 'groundZone', radius: 60, damagePctPerSec: 0.2 }],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
+  });
+
+  it('requires damagePctPerSec on a groundZone, saying how to write a zone without damage', () => {
+    const result = EffectSpecSchema.safeParse({ kind: 'groundZone', radius: 60, durationSec: 2 });
+    expect(result.error?.issues).toEqual([
+      expect.objectContaining({
+        path: ['damagePctPerSec'],
+        message: 'damagePctPerSec is required; use 0 for a zone that only applies its status terms',
+      }),
+    ]);
   });
 });
 

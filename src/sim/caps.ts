@@ -27,3 +27,14 @@ export const SMALL_PROJECTILE_TICKS = 120;
 export const LIST_MAX = 5;
 /** How far from a frozen enemy the others of its freeze's list are (raiseFreeze). */
 export const FREEZE_LIST_RADIUS = 90;
+/**
+ * Effect zones live at once (groundZone, src/sim/systems/zones.ts). A new zone past it evicts
+ * the oldest effect zone, counted in zonesEvicted.
+ */
+export const ZONE_CAP = 64;
+/** Effect zones one source keeps at once; its next one evicts its own oldest. */
+export const ZONE_SOURCE_CAP = 16;
+/** Signature zones live at once, apart from the effect zones; the next evicts the oldest. */
+export const SIGNATURE_ZONE_CAP = 16;
+/** Ticks between two pulses of a zone: four a second. */
+export const PULSE_TICKS = 15;

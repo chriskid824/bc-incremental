@@ -2,9 +2,10 @@
  * Movement system (docs/v3/implementation-plan-v3.md §2.15): enemies walk straight towards
  * the player, who stays at the center. Contact is resolved after every enemy has moved
  * (src/sim/systems/contact.ts). A slowed enemy walks only the part of its step its slow leaves
- * (enemySlow in src/sim/ailments/frost.ts: nothing while frozen). Once a bleed has been applied
- * in the run (RunContext.bleedApplied), a bleeding enemy that moves counts the tick for its
- * bleed (src/sim/ailments/bleed.ts), so a frozen one bleeds as if standing still.
+ * (enemySlow in src/sim/ailments/frost.ts: nothing while frozen; frost, a global slow or a
+ * zone's). Once a bleed has been applied in the run (RunContext.bleedApplied), a bleeding enemy
+ * that moves counts the tick for its bleed (src/sim/ailments/bleed.ts), so a frozen one bleeds
+ * as if standing still.
  */
 
 import { countBleedMove } from '../ailments/bleed';
@@ -12,7 +13,7 @@ import { enemySlow } from '../ailments/frost';
 import type { Enemy, RunContext } from './context';
 
 export function moveEnemies(ctx: RunContext): void {
-  if (ctx.bleedApplied || ctx.frostApplied || ctx.globalSlow !== 0) {
+  if (ctx.bleedApplied || ctx.frostApplied || ctx.globalSlow !== 0 || ctx.sys.zones.slowApplied) {
     moveSlowedOrBleeding(ctx);
     return;
   }
@@ -47,7 +48,7 @@ function moveSlowedOrBleeding(ctx: RunContext): void {
     enemy.prevY = enemy.y;
     const before = enemy.dist;
     let step = enemy.stepDist;
-    if (slowsAll || enemy.frost !== 0 || enemy.frozenUntil > now) {
+    if (slowsAll || enemy.frost !== 0 || enemy.frozenUntil > now || enemy.zoneSlowUntil > now) {
       step *= 1 - enemySlow(ctx, enemy, now);
     }
     const dist = before - step;

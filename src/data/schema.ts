@@ -134,6 +134,7 @@ export const TargetConditionSchema = exact<TargetCondition>()(
           .readonly(),
       })
       .readonly(),
+    z.strictObject({ inZone: SourceSelectorSchema }).readonly(),
   ]),
 );
 
@@ -283,6 +284,27 @@ export const EffectSpecSchema = exact<EffectSpec>()(
       .readonly(),
     z.strictObject({ kind: z.literal('heal'), lifePct: finite }).readonly(),
     z.strictObject({ kind: z.literal('gainShards'), fraction: finite }).readonly(),
+    z
+      .strictObject({
+        kind: z.literal('groundZone'),
+        radius: finite,
+        durationSec: finite,
+        // Required, so that a zone without damage says so (0) rather than by omission.
+        damagePctPerSec: z.number({
+          error: (issue) =>
+            issue.input === undefined
+              ? 'damagePctPerSec is required; use 0 for a zone that only applies its status terms'
+              : undefined,
+        }),
+        ailment: z.enum(APPLIED_AILMENTS).exactOptional(),
+        ailmentStacks: finite.exactOptional(),
+        ailmentDamagePct: finite.exactOptional(),
+        addFrostPerSec: finite.exactOptional(),
+        slow: finite.exactOptional(),
+        tags: damagePart.tags,
+        element: damagePart.element,
+      })
+      .readonly(),
   ]),
 );
 

@@ -26,6 +26,7 @@ import type { BurnSpread } from '../ailments/records';
 import { DOT_STEP_TICKS } from '../ailments/rings';
 import { compileCondition } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
+import type { SourceTable } from '../build/sources';
 import { TICK_RATE } from '../types';
 import { compileSelector } from './select';
 import type { CompiledSelector } from './select';
@@ -118,13 +119,14 @@ export interface CompiledEffect {
   readonly radiusSq: number;
   /**
    * Tags of its hits (explode, nova: hit, trigger and area, plus its tags and element; shatter:
-   * hit, area and cold) or of the hit an ailment it applies counts as (applyAilment: hit and
-   * trigger); 0 for the others.
+   * hit, area and cold; groundZone: hit and zone, plus its tags and element) or of the hit an
+   * ailment it applies counts as (applyAilment: hit and trigger); 0 for the others.
    */
   readonly tags: TagMask;
   /**
    * Damage of a hit or of the hit an applied ailment counts as: damage stat × damagePct; 1 for
-   * shatter, whose hits scale it by the victim's max life.
+   * shatter, whose hits scale it by the victim's max life; the damage stat for groundZone, whose
+   * pulses scale it by damagePctPerSec × 0.25 and its ailment by ailmentDamagePct.
    */
   readonly baseDamage: Num;
   /** spreadAilment's radius and effect (src/sim/ailments/apply.ts); null for the other kinds. */
@@ -145,8 +147,9 @@ export interface CompiledEffect {
 }
 
 /**
- * Compiles a trigger at `index` whose effects start at `effectStart` in CompiledBuild.effects.
- * Throws on an event the simulation does not raise yet.
+ * Compiles a trigger at `index` whose effects start at `effectStart` in CompiledBuild.effects;
+ * an inZone condition numbers its source in `sources`. Throws on an event the simulation does
+ * not raise yet.
  */
 export function compileTrigger(
   index: number,
@@ -154,6 +157,7 @@ export function compileTrigger(
   source: number,
   coef: number,
   effectStart: number,
+  sources?: SourceTable,
 ): CompiledTrigger {
   if (!WIRED_EVENTS.has(spec.on)) {
     throw new Error(`A trigger on '${spec.on}': the simulation does not raise this event yet`);
@@ -174,7 +178,7 @@ export function compileTrigger(
     if ('chance' in condition) chance = condition.chance;
     else if ('cooldownSec' in condition) cooldownSec = condition.cooldownSec;
     else if ('hitIs' in condition && condition.hitIs === 'signature') signatureOnly = true;
-    else conds.push(compileCondition(condition, spec.on));
+    else conds.push(compileCondition(condition, spec.on, sources));
   }
   const kill = spec.on === 'kill' || spec.on === 'diedWithAilment';
   return {
@@ -304,6 +308,14 @@ export function compileEffect(
       break;
     case 'addFrost':
       fanout = scaled.radius === undefined;
+      break;
+    case 'groundZone':
+      tags =
+        TAG.hit |
+        TAG.zone |
+        tagMask(scaled.tags ?? []) |
+        (scaled.element === undefined ? 0 : TAG[scaled.element]);
+      baseDamage = num(damage);
       break;
     default:
       break;

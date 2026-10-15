@@ -35,12 +35,14 @@ export function holdsFrozen(enemy: Enemy, now: number): boolean {
 
 /**
  * The fraction of its step the enemy loses at tick `now`: all of it while frozen, else the
- * larger of the build's slow on every enemy (BuildFlags.globalSlow) and its chill.
+ * largest of the build's slow on every enemy (BuildFlags.globalSlow), its chill and the live
+ * slow of the zones it stands in (src/sim/systems/zones.ts), which bosses take in full.
  */
 export function enemySlow(ctx: RunContext, enemy: Enemy, now: number): number {
   if (enemy.frozenUntil > now) return 1;
   const cap = enemy.boss ? ctx.bossFrostSlowCap : ctx.frostSlowCap;
-  return Math.max(ctx.globalSlow, cap * enemy.frost);
+  const slow = Math.max(ctx.globalSlow, cap * enemy.frost);
+  return enemy.zoneSlowUntil > now ? Math.max(slow, enemy.zoneSlow) : slow;
 }
 
 /**

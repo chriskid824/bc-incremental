@@ -65,6 +65,8 @@ import { createEnemyGrid } from './grid';
 import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
 import { isToughType } from './spawn';
+import { createPulseAcc, createZonePool } from './systemState';
+import type { SystemState } from './systemState';
 
 const DAMAGE = SCOPED_INDEX.damage;
 const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
@@ -175,6 +177,18 @@ export interface Enemy extends EnemyState {
   frozenUntil: number;
   frostLockUntil: number;
   frostApplier: number;
+  /**
+   * The slow of the zones it stands in (src/sim/systems/zones.ts), the strongest that is still
+   * live, and the tick it lapses.
+   */
+  zoneSlow: number;
+  zoneSlowUntil: number;
+  /**
+   * The source index of the last zone that marked it for inZone (−1 before any), and the tick
+   * the mark lapses.
+   */
+  zoneSource: number;
+  zoneUntil: number;
   /** Serial of the last attack that hit this enemy, so chains skip it. */
   hitMark: number;
   /** Projectiles in flight towards this enemy (see src/sim/targeting.ts). */
@@ -384,6 +398,10 @@ export interface RunContext {
   /** The selection in progress, which selAccept reads (src/sim/effects/select.ts). */
   readonly selection: SelectionScratch;
 
+  // ---- Systems with state of their own (src/sim/systems/systemState.ts) ----
+  /** One member per system: the pulse tally and the zone pool. */
+  readonly sys: SystemState;
+
   // ---- Entities and public state ----
   readonly enemies: Enemy[];
   /** The volley's homing projectiles; every other projectile is in the shot pool. */
@@ -554,13 +572,16 @@ export const clamp01 = (value: number): number => Math.min(1, Math.max(0, value)
 export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
 
 /**
- * The payload of an effect that hits (explode, nova) or applies an ailment (applyAilment), on the
- * effects stream: its tags and source, no flags, never chaining. An applied ailment's damage is
- * that of a hit of the payload, so only its burn row is read.
+ * The payload of an effect that hits (explode, nova), applies an ailment (applyAilment) or makes
+ * a zone (groundZone), on the effects stream: its tags and source, no flags, never chaining. An
+ * applied ailment's damage is that of a hit of the payload, so only its burn row is read. A
+ * zone's pulses aggregate their hits, which can crit and roll no ailments: the zone applies its
+ * own terms (src/sim/systems/zones.ts).
  */
 function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
   // A shatter's payload depends on its credit (RunContext.shatterPayloads).
   if (fx.tags === 0 || fx.kind === 'shatter') return null;
+  const zone = fx.kind === 'groundZone';
   const hits = fx.kind !== 'applyAilment';
   return createPayload({
     baseDamage: fx.baseDamage,
@@ -569,9 +590,10 @@ function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
     flags: 0,
     rng,
     chains: false,
-    rollsAilments: hits,
+    rollsAilments: hits && !zone,
     canCrit: hits,
     damageMode: ROWS,
+    aggregate: zone,
   });
 }
 
@@ -629,6 +651,7 @@ export function createRunContext(
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];
   const shots = createShotPool();
+  const zones = createZonePool(build);
   let shotPad = 0;
   for (const id of ENEMY_IDS) {
     if (!isToughType(id)) shotPad = Math.max(shotPad, data.enemies[id].radius);
@@ -650,6 +673,8 @@ export function createRunContext(
     projectiles,
     shots,
     shotCount: 0,
+    zones,
+    zoneCount: 0,
     shards: ZERO,
     cores: 0,
     finished: false,
@@ -671,7 +696,7 @@ export function createRunContext(
   const killPending = Int32Array.from(killTriggers.filter((t) => !t.inline).map((t) => t.index));
   const effectPayloads = effects.map((fx) => effectPayload(fx, effectsRng));
   // Who burn damage can be credited to: the applier of every payload whose hits ignite, and of
-  // every applyAilment burn.
+  // every applyAilment and groundZone burn.
   const burnCredits = new Set<number>();
   for (const emitter of emitters) {
     if (emitter.payload.rollsAilments) {
@@ -680,7 +705,9 @@ export function createRunContext(
   }
   effects.forEach((fx, i) => {
     const p = effectPayloads[i];
-    const burns = fx.spec.kind === 'applyAilment' && fx.spec.ailment === 'burn';
+    const spec = fx.spec;
+    const burns =
+      (spec.kind === 'applyAilment' || spec.kind === 'groundZone') && spec.ailment === 'burn';
     if (p !== undefined && p !== null && (p.rollsAilments || burns)) {
       burnCredits.add(ailmentCredit(sources, attribution, 'burn', p.source));
     }
@@ -806,6 +833,7 @@ export function createRunContext(
     budgetStreak: 0,
     selected: null,
     selection: createSelectionScratch(),
+    sys: { pulse: createPulseAcc(), zones },
 
     enemies,
     projectiles,

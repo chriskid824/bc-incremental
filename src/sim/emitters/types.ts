@@ -129,9 +129,14 @@ export interface Payload {
   readonly damageMode: DamageMode;
   /** ModTable row of each slot (SLOT_*), −1 until first use (slotRow). */
   readonly rows: Int32Array;
+  /**
+   * A pulse's payload (a zone's): its hits add to the pulse's tally (PulseAcc) instead of each
+   * raising a hit event, and the pulse raises one pulse event (src/sim/systems/zones.ts).
+   */
+  readonly aggregate: boolean;
 }
 
-/** What a payload is made of; jumpSource defaults to source. */
+/** What a payload is made of; jumpSource defaults to source, aggregate to false. */
 export interface PayloadSpec {
   readonly baseDamage: Num;
   readonly tags: TagMask;
@@ -143,14 +148,27 @@ export interface PayloadSpec {
   readonly rollsAilments: boolean;
   readonly canCrit: boolean;
   readonly damageMode: DamageMode;
+  readonly aggregate?: boolean;
 }
 
+/** A payload with every member written in one order, so all payloads share one shape. */
 export function createPayload(spec: PayloadSpec): Payload {
-  const payload = {
-    ...spec,
+  const payload: { -readonly [K in keyof Payload]: Payload[K] } = {
+    baseDamage: spec.baseDamage,
+    tags: spec.tags,
+    source: spec.source,
     jumpSource: spec.jumpSource ?? spec.source,
+    // Its own payload, which does not exist yet: set right below.
+    extraJumpPayload: null as unknown as Payload,
+    flags: spec.flags,
+    rng: spec.rng,
+    chains: spec.chains,
+    rollsAilments: spec.rollsAilments,
+    canCrit: spec.canCrit,
+    damageMode: spec.damageMode,
     rows: new Int32Array(SLOT_COUNT).fill(-1),
-  } as { -readonly [K in keyof Payload]: Payload[K] };
+    aggregate: spec.aggregate ?? false,
+  };
   payload.extraJumpPayload = payload;
   return payload;
 }

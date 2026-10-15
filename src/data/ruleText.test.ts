@@ -82,6 +82,15 @@ function effectNumbers(effect: EffectSpec): string[][] {
       return [[percent(effect.lifePct)]];
     case 'gainShards':
       return [[percent(effect.fraction)]];
+    case 'groundZone':
+      return [
+        ...(effect.damagePctPerSec === 0 ? [] : [[percent(effect.damagePctPerSec)]]),
+        [String(effect.durationSec)],
+        ...(effect.ailmentStacks === undefined ? [] : [[String(effect.ailmentStacks)]]),
+        ...(effect.ailmentDamagePct === undefined ? [] : [[percent(effect.ailmentDamagePct)]]),
+        ...(effect.addFrostPerSec === undefined ? [] : [[percent(effect.addFrostPerSec)]]),
+        ...(effect.slow === undefined ? [] : [[percent(effect.slow)]]),
+      ];
   }
 }
 

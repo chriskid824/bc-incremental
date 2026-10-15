@@ -36,6 +36,7 @@ import { moveEnemies } from './systems/movement';
 import { moveProjectiles } from './systems/projectiles';
 import { checkRunEnd, trackOverkill } from './systems/runEnd';
 import { releaseEnemies } from './systems/spawn';
+import { stepZones } from './systems/zones';
 import { startDueWave, updateClears } from './systems/waves';
 import type { InputFrame, RunConfig, RunResult, SimEvent, Simulation } from './types';
 
@@ -104,17 +105,19 @@ export function createSimulation(
    *    pool's shots move and hit, all in id order (projectiles.ts, shots.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
    *    triggers, onKill hooks, drops and splits (death.ts) resolve inline.
-   * 8. ailments: burn records expire; every BURN_TICK_INTERVAL, damage over time (burn, poison,
+   * 8. zones: the ground zones due pulse, in id order, and the ended ones are released
+   *    (zones.ts).
+   * 9. ailments: burn records expire; every BURN_TICK_INTERVAL, damage over time (burn, poison,
    *    bleed) and the ailmentTick triggers (ailments.ts, src/sim/ailments/).
-   * 9. effects: due periodic triggers, then up to EFFECTS_PER_TICK queued effects
+   * 10. effects: due periodic triggers, then up to EFFECTS_PER_TICK queued effects
    *    (src/sim/effects/execute.ts).
-   * 10. death: this tick's pending kill triggers fire, sorted by victim id (their effects run
+   * 11. death: this tick's pending kill triggers fire, sorted by victim id (their effects run
    *    next tick); then compact dead enemies and projectiles (death.ts), after the last grid
    *    query.
-   * 11. waveControl: record cleared waves (waves.ts).
-   * 12. runEnd: overkill tracking, then the end checks (runEnd.ts).
+   * 12. waveControl: record cleared waves (waves.ts).
+   * 13. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
-   * Steps 6–9 run only while the player is alive.
+   * Steps 6–10 run only while the player is alive.
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -130,6 +133,7 @@ export function createSimulation(
       runEmitters(ctx);
       runTickHooks(ctx);
       moveProjectiles(ctx);
+      stepZones(ctx);
       updateAilments(ctx);
       runEffectQueue(ctx);
     }

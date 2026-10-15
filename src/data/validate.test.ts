@@ -931,6 +931,110 @@ describe('trigger validation', () => {
     ).toEqual([]);
   });
 
+  it('accepts groundZone effects, and inZone conditions where a target is checked', () => {
+    const zone = { kind: 'groundZone', radius: 60, durationSec: 2, damagePctPerSec: 0.2 } as const;
+    expect(
+      triggerIssues(
+        { on: 'hit', when: [{ inZone: 'outer.fire' }], do: [zone] },
+        { on: 'kill', do: [{ ...zone, damagePctPerSec: 0, ailment: 'poison', ailmentStacks: 2 }] },
+        { on: 'periodic', every: 2, do: [{ ...zone, damagePctPerSec: 0, slow: 0.9 }] },
+        { on: 'freeze', when: [{ inZone: 'center' }], do: [{ ...zone, addFrostPerSec: 0.5 }] },
+        { on: 'crit', when: [{ inZone: 'fusion.fire.ice' }], do: [{ ...zone, radius: 400 }] },
+      ),
+    ).toEqual([]);
+    expect(triggerIssues({ on: 'kill', when: [{ inZone: 'outer.fire' }], do: [explode] })).toEqual([
+      `${at} when[0] inZone does not apply to 'kill' events`,
+    ]);
+  });
+
+  it.each(['outer', 'fusion', 'hub', 'asc'] as const)(
+    'rejects inZone on the source class %s, on a trigger and on a modifier (K18)',
+    (selector) => {
+      const problem = `inZone takes one source id (center, outer.<id>, fusion.<char>.<outer>), not '${selector}'`;
+      expect(triggerIssues({ on: 'hit', when: [{ inZone: selector }], do: [explode] })).toEqual([
+        `${at} when[0] ${problem}`,
+      ]);
+      let index = -1;
+      expect(
+        issuesAfter((d) => {
+          const node = talent(d, 'vitality');
+          index = node.modifiers.length;
+          node.modifiers.push({
+            stat: 'damage',
+            kind: 'more',
+            value: 0.1,
+            when: [{ inZone: selector }],
+          });
+          node.descKey = 'talent.vitality.desc';
+        }),
+      ).toEqual([`talent 'vitality': modifiers[${index}] when[0] ${problem}`]);
+    },
+  );
+
+  it('rejects groundZone parameters out of range, and a zone that does nothing', () => {
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { kind: 'groundZone', radius: 0, durationSec: 0.2, damagePctPerSec: -1 },
+          { kind: 'groundZone', radius: 401, durationSec: 1, damagePctPerSec: 0 },
+          {
+            kind: 'groundZone',
+            radius: 60,
+            durationSec: 1,
+            damagePctPerSec: 0.1,
+            ailmentStacks: 1.5,
+            ailmentDamagePct: 0,
+          },
+          {
+            kind: 'groundZone',
+            radius: 60,
+            durationSec: 1,
+            damagePctPerSec: 0,
+            addFrostPerSec: 0,
+            slow: 0.95,
+          },
+          { kind: 'groundZone', radius: 60, durationSec: 1, damagePctPerSec: 0, slow: 0 },
+          {
+            kind: 'groundZone',
+            radius: 1,
+            durationSec: 0.25,
+            damagePctPerSec: 0.1,
+            tags: ['burn'],
+          },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] radius must be in [1, 400] (got 0)`,
+      `${at} do[0] durationSec must be >= 0.25, one pulse (got 0.2)`,
+      `${at} do[0] damagePctPerSec must be >= 0 (got -1)`,
+      `${at} do[1] radius must be in [1, 400] (got 401)`,
+      `${at} do[1] groundZone does nothing: give it damagePctPerSec > 0, ailment, addFrostPerSec or slow`,
+      `${at} do[2] ailmentStacks must be a positive integer (got 1.5)`,
+      `${at} do[2] ailmentDamagePct must be > 0 (got 0)`,
+      `${at} do[2] ailmentStacks and ailmentDamagePct need ailment`,
+      `${at} do[3] addFrostPerSec must be > 0 (got 0)`,
+      `${at} do[3] slow must be in (0, 0.9] (got 0.95)`,
+      `${at} do[4] slow must be in (0, 0.9] (got 0)`,
+      `${at} do[5] tag 'burn' is not an owner or geometry tag`,
+    ]);
+  });
+
+  it('requires damagePctPerSec on a groundZone, through the schema and without it (L1)', () => {
+    const l1 = 'damagePctPerSec is required; use 0 for a zone that only applies its status terms';
+    const zone = { kind: 'groundZone', radius: 60, durationSec: 1, ailment: 'poison' };
+    expect(
+      triggerIssues({ on: 'hit', do: [zone as unknown as TriggerSpec['do'][number]] }),
+    ).toEqual([`${at} do[0] ${l1}`]);
+    const data = content();
+    talent(data, 'vitality').triggers.push({
+      on: 'hit',
+      do: [zone],
+    } as unknown as Mutable<TriggerSpec>);
+    talent(data, 'vitality').descKey = 'talent.vitality.desc';
+    expect(() => parseGameData(data)).toThrow(l1);
+  });
+
   it('accepts a keystone whose behaviour is a trigger, and needs a descKey for one', () => {
     expect(
       issuesAfter((d) => {

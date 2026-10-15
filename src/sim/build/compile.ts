@@ -231,7 +231,7 @@ export function compileBuild(
   const triggers: CompiledTrigger[] = [shatterTrigger(false, 0)];
   const effects: CompiledEffect[] = [];
   const addTrigger = (source: number, spec: TriggerSpec, coef: number): void => {
-    triggers.push(compileTrigger(triggers.length, spec, source, coef, effects.length));
+    triggers.push(compileTrigger(triggers.length, spec, source, coef, effects.length, sources));
     for (const effect of spec.do) {
       effects.push(compileEffect(effect, source, coef, values.damage, spec.target));
     }
@@ -298,12 +298,16 @@ export function compileBuild(
     compileInstance(source, () => module(compiler, source));
   }
   // Shatter listens to kills only when something can fill a chill meter: frost on hit, or an
-  // addFrost effect, a trigger's or one a module compiled.
+  // addFrost effect or a groundZone with frost, a trigger's or one a module compiled.
   const scoped = [...stats.scoped, ...added];
   const canFreeze =
     values.frostOnHit > 0 ||
     scoped.some((mod) => mod.stat === 'frostOnHit' && mod.value > 0) ||
-    effects.some((fx) => fx.kind === 'addFrost');
+    effects.some(
+      (fx) =>
+        fx.spec.kind === 'addFrost' ||
+        (fx.spec.kind === 'groundZone' && (fx.spec.addFrostPerSec ?? 0) > 0),
+    );
   if (canFreeze) {
     triggers[SHATTER_TRIGGER] = shatterTrigger(true, effects.length);
     effects.push(shatterEffect(Math.max(0, values.shatterRadius)));

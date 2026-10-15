@@ -19,6 +19,7 @@
  * only queue (src/sim/effects/centerEvents.ts).
  */
 
+import type { Num } from '../../core/num';
 import { add, mul, num, toNumber, ZERO } from '../../core/num';
 import type { AppliedAilment } from '../../data/triggers';
 import {
@@ -32,11 +33,13 @@ import {
 import { addBleed } from '../ailments/bleed';
 import { addFrost } from '../ailments/frost';
 import { addShock } from '../ailments/shock';
+import { sizeOf } from '../build/size';
 import { hitWithPayload } from '../combat/hit';
 import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
 import { rebuildGrid } from '../systems/grid';
+import { addZone, PULSES_PER_SECOND } from '../systems/zones';
 import { raiseFreeze } from './centerEvents';
 import { fireApplied, fireOne } from './dispatch';
 import { dequeue } from './queue';
@@ -92,28 +95,32 @@ const centerY = (ctx: RunContext, fx: CompiledEffect, entry: Readonly<EffectEntr
   fx.atTarget && entry.target !== null ? entry.target.y : fx.atPlayer ? ctx.player.y : entry.y;
 
 /**
- * `stacks` stacks of `ailment` from the effect's payload on `enemy`, each as its hit would apply
- * it (bleed keeps the strongest, so more stacks add nothing), then its ailmentApplied event.
+ * `stacks` stacks of `ailment` from payload `p` on `enemy`, each as a hit of damage `base` would
+ * apply it, through p's rows and credit (bleed keeps the strongest, so more stacks add nothing),
+ * then its ailmentApplied event, at `depth` from trigger `origin`. The applyAilment executor
+ * passes its payload's base damage; a zone, its payload's base × ailmentDamagePct
+ * (src/sim/systems/zones.ts).
  */
-function applyStacks(
+export function applyStacks(
   ctx: RunContext,
   ailment: AppliedAilment,
   enemy: Enemy,
   p: Payload,
+  base: Num,
   stacks: number,
-  entry: Readonly<EffectEntry>,
+  depth: number,
+  origin: number,
 ): void {
-  const depth = entry.depth;
   const now = ctx.now;
   let applied = true;
   switch (ailment) {
     case 'burn': {
-      const dps = ailmentDps(ctx, enemy, p, SLOT_BURN, p.baseDamage, ctx.burnDamage);
+      const dps = ailmentDps(ctx, enemy, p, SLOT_BURN, base, ctx.burnDamage);
       applyBurn(ctx, enemy, dps, now + ctx.burnTicks, depth, creditOf(ctx, 'burn', p), stacks);
       break;
     }
     case 'poison': {
-      const dps = ailmentDps(ctx, enemy, p, SLOT_POISON, p.baseDamage, ctx.poisonDamage);
+      const dps = ailmentDps(ctx, enemy, p, SLOT_POISON, base, ctx.poisonDamage);
       applyPoison(
         ctx,
         enemy,
@@ -126,7 +133,7 @@ function applyStacks(
       break;
     }
     case 'bleed': {
-      const dps = ailmentDps(ctx, enemy, p, SLOT_BLEED, p.baseDamage, ctx.bleedDamage);
+      const dps = ailmentDps(ctx, enemy, p, SLOT_BLEED, base, ctx.bleedDamage);
       const source = creditOf(ctx, 'bleed', p);
       applied = addBleed(ctx, enemy, dps, now + ctx.bleedTicks, depth, source);
       if (applied) {
@@ -142,11 +149,11 @@ function applyStacks(
       }
       break;
   }
-  if (applied && ctx.appliedListeners) fireApplied(ctx, enemy, ailment, depth, entry.origin, 0);
+  if (applied && ctx.appliedListeners) fireApplied(ctx, enemy, ailment, depth, origin, 0);
 }
 
 /** Ticks the ailment lasts once applied; nothing is applied without any. */
-const durationOf = (ctx: RunContext, ailment: AppliedAilment): number =>
+export const durationOf = (ctx: RunContext, ailment: AppliedAilment): number =>
   ailment === 'burn'
     ? ctx.burnTicks
     : ailment === 'poison'
@@ -179,16 +186,19 @@ function hitArea(
   }
 }
 
-/** `amount` of frost from the effect's credit on `enemy`, which may freeze it. */
-function frostOne(
+/**
+ * `amount` of frost credited to `source` on `enemy`, which may freeze it; the freeze is raised
+ * at `depth` from trigger `origin`.
+ */
+export function frostOne(
   ctx: RunContext,
   enemy: Enemy,
   amount: number,
-  entry: Readonly<EffectEntry>,
+  source: number,
+  depth: number,
+  origin: number,
 ): void {
-  if (addFrost(ctx, enemy, amount, entry.source)) {
-    raiseFreeze(ctx, enemy, entry.depth, entry.origin, 0);
-  }
+  if (addFrost(ctx, enemy, amount, source)) raiseFreeze(ctx, enemy, depth, origin, 0);
 }
 
 /**
@@ -221,15 +231,18 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const stacks = spec.stacks ?? 1;
     if (spec.radius === undefined) {
       const target = liveTarget(entry);
-      if (target !== null) applyStacks(ctx, ailment, target, p, stacks, entry);
+      if (target !== null) {
+        applyStacks(ctx, ailment, target, p, p.baseDamage, stacks, entry.depth, entry.origin);
+      }
       return;
     }
     const targets = ctx.effectTargets;
     const max = spec.maxTargets ?? Infinity;
     const nearest = spec.order === 'nearest';
     const count = inArea(ctx, fx, centerX(ctx, fx, entry), centerY(ctx, fx, entry), max, nearest);
+    const { depth, origin } = entry;
     for (let i = 0; i < count; i++) {
-      applyStacks(ctx, ailment, targets[i] as Enemy, p, stacks, entry);
+      applyStacks(ctx, ailment, targets[i] as Enemy, p, p.baseDamage, stacks, depth, origin);
     }
   },
   spreadAilment(ctx, spec, fx, entry) {
@@ -272,14 +285,19 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   addFrost(ctx, spec, fx, entry) {
     if (spec.radius === undefined) {
       const target = liveTarget(entry);
-      if (target !== null) frostOne(ctx, target, spec.amount, entry);
+      if (target !== null) {
+        frostOne(ctx, target, spec.amount, entry.source, entry.depth, entry.origin);
+      }
       return;
     }
     const targets = ctx.effectTargets;
     const max = spec.maxTargets ?? Infinity;
     const nearest = spec.order === 'nearest';
     const count = inArea(ctx, fx, centerX(ctx, fx, entry), centerY(ctx, fx, entry), max, nearest);
-    for (let i = 0; i < count; i++) frostOne(ctx, targets[i] as Enemy, spec.amount, entry);
+    const { source, depth, origin } = entry;
+    for (let i = 0; i < count; i++) {
+      frostOne(ctx, targets[i] as Enemy, spec.amount, source, depth, origin);
+    }
   },
   heal(ctx, spec) {
     const player = ctx.player;
@@ -288,6 +306,24 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   gainShards(ctx, spec, _fx, entry) {
     const state = ctx.state;
     state.shards = add(state.shards, mul(num(entry.value), spec.fraction));
+  },
+  // A zone at the event's point, or on the enemy or player its trigger's selector picked, its
+  // pulses scaled from the effect's payload (src/sim/systems/zones.ts).
+  groundZone(ctx, spec, fx, entry) {
+    addZone(
+      ctx,
+      false,
+      centerX(ctx, fx, entry),
+      centerY(ctx, fx, entry),
+      sizeOf(ctx.build, spec.radius),
+      Math.max(1, Math.round(spec.durationSec * PULSES_PER_SECOND)),
+      ctx.effectPayloads[entry.effect] as Payload,
+      spec.damagePctPerSec / PULSES_PER_SECOND,
+      entry.source,
+      entry.effect,
+      entry.depth,
+      entry.origin,
+    );
   },
   // The victim (dead and gone) at the entry's position: shatterDamage of its max life (the
   // entry's value) to every alive enemy within shatterRadius, credited to the entry's source.

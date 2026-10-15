@@ -295,6 +295,108 @@ const FREEZE_LIST_STATS = makeStats(
   },
 );
 
+/**
+ * C4.6's ground zones: the volley's hits drop burning fire zones (a source's 16 bind, so they
+ * evict), crits drop slowing, chilling ice zones that also mark enemies for a damage more, kills
+ * drop poison-only zones, half the freezes drop small cold zones, and every second an aura zone
+ * lands on the densest spot and marks enemies for a center explode.
+ */
+const ZONE_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'outer.fire',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'signature' }],
+      do: [
+        { kind: 'groundZone', radius: 50, durationSec: 3, damagePctPerSec: 0.3, ailment: 'burn' },
+      ],
+    },
+  ],
+  [
+    'outer.ice',
+    {
+      on: 'crit',
+      when: [{ cooldownSec: 0.5 }],
+      do: [
+        {
+          kind: 'groundZone',
+          radius: 80,
+          durationSec: 2,
+          damagePctPerSec: 0.05,
+          slow: 0.4,
+          addFrostPerSec: 0.6,
+        },
+      ],
+    },
+  ],
+  [
+    'outer.poison',
+    {
+      on: 'kill',
+      do: [
+        {
+          kind: 'groundZone',
+          radius: 60,
+          durationSec: 2,
+          damagePctPerSec: 0,
+          ailment: 'poison',
+          ailmentStacks: 2,
+          ailmentDamagePct: 0.5,
+        },
+      ],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'freeze',
+      when: [{ chance: 0.5 }],
+      do: [
+        { kind: 'groundZone', radius: 40, durationSec: 0.5, damagePctPerSec: 0.5, element: 'cold' },
+      ],
+    },
+  ],
+  [
+    'outer.aura',
+    {
+      on: 'periodic',
+      every: 1,
+      target: { pick: 'densest' },
+      do: [{ kind: 'groundZone', radius: 120, durationSec: 3, damagePctPerSec: 0.1 }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'hit',
+      when: [{ inZone: 'outer.aura' }, { chance: 0.05 }],
+      do: [{ kind: 'explode', radius: 60, damagePct: 0.4 }],
+    },
+  ],
+];
+const IN_ICE_MORE: Modifier = {
+  stat: 'damage',
+  kind: 'more',
+  value: 0.5,
+  when: [{ inZone: 'outer.ice' }],
+};
+const ZONE_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    frostOnHit: 0.1,
+  },
+  [...maskProbeMods(), IN_ICE_MORE],
+  {
+    triggers: ZONE_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -317,6 +419,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'freezeList',
     config: { stats: FREEZE_LIST_STATS, rules: [], startWave: 12 },
     expected: ['ae018a4f73b2c1f4', '0490a9498a7123b6'],
+  },
+  {
+    name: 'zones',
+    config: { stats: ZONE_STATS, rules: [], startWave: 12 },
+    expected: ['f091aa790dacbed5', '06f2ea6ccd3beb26'],
   },
 ];
 
