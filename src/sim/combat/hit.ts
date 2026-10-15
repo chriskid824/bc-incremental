@@ -406,7 +406,7 @@ export function applyHitDamage(
   } else {
     acc.hits++;
     acc.total = add(acc.total, amount);
-    if (crit) acc.crits.push(enemy.id);
+    if (crit) acc.crits[acc.critCount++] = enemy.id;
   }
   if (lte(enemy.hp, ZERO)) {
     enemy.killDepth = depth;

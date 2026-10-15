@@ -34,27 +34,43 @@ export interface PulseAcc {
   /** Enemies the pulse hit, and the damage it dealt them in all. */
   hits: number;
   total: Num;
-  /** Ids of the enemies it crit, in hit order. */
+  /** Ids of the enemies it crit, in hit order: crits[0 .. critCount); past it, stale. */
   readonly crits: number[];
+  critCount: number;
   /** The pulse payload's hit row without and with crit (hoistPulseRows). */
   row: number;
   critRow: number;
+  /**
+   * Something listens to hits, but no hit or crit trigger and no onHit hook can act on the
+   * pulse's hits (hoistPulseRows).
+   */
+  quiet: boolean;
 }
 
 export function createPulseAcc(): PulseAcc {
-  return { hits: 0, total: ZERO, crits: [], row: -1, critRow: -1 };
+  return { hits: 0, total: ZERO, crits: [], critCount: 0, row: -1, critRow: -1, quiet: false };
 }
 
 /**
  * The zone pool of a run (RunContext.sys.zones), also SimState.zones: ZONE_CAP effect zones
  * and SIGNATURE_ZONE_CAP signature zones in one pool. Slots 0 .. count − 1 hold the live zones
- * in id order, kept in order when zones end.
+ * in id order, kept in order when zones end: the view's arrays (ZonePoolState) and `record`,
+ * which are indexed by slot. Every other per-zone array is indexed by the zone's record, which
+ * it keeps from its creation to its end, so closing a slot moves only the slot arrays.
  */
 export interface ZonePool extends ZonePoolState {
   /** Live zones; effect zones among them, and signature zones. */
   count: number;
   live: number;
   liveSignature: number;
+  /**
+   * The record of the zone in each slot. A byte holds it while the caps total at most 256
+   * (ZONE_CAP + SIGNATURE_ZONE_CAP, 80); caps past that must widen record and free.
+   */
+  readonly record: Uint8Array;
+  /** The free records, the next to use on top: free[0 .. freeCount). */
+  readonly free: Uint8Array;
+  freeCount: number;
   /** Multiplier of its hits, damagePctPerSec × 0.25 of the payload; 0: it hits nothing. */
   readonly scale: Float64Array;
   /** The payload that created it: its hits' and its ailment's base, rows and stream. */
@@ -96,6 +112,9 @@ function markZoneSources(conds: readonly CompiledCondition[] | null, out: Uint8A
 /** An empty pool for `build`, whose inZone conditions decide which sources mark enemies. */
 export function createZonePool(build: CompiledBuild): ZonePool {
   const n = ZONE_CAP + SIGNATURE_ZONE_CAP;
+  // Record 0 on top, so a run's records are first taken in order and `payload` grows packed.
+  const free = new Uint8Array(n);
+  for (let k = 0; k < n; k++) free[k] = n - 1 - k;
   const stampSources = new Uint8Array(MAX_SOURCES);
   for (const mod of build.mods) markZoneSources(mod.cond, stampSources);
   for (const t of build.triggers) markZoneSources(t.conds, stampSources);
@@ -103,6 +122,9 @@ export function createZonePool(build: CompiledBuild): ZonePool {
     count: 0,
     live: 0,
     liveSignature: 0,
+    record: new Uint8Array(n),
+    free,
+    freeCount: n,
     id: new Int32Array(n),
     x: new Float64Array(n),
     y: new Float64Array(n),

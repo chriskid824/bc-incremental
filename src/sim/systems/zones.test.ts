@@ -10,7 +10,8 @@ import { PULSE_TICKS, SIGNATURE_ZONE_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../c
 import { hitWithPayload } from '../combat/hit';
 import { createEffectEntry } from '../effects/queue';
 import { runEffect, runEffectQueue } from '../effects/execute';
-import { SHATTER_TRIGGER } from '../effects/types';
+import { SIGNATURE } from '../effects/flags';
+import { MAX_DEPTH, SHATTER_TRIGGER } from '../effects/types';
 import type { CompiledTrigger } from '../effects/types';
 import type { Payload } from '../emitters/types';
 import type { TestModule } from '../rules';
@@ -681,4 +682,212 @@ describe('hitPulse', () => {
     expect(a.events.some((event) => event.type === 'hit')).toBe(false);
     if (n % 3 === 1) expect(a.sys.pulse.hits).toBeGreaterThan(0);
   });
+
+  it.each(FIXTURES)(
+    'equals hitWithPayload when every hit and crit trigger takes only signature hits (fixture %i)',
+    (n) => {
+      const r = createStreams(2000 + n).spawn;
+      const heal: TriggerSpec['do'] = [{ kind: 'heal', lifePct: 0.01 }];
+      const triggers: TriggerSpec[] = [idle(ZONE)];
+      // Hit triggers, crit triggers or both; crit chance 0, .4 or 1; depth 1 or MAX_DEPTH, at
+      // which fire counts each listened event in triggerDepthCapped: every mix in 18 fixtures.
+      const listens = Math.floor(n / 6) % 3;
+      if (listens !== 2) triggers.push({ on: 'hit', when: [{ hitIs: 'signature' }], do: heal });
+      if (listens !== 1) triggers.push({ on: 'crit', when: [{ hitIs: 'signature' }], do: heal });
+      const critChance = [0, 0.4, 1][Math.floor(n / 2) % 3] as number;
+      const depth = n % 2 === 0 ? 1 : MAX_DEPTH;
+      // Some survive their hit, whose dispatch is the quiet one, and some die of it.
+      const placed = Array.from({ length: 10 }, (_, k) =>
+        near(4 * k, 0, { hp: Math.round(50 + r.next() * 600) }),
+      );
+      const make = (): RunContext => {
+        const stats = makeStats(
+          { damage: 400, critChance, critMultiplier: 2 },
+          [],
+          centerTriggers(triggers),
+        );
+        return placedEnemies(placed, { stats, seed: 11 + n });
+      };
+      const a = make();
+      const b = make();
+      const scale = 0.1 + 0.6 * r.next();
+      const pa = a.effectPayloads[effectOf(a, 0)] as Payload;
+      const pb = b.effectPayloads[effectOf(b, 0)] as Payload;
+      hoistPulseRows(a, a.sys.pulse, pa);
+      expect(a.sys.pulse.quiet).toBe(true);
+      for (let k = 0; k < a.enemies.length; k++) {
+        const [ea, eb] = [a.enemies[k] as Enemy, b.enemies[k] as Enemy];
+        if (ea.alive) hitPulse(a, a.sys.pulse, ea, pa, scale, depth, FIRST);
+        if (eb.alive) hitWithPayload(b, eb, pb, 0, scale, null, null, false, depth, FIRST);
+      }
+      const state = (ctx: RunContext) => ({
+        hp: ctx.enemies.map((e) => [e.hp, e.alive, e.killDepth]),
+        tallies: [ctx.damageHit, ctx.damageCrit, ctx.maxHit, ctx.kills],
+        bySource: ctx.bySource.slice(0, 4),
+        counters: { ...ctx.counters },
+        rng: rngPositions(ctx),
+        hits: ctx.sys.pulse.hits,
+        total: ctx.sys.pulse.total,
+        crits: ctx.sys.pulse.crits.slice(0, ctx.sys.pulse.critCount),
+        events: ctx.events.slice(),
+        queue: ctx.effectQueue.size,
+        triggerState: [ctx.triggerState.readyAt.slice(), ctx.triggerState.count.slice()],
+      });
+      expect(state(a)).toEqual(state(b));
+      // Each hit's events, lethal or not, reach fire once: at MAX_DEPTH each listened one counts.
+      const pulse = a.sys.pulse;
+      const capped = (listens !== 2 ? pulse.hits : 0) + (listens !== 1 ? pulse.critCount : 0);
+      expect(a.counters.triggerDepthCapped).toBe(depth === MAX_DEPTH ? capped : 0);
+    },
+  );
+
+  it('is not quiet for a hit or crit trigger on other hits, an onHit hook or a signature payload', () => {
+    const quietOf = (triggers: TriggerSpec[], flags = 0, modules: TestModule[] = []): boolean => {
+      const ctx = placedEnemies([near(0, 0)], { stats: zoneStats(triggers), modules });
+      const p = ctx.effectPayloads[effectOf(ctx, 0)] as Payload;
+      hoistPulseRows(ctx, ctx.sys.pulse, { ...p, flags: p.flags | flags });
+      return ctx.sys.pulse.quiet;
+    };
+    const heal: TriggerSpec['do'] = [{ kind: 'heal', lifePct: 0.01 }];
+    const onlySignature: TriggerSpec = { on: 'hit', when: [{ hitIs: 'signature' }], do: heal };
+    const onHit: TestModule = (b) => b.hook('onHit', () => {});
+    expect(quietOf([idle(ZONE), onlySignature])).toBe(true);
+    expect(quietOf([idle(ZONE), onlySignature], SIGNATURE)).toBe(false);
+    expect(quietOf([idle(ZONE), onlySignature, { on: 'crit', do: heal }])).toBe(false);
+    expect(quietOf([idle(ZONE), { on: 'hit', do: heal }])).toBe(false);
+    expect(quietOf([idle(ZONE), onlySignature], 0, [onHit])).toBe(false);
+    // Nothing listens to hits: hitPulse skips their dispatch before it reads quiet.
+    expect(quietOf([idle(ZONE)])).toBe(false);
+  });
+});
+
+describe('zone pool against a model (K5, C8)', () => {
+  /** A zone of the model: what its events and its pulses' totals show of it. */
+  interface ModelZone {
+    readonly id: number;
+    readonly source: number;
+    readonly signature: boolean;
+    readonly created: number;
+    readonly expiresAt: number;
+    readonly total: number;
+  }
+
+  it.each([1, 2, 3])(
+    'raises the model events, in order, through evictions, expiry and reused slots (seed %i)',
+    (seed) => {
+      const r = createStreams(seed).spawn;
+      // One enemy in every zone; it never dies, so each pulse hits it once.
+      const ctx = placedEnemies([near(0, 0, { hp: 1e15 })], { stats: zoneStats([idle(ZONE)]) });
+      const effect = effectOf(ctx, 0);
+      const p = ctx.effectPayloads[effect] as Payload;
+      const zones = ctx.sys.zones;
+      const model: ModelZone[] = [];
+      let nextId = 0;
+      // Evictions of each kind: a signature zone, a source's, any source's.
+      const kinds = [0, 0, 0];
+      const oldestOf = (match: (zone: ModelZone) => boolean): number => model.findIndex(match);
+      const records = ZONE_CAP + SIGNATURE_ZONE_CAP;
+      // The records are bytes (ZonePool.record).
+      expect(records).toBeLessThanOrEqual(256);
+      /** The view holds the model's live zones, in id order; each record is used or free, once. */
+      const expectView = (): void => {
+        expect(ctx.state.zoneCount).toBe(model.length);
+        expect(Array.from(zones.id.subarray(0, zones.count))).toEqual(model.map((zone) => zone.id));
+        expect(Array.from(zones.signature.subarray(0, zones.count))).toEqual(
+          model.map((zone) => (zone.signature ? 1 : 0)),
+        );
+        const held = [
+          ...zones.record.subarray(0, zones.count),
+          ...zones.free.subarray(0, zones.freeCount),
+        ];
+        expect(held.sort((x, y) => x - y)).toEqual(Array.from({ length: records }, (_, k) => k));
+      };
+      for (let step = 0; step < 900; step++) {
+        const expected: unknown[] = [];
+        if (r.next() < 0.3) {
+          // The zone stage: pulses in id order, then each zone at or past its last tick ends.
+          const now = ctx.now + 1;
+          for (const zone of [...model]) {
+            if (
+              zone.created < now &&
+              now <= zone.expiresAt &&
+              zone.id % PULSE_TICKS === now % PULSE_TICKS
+            ) {
+              expected.push({
+                type: 'pulse',
+                kind: 'zone',
+                id: zone.id,
+                hits: 1,
+                total: zone.total,
+                crits: [],
+              });
+            }
+            if (now >= zone.expiresAt) {
+              expected.push({ type: 'zoneEnd', id: zone.id, evicted: false });
+              model.splice(model.indexOf(zone), 1);
+            }
+          }
+          expect(tick(ctx)).toEqual(expected);
+          expectView();
+          continue;
+        }
+        // An add: a signature zone, or an effect zone of one of six sources (more than the
+        // pool's 64 hold at 16 each; source 1 adds the most, so it meets its own cap too), with
+        // its own scale, so its pulses' totals name it.
+        const signature = r.next() < 0.2;
+        const source = signature ? 0 : r.next() < 0.4 ? 1 : 2 + r.int(5);
+        const pulses = 2 + r.int(8);
+        const scale = 0.25 * (1 + r.int(8));
+        const effects = model.filter((zone) => !zone.signature);
+        let evict = -1;
+        let kind = -1;
+        if (signature) {
+          if (model.length - effects.length >= SIGNATURE_ZONE_CAP) {
+            [evict, kind] = [oldestOf((z) => z.signature), 0];
+          }
+        } else if (effects.filter((zone) => zone.source === source).length >= ZONE_SOURCE_CAP) {
+          [evict, kind] = [oldestOf((z) => !z.signature && z.source === source), 1];
+        } else if (effects.length >= ZONE_CAP) {
+          [evict, kind] = [oldestOf((z) => !z.signature), 2];
+        }
+        if (kind >= 0) kinds[kind] = (kinds[kind] as number) + 1;
+        if (evict >= 0) {
+          expected.push({ type: 'zoneEnd', id: (model[evict] as ModelZone).id, evicted: true });
+          model.splice(evict, 1);
+        }
+        const id = ++nextId;
+        const expiresAt = ctx.now + PULSE_TICKS * pulses;
+        model.push({ id, source, signature, created: ctx.now, expiresAt, total: 400 * scale });
+        expected.push({
+          type: 'zone',
+          id,
+          x: Z.x,
+          y: Z.y,
+          radius: 50,
+          expiresAt,
+          source,
+          signature,
+        });
+        ctx.events.length = 0;
+        addZone(
+          ctx,
+          signature,
+          Z.x,
+          Z.y,
+          50,
+          pulses,
+          p,
+          scale,
+          source,
+          signature ? -1 : effect,
+          0,
+          -1,
+        );
+        expect(ctx.events).toEqual(expected);
+        expectView();
+      }
+      expect(ctx.counters.zonesEvicted).toBe(kinds.reduce((a, b) => a + b, 0));
+      for (const n of kinds) expect(n).toBeGreaterThan(10);
+    },
+  );
 });

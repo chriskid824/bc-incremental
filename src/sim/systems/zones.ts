@@ -19,9 +19,11 @@
  * source; a new signature zone at its cap evicts the oldest signature zone. Each eviction counts
  * in zonesEvicted and raises zoneEnd with `evicted`.
  *
- * Slots 0 .. count − 1 hold the live zones in id order, kept in order as zones end. The zone
- * stage runs after the projectiles and before the ailments; nothing it reaches adds a zone
- * (kills and freezes only queue effects), so no slot moves under a pulse.
+ * Slots 0 .. count − 1 hold the live zones in id order, kept in order as zones end. A zone's
+ * other arrays stay at its record (ZonePool.record) from its creation to its end, so closing a
+ * slot moves only the slot arrays. The zone stage runs after the projectiles and before the
+ * ailments; nothing it reaches adds a zone (kills and freezes only queue effects), so no slot
+ * moves under a pulse.
  */
 
 import { assertFinite, mul, ZERO } from '../../core/num';
@@ -36,8 +38,10 @@ import { PULSE_TICKS, SIGNATURE_ZONE_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../c
 import { convertHit } from '../combat/convert';
 import { applyHitDamage, dispatchHit, modifyDamage } from '../combat/hit';
 import { applyStacks, durationOf, frostOne } from '../effects/execute';
-import { CRIT_HIT, HIT_EVENT } from '../effects/flags';
+import { CRIT_HIT, HIT_EVENT, SIGNATURE } from '../effects/flags';
+import { EVENT, MAX_DEPTH } from '../effects/types';
 import { PRESCALED, ROWS, SLOT_HIT, SLOT_HIT_CRIT, slotRow } from '../emitters/types';
+import type { CompiledTrigger } from '../effects/types';
 import type { Payload } from '../emitters/types';
 import { TICK_RATE } from '../types';
 import { clamp01 } from './context';
@@ -50,6 +54,8 @@ const DAMAGE = SCOPED_INDEX.damage;
 const CRIT_CHANCE = SCOPED_INDEX.critChance;
 const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
 const CRIT_ALWAYS = SCOPED_INDEX.critAlways;
+const EV_HIT = EVENT.hit;
+const EV_CRIT = EVENT.crit;
 
 /** Pulses a second: a groundZone's durationSec and per-second terms count them. */
 export const PULSES_PER_SECOND = TICK_RATE / PULSE_TICKS;
@@ -88,17 +94,20 @@ export function addZone(
     evict(ctx, z, oldest(z, 0, -1));
   }
   // Ids only grow, so appending keeps the pool in id order.
-  const i = z.count++;
+  const slot = z.count++;
+  // Its record, where its terms stay while its slot moves: the free record on top.
+  const i = z.free[--z.freeCount] as number;
   const id = ++z.nextId;
   const now = ctx.now;
   const expiresAt = now + PULSE_TICKS * pulses;
-  z.id[i] = id;
-  z.x[i] = x;
-  z.y[i] = y;
-  z.radiusSq[i] = radius * radius;
-  z.created[i] = now;
-  z.expiresAt[i] = expiresAt;
-  z.signature[i] = signature ? 1 : 0;
+  z.record[slot] = i;
+  z.id[slot] = id;
+  z.x[slot] = x;
+  z.y[slot] = y;
+  z.radiusSq[slot] = radius * radius;
+  z.created[slot] = now;
+  z.expiresAt[slot] = expiresAt;
+  z.signature[slot] = signature ? 1 : 0;
   z.scale[i] = scale;
   z.payload[i] = p;
   z.source[i] = source;
@@ -135,30 +144,46 @@ export function addZone(
  * the first in slot order, which is id order.
  */
 function oldest(z: ZonePool, signature: number, source: number): number {
-  for (let i = 0; i < z.count; i++) {
-    if (z.signature[i] === signature && (source < 0 || z.source[i] === source)) return i;
+  for (let s = 0; s < z.count; s++) {
+    if (
+      z.signature[s] === signature &&
+      (source < 0 || z.source[z.record[s] as number] === source)
+    ) {
+      return s;
+    }
   }
   throw new Error('No zone to evict');
 }
 
-/** Evicts the zone in slot `i`: counted, announced, and its slot closed up in order. */
-function evict(ctx: RunContext, z: ZonePool, i: number): void {
+/** Evicts the zone in slot `s`: counted, announced, and its slot closed up in order. */
+function evict(ctx: RunContext, z: ZonePool, s: number): void {
   ctx.counters.zonesEvicted++;
-  ctx.events.push({ type: 'zoneEnd', id: z.id[i] as number, evicted: true });
-  release(z, i);
+  ctx.events.push({ type: 'zoneEnd', id: z.id[s] as number, evicted: true });
+  release(z, s);
   const n = z.count;
-  for (let s = i + 1; s < n; s++) moveSlot(z, s, s - 1);
+  // The slots past it move down one, a block copy of each slot array (records stay put).
+  const from = s + 1;
+  z.record.copyWithin(s, from, n);
+  z.id.copyWithin(s, from, n);
+  z.x.copyWithin(s, from, n);
+  z.y.copyWithin(s, from, n);
+  z.radiusSq.copyWithin(s, from, n);
+  z.created.copyWithin(s, from, n);
+  z.expiresAt.copyWithin(s, from, n);
+  z.signature.copyWithin(s, from, n);
   z.count = n - 1;
 }
 
-/** Takes the zone in slot `i` out of the live counts. */
-function release(z: ZonePool, i: number): void {
-  if (z.signature[i] === 1) z.liveSignature--;
+/** Takes the zone in slot `s` out of the live counts and frees its record. */
+function release(z: ZonePool, s: number): void {
+  const r = z.record[s] as number;
+  if (z.signature[s] === 1) z.liveSignature--;
   else {
     z.live--;
-    const source = z.source[i] as number;
+    const source = z.source[r] as number;
     z.perSource[source] = (z.perSource[source] as number) - 1;
   }
+  z.free[z.freeCount++] = r;
 }
 
 /** The zone stage: each zone due pulses, in id order; zones past their last tick are released. */
@@ -171,21 +196,21 @@ export function stepZones(ctx: RunContext): void {
   const now = ctx.now;
   const phase = now % PULSE_TICKS;
   let kept = 0;
-  for (let i = 0; i < n; i++) {
-    const expiresAt = z.expiresAt[i] as number;
+  for (let s = 0; s < n; s++) {
+    const expiresAt = z.expiresAt[s] as number;
     if (
-      (z.created[i] as number) < now &&
+      (z.created[s] as number) < now &&
       now <= expiresAt &&
-      (z.id[i] as number) % PULSE_TICKS === phase
+      (z.id[s] as number) % PULSE_TICKS === phase
     ) {
-      pulse(ctx, z, acc, i);
+      pulse(ctx, z, acc, s);
     }
     if (now >= expiresAt) {
-      ctx.events.push({ type: 'zoneEnd', id: z.id[i] as number, evicted: false });
-      release(z, i);
+      ctx.events.push({ type: 'zoneEnd', id: z.id[s] as number, evicted: false });
+      release(z, s);
       continue;
     }
-    if (kept !== i) moveSlot(z, i, kept);
+    if (kept !== s) moveSlot(z, s, kept);
     kept++;
   }
   z.count = kept;
@@ -193,17 +218,18 @@ export function stepZones(ctx: RunContext): void {
 }
 
 /**
- * One pulse of the zone in slot `i`: its hit, then its terms, on each alive enemy within it, in
+ * One pulse of the zone in slot `s`: its hit, then its terms, on each alive enemy within it, in
  * id order; then its pulse event, when it hit anything.
  */
-function pulse(ctx: RunContext, z: ZonePool, acc: PulseAcc, i: number): void {
+function pulse(ctx: RunContext, z: ZonePool, acc: PulseAcc, s: number): void {
   const targets = z.targets;
-  const n = ctx.grid.within(z.x[i] as number, z.y[i] as number, z.radiusSq[i] as number, targets);
+  const n = ctx.grid.within(z.x[s] as number, z.y[s] as number, z.radiusSq[s] as number, targets);
+  const i = z.record[s] as number;
   const p = z.payload[i] as Payload;
   const scale = z.scale[i] as number;
   acc.hits = 0;
   acc.total = ZERO;
-  acc.crits.length = 0;
+  acc.critCount = 0;
   if (scale > 0) hoistPulseRows(ctx, acc, p);
   // A build without the ailment's duration skips the term, as applyAilment does.
   const a = z.ailment[i] as number;
@@ -241,25 +267,58 @@ function pulse(ctx: RunContext, z: ZonePool, acc: PulseAcc, i: number): void {
     ctx.events.push({
       type: 'pulse',
       kind: 'zone',
-      id: z.id[i] as number,
+      id: z.id[s] as number,
       hits: acc.hits,
       total: acc.total,
-      crits: acc.crits.slice(),
+      crits: acc.crits.slice(0, acc.critCount),
     });
   }
 }
 
-/** The hit rows of pulse payload `p`, without and with crit, into acc, once per pulse. */
+/**
+ * The hit rows of pulse payload `p`, without and with crit, into acc, once per pulse; and
+ * whether its hits are quiet: something listens to hits (RunContext.hitListeners), but no hit
+ * or crit trigger can pass on them, because every one takes only signature hits and `p`'s are
+ * not, and no onHit hook listens.
+ */
 export function hoistPulseRows(ctx: RunContext, acc: PulseAcc, p: Payload): void {
-  acc.row = slotRow(ctx.build, p, SLOT_HIT);
-  acc.critRow = slotRow(ctx.build, p, SLOT_HIT_CRIT);
+  const build = ctx.build;
+  acc.row = slotRow(build, p, SLOT_HIT);
+  acc.critRow = slotRow(build, p, SLOT_HIT_CRIT);
+  acc.quiet =
+    ctx.hitListeners &&
+    (p.flags & SIGNATURE) === 0 &&
+    build.hooks.onHit.length === 0 &&
+    signatureOnly(ctx, build.triggersOn[EV_HIT] as Int32Array) &&
+    signatureOnly(ctx, build.triggersOn[EV_CRIT] as Int32Array);
+}
+
+/** Every trigger of `list` takes only signature hits. */
+function signatureOnly(ctx: RunContext, list: Int32Array): boolean {
+  const triggers = ctx.build.triggers;
+  for (let n = 0; n < list.length; n++) {
+    if (!(triggers[list[n] as number] as CompiledTrigger).signatureOnly) return false;
+  }
+  return true;
+}
+
+/**
+ * What dispatchHit leaves of a quiet hit at `depth` (hoistPulseRows): fire counts the event of
+ * each listened list in triggerDepthCapped at MAX_DEPTH or deeper, and its triggers pass nothing.
+ */
+function quietDispatch(ctx: RunContext, crit: boolean, depth: number): void {
+  if (depth < MAX_DEPTH) return;
+  const on = ctx.build.triggersOn;
+  if ((on[EV_HIT] as Int32Array).length !== 0) ctx.counters.triggerDepthCapped++;
+  if (crit && (on[EV_CRIT] as Int32Array).length !== 0) ctx.counters.triggerDepthCapped++;
 }
 
 /**
  * A pulse's hit of payload `p` on `enemy` at `scale`, added to the pulse's tally `acc`: what
  * hitWithPayload (src/sim/combat/hit.ts) does for a primary hit that is not forced to crit,
  * with no caller flags and a payload that rolls no ailments, reading the rows hoistPulseRows put
- * in `acc`. The differential test in zones.test.ts holds them equal.
+ * in `acc`; a quiet pulse's hit leaves dispatchHit to quietDispatch, which keeps only its
+ * counts. The differential tests in zones.test.ts hold them equal.
  */
 export function hitPulse(
   ctx: RunContext,
@@ -318,12 +377,14 @@ export function hitPulse(
   );
   if (!enemy.alive) return;
   if (ctx.hitListeners) {
-    dispatchHit(ctx, enemy, amount, mask, source, crit, 0, depth, origin, flags);
+    if (acc.quiet) quietDispatch(ctx, crit, depth);
+    else dispatchHit(ctx, enemy, amount, mask, source, crit, 0, depth, origin, flags);
   }
 }
 
-/** Moves the zone in slot `from` to slot `to` (to < from). */
+/** Moves the zone in slot `from` to slot `to` (to < from); its record stays put. */
 function moveSlot(z: ZonePool, from: number, to: number): void {
+  z.record[to] = z.record[from] as number;
   z.id[to] = z.id[from] as number;
   z.x[to] = z.x[from] as number;
   z.y[to] = z.y[from] as number;
@@ -331,15 +392,4 @@ function moveSlot(z: ZonePool, from: number, to: number): void {
   z.created[to] = z.created[from] as number;
   z.expiresAt[to] = z.expiresAt[from] as number;
   z.signature[to] = z.signature[from] as number;
-  z.scale[to] = z.scale[from] as number;
-  z.payload[to] = z.payload[from] as Payload;
-  z.source[to] = z.source[from] as number;
-  z.depth[to] = z.depth[from] as number;
-  z.origin[to] = z.origin[from] as number;
-  z.ailment[to] = z.ailment[from] as number;
-  z.stacks[to] = z.stacks[from] as number;
-  z.ailmentPct[to] = z.ailmentPct[from] as number;
-  z.frost[to] = z.frost[from] as number;
-  z.slow[to] = z.slow[from] as number;
-  z.stamp[to] = z.stamp[from] as number;
 }
