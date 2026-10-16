@@ -99,7 +99,8 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
 export const SIGNATURE = 1;
 /**
  * The bit of Payload.flags that makes every hit of a pulse payload ignite, its roll still drawn
- * (hitPulse, src/sim/systems/zones.ts): set on 火地's, the lob's fire zones (Payload.zoneVariant).
+ * (hitPulse, src/sim/systems/zones.ts): set on 火地's, the lob's fire zones (Payload.zoneVariant),
+ * a repeat's bombs' included.
  * It rides into the hits' dispatch flags, where no condition reads it, and kills drop it
  * (HIT_BITS); bit 20 of the layout in src/sim/effects/flags.ts.
  */
@@ -147,9 +148,12 @@ export interface Payload {
    * and rows. The payload itself while the sources match.
    */
   readonly extraJumpPayload: Payload;
-  /** SIGNATURE for the signature emitter's payload; ALWAYS_IGNITES for 火地's. */
+  /**
+   * SIGNATURE for the signature emitter's payload, SIGNATURE and REPEAT for a repeat's
+   * (src/sim/effects/flags.ts); ALWAYS_IGNITES for 火地's, and REPEAT too for a repeat bomb's.
+   */
   readonly flags: number;
-  /** Stream of its rolls: combat for emitters. */
+  /** Stream of its rolls: combat for emitters, effects for effects and repeats. */
   readonly rng: Rng;
   readonly chains: boolean;
   readonly rollsAilments: boolean;
@@ -169,7 +173,8 @@ export interface Payload {
 
 /**
  * What a payload is made of; jumpSource defaults to source, zoneVariant to null, aggregate to
- * false.
+ * false. `rowsOf` is a payload of the same tags, source and jumpSource, so whose slots key the
+ * same rows: the new payload shares its row cache (Payload.rows) instead of starting its own.
  */
 export interface PayloadSpec {
   readonly baseDamage: Num;
@@ -184,6 +189,7 @@ export interface PayloadSpec {
   readonly damageMode: DamageMode;
   readonly zoneVariant?: Payload | null;
   readonly aggregate?: boolean;
+  readonly rowsOf?: Payload;
 }
 
 /** A payload with every member written in one order, so all payloads share one shape. */
@@ -201,12 +207,22 @@ export function createPayload(spec: PayloadSpec): Payload {
     rollsAilments: spec.rollsAilments,
     canCrit: spec.canCrit,
     damageMode: spec.damageMode,
-    rows: new Int32Array(SLOT_COUNT).fill(-1),
+    rows: spec.rowsOf === undefined ? new Int32Array(SLOT_COUNT).fill(-1) : sharedRows(spec),
     zoneVariant: spec.zoneVariant ?? null,
     aggregate: spec.aggregate ?? false,
   };
   payload.extraJumpPayload = payload;
   return payload;
+}
+
+/** The row cache of spec.rowsOf, whose slots must key the rows of the spec's. */
+function sharedRows(spec: PayloadSpec): Int32Array {
+  const of = spec.rowsOf as Payload;
+  const jumpSource = spec.jumpSource ?? spec.source;
+  if (of.tags !== spec.tags || of.source !== spec.source || of.jumpSource !== jumpSource) {
+    throw new Error('A payload shares the rows only of one with its tags and sources');
+  }
+  return of.rows;
 }
 
 /**

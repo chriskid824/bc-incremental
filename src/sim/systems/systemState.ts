@@ -9,7 +9,7 @@
 
 import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
-import { SIGNATURE_ZONE_CAP, ZONE_CAP } from '../caps';
+import { REPEAT_CHARGE_CAP, SIGNATURE_ZONE_CAP, ZONE_CAP } from '../caps';
 import type { CompiledBuild } from '../build/compile';
 import { IN_ZONE } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
@@ -27,6 +27,8 @@ export interface SystemState {
   readonly zones: ZonePool;
   /** The lob's aim and landing (src/sim/emitters/lob.ts). */
   readonly lob: LobState;
+  /** The repeats of the signature attack (repeatAttack, src/sim/effects/execute.ts). */
+  readonly repeat: RepeatState;
 }
 
 /**
@@ -212,5 +214,43 @@ export function createLobState(): LobState {
     radiusSq: 0,
     sepSq: 0,
     event: { target: null, x: 0, y: 0, depth: 0, origin: -1, flags: 0 },
+  };
+}
+
+/**
+ * The repeats of the signature attack (RunContext.sys.repeat, the repeatAttack executor in
+ * src/sim/effects/execute.ts): each repeatAttack effect's payload, and the repeats waiting for
+ * the attack's next own firing.
+ */
+export interface RepeatState {
+  /**
+   * The payload of each repeatAttack effect, by its index in CompiledBuild.effects; null for
+   * every other effect.
+   */
+  readonly payloads: readonly (Payload | null)[];
+  /**
+   * The repeats waiting for the next counted attack (timing 'nextAttack'), first in first out:
+   * a ring of REPEAT_CHARGE_CAP slots, each with its repeat's payload and its hits' trigger depth
+   * and origin; the oldest at head, count of them.
+   */
+  readonly charges: {
+    readonly payload: (Payload | null)[];
+    readonly depth: Int32Array;
+    readonly origin: Int32Array;
+    head: number;
+    count: number;
+  };
+}
+
+export function createRepeatState(payloads: readonly (Payload | null)[]): RepeatState {
+  return {
+    payloads,
+    charges: {
+      payload: new Array<Payload | null>(REPEAT_CHARGE_CAP).fill(null),
+      depth: new Int32Array(REPEAT_CHARGE_CAP),
+      origin: new Int32Array(REPEAT_CHARGE_CAP),
+      head: 0,
+      count: 0,
+    },
   };
 }

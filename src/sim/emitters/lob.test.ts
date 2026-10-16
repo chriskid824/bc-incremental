@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { toNumber } from '../../core/num';
+import { num, toNumber, ZERO } from '../../core/num';
 import { createStreams } from '../../core/rng';
 import type { Rng } from '../../core/rng';
 import type { RuleSpec, SignatureSpec } from '../../data/rules';
@@ -12,6 +12,7 @@ import { compileBuild } from '../build/compile';
 import { liveStacks } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
 import { PROJECTILE_CAP, SIGNATURE_ZONE_CAP } from '../caps';
+import { dispatchPendingKills } from '../effects/dispatch';
 import { runEffect, runEffectQueue } from '../effects/execute';
 import { HIT_EVENT, PRIMARY, REPEAT, SIGNATURE } from '../effects/flags';
 import { createEffectEntry, dequeue } from '../effects/queue';
@@ -42,6 +43,7 @@ import {
   aimDense,
   aimFar,
   beginAim,
+  fireLobRepeat,
   isFar,
   launch,
   LOB_FAR,
@@ -1451,6 +1453,40 @@ function landedOn(ctx: RunContext, events: readonly SimEvent[]): number[] {
   });
 }
 
+/** Idle triggers (never firing here) with a repeat now and a charge for the next firing. */
+const IDLE_REPEAT: TriggerSpec = {
+  on: 'periodic',
+  every: 1000,
+  do: [{ kind: 'repeatAttack', count: 1, damagePct: 0.5 }],
+};
+const IDLE_CHARGE: TriggerSpec = {
+  on: 'periodic',
+  every: 1000,
+  do: [{ kind: 'repeatAttack', count: 1, damagePct: 0.25, timing: 'nextAttack' }],
+};
+
+/** The index of the build's n-th repeatAttack effect. */
+function repeatEffectOf(ctx: RunContext, n = 0): number {
+  const found = ctx.build.effects.flatMap((fx, i) => (fx.kind === 'repeatAttack' ? [i] : []));
+  const effect = found[n];
+  if (effect === undefined) throw new Error(`no repeatAttack effect ${n}`);
+  return effect;
+}
+
+/** The repeat payload of the build's n-th repeatAttack effect (RunContext.sys.repeat). */
+const repeatPayloadOf = (ctx: RunContext, n = 0): Payload =>
+  ctx.sys.repeat.payloads[repeatEffectOf(ctx, n)] as Payload;
+
+/** Runs the build's n-th repeatAttack effect at `depth` from trigger `origin`. */
+function runRepeatEffect(ctx: RunContext, n = 0, depth = 1, origin = 9): void {
+  const entry = createEffectEntry();
+  entry.effect = repeatEffectOf(ctx, n);
+  entry.depth = depth;
+  entry.origin = origin;
+  entry.flags = SIGNATURE | HIT_EVENT;
+  runEffect(ctx, entry);
+}
+
 describe('遠投 (farThrow; C10, Q3 (B))', () => {
   /** SALVO, then two far enemies inside the arena (7: 966 away, 8: 888) and one outside it. */
   const FAR_FIELD: readonly PlacedEnemy[] = [
@@ -1954,5 +1990,568 @@ describe('連環爆 (chainBlast; C12, R25)', () => {
     landAll(ctx);
     expect(ctx.enemies.every((e) => !e.alive)).toBe(true);
     expect(ctx.effectQueue.size).toBe(0);
+  });
+
+  it('queues none for real repeat bombs, thrown now or right after a firing (C4.9)', () => {
+    const placed = [near(0, 0, { hp: 1 }), near(10, 0, { hp: 1 }), near(-10, 0, { hp: 1 })];
+    const options: BombOptions = {
+      rules: [CHAIN_BLAST()],
+      triggers: [IDLE_REPEAT, IDLE_CHARGE],
+    };
+    const now = bombs(placed, options);
+    fireLobRepeat(now, lobOf(now), repeatPayloadOf(now), 1, 9);
+    expect(now.shots.count).toBe(1);
+    landAll(now);
+    expect(now.enemies.every((e) => !e.alive)).toBe(true);
+    expect(now.effectQueue.size).toBe(0);
+    // A counted bomb of the same build queues its 2; a charge drained after it, none more.
+    const counted = bombs(placed, options);
+    runRepeatEffect(counted, 1);
+    fire(counted);
+    expect(counted.shots.count).toBe(2);
+    expect(counted.shots.payload[1]).toBe(repeatPayloadOf(counted, 1));
+    landAll(counted);
+    expect(counted.enemies.every((e) => !e.alive)).toBe(true);
+    expect(counted.effectQueue.size).toBe(2);
+  });
+});
+
+describe('lob repeats (fireLobRepeat; C4.9, Q3 (B), Q5 (A))', () => {
+  /** bombs with IDLE_REPEAT (50%) and IDLE_CHARGE (25%) besides `options.triggers`. */
+  const repeating = (placed: readonly PlacedEnemy[], options: BombOptions = {}): RunContext =>
+    bombs(placed, {
+      ...options,
+      triggers: [IDLE_REPEAT, IDLE_CHARGE, ...(options.triggers ?? [])],
+    });
+  /** A repeat of 50% thrown now, its hits at `depth` from trigger `origin`. */
+  const throwRepeat = (ctx: RunContext, depth = 1, origin = 9): void =>
+    fireLobRepeat(ctx, lobOf(ctx), repeatPayloadOf(ctx), depth, origin);
+  const formsOf = (ctx: RunContext): number[] =>
+    eventsOf([ctx.events], 'lob').map((lob) => lob.form);
+  const lobCounts = (em: EmitterRuntime) => ({
+    attacks: em.attacks,
+    shots: em.shots,
+    volley: em.volley,
+    acc: em.acc,
+    interval: em.interval,
+  });
+  const ignitesOf = (events: readonly SimEvent[]): number[] =>
+    eventsOf([events], 'ignite').map((ignite) => ignite.targetId);
+
+  it('gives each repeat payload a 火地 of its own: the signature’s at its share, effects stream, always igniting, flagged REPEAT (C11, Q4/F1, Q5/F1)', () => {
+    const ctx = repeating([]);
+    const sig = lobOf(ctx).payload;
+    const sigZone = sig.zoneVariant as Payload;
+    for (const [n, share] of [
+      [0, 0.5],
+      [1, 0.25],
+    ] as const) {
+      const p = repeatPayloadOf(ctx, n);
+      expect([p.flags, p.rng, p.rows, p.tags]).toEqual([
+        SIGNATURE | REPEAT,
+        ctx.effectsRng,
+        sig.rows,
+        sig.tags,
+      ]);
+      expect(toNumber(p.baseDamage)).toBe(toNumber(sig.baseDamage) * share);
+      const zone = p.zoneVariant as Payload;
+      expect(zone).not.toBe(sigZone);
+      expect(zone).toMatchObject({
+        tags: sigZone.tags,
+        source: sigZone.source,
+        jumpSource: sigZone.jumpSource,
+        flags: ALWAYS_IGNITES | REPEAT,
+        chains: false,
+        rollsAilments: true,
+        canCrit: sigZone.canCrit,
+        damageMode: sigZone.damageMode,
+        zoneVariant: null,
+        aggregate: true,
+      });
+      expect(zone.rng).toBe(ctx.effectsRng);
+      expect(zone.rows).toBe(sigZone.rows);
+      expect(toNumber(zone.baseDamage)).toBe(toNumber(sigZone.baseDamage) * share);
+    }
+  });
+
+  it('throws 2 bombs at projectileCount 3, aimed as a firing’s, never steady, counting no shot or attack', () => {
+    const values = { projectileCount: 3 };
+    const counted = repeating(SALVO, { values });
+    fire(counted);
+    const firing = landedOn(counted, counted.events);
+    expect(firing).toEqual([2, 4]);
+    // Every counted bomb would be steady.
+    const steadyAim: RuleSpec = {
+      id: 'steadyAim',
+      everyNth: 1,
+      critMultiplierMore: 0,
+      counts: 'shot',
+    };
+    const ctx = repeating(SALVO, { values, rules: [steadyAim] });
+    const em = lobOf(ctx);
+    const before = lobCounts(em);
+    ctx.events.length = 0;
+    throwRepeat(ctx, 2, 9);
+    expect(landedOn(ctx, ctx.events)).toEqual(firing);
+    expect(formsOf(ctx)).toEqual([LOB_NORMAL, LOB_NORMAL]);
+    const shots = ctx.shots;
+    const p = repeatPayloadOf(ctx);
+    expect(
+      [0, 1].map((s) => [shots.payload[s] === p, shots.steady[s], shots.depth[s], shots.origin[s]]),
+    ).toEqual([
+      [true, 0, 2, 9],
+      [true, 0, 2, 9],
+    ]);
+    expect(Array.from(shots.scale.subarray(0, 2))).toEqual([1, 1]);
+    expect(lobCounts(em)).toEqual(before);
+    fire(ctx);
+    expect(Array.from(shots.steady.subarray(2, 4))).toEqual([1, 1]);
+  });
+
+  it('is what repeatAttack throws now for the lob: count repeats of its bombs, no volley (REPEAT_STEPS)', () => {
+    const twice: TriggerSpec = {
+      on: 'periodic',
+      every: 1000,
+      do: [{ kind: 'repeatAttack', count: 2, damagePct: 0.5 }],
+    };
+    const ctx = repeating(SALVO, { values: { projectileCount: 3 }, triggers: [twice] });
+    const em = lobOf(ctx);
+    const before = lobCounts(em);
+    ctx.events.length = 0;
+    runRepeatEffect(ctx, 2, 3, 5);
+    expect(ctx.projectiles).toEqual([]);
+    expect(formsOf(ctx)).toEqual([LOB_NORMAL, LOB_NORMAL, LOB_NORMAL, LOB_NORMAL]);
+    expect(landedOn(ctx, ctx.events)).toEqual([2, 4, 2, 4]);
+    const shots = ctx.shots;
+    const p = repeatPayloadOf(ctx, 2);
+    expect(
+      [0, 1, 2, 3].map((s) => [shots.payload[s] === p, shots.depth[s], shots.origin[s]]),
+    ).toEqual(Array.from({ length: 4 }, () => [true, 3, 5]));
+    expect(lobCounts(em)).toEqual(before);
+  });
+
+  it('aims afresh right after a firing: a drained charge throws at the firing’s enemies again', () => {
+    const ctx = repeating(SALVO, { values: { projectileCount: 3 } });
+    runRepeatEffect(ctx, 1, 2, 7);
+    expect(ctx.sys.repeat.charges.count).toBe(1);
+    ctx.events.length = 0;
+    fire(ctx);
+    expect(landedOn(ctx, ctx.events)).toEqual([2, 4, 2, 4]);
+    const shots = ctx.shots;
+    const sig = lobOf(ctx).payload;
+    const charge = repeatPayloadOf(ctx, 1);
+    expect(
+      [0, 1, 2, 3].map((s) => [shots.payload[s] === sig, shots.depth[s], shots.origin[s]]),
+    ).toEqual([
+      [true, 0, -1],
+      [true, 0, -1],
+      [false, 2, 7],
+      [false, 2, 7],
+    ]);
+    expect([shots.payload[2], shots.payload[3]]).toEqual([charge, charge]);
+    expect(lobCounts(lobOf(ctx))).toMatchObject({ attacks: 1, shots: 2 });
+    expect(ctx.sys.repeat.charges.count).toBe(0);
+  });
+
+  it('draws its count on the effects stream at projectileCount 2.5, after its first aim; nothing on combat', () => {
+    const ctx = repeating(SALVO, { values: { projectileCount: 2.5 } });
+    expect(ctx.projectileCount).toBe(1.5);
+    const twin = createStreams(1).effects;
+    sync(twin, ctx.effectsRng);
+    const combat = ctx.combatRng.snapshot();
+    const thrown: number[] = [];
+    for (let r = 0; r < 12; r++) {
+      ctx.events.length = 0;
+      throwRepeat(ctx);
+      const n = formsOf(ctx).length;
+      expect(n).toBe(twin.next() < 0.5 ? 2 : 1);
+      expect(ctx.effectsRng.snapshot()).toEqual(twin.snapshot());
+      thrown.push(n);
+    }
+    expect(new Set(thrown)).toEqual(new Set([1, 2]));
+    expect(ctx.combatRng.snapshot()).toEqual(combat);
+    // No candidate: no bomb, and the roll is not drawn.
+    const empty = repeating([], { values: { projectileCount: 2.5 } });
+    const before = rngPositions(empty);
+    throwRepeat(empty);
+    expect([empty.shots.count, empty.events.length]).toEqual([0, 0]);
+    expect(rngPositions(empty)).toEqual(before);
+  });
+
+  it('never throws far under 遠投, and leaves its count to the counted bombs (K8)', () => {
+    const ctx = repeating([...SALVO, { x: 100, y: 100 }], {
+      values: { projectileCount: 3 },
+      rules: [FAR_THROW(2)],
+    });
+    const em = lobOf(ctx);
+    // The next counted bomb is the 2nd: far.
+    em.shots = 1;
+    ctx.events.length = 0;
+    throwRepeat(ctx);
+    expect(formsOf(ctx)).toEqual([LOB_NORMAL, LOB_NORMAL]);
+    expect(landedOn(ctx, ctx.events)).toEqual([2, 4]);
+    expect(em.shots).toBe(1);
+    ctx.events.length = 0;
+    fire(ctx);
+    expect(formsOf(ctx)).toEqual([LOB_FAR, LOB_NORMAL]);
+    expect(landedOn(ctx, ctx.events)[0]).toBe(7);
+  });
+
+  it('throws giant bombs under 火山 at the repeat’s share, the period left alone (F12)', () => {
+    const run = (repeated: boolean) => {
+      const ctx = repeating([near(0, 0), near(20, 0), near(150, 0)], { rules: [VOLCANO] });
+      ctx.events.length = 0;
+      if (repeated) throwRepeat(ctx);
+      else launchAt(ctx, L, 0, -1, LOB_VOLCANO);
+      const forms = formsOf(ctx);
+      const scale = ctx.shots.scale[0];
+      landAll(ctx);
+      return {
+        ctx,
+        forms,
+        scale,
+        explosion: eventsOf([ctx.events], 'explosion')[0],
+        hits: eventsOf([ctx.events], 'hit').map((hit) => [hit.targetId, toNumber(hit.amount)]),
+      };
+    };
+    const giant = run(false);
+    const repeat = run(true);
+    expect([repeat.forms, repeat.scale]).toEqual([[LOB_VOLCANO], 5]);
+    expect(repeat.explosion).toMatchObject({ radius: 180, primaryId: 1, count: 3 });
+    expect(repeat.hits.map(([id]) => id)).toEqual([1, 2, 3]);
+    repeat.hits.forEach(([, amount], i) =>
+      expect(amount).toBeCloseTo((giant.hits[i]?.[1] as number) * 0.5, 9),
+    );
+    // The period: firings on ticks 180 and 360, a repeat thrown on tick 50 or not.
+    const ctx = repeating([near(0, 0)], { rules: [VOLCANO] });
+    const em = lobOf(ctx);
+    const ticks: number[] = [];
+    for (let tick = 1; tick <= 400; tick++) {
+      if (tick === 50) {
+        const before = lobCounts(em);
+        throwRepeat(ctx);
+        expect(lobCounts(em)).toEqual(before);
+      }
+      const attacks = em.attacks;
+      runLob(ctx, em);
+      if (em.attacks > attacks) ticks.push(tick);
+    }
+    expect(ticks).toEqual([180, 360]);
+    expect(em.interval).toBe(180);
+  });
+
+  it('raises no explode at its landing, and leaves the repeat’s fire zone, at its share (C11)', () => {
+    const run = (repeated: boolean) => {
+      const spy = watch();
+      const ctx = repeating([near(0, 0), near(20, 0)], {
+        values: { burnMaxStacks: 50 },
+        triggers: [{ on: 'explode', do: [{ kind: 'heal', lifePct: 0.1 }] }],
+        modules: [spy.module],
+      });
+      const p = repeated ? repeatPayloadOf(ctx) : lobOf(ctx).payload;
+      launchAt(ctx, L, 1, 9, LOB_NORMAL, p);
+      const landAt = landAll(ctx);
+      const landed = [...ctx.events];
+      const zones = ctx.sys.zones;
+      const zonePayload = zones.payload[zones.record[0] as number];
+      const pulses = eventsOf([zoneTicks(ctx, landAt, landAt + 120)], 'pulse');
+      const burns = (id: number) =>
+        enemy(ctx, id)
+          .burns.filter((b) => b.start > landAt)
+          .map((b) => toNumber(b.dps));
+      return { ctx, p, spy, landed, landAt, zonePayload, pulses, burns: [burns(1), burns(2)] };
+    };
+    const normal = run(false);
+    const repeat = run(true);
+    expect(normal.spy.centers.filter((c) => c.event === EVENT.explode)).toHaveLength(1);
+    expect(normal.ctx.effectQueue.size).toBe(1);
+    expect(repeat.spy.centers).toEqual([]);
+    expect(repeat.ctx.effectQueue.size).toBe(0);
+    // Its own fire zone, a signature zone at the repeat's depth and origin.
+    expect(eventsOf([repeat.landed], 'zone')).toMatchObject([{ signature: true, radius: 60 }]);
+    expect(repeat.zonePayload).toBe(repeat.p.zoneVariant);
+    const zones = repeat.ctx.sys.zones;
+    expect([zones.depth[0], zones.origin[0]]).toEqual([1, 9]);
+    expect(repeat.pulses.map((pulse) => pulse.hits)).toEqual(normal.pulses.map((p) => p.hits));
+    expect(repeat.pulses).toHaveLength(6);
+    repeat.pulses.forEach((pulse, i) =>
+      expect(toNumber(pulse.total)).toBeCloseTo(toNumber(normal.pulses[i]?.total ?? ZERO) * 0.5, 9),
+    );
+    // Q4 (B): its pulse hits' burns, computed from the hit's base, at the repeat's share.
+    expect(repeat.burns[0]?.length).toBeGreaterThan(0);
+    for (const id of [0, 1]) {
+      expect(repeat.burns[id]).toHaveLength((normal.burns[id] as number[]).length);
+      repeat.burns[id]?.forEach((dps, i) =>
+        expect(dps).toBeCloseTo((normal.burns[id]?.[i] as number) * 0.5, 9),
+      );
+    }
+  });
+
+  it('ignites on every hit of its fire zone at igniteChance 0 (ALWAYS_IGNITES, Q4/F1)', () => {
+    const ctx = repeating([near(0, 0), near(20, 0)], { values: { burnMaxStacks: 50 } });
+    launchAt(ctx, L, 1, 9, LOB_NORMAL, repeatPayloadOf(ctx));
+    const landAt = landAll(ctx);
+    const before = rngPositions(ctx);
+    const events = zoneTicks(ctx, landAt, landAt + 120);
+    expect(eventsOf([events], 'pulse').map((pulse) => pulse.hits)).toEqual([2, 2, 2, 2, 2, 2]);
+    expect(ignitesOf(events)).toEqual([1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2]);
+    expect(rngPositions(ctx)).toEqual(before);
+  });
+
+  it('rolls its fire zone’s crits and ignites on the effects stream, the combat stream untouched (Q4 (B))', () => {
+    const values = { critChance: 0.5, igniteChance: 0.5, burnMaxStacks: 50 };
+    const ctx = repeating([near(0, 0), near(20, 0), near(-20, 0)], { values });
+    launchAt(ctx, L, 1, 9, LOB_NORMAL, repeatPayloadOf(ctx));
+    const landAt = landAll(ctx);
+    const twin = createStreams(1).effects;
+    sync(twin, ctx.effectsRng);
+    const combat = ctx.combatRng.snapshot();
+    let hits = 0;
+    for (let tick = landAt + 1; tick <= landAt + 120; tick++) {
+      const events = zoneTicks(ctx, tick - 1, tick);
+      const pulses = eventsOf([events], 'pulse');
+      const crits: number[] = [];
+      for (const pulse of pulses) {
+        expect(pulse.hits).toBe(3);
+        for (const id of [1, 2, 3]) {
+          if (twin.next() < 0.5) crits.push(id);
+          // The ignite roll is drawn, and every hit ignites whatever it gives.
+          twin.next();
+        }
+        hits += pulse.hits;
+      }
+      expect(pulses.flatMap((pulse) => pulse.crits)).toEqual(crits);
+      expect(ignitesOf(events)).toEqual(pulses.length === 0 ? [] : [1, 2, 3]);
+      expect(ctx.effectsRng.snapshot()).toEqual(twin.snapshot());
+    }
+    expect(hits).toBe(18);
+    expect(ctx.combatRng.snapshot()).toEqual(combat);
+  });
+
+  it('repeats nothing on its fire zone’s hits or their kills, where a normal bomb’s 火地 does (REPEAT, Hoshi’s Q5/F1)', () => {
+    // Every hit and every kill repeats the attack, signature or not.
+    const again: TriggerSpec['do'] = [{ kind: 'repeatAttack', count: 1, damagePct: 0.5 }];
+    const run = (repeated: boolean) => {
+      const ctx = repeating([near(0, 0, { hp: 1e9 }), near(20, 0, { hp: 1e9 })], {
+        triggers: [
+          { on: 'hit', do: again },
+          { on: 'kill', do: again },
+        ],
+      });
+      launchAt(ctx, L, 0, -1, LOB_NORMAL, repeated ? repeatPayloadOf(ctx) : lobOf(ctx).payload);
+      const landAt = landAll(ctx);
+      // The explosion's entries set aside; enemy 2 dies to the fire zone's first pulse.
+      const entry = createEffectEntry();
+      while (ctx.effectQueue.size > 0) dequeue(ctx.effectQueue, entry);
+      enemy(ctx, 2).hp = num(1e-9);
+      const pulses = eventsOf([zoneTicks(ctx, landAt, landAt + 120)], 'pulse');
+      dispatchPendingKills(ctx);
+      // Each queued entry's effect, and whether it carries REPEAT.
+      const q = ctx.effectQueue;
+      const queued = Array.from({ length: q.size }, (_, n) => {
+        const at = (q.head + n) & q.capMask;
+        return [q.effect[at], ((q.flags[at] as number) & REPEAT) !== 0];
+      });
+      ctx.events.length = 0;
+      runEffectQueue(ctx);
+      return { ctx, pulses: pulses.map((pulse) => pulse.hits), queued, thrown: formsOf(ctx) };
+    };
+    const normal = run(false);
+    const repeat = run(true);
+    const [hit, kill] = [2, 3].map((n) => repeatEffectOf(repeat.ctx, n));
+    // 火地's 7 hits fire the hit trigger and its kill the kill trigger, from either bomb.
+    expect(repeat.pulses).toEqual([2, 1, 1, 1, 1, 1]);
+    expect(normal.pulses).toEqual(repeat.pulses);
+    const entries = (flagged: boolean) => [
+      ...Array.from({ length: 7 }, () => [hit, flagged]),
+      [kill, flagged],
+    ];
+    // A normal bomb's 火地 repeats on each, a bomb a repeat.
+    expect(normal.queued).toEqual(entries(false));
+    expect(normal.thrown).toEqual(Array<number>(8).fill(LOB_NORMAL));
+    // The repeat bomb's carries REPEAT to its hits and their kill, so they repeat nothing (rule 7).
+    expect(repeat.queued).toEqual(entries(true));
+    expect(repeat.thrown).toEqual([]);
+    expect(repeat.ctx.counters.effectsRun).toBe(8);
+  });
+
+  it('repeats nothing on the ignites and freezes its explosion and fire zone cause, where a normal bomb’s do (REPEAT, Q5/F1)', () => {
+    // Every burn applied and every freeze repeats the attack.
+    const again: TriggerSpec['do'] = [{ kind: 'repeatAttack', count: 1, damagePct: 0.5 }];
+    const run = (repeated: boolean) => {
+      const ctx = repeating([near(0, 0, { hp: 1e9 })], {
+        values: { burnMaxStacks: 50, frostOnHit: 0.5 },
+        triggers: [
+          { on: 'ailmentApplied', when: [{ ailment: 'burn' }], do: again },
+          { on: 'freeze', do: again },
+        ],
+      });
+      launchAt(ctx, L, 0, -1, LOB_NORMAL, repeated ? repeatPayloadOf(ctx) : lobOf(ctx).payload);
+      const landAt = landAll(ctx);
+      // Each queued entry's effect, and whether it carries REPEAT.
+      const q = ctx.effectQueue;
+      const queued = () =>
+        Array.from({ length: q.size }, (_, n) => {
+          const at = (q.head + n) & q.capMask;
+          return [q.effect[at], ((q.flags[at] as number) & REPEAT) !== 0];
+        });
+      // The explosion ignites (igniteAlways), set aside here; its 0.5 frost freezes nothing yet.
+      const landed = queued();
+      const entry = createEffectEntry();
+      while (q.size > 0) dequeue(q, entry);
+      // Each of 火地's pulses ignites (ALWAYS_IGNITES), and the first one's frost freezes.
+      const pulses = eventsOf([zoneTicks(ctx, landAt, landAt + 120)], 'pulse');
+      const pulsed = queued();
+      ctx.events.length = 0;
+      runEffectQueue(ctx);
+      return { ctx, pulses: pulses.length, landed, pulsed, thrown: formsOf(ctx) };
+    };
+    const normal = run(false);
+    const repeat = run(true);
+    const [ignite, freeze] = [2, 3].map((n) => repeatEffectOf(repeat.ctx, n));
+    const entries = (flagged: boolean) => ({
+      landed: [[ignite, flagged]],
+      pulsed: [
+        [ignite, flagged],
+        [freeze, flagged],
+        ...Array.from({ length: 5 }, () => [ignite, flagged]),
+      ],
+    });
+    expect([normal.pulses, repeat.pulses]).toEqual([6, 6]);
+    // A normal bomb's ignites and freeze repeat, a bomb each.
+    expect({ landed: normal.landed, pulsed: normal.pulsed }).toEqual(entries(false));
+    expect(normal.thrown).toEqual(Array<number>(7).fill(LOB_NORMAL));
+    // The repeat bomb's carry REPEAT from its payloads, so they repeat nothing (rule 7).
+    expect({ landed: repeat.landed, pulsed: repeat.pulsed }).toEqual(entries(true));
+    expect(repeat.thrown).toEqual([]);
+    expect(repeat.ctx.counters.effectsRun).toBe(7);
+  });
+
+  it('is never steady after a steady firing (steadyAim counts attack, an onAttack forceCrit), drained or thrown now', () => {
+    const everyFiring: RuleSpec = {
+      id: 'steadyAim',
+      everyNth: 1,
+      critMultiplierMore: 0,
+      counts: 'attack',
+    };
+    const forced: TestModule = (b) =>
+      b.hook('onAttack', (_ctx, _em, shot) => {
+        shot.forceCrit = true;
+      });
+    for (const options of [{ rules: [everyFiring] }, { modules: [forced] }] as BombOptions[]) {
+      const ctx = repeating(SALVO, { ...options, values: { projectileCount: 3 } });
+      runRepeatEffect(ctx, 1, 2, 7);
+      fire(ctx);
+      throwRepeat(ctx);
+      const shots = ctx.shots;
+      const charge = repeatPayloadOf(ctx, 1);
+      const now = repeatPayloadOf(ctx, 0);
+      const sig = lobOf(ctx).payload;
+      // The firing's 2 bombs, the charge drained after it, then the repeat thrown now.
+      expect(
+        Array.from({ length: shots.count }, (_, s) => {
+          const p = shots.payload[s];
+          return [
+            p === sig ? 'sig' : p === charge ? 'charge' : p === now ? 'now' : '?',
+            shots.steady[s],
+          ];
+        }),
+      ).toEqual([
+        ['sig', 1],
+        ['sig', 1],
+        ['charge', 0],
+        ['charge', 0],
+        ['now', 0],
+        ['now', 0],
+      ]);
+    }
+  });
+
+  it('throws the waiting repeats right after the first firing of a tick, before the second', () => {
+    const ctx = repeating(SALVO, { values: { projectileCount: 3 } });
+    runRepeatEffect(ctx, 1, 2, 7);
+    const em = lobOf(ctx);
+    // Two firings due on one tick.
+    em.acc = 2 * em.interval - em.cadence;
+    ctx.events.length = 0;
+    runLob(ctx, em);
+    const shots = ctx.shots;
+    const sig = em.payload;
+    const charge = repeatPayloadOf(ctx, 1);
+    expect(
+      Array.from({ length: shots.count }, (_, s) => {
+        const p = shots.payload[s];
+        return [p === sig ? 'sig' : p === charge ? 'charge' : '?', shots.depth[s], shots.origin[s]];
+      }),
+    ).toEqual([
+      ['sig', 0, -1],
+      ['sig', 0, -1],
+      ['charge', 2, 7],
+      ['charge', 2, 7],
+      ['sig', 0, -1],
+      ['sig', 0, -1],
+    ]);
+    expect(landedOn(ctx, ctx.events)).toEqual([2, 4, 2, 4, 2, 4]);
+    expect(lobCounts(em)).toMatchObject({ attacks: 2, shots: 4 });
+    expect(ctx.sys.repeat.charges.count).toBe(0);
+  });
+
+  it('throws the waiting repeats after a firing whose later bomb found no enemy: once per firing', () => {
+    // Two bombs a firing at projectileCount 3, but one enemy: the firing's second bomb is lost,
+    // and so is the repeat's.
+    const ctx = repeating([near(0, 0)], { values: { projectileCount: 3 } });
+    runRepeatEffect(ctx, 1, 2, 7);
+    const em = lobOf(ctx);
+    ctx.events.length = 0;
+    fire(ctx);
+    const shots = ctx.shots;
+    const charge = repeatPayloadOf(ctx, 1);
+    expect(
+      Array.from({ length: shots.count }, (_, s) => {
+        const p = shots.payload[s];
+        return [
+          p === em.payload ? 'sig' : p === charge ? 'charge' : '?',
+          shots.depth[s],
+          shots.origin[s],
+        ];
+      }),
+    ).toEqual([
+      ['sig', 0, -1],
+      ['charge', 2, 7],
+    ]);
+    expect(landedOn(ctx, ctx.events)).toEqual([1, 1]);
+    expect(lobCounts(em)).toMatchObject({ attacks: 1, shots: 1 });
+    expect(ctx.sys.repeat.charges.count).toBe(0);
+  });
+
+  it('keeps its waiting repeats while no firing fires, and throws them after the next one', () => {
+    // Nothing alive: no firing, no repeat.
+    const empty = repeating([]);
+    runRepeatEffect(empty, 1, 2, 7);
+    fire(empty);
+    expect([empty.shots.count, lobOf(empty).attacks, empty.sys.repeat.charges.count]).toEqual([
+      0, 0, 1,
+    ]);
+    // One enemy, outside the arena, and the next bomb is 遠投's: the far aim finds no enemy, so
+    // nothing fires, though a dense aim would find it.
+    const ctx = repeating([{ x: -40, y: 500 }], { rules: [FAR_THROW(2)] });
+    const em = lobOf(ctx);
+    em.shots = 1;
+    runRepeatEffect(ctx, 1, 2, 7);
+    ctx.events.length = 0;
+    fire(ctx);
+    expect([ctx.shots.count, ctx.events.length, em.attacks]).toEqual([0, 0, 0]);
+    expect(ctx.sys.repeat.charges.count).toBe(1);
+    // Inside the arena it draws the far bomb, and the charge right after it.
+    moveTo(enemy(ctx, 1), 100, 500);
+    rebuildGrid(ctx);
+    fire(ctx);
+    expect(formsOf(ctx)).toEqual([LOB_FAR, LOB_NORMAL]);
+    expect([ctx.shots.payload[0], ctx.shots.payload[1]]).toEqual([
+      em.payload,
+      repeatPayloadOf(ctx, 1),
+    ]);
+    expect([ctx.shots.depth[1], ctx.shots.origin[1]]).toEqual([2, 7]);
+    expect(ctx.sys.repeat.charges.count).toBe(0);
   });
 });

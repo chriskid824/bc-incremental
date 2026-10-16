@@ -17,10 +17,17 @@
  * effects never nest, transfers at a kill use ctx.spreadTargets, and a freeze takes its list
  * from ctx.centerEvents.freezeTargets into the center-event scratch, whose triggers and hooks
  * only queue (src/sim/effects/centerEvents.ts).
+ *
+ * A repeatAttack makes the signature attack again (REPEAT_STEPS), as no attack of its own, on
+ * its effect's repeat payload (RunContext.sys.repeat: the signature's, flagged SIGNATURE and
+ * REPEAT, on the effects stream): at once, or, with timing 'nextAttack', right after the
+ * attack's next own firing (drainRepeatCharges), at most REPEAT_CHARGE_CAP waiting. An entry
+ * whose event came from a repeat's hit (REPEAT) repeats nothing (rule 7).
  */
 
 import type { Num } from '../../core/num';
 import { add, mul, num, toNumber, ZERO } from '../../core/num';
+import type { SignatureId } from '../../data/rules';
 import type { AppliedAilment } from '../../data/triggers';
 import {
   ailmentDps,
@@ -34,14 +41,18 @@ import { addBleed } from '../ailments/bleed';
 import { addFrost } from '../ailments/frost';
 import { addShock } from '../ailments/shock';
 import { sizeOf } from '../build/size';
+import { REPEAT_CHARGE_CAP } from '../caps';
 import { hitWithPayload } from '../combat/hit';
+import { fireLobRepeat } from '../emitters/lob';
 import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
-import type { Payload } from '../emitters/types';
+import type { EmitterRuntime, Payload } from '../emitters/types';
+import { fireVolleyRepeat } from '../emitters/volley';
 import type { Enemy, RunContext } from '../systems/context';
 import { rebuildGrid } from '../systems/grid';
 import { addZone, PULSES_PER_SECOND } from '../systems/zones';
 import { raiseFreeze } from './centerEvents';
 import { fireApplied, fireOne } from './dispatch';
+import { REPEAT } from './flags';
 import { dequeue } from './queue';
 import type { EffectEntry } from './queue';
 import { orderNearest } from './select';
@@ -223,6 +234,49 @@ function shatterPayload(ctx: RunContext, fx: CompiledEffect, source: number): Pa
   return payload;
 }
 
+/**
+ * A repeat of the signature attack: emitter `em`'s attack again with payload `p`, as no attack
+ * of its own, its hits at `depth` from trigger `origin`.
+ */
+type RepeatStep = (
+  ctx: RunContext,
+  em: EmitterRuntime,
+  p: Payload,
+  depth: number,
+  origin: number,
+) => void;
+
+/**
+ * Each signature's repeat, typed over the signature ids, so a new signature needs its entry
+ * here. Read at this module's top level, inside the import cycle it shares with the emitters:
+ * every entry must be a function declaration (docs/v3 C4 design §0.7).
+ */
+export const REPEAT_STEPS: { readonly [K in SignatureId]: RepeatStep } = {
+  m1Volley: fireVolleyRepeat,
+  magmaBomb: fireLobRepeat,
+};
+
+/**
+ * Fires the repeats waiting for the signature attack's next own firing, oldest first, each with
+ * its own payload, depth and origin: right after each counted attack of `em`, the signature
+ * (runVolley, runLob).
+ */
+export function drainRepeatCharges(ctx: RunContext, em: EmitterRuntime): void {
+  const charges = ctx.sys.repeat.charges;
+  if (charges.count === 0) return;
+  const step = REPEAT_STEPS[ctx.build.signature.id];
+  while (charges.count > 0) {
+    const at = charges.head;
+    const p = charges.payload[at] as Payload;
+    const depth = charges.depth[at] as number;
+    const origin = charges.origin[at] as number;
+    charges.payload[at] = null;
+    charges.head = (at + 1) % REPEAT_CHARGE_CAP;
+    charges.count--;
+    step(ctx, em, p, depth, origin);
+  }
+}
+
 const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   applyAilment(ctx, spec, fx, entry) {
     const ailment = spec.ailment;
@@ -344,6 +398,34 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
         hitWithPayload(ctx, enemy, p, 0, scale, null, null, false, entry.depth, entry.origin);
       }
     }
+  },
+  // `count` repeats of the signature attack at the entry's depth and origin, on the effect's
+  // repeat payload: now, or queued for the attack's next own firing, the rest dropped at the
+  // cap. Never from a repeat's hit (rule 7): a repeat never repeats in turn.
+  repeatAttack(ctx, spec, _fx, entry) {
+    if ((entry.flags & REPEAT) !== 0) return;
+    const rs = ctx.sys.repeat;
+    const p = rs.payloads[entry.effect] as Payload;
+    const count = spec.count;
+    const { depth, origin } = entry;
+    if (spec.timing === 'nextAttack') {
+      const charges = rs.charges;
+      for (let c = 0; c < count; c++) {
+        if (charges.count === REPEAT_CHARGE_CAP) {
+          ctx.counters.repeatChargesDropped++;
+          continue;
+        }
+        const at = (charges.head + charges.count) % REPEAT_CHARGE_CAP;
+        charges.payload[at] = p;
+        charges.depth[at] = depth;
+        charges.origin[at] = origin;
+        charges.count++;
+      }
+      return;
+    }
+    const em = ctx.emitters[0] as EmitterRuntime;
+    const step = REPEAT_STEPS[ctx.build.signature.id];
+    for (let c = 0; c < count; c++) step(ctx, em, p, depth, origin);
   },
 };
 

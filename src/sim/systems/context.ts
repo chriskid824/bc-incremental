@@ -24,6 +24,7 @@ import { ailmentCredit, MAX_SOURCES, SOURCE_CLASS_ORDINAL } from '../build/sourc
 import type { AttributionPolicy, SourceTable } from '../build/sources';
 import { createCenterEventState, FREEZE_PAYLOADS } from '../effects/centerEvents';
 import type { CenterEventState } from '../effects/centerEvents';
+import { REPEAT } from '../effects/flags';
 import { createEffectEntry, createEffectQueue } from '../effects/queue';
 import type { EffectEntry, EffectQueue, PendingKill, TriggerState } from '../effects/queue';
 import { createSelectionScratch, selectable } from '../effects/select';
@@ -31,11 +32,13 @@ import type { SelectionScratch } from '../effects/select';
 import { EVENT } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import {
+  ALWAYS_IGNITES,
   createEmitterRuntime,
   createPayload,
   emitterInterval,
   emitterPayload,
   ROWS,
+  SIGNATURE,
   SLOT_HIT,
   SLOT_HIT_CRIT,
   slotRow,
@@ -65,7 +68,7 @@ import { createEnemyGrid } from './grid';
 import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
 import { isToughType } from './spawn';
-import { createLobState, createPulseAcc, createZonePool } from './systemState';
+import { createLobState, createPulseAcc, createRepeatState, createZonePool } from './systemState';
 import type { SystemState } from './systemState';
 
 const DAMAGE = SCOPED_INDEX.damage;
@@ -352,7 +355,8 @@ export interface RunContext {
   readonly effectQueue: EffectQueue;
   /**
    * Per effect index, the payload of its hits (explode, nova) or of the hit its ailments count
-   * as (applyAilment), on the effects stream; null for the others.
+   * as (applyAilment), on the effects stream; null for the others. A repeatAttack's repeats
+   * take theirs from sys.repeat.
    */
   readonly effectPayloads: readonly (Payload | null)[];
   /** Some hit or crit trigger or onHit hook listens: the hit path dispatches. */
@@ -399,7 +403,7 @@ export interface RunContext {
   readonly selection: SelectionScratch;
 
   // ---- Systems with state of their own (src/sim/systems/systemState.ts) ----
-  /** One member per system: the pulse tally, the zone pool and the lob. */
+  /** One member per system: the pulse tally, the zone pool, the lob and the repeats. */
   readonly sys: SystemState;
 
   // ---- Entities and public state ----
@@ -600,6 +604,50 @@ function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
 }
 
 /**
+ * The payload of a repeatAttack effect's repeats (RunContext.sys.repeat): the signature
+ * payload's at the effect's damagePct of its damage, on the effects stream, flagged SIGNATURE
+ * and REPEAT. Its tags and sources are the signature's, so it shares its rows. A lob's carries
+ * its own fire zone's payload, the signature's 火地 at the same share on the effects stream,
+ * which rolls ailments and always ignites as 火地 does, flagged REPEAT too: its pulse hits and
+ * their kills fire no repeat (rule 7, Hoshi's Q5/F1). Null for every other effect.
+ */
+function repeatPayload(fx: CompiledEffect, signature: Payload, rng: Rng): Payload | null {
+  const spec = fx.spec;
+  if (spec.kind !== 'repeatAttack') return null;
+  const share = spec.damagePct;
+  const zone = signature.zoneVariant;
+  return createPayload({
+    baseDamage: mul(signature.baseDamage, share),
+    tags: signature.tags,
+    source: signature.source,
+    jumpSource: signature.jumpSource,
+    flags: SIGNATURE | REPEAT,
+    rng,
+    chains: signature.chains,
+    rollsAilments: signature.rollsAilments,
+    canCrit: signature.canCrit,
+    damageMode: signature.damageMode,
+    zoneVariant:
+      zone === null
+        ? null
+        : createPayload({
+            baseDamage: mul(zone.baseDamage, share),
+            tags: zone.tags,
+            source: zone.source,
+            flags: ALWAYS_IGNITES | REPEAT,
+            rng,
+            chains: false,
+            rollsAilments: true,
+            canCrit: zone.canCrit,
+            damageMode: zone.damageMode,
+            aggregate: true,
+            rowsOf: zone,
+          }),
+    rowsOf: signature,
+  });
+}
+
+/**
  * Builds the context of one run; the config must already be validated. testModules are for
  * tests only (src/sim/rules/module.ts).
  */
@@ -697,9 +745,10 @@ export function createRunContext(
   const killInline = Int32Array.from(killTriggers.filter((t) => t.inline).map((t) => t.index));
   const killPending = Int32Array.from(killTriggers.filter((t) => !t.inline).map((t) => t.index));
   const effectPayloads = effects.map((fx) => effectPayload(fx, effectsRng));
+  const repeatPayloads = effects.map((fx) => repeatPayload(fx, signaturePayload, effectsRng));
   // Who burn damage can be credited to: the applier of every payload whose hits ignite, an
   // emitter's zone payload among them (Payload.zoneVariant), and of every applyAilment and
-  // groundZone burn.
+  // groundZone burn. A repeat's payloads have the signature's sources.
   const burnCredits = new Set<number>();
   for (const emitter of emitters) {
     const p = emitter.payload;
@@ -839,7 +888,12 @@ export function createRunContext(
     budgetStreak: 0,
     selected: null,
     selection: createSelectionScratch(),
-    sys: { pulse: createPulseAcc(), zones, lob: createLobState() },
+    sys: {
+      pulse: createPulseAcc(),
+      zones,
+      lob: createLobState(),
+      repeat: createRepeatState(repeatPayloads),
+    },
 
     enemies,
     projectiles,

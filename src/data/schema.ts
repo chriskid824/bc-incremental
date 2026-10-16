@@ -305,6 +305,14 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         element: damagePart.element,
       })
       .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('repeatAttack'),
+        count: finite,
+        damagePct: finite,
+        timing: z.enum(['now', 'nextAttack']).exactOptional(),
+      })
+      .readonly(),
   ]),
 );
 

@@ -366,6 +366,8 @@ export const COUNTER_IDS = [
   'projectilesCapped',
   /** Ground zones a newer one evicted at ZONE_CAP, ZONE_SOURCE_CAP or SIGNATURE_ZONE_CAP. */
   'zonesEvicted',
+  /** Repeats dropped because REPEAT_CHARGE_CAP were already waiting for the next attack. */
+  'repeatChargesDropped',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

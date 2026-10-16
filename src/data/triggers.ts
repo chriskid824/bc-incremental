@@ -341,6 +341,24 @@ export interface GroundZoneSpec {
 }
 
 /**
+ * Repeats of the signature attack (回聲, 多重施法): `count` of them, each the attack again at
+ * a fresh target, dealing damagePct of the attack's damage on the effects stream. With timing
+ * 'now' (the default) they fire when the effect runs; with 'nextAttack' they wait and fire right
+ * after the attack's next own firing, at most 8 waiting at once (more are dropped). A repeat
+ * counts as no attack of its own: it advances no nthAttack count, no steadyAim rhythm and no
+ * per-attack form (遠投, 連環爆), its hits are never steady and raise no center event, and it
+ * never repeats in turn. Forms that last apply to it (火山's giant bombs).
+ */
+export interface RepeatAttackSpec {
+  readonly kind: 'repeatAttack';
+  /** Repeats, 1 to 4. */
+  readonly count: number;
+  /** Each repeat's share of the signature attack's damage. */
+  readonly damagePct: number;
+  readonly timing?: 'now' | 'nextAttack';
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -363,6 +381,8 @@ export interface GroundZoneSpec {
  * - gainShards: the dying enemy's shard drop again, × `fraction` (kill events only).
  * - groundZone: a zone of `radius` at the event's point for `durationSec`, pulsing four times a
  *   second (GroundZoneSpec).
+ * - repeatAttack: the signature attack again, `count` times, at damagePct of its damage
+ *   (RepeatAttackSpec).
  */
 export type EffectSpec =
   | {
@@ -401,7 +421,8 @@ export type EffectSpec =
     }
   | { readonly kind: 'heal'; readonly lifePct: number }
   | { readonly kind: 'gainShards'; readonly fraction: number }
-  | GroundZoneSpec;
+  | GroundZoneSpec
+  | RepeatAttackSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -426,6 +447,8 @@ export const COEF_FIELDS: {
   heal: [],
   gainShards: [],
   groundZone: ['damagePctPerSec', 'ailmentDamagePct'],
+  // A share of the signature attack, whose damage the calibration does not scale.
+  repeatAttack: [],
 };
 
 /** When `on` happens and every `when` condition holds, run each effect of `do` in order. */

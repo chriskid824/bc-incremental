@@ -25,6 +25,14 @@
  * aim, separation and fire zone too) and damageMult × the damage of their explosion hits, not of
  * their chains or fire zones; under 連環爆 an enemy a bomb's explosion kills explodes in turn, an
  * effect queued for the form (enqueueModuleEffect), at most perBomb of them a bomb.
+ *
+ * A repeat of the attack (fireLobRepeat; repeatAttack, src/sim/effects/execute.ts) is a firing
+ * that counts as no attack: projectileCount bombs of the repeat's payload, its fraction rolled on
+ * that payload's stream, each aimed dense as a firing's are, none far, steady or counted as a
+ * shot. Under 火山 they are giant bombs, the period untouched; their landings queue no 連環爆
+ * and raise no explode, and their fire zones are the repeat's (Payload.zoneVariant), whose hits
+ * repeat nothing either (REPEAT). The repeats waiting for a firing are thrown right after it
+ * (drainRepeatCharges).
  */
 
 import { enemySlow } from '../ailments/frost';
@@ -34,6 +42,7 @@ import { LIST_MAX } from '../caps';
 import { beginAttack, chainFrom, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { emitCenterEvent } from '../effects/centerEvents';
+import { drainRepeatCharges } from '../effects/execute';
 import { PRIMARY, REPEAT } from '../effects/flags';
 import { EVENT } from '../effects/types';
 import { enqueueModuleEffect } from '../rules/api';
@@ -71,10 +80,10 @@ export function isFar(lob: LobParams, s: number): boolean {
 }
 
 /**
- * Fires every due firing of `em`, a lob. The accumulator gains the emitter's cadence per tick; a
- * firing is due each time it reaches the emitter's interval. With no enemy alive the emitter
- * stays ready without banking firings, as the volley does (runVolley): it fires on the tick an
- * enemy appears.
+ * Fires every due firing of `em`, a lob, each followed by the repeats waiting for it. The
+ * accumulator gains the emitter's cadence per tick; a firing is due each time it reaches the
+ * emitter's interval. With no enemy alive the emitter stays ready without banking firings, as
+ * the volley does (runVolley): it fires on the tick an enemy appears.
  */
 export function runLob(ctx: RunContext, em: EmitterRuntime): void {
   const lob = ctx.build.signature.lob as LobParams;
@@ -105,6 +114,33 @@ export function runLob(ctx: RunContext, em: EmitterRuntime): void {
       const form = giant ? LOB_VOLCANO : far ? LOB_FAR : LOB_NORMAL;
       launch(ctx, em, em.payload, form, nextShotSteady(ctx, em), 0, -1);
     }
+    drainRepeatCharges(ctx, em);
+  }
+}
+
+/**
+ * A repeat of the lob (REPEAT_STEPS, src/sim/effects/execute.ts): a firing of `em` with payload
+ * `p` that counts as no attack, its hits at `depth` from trigger `origin`. It throws
+ * projectileCount bombs, the fraction the chance of one more rolled on p's stream once the
+ * first is aimed, each aimed dense afresh (aimDense), never far: 遠投 is per attack. Its bombs
+ * are never steady and count as no shot; under 火山 they are giant bombs, and the lob's period
+ * is left alone. A bomb with no candidate left is not thrown.
+ */
+export function fireLobRepeat(
+  ctx: RunContext,
+  em: EmitterRuntime,
+  p: Payload,
+  depth: number,
+  origin: number,
+): void {
+  const form = (ctx.build.signature.lob as LobParams).volcano !== null ? LOB_VOLCANO : LOB_NORMAL;
+  beginAim(ctx, em);
+  if (aimDense(ctx, em) === null) return;
+  const rng = p.rng;
+  const bombs = rollCount(ctx.projectileCount, (c) => rng.chance(c));
+  for (let b = 0; b < bombs; b++) {
+    if (b > 0 && aimDense(ctx, em) === null) break;
+    launch(ctx, em, p, form, false, depth, origin);
   }
 }
 

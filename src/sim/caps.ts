@@ -38,3 +38,9 @@ export const ZONE_SOURCE_CAP = 16;
 export const SIGNATURE_ZONE_CAP = 16;
 /** Ticks between two pulses of a zone: four a second. */
 export const PULSE_TICKS = 15;
+/**
+ * Repeats waiting for the signature attack's next own firing (repeatAttack with timing
+ * 'nextAttack', src/sim/effects/execute.ts); one more is dropped and counted in
+ * repeatChargesDropped.
+ */
+export const REPEAT_CHARGE_CAP = 8;

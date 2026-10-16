@@ -1011,6 +1011,50 @@ describe('trigger validation', () => {
     },
   );
 
+  it('accepts repeatAttack effects of 1 to 4 repeats, now or at the next attack, on any event', () => {
+    expect(
+      triggerIssues(
+        { on: 'hit', do: [{ kind: 'repeatAttack', count: 1, damagePct: 0.5 }] },
+        { on: 'kill', do: [{ kind: 'repeatAttack', count: 4, damagePct: 0.2, timing: 'now' }] },
+        {
+          on: 'nthAttack',
+          every: 3,
+          do: [{ kind: 'repeatAttack', count: 2, damagePct: 1.5, timing: 'nextAttack' }],
+        },
+        { on: 'periodic', every: 2, do: [{ kind: 'repeatAttack', count: 3, damagePct: 0.01 }] },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects repeatAttack parameters out of range', () => {
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { kind: 'repeatAttack', count: 0, damagePct: 0 },
+          { kind: 'repeatAttack', count: 5, damagePct: -0.5 },
+          { kind: 'repeatAttack', count: 1.5, damagePct: 0.5 },
+          { kind: 'repeatAttack', count: Number.NaN, damagePct: Number.NaN },
+          {
+            kind: 'repeatAttack',
+            count: 1,
+            damagePct: 0.5,
+            timing: 'later' as unknown as 'now',
+          },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] count must be an integer in [1, 4] (got 0)`,
+      `${at} do[0] damagePct must be > 0 (got 0)`,
+      `${at} do[1] count must be an integer in [1, 4] (got 5)`,
+      `${at} do[1] damagePct must be > 0 (got -0.5)`,
+      `${at} do[2] count must be an integer in [1, 4] (got 1.5)`,
+      `${at} do[3] count must be an integer in [1, 4] (got NaN)`,
+      `${at} do[3] damagePct must be > 0 (got NaN)`,
+      `${at} do[4] timing must be 'now' or 'nextAttack' (got later)`,
+    ]);
+  });
+
   it('rejects groundZone parameters out of range, and a zone that does nothing', () => {
     expect(
       triggerIssues({

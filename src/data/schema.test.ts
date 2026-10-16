@@ -375,6 +375,9 @@ describe('EffectSpecSchema', () => {
       tags: ['area'],
       element: 'cold',
     },
+    { kind: 'repeatAttack', count: 1, damagePct: 0.5 },
+    { kind: 'repeatAttack', count: 2, damagePct: 0.3, timing: 'now' },
+    { kind: 'repeatAttack', count: 4, damagePct: 1, timing: 'nextAttack' },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -423,6 +426,16 @@ describe('EffectSpecSchema', () => {
       { kind: 'groundZone', radius: 60, durationSec: 2, damagePctPerSec: 0, ailment: 'frost' },
     ],
     ['groundZone without a duration', { kind: 'groundZone', radius: 60, damagePctPerSec: 0.2 }],
+    ['repeatAttack without a count', { kind: 'repeatAttack', damagePct: 0.5 }],
+    ['repeatAttack without damagePct', { kind: 'repeatAttack', count: 1 }],
+    [
+      'repeatAttack at an unknown timing',
+      { kind: 'repeatAttack', count: 1, damagePct: 0.5, timing: 'later' },
+    ],
+    [
+      'repeatAttack with an unknown key',
+      { kind: 'repeatAttack', count: 1, damagePct: 0.5, radius: 100 },
+    ],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
   });

@@ -751,9 +751,23 @@ function effectIssues(
       issues.push(...groundZoneIssues(effect));
       delivery(effect.tags);
       break;
+    case 'repeatAttack': {
+      const { count: repeats, timing } = effect;
+      if (!(Number.isInteger(repeats) && repeats >= 1 && repeats <= REPEAT_COUNT_MAX)) {
+        issues.push(`count must be an integer in [1, ${REPEAT_COUNT_MAX}] (got ${repeats})`);
+      }
+      positive('damagePct', effect.damagePct);
+      if (timing !== undefined && timing !== 'now' && timing !== 'nextAttack') {
+        issues.push(`timing must be 'now' or 'nextAttack' (got ${String(timing)})`);
+      }
+      break;
+    }
   }
   return issues;
 }
+
+/** The most repeats one repeatAttack makes. */
+const REPEAT_COUNT_MAX = 4;
 
 /** Zone radii a groundZone accepts, in arena units. */
 const ZONE_RADIUS_MIN = 1;

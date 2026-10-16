@@ -97,6 +97,8 @@ function effectNumbers(effect: EffectSpec): string[][] {
         ...(effect.addFrostPerSec === undefined ? [] : [[percent(effect.addFrostPerSec)]]),
         ...(effect.slow === undefined ? [] : [[percent(effect.slow)]]),
       ];
+    case 'repeatAttack':
+      return [[String(effect.count)], [percent(effect.damagePct)]];
   }
 }
 

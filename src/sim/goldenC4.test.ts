@@ -491,6 +491,74 @@ function slowFireModule(): TestModule {
   };
 }
 
+/**
+ * C4.9's repeats: 回聲 repeats every fifth attack once at half its damage, now; 多重施法 on every
+ * twelfth queues two full repeats for the next attack; a signature hit now and then repeats the
+ * attack at 30% (a repeat's own hits pass that trigger's conditions and do not repeat, rule 7);
+ * and a kill now and then queues three more, so pending charges can overflow (`repeat`'s seed 2
+ * drops three). `repeat` runs them on the volley at 2.5 projectiles an attack, with crits,
+ * ignites and a chain jump; `repeatLob` on C4.7's magma bombs at projectileCount 2.5 (one bomb
+ * and a second on a drawn chance), with their triggers, probes and steadyAim on every fourth
+ * bomb.
+ */
+const REPEAT_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'outer.combo',
+    { on: 'nthAttack', every: 5, do: [{ kind: 'repeatAttack', count: 1, damagePct: 0.5 }] },
+  ],
+  [
+    'outer.combo',
+    {
+      on: 'nthAttack',
+      every: 12,
+      do: [{ kind: 'repeatAttack', count: 2, damagePct: 1, timing: 'nextAttack' }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'signature' }, { chance: 0.05 }],
+      do: [{ kind: 'repeatAttack', count: 1, damagePct: 0.3, timing: 'now' }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'kill',
+      when: [{ chance: 0.3 }],
+      do: [{ kind: 'repeatAttack', count: 3, damagePct: 0.4, timing: 'nextAttack' }],
+    },
+  ],
+];
+const REPEAT_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1,
+    attackSpeed: 6,
+    projectileCount: 2.5,
+  },
+  maskProbeMods(),
+  {
+    triggers: REPEAT_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+const REPEAT_LOB_STATS = makeStats(
+  { ...MAGMA_STATS.values, projectileCount: 2.5 },
+  [...maskProbeMods(), PROJECTILE_PROBE],
+  {
+    triggers: [...MAGMA_TRIGGERS, ...REPEAT_TRIGGERS].map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -549,6 +617,21 @@ const ENTRIES: readonly GoldenC4Entry[] = [
       startWave: 12,
     },
     expected: ['24277606333be1f9', 'afa4bc2dec7da67c'],
+  },
+  {
+    name: 'repeat',
+    config: { stats: REPEAT_STATS, rules: [], startWave: 12 },
+    expected: ['98990a1fd39d8f45', '8cdd0b7edfebf481'],
+  },
+  {
+    name: 'repeatLob',
+    config: {
+      stats: REPEAT_LOB_STATS,
+      rules: [{ id: 'steadyAim', everyNth: 4, critMultiplierMore: 0.5, counts: 'shot' }],
+      signature: { id: 'magmaBomb' },
+      startWave: 12,
+    },
+    expected: ['1bb62573bf834d27', 'b9ea74917d7d6e1e'],
   },
 ];
 
