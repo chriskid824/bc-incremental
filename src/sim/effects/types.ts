@@ -21,8 +21,20 @@ import type { Num } from '../../core/num';
 import { mul, num, ONE, ZERO } from '../../core/num';
 import { TAG, tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
-import { COEF_FIELDS, TRANSFER_EFFECTS, TRIGGER_EVENTS, WIRED_EVENTS } from '../../data/triggers';
-import type { EffectSpec, TargetSelector, TriggerEventId, TriggerSpec } from '../../data/triggers';
+import {
+  COEF_FIELDS,
+  DETONATE_AILMENTS,
+  TRANSFER_EFFECTS,
+  TRIGGER_EVENTS,
+  WIRED_EVENTS,
+} from '../../data/triggers';
+import type {
+  DetonateSpec,
+  EffectSpec,
+  TargetSelector,
+  TriggerEventId,
+  TriggerSpec,
+} from '../../data/triggers';
 import type { BurnSpread } from '../ailments/records';
 import { DOT_STEP_TICKS } from '../ailments/rings';
 import { compileCondition } from '../build/eval';
@@ -101,6 +113,11 @@ export interface CompiledTrigger {
    * instead of the event's; null without one.
    */
   readonly selector: CompiledSelector | null;
+  /**
+   * A kill, diedWithAilment or shatter trigger with a detonate: the DETONATE_AILMENTS ordinal of
+   * its ailment, whose damage the victim had left its pending kills carry; −1 for every other.
+   */
+  readonly detonateAilment: number;
 }
 
 /** The built-in shatter's effect (SHATTER_TRIGGER), which no data can name. */
@@ -120,14 +137,16 @@ export interface CompiledEffect {
   readonly radiusSq: number;
   /**
    * Tags of its hits (explode, nova: hit, trigger and area, plus its tags and element; shatter:
-   * hit, area and cold; groundZone: hit and zone, plus its tags and element) or of the hit an
-   * ailment it applies counts as (applyAilment: hit and trigger); 0 for the others.
+   * hit, area and cold; groundZone: hit and zone, plus its tags and element; detonate: its
+   * ailment's kind and trigger, plus area with a radius) or of the hit an ailment it applies
+   * counts as (applyAilment: hit and trigger); 0 for the others.
    */
   readonly tags: TagMask;
   /**
    * Damage of a hit or of the hit an applied ailment counts as: damage stat × damagePct; 1 for
-   * shatter, whose hits scale it by the victim's max life; the damage stat for groundZone, whose
-   * pulses scale it by damagePctPerSec × 0.25 and its ailment by ailmentDamagePct.
+   * shatter, whose hits scale it by the victim's max life, and for detonate, whose hits deal the
+   * damage it takes from the ailment; the damage stat for groundZone, whose pulses scale it by
+   * damagePctPerSec × 0.25 and its ailment by ailmentDamagePct.
    */
   readonly baseDamage: Num;
   /** spreadAilment's radius and effect (src/sim/ailments/apply.ts); null for the other kinds. */
@@ -140,7 +159,7 @@ export interface CompiledEffect {
   /** Its trigger's selector picks 'player': the effect centers on the player, with no target. */
   readonly atPlayer: boolean;
   /**
-   * It applies a status to its target alone (applyAilment and addFrost without a radius): on a
+   * It acts on its target alone (applyAilment, addFrost and detonate without a radius): on a
    * center event with a list, a trigger without a selector queues it once per alive enemy of
    * the list (fireOne in dispatch.ts).
    */
@@ -182,6 +201,9 @@ export function compileTrigger(
     else conds.push(compileCondition(condition, spec.on, sources));
   }
   const kill = spec.on === 'kill' || spec.on === 'diedWithAilment';
+  // Validation keeps a dead enemy's detonates to one ailment.
+  const detonate = spec.do.find((effect): effect is DetonateSpec => effect.kind === 'detonate');
+  const dead = kill || spec.on === 'shatter';
   return {
     index,
     on: EVENT[spec.on],
@@ -203,6 +225,8 @@ export function compileTrigger(
         : 0,
     takesDrop: spec.do.some((effect) => effect.kind === 'gainShards'),
     selector: spec.target === undefined ? null : compileSelector(spec.target, spec.on),
+    detonateAilment:
+      dead && detonate !== undefined ? DETONATE_AILMENTS.indexOf(detonate.ailment) : -1,
   };
 }
 
@@ -225,6 +249,7 @@ export function moduleTrigger(index: number, source: number): CompiledTrigger {
     stepEvery: 0,
     takesDrop: false,
     selector: null,
+    detonateAilment: -1,
   };
 }
 
@@ -317,6 +342,11 @@ export function compileEffect(
         tagMask(scaled.tags ?? []) |
         (scaled.element === undefined ? 0 : TAG[scaled.element]);
       baseDamage = num(damage);
+      break;
+    case 'detonate':
+      tags = TAG[scaled.ailment] | TAG.trigger | (scaled.radius === undefined ? 0 : TAG.area);
+      baseDamage = ONE;
+      fanout = scaled.radius === undefined;
       break;
     default:
       break;

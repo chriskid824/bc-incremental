@@ -376,6 +376,7 @@ describe('frost readers', () => {
       target,
       chainJump: 0,
       playerLifeFrac: 1,
+      ctx: null,
     });
     expect([chilled, frozen, boss, null].map((e) => scaling.read(evOn(e)))).toEqual([0.4, 1, 0, 0]);
     const hasFrost = [compileCondition({ targetHas: 'frost' })];

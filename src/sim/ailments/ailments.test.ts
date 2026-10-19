@@ -186,6 +186,7 @@ describe('shock', () => {
     target: enemy,
     chainJump: 0,
     playerLifeFrac: 1,
+    ctx: null,
   });
 
   it('stacks to its cap on a shared timer; once it wears off every reader sees none', () => {
@@ -266,7 +267,7 @@ describe('poison', () => {
     expect(enemy.poisonStacks).toBe(5);
     expect(ctx.rings.live).toBe(1);
     const scaling = compileScaling({ per: 'targetPoisonStacks' });
-    const ev: EvalInput = { now: 20, target: enemy, chainJump: 0, playerLifeFrac: 1 };
+    const ev: EvalInput = { now: 20, target: enemy, chainJump: 0, playerLifeFrac: 1, ctx: null };
     expect(scaling.read(ev)).toBe(5);
     expect(scaling.read({ ...ev, target: null })).toBe(0);
     for (const [tick, more] of advance(ctx, 90)) events.set(tick, more);

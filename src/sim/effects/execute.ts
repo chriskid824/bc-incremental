@@ -23,10 +23,15 @@
  * REPEAT, on the effects stream): at once, or, with timing 'nextAttack', right after the
  * attack's next own firing (drainRepeatCharges), at most REPEAT_CHARGE_CAP waiting. An entry
  * whose event came from a repeat's hit (REPEAT) repeats nothing (rule 7).
+ *
+ * A detonate takes its share of the damage an ailment has left on its live target
+ * (src/sim/ailments/remaining.ts) and deals it at once, as it is (PRESCALED); on a kill trigger,
+ * whose target is dead, it deals that share of what the victim had left, its entry's value
+ * (recordPendingKills, dispatch.ts), and consumes nothing.
  */
 
 import type { Num } from '../../core/num';
-import { add, mul, num, toNumber, ZERO } from '../../core/num';
+import { add, gt, mul, num, toNumber, ZERO } from '../../core/num';
 import type { SignatureId } from '../../data/rules';
 import type { AppliedAilment } from '../../data/triggers';
 import {
@@ -39,6 +44,7 @@ import {
 } from '../ailments/apply';
 import { addBleed } from '../ailments/bleed';
 import { addFrost } from '../ailments/frost';
+import { consumeAilment, remainingOf } from '../ailments/remaining';
 import { addShock } from '../ailments/shock';
 import { sizeOf } from '../build/size';
 import { REPEAT_CHARGE_CAP } from '../caps';
@@ -426,6 +432,32 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const em = ctx.emitters[0] as EmitterRuntime;
     const step = REPEAT_STEPS[ctx.build.signature.id];
     for (let c = 0; c < count; c++) step(ctx, em, p, depth, origin);
+  },
+  // `fraction` of what the ailment has left on the live target, consumed from it, or of a dead
+  // victim's (the entry's value), × `damage`: to the target, or to each alive enemy within the
+  // radius (at most maxTargets, in `order`), every one taking the whole amount.
+  detonate(ctx, spec, fx, entry) {
+    const live = liveTarget(entry);
+    const left = live !== null ? remainingOf(ctx, live, spec.ailment) : num(entry.value);
+    if (!gt(left, ZERO)) return;
+    const fraction = spec.fraction ?? 1;
+    const dealt =
+      live !== null ? consumeAilment(ctx, live, spec.ailment, fraction) : mul(left, fraction);
+    const amount = toNumber(mul(dealt, spec.damage ?? 1));
+    const p = ctx.effectPayloads[entry.effect] as Payload;
+    const { depth, origin } = entry;
+    if (fx.radiusSq === 0) {
+      if (live !== null) hitWithPayload(ctx, live, p, 0, amount, null, null, false, depth, origin);
+      return;
+    }
+    const max = spec.maxTargets ?? Infinity;
+    const nearest = spec.order === 'nearest';
+    const targets = ctx.effectTargets;
+    const count = inArea(ctx, fx, centerX(ctx, fx, entry), centerY(ctx, fx, entry), max, nearest);
+    for (let i = 0; i < count; i++) {
+      const enemy = targets[i] as Enemy;
+      if (enemy.alive) hitWithPayload(ctx, enemy, p, 0, amount, null, null, false, depth, origin);
+    }
   },
 };
 

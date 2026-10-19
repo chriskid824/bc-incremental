@@ -450,10 +450,19 @@ function conditionIssues(condition: Condition): string[] {
   ) {
     issues.push(`targetHpBelow must be in (0, 1] (got ${condition.targetHpBelow})`);
   }
-  if ('stacksAtLeast' in condition && !isPositiveInt(condition.stacksAtLeast.stacks)) {
-    issues.push(
-      `stacksAtLeast.stacks must be a positive integer (got ${condition.stacksAtLeast.stacks})`,
-    );
+  if ('stacksAtLeast' in condition) {
+    const { ailment, stacks } = condition.stacksAtLeast;
+    // 'max' reads the ailment's stack cap: burn's (records, or 5 in eternalFlame's rings) and
+    // shock's. Poison has none, and bleed keeps one bleed.
+    if (stacks === 'max') {
+      if (ailment !== 'burn' && ailment !== 'shock') {
+        issues.push(
+          `stacksAtLeast 'max' needs a stack cap, which ${ailment} has not; give a number`,
+        );
+      }
+    } else if (!isPositiveInt(stacks)) {
+      issues.push(`stacksAtLeast.stacks must be a positive integer (got ${stacks})`);
+    }
   }
   // Sources are numbered as a run first meets them, so a class has no fixed set to expand to;
   // 'center' is both a class and its one id.
@@ -569,9 +578,40 @@ function triggerIssues(trigger: TriggerSpec): string[] {
   if (kill && transfers > 0 && transfers < trigger.do.length) {
     issues.push('mixes transfer and other effects on a kill event; split it into two triggers');
   }
+  issues.push(...detonateIssues(trigger));
   trigger.do.forEach((effect, i) => {
     for (const problem of effectIssues(effect, on, target)) issues.push(`do[${i}] ${problem}`);
   });
+  return issues;
+}
+
+/**
+ * A kill trigger's detonates deal what the victim had left at its death, which its pending kill
+ * carries as its value (src/sim/effects/dispatch.ts): of one ailment, which the victim must have
+ * held (victimHas), and never beside gainShards, whose value is the victim's drop.
+ */
+function detonateIssues(trigger: TriggerSpec): string[] {
+  if (!DEAD_EVENTS.includes(trigger.on)) return [];
+  const ailments = [
+    ...new Set(
+      trigger.do.flatMap((effect) => (effect.kind === 'detonate' ? [effect.ailment] : [])),
+    ),
+  ];
+  if (ailments.length === 0) return [];
+  const issues: string[] = [];
+  const held = (trigger.when ?? []).flatMap((condition) =>
+    'victimHas' in condition ? [condition.victimHas] : [],
+  );
+  for (const ailment of ailments) {
+    if (!held.includes(ailment))
+      issues.push(`a kill trigger with detonate needs victimHas '${ailment}'`);
+  }
+  if (ailments.length > 1) {
+    issues.push(`a kill trigger's detonates must name one ailment (got ${ailments.join(', ')})`);
+  }
+  if (trigger.do.some((effect) => effect.kind === 'gainShards')) {
+    issues.push('gainShards and detonate cannot share a kill trigger');
+  }
   return issues;
 }
 
@@ -670,20 +710,27 @@ function effectIssues(
   // effects run (a kill's transfers run at the kill, before it is gone; a shatter's never do),
   // and gone by the time a contact trigger's effects run, since a touching enemy leaks or dies
   // at its touch. A selector's enemy takes its place, alive when it is picked; a 'player' pick
-  // gives none.
+  // gives none. A detonate needs the enemy whose ailment it deals, with or without a radius,
+  // but on the events whose enemy is dead, where the victim's damage left stands in (its radius
+  // is checked below).
+  const detonate = effect.kind === 'detonate';
+  const dead = DEAD_EVENTS.includes(on);
   const needsTarget =
     ((effect.kind === 'applyAilment' || effect.kind === 'addFrost') &&
       effect.radius === undefined) ||
-    effect.kind === 'spreadAilment';
+    effect.kind === 'spreadAilment' ||
+    (detonate && !dead);
   if (needsTarget && target !== undefined) {
     if (target.pick === 'player') {
       issues.push(`${effect.kind} needs an enemy, which target.pick 'player' does not give`);
     }
+  } else if (needsTarget && detonate && TARGETLESS_EVENTS.has(on)) {
+    issues.push(`detonate needs a target on '${on}' events; add target {pick}`);
   } else if (needsTarget && TARGETLESS_EVENTS.has(on)) {
     issues.push(`${effect.kind} needs the event's enemy, which '${on}' events have not`);
   } else if (needsTarget && on === 'contact') {
     issues.push(`${effect.kind} needs the event's enemy, which has left by the time it runs`);
-  } else if (needsTarget && effect.kind !== 'spreadAilment' && DEAD_EVENTS.includes(on)) {
+  } else if (needsTarget && effect.kind !== 'spreadAilment' && dead) {
     issues.push(`${effect.kind} needs a radius on '${on}' events, whose enemy is dead`);
   } else if (needsTarget && on === 'shatter') {
     issues.push(`${effect.kind} needs the event's enemy, which is gone when '${on}' triggers run`);
@@ -750,6 +797,23 @@ function effectIssues(
     case 'groundZone':
       issues.push(...groundZoneIssues(effect));
       delivery(effect.tags);
+      break;
+    case 'detonate':
+      if (effect.fraction !== undefined && !(effect.fraction > 0 && effect.fraction <= 1)) {
+        issues.push(`fraction must be in (0, 1] (got ${effect.fraction})`);
+      }
+      positive('damage', effect.damage);
+      positive('radius', effect.radius);
+      count('maxTargets', effect.maxTargets);
+      if (
+        (effect.maxTargets !== undefined || effect.order !== undefined) &&
+        effect.radius === undefined
+      ) {
+        issues.push('maxTargets and order need a radius');
+      }
+      if (dead && effect.radius === undefined) {
+        issues.push(`detonate needs a radius on '${on}' events, whose enemy is dead`);
+      }
       break;
     case 'repeatAttack': {
       const { count: repeats, timing } = effect;

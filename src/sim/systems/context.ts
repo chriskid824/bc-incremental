@@ -37,6 +37,7 @@ import {
   createPayload,
   emitterInterval,
   emitterPayload,
+  PRESCALED,
   ROWS,
   SIGNATURE,
   SLOT_HIT,
@@ -354,9 +355,9 @@ export interface RunContext {
   readonly triggerState: TriggerState;
   readonly effectQueue: EffectQueue;
   /**
-   * Per effect index, the payload of its hits (explode, nova) or of the hit its ailments count
-   * as (applyAilment), on the effects stream; null for the others. A repeatAttack's repeats
-   * take theirs from sys.repeat.
+   * Per effect index, the payload of its hits (explode, nova, detonate) or of the hit its
+   * ailments count as (applyAilment), on the effects stream; null for the others. A
+   * repeatAttack's repeats take theirs from sys.repeat.
    */
   readonly effectPayloads: readonly (Payload | null)[];
   /** Some hit or crit trigger or onHit hook listens: the hit path dispatches. */
@@ -576,19 +577,21 @@ export const clamp01 = (value: number): number => Math.min(1, Math.max(0, value)
 export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
 
 /**
- * The payload of an effect that hits (explode, nova), applies an ailment (applyAilment) or makes
- * a zone (groundZone), on the effects stream: its tags and source, no flags, never chaining. An
- * applied ailment's damage is that of a hit of the payload, so only its burn row is read. A
- * zone's pulses aggregate their hits, which crit and roll ailments as any hit does, before the
- * zone applies its own terms (src/sim/systems/zones.ts); a zone without damage hits nothing, so
- * its payload rolls none.
+ * The payload of an effect that hits (explode, nova, detonate), applies an ailment (applyAilment)
+ * or makes a zone (groundZone), on the effects stream: its tags and source, no flags, never
+ * chaining. An applied ailment's damage is that of a hit of the payload, so only its burn row is
+ * read. A zone's pulses aggregate their hits, which crit and roll ailments as any hit does,
+ * before the zone applies its own terms (src/sim/systems/zones.ts); a zone without damage hits
+ * nothing, so its payload rolls none. A detonate's hits deal the damage it hands them as it is
+ * (PRESCALED, base 1): no crit, no ailment, no damage row, so its payload draws nothing.
  */
 function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
   const spec = fx.spec;
   // A shatter's payload depends on its credit (RunContext.shatterPayloads).
   if (fx.tags === 0 || spec.kind === 'shatter') return null;
   const zone = spec.kind === 'groundZone';
-  const hits = spec.kind !== 'applyAilment';
+  const detonate = spec.kind === 'detonate';
+  const hits = spec.kind !== 'applyAilment' && !detonate;
   return createPayload({
     baseDamage: fx.baseDamage,
     tags: fx.tags,
@@ -598,7 +601,7 @@ function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
     chains: false,
     rollsAilments: hits && (!zone || spec.damagePctPerSec > 0),
     canCrit: hits,
-    damageMode: ROWS,
+    damageMode: detonate ? PRESCALED : ROWS,
     aggregate: zone,
   });
 }
@@ -856,7 +859,8 @@ export function createRunContext(
     thornsEmitters,
     segmentEmitters: [],
 
-    evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1 },
+    // Its run is this context, set once the literal is built.
+    evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1, ctx: null },
     triggerState: {
       count: new Int32Array(triggers.length),
       readyAt: new Float64Array(triggers.length),
@@ -984,5 +988,7 @@ export function createRunContext(
     chainable: (enemy) => enemy.hitMark !== ctx.attackSerial,
     selAccept: (enemy) => selectable(ctx, enemy),
   };
+  // A modifier's conditions, checked in stat reads, ask this run's stack caps ('max').
+  ctx.evalInput.ctx = ctx;
   return ctx;
 }

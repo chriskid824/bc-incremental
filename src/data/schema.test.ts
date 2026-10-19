@@ -284,6 +284,10 @@ describe('ConditionSchema', () => {
     ]),
     { stacksAtLeast: { ailment: 'poison', stacks: 10 } },
     { stacksAtLeast: { ailment: 'shock', stacks: 2 } },
+    // 'max': the ailment's stack cap; validation rejects it for poison, which has none.
+    ...['burn', 'poison', 'shock'].map((ailment) => ({
+      stacksAtLeast: { ailment, stacks: 'max' },
+    })),
     { killedBy: 'poison' },
     { killedBy: 'bleed' },
     ...['burn', 'poison', 'bleed', 'shock'].map((ailment) => ({ ailment })),
@@ -305,6 +309,9 @@ describe('ConditionSchema', () => {
     ]),
     // Bleed keeps one bleed, so it has no stacks to count; shock kills nothing.
     { stacksAtLeast: { ailment: 'bleed', stacks: 1 } },
+    { stacksAtLeast: { ailment: 'bleed', stacks: 'max' } },
+    { stacksAtLeast: { ailment: 'burn', stacks: 'cap' } },
+    { stacksAtLeast: { ailment: 'burn' } },
     { killedBy: 'shock' },
     { targetKind: 'minion' },
     { hitIs: 'dot' },
@@ -378,6 +385,9 @@ describe('EffectSpecSchema', () => {
     { kind: 'repeatAttack', count: 1, damagePct: 0.5 },
     { kind: 'repeatAttack', count: 2, damagePct: 0.3, timing: 'now' },
     { kind: 'repeatAttack', count: 4, damagePct: 1, timing: 'nextAttack' },
+    { kind: 'detonate', ailment: 'burn' },
+    { kind: 'detonate', ailment: 'poison', fraction: 0.5, damage: 2 },
+    { kind: 'detonate', ailment: 'bleed', radius: 120, maxTargets: 3, order: 'nearest' },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -405,7 +415,13 @@ describe('EffectSpecSchema', () => {
     ],
     ['addFrost without an amount', { kind: 'addFrost', radius: 100 }],
     ['addFrost with an unknown key', { kind: 'addFrost', amount: 0.2, stacks: 1 }],
-    ['detonate', { kind: 'detonate', ailment: 'burn', radius: 100 }],
+    ['detonate without an ailment', { kind: 'detonate', radius: 100 }],
+    ...['shock', 'frost', 'frozen'].map((ailment): [string, unknown] => [
+      `detonate ${ailment}, which deals no damage over time`,
+      { kind: 'detonate', ailment },
+    ]),
+    ['detonate with an unknown key', { kind: 'detonate', ailment: 'burn', stacks: 2 }],
+    ['detonate at an unknown order', { kind: 'detonate', ailment: 'burn', order: 'farthest' }],
     ['explode without a radius', { kind: 'explode', damagePct: 0.5 }],
     ['nova at an unknown point', { kind: 'nova', radius: 100, damagePct: 1, at: 'target' }],
     ['an element that is not one', { kind: 'nova', radius: 100, damagePct: 1, element: 'fire' }],
@@ -492,7 +508,7 @@ describe('TriggerSpecSchema', () => {
   it.each([
     ['an unknown event', { on: 'tick', do: [{ kind: 'heal', lifePct: 0.1 }] }],
     ['no effect list', { on: 'kill' }],
-    ['an unknown effect', { on: 'kill', do: [{ kind: 'detonate' }] }],
+    ['an unknown effect', { on: 'kill', do: [{ kind: 'teleport' }] }],
     ['an unknown key', { on: 'kill', do: [], selector: { pick: 'nearest' } }],
   ])('rejects %s', (_label, trigger) => {
     expect(TriggerSpecSchema.safeParse(trigger).success).toBe(false);

@@ -1055,6 +1055,134 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('accepts detonates on a live target, and on a dead one with a radius and its victimHas', () => {
+    const burn = { kind: 'detonate', ailment: 'burn' } as const;
+    expect(
+      triggerIssues(
+        { on: 'hit', do: [burn, { ...burn, ailment: 'poison', fraction: 0.5, damage: 2 }] },
+        { on: 'crit', do: [{ ...burn, radius: 80, maxTargets: 3, order: 'nearest' }] },
+        { on: 'freeze', do: [{ ...burn, ailment: 'bleed', fraction: 1 }] },
+        { on: 'kill', when: [{ victimHas: 'burn' }], do: [{ ...burn, radius: 120 }] },
+        {
+          on: 'diedWithAilment',
+          when: [{ victimHas: 'poison' }],
+          do: [heal, { kind: 'detonate', ailment: 'poison', radius: 60, damage: 0.5 }],
+        },
+        {
+          on: 'shatter',
+          when: [{ victimHas: 'bleed' }],
+          do: [{ ...burn, ailment: 'bleed', radius: 90 }],
+        },
+        { on: 'periodic', every: 2, target: { pick: 'highestHp' }, do: [burn] },
+        {
+          on: 'hit',
+          when: [
+            { stacksAtLeast: { ailment: 'burn', stacks: 'max' } },
+            { stacksAtLeast: { ailment: 'shock', stacks: 'max' } },
+          ],
+          do: [burn],
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects detonate parameters out of range, and maxTargets or order without a radius', () => {
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { kind: 'detonate', ailment: 'burn', fraction: 0, damage: 0 },
+          { kind: 'detonate', ailment: 'burn', fraction: 1.5, radius: -1 },
+          { kind: 'detonate', ailment: 'burn', fraction: Number.NaN, radius: 50, maxTargets: 1.5 },
+          { kind: 'detonate', ailment: 'poison', maxTargets: 2 },
+          { kind: 'detonate', ailment: 'poison', order: 'nearest' },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] fraction must be in (0, 1] (got 0)`,
+      `${at} do[0] damage must be > 0 (got 0)`,
+      `${at} do[1] fraction must be in (0, 1] (got 1.5)`,
+      `${at} do[1] radius must be > 0 (got -1)`,
+      `${at} do[2] fraction must be in (0, 1] (got NaN)`,
+      `${at} do[2] maxTargets must be a positive integer (got 1.5)`,
+      `${at} do[3] maxTargets and order need a radius`,
+      `${at} do[4] maxTargets and order need a radius`,
+    ]);
+  });
+
+  it('rejects a kill detonate without a radius, its victimHas, or one ailment, or with gainShards', () => {
+    const burn = { kind: 'detonate', ailment: 'burn', radius: 100 } as const;
+    expect(
+      triggerIssues({
+        on: 'kill',
+        when: [{ victimHas: 'burn' }],
+        do: [{ kind: 'detonate', ailment: 'burn' }],
+      }),
+    ).toEqual([`${at} do[0] detonate needs a radius on 'kill' events, whose enemy is dead`]);
+    expect(
+      triggerIssues({
+        on: 'shatter',
+        when: [{ victimHas: 'burn' }],
+        do: [{ kind: 'detonate', ailment: 'burn' }],
+      }),
+    ).toEqual([`${at} do[0] detonate needs a radius on 'shatter' events, whose enemy is dead`]);
+    expect(triggerIssues({ on: 'kill', do: [burn] })).toEqual([
+      `${at} a kill trigger with detonate needs victimHas 'burn'`,
+    ]);
+    expect(
+      triggerIssues({ on: 'diedWithAilment', when: [{ victimHas: 'poison' }], do: [burn] }),
+    ).toEqual([`${at} a kill trigger with detonate needs victimHas 'burn'`]);
+    expect(
+      triggerIssues({
+        on: 'kill',
+        when: [{ victimHas: 'burn' }, { victimHas: 'bleed' }],
+        do: [burn, { ...burn, ailment: 'bleed' }],
+      }),
+    ).toEqual([`${at} a kill trigger's detonates must name one ailment (got burn, bleed)`]);
+    expect(
+      triggerIssues({
+        on: 'kill',
+        when: [{ victimHas: 'burn' }],
+        do: [{ kind: 'gainShards', fraction: 0.5 }, burn],
+      }),
+    ).toEqual([`${at} gainShards and detonate cannot share a kill trigger`]);
+    // On a live target's event, none of these applies.
+    expect(triggerIssues({ on: 'hit', do: [{ kind: 'detonate', ailment: 'bleed' }] })).toEqual([]);
+  });
+
+  it('rejects a detonate with no enemy to read', () => {
+    const burn = { kind: 'detonate', ailment: 'burn' } as const;
+    expect(triggerIssues({ on: 'periodic', every: 2, do: [burn] })).toEqual([
+      `${at} do[0] detonate needs a target on 'periodic' events; add target {pick}`,
+    ]);
+    expect(triggerIssues({ on: 'heroHit', do: [{ ...burn, radius: 80 }] })).toEqual([
+      `${at} do[0] detonate needs a target on 'heroHit' events; add target {pick}`,
+    ]);
+    expect(triggerIssues({ on: 'contact', do: [burn] })).toEqual([
+      `${at} do[0] detonate needs the event's enemy, which has left by the time it runs`,
+    ]);
+    expect(
+      triggerIssues({ on: 'periodic', every: 2, target: { pick: 'player' }, do: [burn] }),
+    ).toEqual([`${at} do[0] detonate needs an enemy, which target.pick 'player' does not give`]);
+  });
+
+  it("rejects stacksAtLeast 'max' for poison, on a trigger and on a modifier", () => {
+    const problem = "stacksAtLeast 'max' needs a stack cap, which poison has not; give a number";
+    const max = { stacksAtLeast: { ailment: 'poison', stacks: 'max' } } as const;
+    expect(triggerIssues({ on: 'hit', when: [max], do: [explode] })).toEqual([
+      `${at} when[0] ${problem}`,
+    ]);
+    let index = -1;
+    expect(
+      issuesAfter((d) => {
+        const node = talent(d, 'vitality');
+        index = node.modifiers.length;
+        node.modifiers.push({ stat: 'damage', kind: 'more', value: 0.1, when: [max] });
+        node.descKey = 'talent.vitality.desc';
+      }),
+    ).toEqual([`talent 'vitality': modifiers[${index}] when[0] ${problem}`]);
+  });
+
   it('rejects groundZone parameters out of range, and a zone that does nothing', () => {
     expect(
       triggerIssues({

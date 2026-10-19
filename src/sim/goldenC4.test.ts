@@ -559,6 +559,95 @@ const REPEAT_LOB_STATS = makeStats(
   },
 );
 
+/**
+ * C4.10's detonates on records burn, poison rings and bleed, with crits, a chain jump and
+ * shocks: a signature hit on a burning enemy now and then takes half its burn; a crit on a
+ * poisoned one sets off its poison on the three nearest within 80; 焚屍 deals what a burning
+ * victim had left around it, and a bleeding victim half of its bleed (the step's bleed included
+ * when its burn or poison step killed it, Hoshi's Q7/F1); a hit on an enemy at the shock cap
+ * ('max', 2) takes 30% of its poison, on a cooldown. A modifier at the burn cap ('max', 3) adds
+ * 50% more damage.
+ */
+const DETONATE_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'center',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'signature' }, { targetHas: 'burn' }, { chance: 0.15 }],
+      do: [{ kind: 'detonate', ailment: 'burn', fraction: 0.5 }],
+    },
+  ],
+  [
+    'outer.poison',
+    {
+      on: 'crit',
+      when: [{ targetHas: 'poison' }],
+      do: [
+        {
+          kind: 'detonate',
+          ailment: 'poison',
+          radius: 80,
+          maxTargets: 3,
+          order: 'nearest',
+          damage: 0.8,
+        },
+      ],
+    },
+  ],
+  [
+    'outer.fire',
+    {
+      on: 'kill',
+      when: [{ victimHas: 'burn' }],
+      do: [{ kind: 'detonate', ailment: 'burn', radius: 100, damage: 0.5 }],
+    },
+  ],
+  [
+    'outer.bleed',
+    {
+      on: 'diedWithAilment',
+      when: [{ victimHas: 'bleed' }],
+      do: [{ kind: 'detonate', ailment: 'bleed', radius: 60, fraction: 0.5 }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'hit',
+      when: [{ stacksAtLeast: { ailment: 'shock', stacks: 'max' } }, { cooldownSec: 0.5 }],
+      do: [{ kind: 'detonate', ailment: 'poison', fraction: 0.3 }],
+    },
+  ],
+];
+const AT_BURN_CAP_MORE: Modifier = {
+  stat: 'damage',
+  kind: 'more',
+  value: 0.5,
+  when: [{ stacksAtLeast: { ailment: 'burn', stacks: 'max' } }],
+};
+const DETONATE_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.3,
+    poisonChance: 0.3,
+    bleedChance: 0.2,
+    shockChance: 0.25,
+    shockMaxStacks: 2,
+    burnMaxStacks: 3,
+    chainCount: 1,
+    projectileCount: 2,
+  },
+  [...maskProbeMods(), AT_BURN_CAP_MORE],
+  {
+    triggers: DETONATE_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -632,6 +721,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
       startWave: 12,
     },
     expected: ['1bb62573bf834d27', 'b9ea74917d7d6e1e'],
+  },
+  {
+    name: 'detonate',
+    config: { stats: DETONATE_STATS, rules: [], startWave: 12 },
+    expected: ['7d2fd5f83ec324ff', '9f3742425233f89b'],
   },
 ];
 

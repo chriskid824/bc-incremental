@@ -8,7 +8,7 @@
  * `import { type X } from './m'` still loads './m', so it counts as a value edge.
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -20,6 +20,27 @@ const CONTEXT = 'sim/systems/context.ts';
 
 /** The modules systemState.ts may value-import (§0.7's exhaustive list at C4.6). */
 const LEAF_IMPORTS = ['core/num.ts', 'sim/caps.ts', 'sim/build/sources.ts', 'sim/build/eval.ts'];
+
+const REMAINING = 'sim/ailments/remaining.ts';
+
+/**
+ * The modules remaining.ts may value-import: §0.7's C4.10 entry, and effects/flags.ts for the
+ * kill kinds bleedRemaining reads (Hoshi's Q7/F1), already in its closure through apply.ts and
+ * eval.ts.
+ */
+const REMAINING_IMPORTS = [
+  'core/num.ts',
+  'sim/types.ts',
+  'sim/ailments/bleed.ts',
+  'sim/ailments/frost.ts',
+  'sim/ailments/rings.ts',
+  'sim/ailments/records.ts',
+  'sim/ailments/apply.ts',
+  'sim/effects/flags.ts',
+];
+
+/** The only modules that may value-import remaining.ts (§0.7's C4.10 entry). */
+const REMAINING_IMPORTERS = ['sim/effects/dispatch.ts', 'sim/effects/execute.ts'];
 
 /** One import or re-export declaration of a module: its specifier, and whether it loads it. */
 interface ImportDecl {
@@ -182,5 +203,36 @@ describe('systemState.ts stays a leaf', () => {
     // It loads more than its list: the walk goes through eval.ts's imports.
     expect(graph.size).toBeGreaterThan(LEAF_IMPORTS.length + 1);
     expect(findCycle(graph)).toBeNull();
+  });
+});
+
+describe('remaining.ts stays outside every cycle (C4.10)', () => {
+  it('is not in the leaf’s closure, which reaches the stack cap readers through eval.ts', () => {
+    const graph = closure(LEAF);
+    for (const module of ['sim/ailments/records.ts', 'sim/ailments/shock.ts', 'sim/caps.ts']) {
+      expect(graph.has(module), module).toBe(true);
+    }
+    expect(graph.get('sim/build/eval.ts')).toEqual(
+      expect.arrayContaining(['sim/ailments/records.ts', 'sim/ailments/shock.ts']),
+    );
+    expect(graph.has(REMAINING)).toBe(false);
+  });
+
+  it('value-imports only the modules on its list, without a cycle or systems/context.ts', () => {
+    const graph = closure(REMAINING);
+    const direct = graph.get(REMAINING) ?? [];
+    expect(direct.length).toBeGreaterThan(0);
+    for (const module of direct) expect(REMAINING_IMPORTS, module).toContain(module);
+    expect(findCycle(graph)).toBeNull();
+    expect(graph.has(CONTEXT)).toBe(false);
+  });
+
+  it('is value-imported by execute.ts and dispatch.ts alone', () => {
+    const modules = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
+      .map((path) => path.replaceAll('\\', '/'))
+      .filter((path) => path.endsWith('.ts') && !path.endsWith('.test.ts'));
+    expect(modules.length).toBeGreaterThan(50);
+    const importers = modules.filter((module) => valueImports(module).includes(REMAINING));
+    expect(importers.sort()).toEqual(REMAINING_IMPORTERS);
   });
 });

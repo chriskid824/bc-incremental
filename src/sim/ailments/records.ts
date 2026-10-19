@@ -21,6 +21,7 @@
 import type { Num } from '../../core/num';
 import { add, lt, mul, ZERO } from '../../core/num';
 import { SOURCE_CLASS_ORDINAL } from '../build/sources';
+import { BURN_RINGS_MAX_STACKS } from '../caps';
 import type { BurnStack, Enemy, RunContext } from '../systems/context';
 import { DT } from '../types';
 import { DOT_STEP_TICKS } from './rings';
@@ -72,6 +73,15 @@ export function liveBurnStacks(enemy: Enemy, now: number): number {
   return live;
 }
 
+/**
+ * The burn stacks the enemy can hold: the records cap (RunContext.burnCap, at least 1), which
+ * addBurn reads; under eternalFlame, whose rings refuse no stack, BURN_RINGS_MAX_STACKS. What
+ * stacksAtLeast 'max' compares with (src/sim/build/eval.ts).
+ */
+export function burnCapOf(ctx: RunContext, _enemy: Enemy): number {
+  return ctx.burnRings ? BURN_RINGS_MAX_STACKS : ctx.burnCap;
+}
+
 /** Adds `amount`, the damage of an ended or replaced stack, to burnPending. */
 function bank(ctx: RunContext, enemy: Enemy, stack: BurnStack, amount: Num): void {
   enemy.burnPending = add(enemy.burnPending, amount);
@@ -119,7 +129,7 @@ export function addBurn(
   const cls = ctx.sources.cls[source] as number;
   if (cls === FUSION && enemy.burnFusionCredit < 0) enemy.burnFusionCredit = source;
   const burns = enemy.burns;
-  if (burns.length < ctx.burnCap) {
+  if (burns.length < burnCapOf(ctx, enemy)) {
     burns.push({ dps, start: now, end, depth, source, cls });
     if (end < enemy.burnNextEnd) enemy.burnNextEnd = end;
   } else {
@@ -173,7 +183,7 @@ export function addBurnIfStronger(
   const now = ctx.now;
   if (now >= enemy.burnNextEnd) expireBurns(ctx, enemy);
   const burns = enemy.burns;
-  if (burns.length >= ctx.burnCap) {
+  if (burns.length >= burnCapOf(ctx, enemy)) {
     // addBurn's scan: the least remaining damage of a stack, the one it would replace.
     let weakestLeft = mul((burns[0] as BurnStack).dps, (burns[0] as BurnStack).end - now);
     for (let i = 1; i < burns.length; i++) {

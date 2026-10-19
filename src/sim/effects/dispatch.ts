@@ -25,7 +25,9 @@
 
 import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
-import type { AppliedAilment } from '../../data/triggers';
+import { DETONATE_AILMENTS } from '../../data/triggers';
+import type { AppliedAilment, DetonateAilment } from '../../data/triggers';
+import { remainingOf } from '../ailments/remaining';
 import { conditionsMet } from '../build/eval';
 import { ailmentCredit } from '../build/sources';
 import type { Enemy, RunContext } from '../systems/context';
@@ -212,7 +214,7 @@ function passes(
     if (count % t.every !== 0) return null;
   }
   const now = ctx.now;
-  if (now < (state.readyAt[i] as number) || !conditionsMet(t.conds, target, now, flags)) {
+  if (now < (state.readyAt[i] as number) || !conditionsMet(t.conds, target, now, flags, ctx)) {
     return null;
   }
   if (t.selector !== null && !select(ctx, t.selector, target, x, y)) return null;
@@ -261,9 +263,11 @@ export function fireInlineKill(
 /**
  * Records the kill's pending triggers (RunContext.killPending), except the one whose damage
  * killed (rule 3) and, for a victim that held no ailment, diedWithAilment's. `drop` is the
- * victim's shard drop, the value of triggers with gainShards. SHATTER_TRIGGER is recorded only
- * for a frozen victim, with its max life as the value and the credit of the frost that froze it
- * as the source, and the shatter triggers with it; a kill by a shatter records neither.
+ * victim's shard drop, the value of triggers with gainShards; a trigger with a detonate carries
+ * the damage its ailment had left on the victim instead (killValue). SHATTER_TRIGGER is recorded
+ * only for a frozen victim, with its max life as the value and the credit of the frost that
+ * froze it as the source, and the shatter triggers with it; a kill by a shatter records neither.
+ * Called before the kill releases the victim's ailments (killEnemy, src/sim/systems/death.ts).
  */
 export function recordPendingKills(
   ctx: RunContext,
@@ -283,8 +287,20 @@ export function recordPendingKills(
       continue;
     }
     if (t.on === EVENT.diedWithAilment && (flags & HELD_MASK) === 0) continue;
-    record(ctx, i, victim, origin, flags, t.takesDrop ? drop : ZERO, -1);
+    record(ctx, i, victim, origin, flags, killValue(ctx, t, victim, drop), -1);
   }
+}
+
+/**
+ * The value of trigger `t`'s pending kill of `victim`: with a detonate, the damage its ailment
+ * had left on the victim (remainingOf); with gainShards, the victim's drop; else 0. Validation
+ * keeps the two apart.
+ */
+function killValue(ctx: RunContext, t: CompiledTrigger, victim: Enemy, drop: Num): Num {
+  if (t.detonateAilment >= 0) {
+    return remainingOf(ctx, victim, DETONATE_AILMENTS[t.detonateAilment] as DetonateAilment);
+  }
+  return t.takesDrop ? drop : ZERO;
 }
 
 /** The shatter of a frozen victim: SHATTER_TRIGGER's pending kill, then the shatter triggers'. */
@@ -303,7 +319,7 @@ function recordShatter(
     const i = list[n] as number;
     if (i === origin) continue;
     const t = triggers[i] as CompiledTrigger;
-    record(ctx, i, victim, origin, flags, t.takesDrop ? drop : ZERO, -1);
+    record(ctx, i, victim, origin, flags, killValue(ctx, t, victim, drop), -1);
   }
 }
 

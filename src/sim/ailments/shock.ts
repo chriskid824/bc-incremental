@@ -30,13 +30,23 @@ export function takenMult(ctx: RunContext, enemy: Enemy): number {
 }
 
 /**
+ * The shock stacks the enemy can hold (RunContext.shockCap, 0 for a build that cannot shock),
+ * which addShock reads; what stacksAtLeast 'max' compares with, at least 1
+ * (src/sim/build/eval.ts).
+ */
+export function shockCapOf(ctx: RunContext, _enemy: Enemy): number {
+  return ctx.shockCap;
+}
+
+/**
  * Adds `stacks` shock stacks, applied at trigger depth `depth`, and restarts the timer of all
  * of them. False, and nothing changes, when the build cannot shock (no stack cap or duration).
  */
 export function addShock(ctx: RunContext, enemy: Enemy, stacks: number, depth: number): boolean {
-  if (ctx.shockCap <= 0 || ctx.shockTicks <= 0) return false;
+  const cap = shockCapOf(ctx, enemy);
+  if (cap <= 0 || ctx.shockTicks <= 0) return false;
   const now = ctx.now;
-  enemy.shockStacks = Math.min(ctx.shockCap, activeShockStacks(enemy, now) + stacks);
+  enemy.shockStacks = Math.min(cap, activeShockStacks(enemy, now) + stacks);
   enemy.shockUntil = now + ctx.shockTicks;
   if (depth < enemy.ailDepth) enemy.ailDepth = depth;
   return true;

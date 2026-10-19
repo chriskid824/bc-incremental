@@ -309,7 +309,7 @@ describe('emitCenterEvent', () => {
 });
 
 describe('fanout at compile', () => {
-  it('marks applyAilment and addFrost without a radius, and nothing else', () => {
+  it('marks applyAilment, addFrost and detonate without a radius, and nothing else', () => {
     const effects: readonly EffectSpec[] = [
       { kind: 'applyAilment', ailment: 'burn' },
       { kind: 'applyAilment', ailment: 'bleed', radius: 60 },
@@ -320,6 +320,8 @@ describe('fanout at compile', () => {
       { kind: 'spreadAilment', ailment: 'burn', radius: 60 },
       { kind: 'push', distance: 10, radius: 60 },
       { kind: 'heal', lifePct: 0.1 },
+      { kind: 'detonate', ailment: 'poison' },
+      { kind: 'detonate', ailment: 'poison', radius: 60 },
     ];
     // frostOnHit lets the build freeze, so its shatter effect is compiled too.
     const build = compileBuild(
@@ -336,6 +338,8 @@ describe('fanout at compile', () => {
       ['spreadAilment', false],
       ['push', false],
       ['heal', false],
+      ['detonate', true],
+      ['detonate', false],
       ['shatter', false],
     ]);
   });

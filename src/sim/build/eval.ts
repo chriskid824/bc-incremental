@@ -20,9 +20,9 @@ import type {
 } from '../../data/triggers';
 import { holdsBleed } from '../ailments/bleed';
 import { frostMeter, holdsFrost, holdsFrozen } from '../ailments/frost';
-import { holdsBurn, liveBurnStacks } from '../ailments/records';
+import { burnCapOf, holdsBurn, liveBurnStacks } from '../ailments/records';
 import { holdsPoison, livePoisonStacks } from '../ailments/rings';
-import { activeShockStacks, holdsShock } from '../ailments/shock';
+import { activeShockStacks, holdsShock, shockCapOf } from '../ailments/shock';
 import {
   AILMENT_FLAG_MASK,
   appliedFlag,
@@ -34,7 +34,7 @@ import {
   killKindFlag,
   PRIMARY,
 } from '../effects/flags';
-import type { Enemy } from '../systems/context';
+import type { Enemy, RunContext } from '../systems/context';
 import type { CompiledMod, ModTable } from './modTable';
 import type { SourceTable } from './sources';
 
@@ -67,17 +67,23 @@ export interface EvalInput {
   /** The instance's chain jump index, 0 for a primary hit and for ailments. */
   chainJump: number;
   playerLifeFrac: number;
+  /**
+   * The run, whose stack caps stacksAtLeast 'max' reads; null outside a run, where no such
+   * condition is met.
+   */
+  ctx: RunContext | null;
 }
 
 /**
  * An input for estimates outside a run: no target (target conditions are not met, target
- * variables read 0) and full life.
+ * variables read 0), full life and no run.
  */
 export const staticInput = (chainJump = 0): EvalInput => ({
   now: 0,
   target: null,
   chainJump,
   playerLifeFrac: 1,
+  ctx: null,
 });
 
 /** Whether the enemy holds each ailment a condition can name, at tick `now`. */
@@ -101,8 +107,21 @@ const STACK_READERS: {
   shock: activeShockStacks,
 };
 
+/**
+ * The stacks the enemy can hold of each ailment a condition can count, which stacksAtLeast 'max'
+ * asks for (at least 1); null for poison, which has no cap (validation rejects its 'max').
+ */
+const CAP_READERS: {
+  readonly [K in StackAilment]: ((ctx: RunContext, enemy: Enemy) => number) | null;
+} = {
+  burn: burnCapOf,
+  poison: null,
+  shock: shockCapOf,
+};
+
 const heldReader = HELD_AILMENTS.map((ailment) => HELD_READERS[ailment]);
 const stackReader = STACK_AILMENTS.map((ailment) => STACK_READERS[ailment]);
+const capReader = STACK_AILMENTS.map((ailment) => CAP_READERS[ailment]);
 
 /** The live stacks `enemy` carries at tick `now` of the ailment at STACK_AILMENTS[a]. */
 export const liveStacks = (enemy: Enemy, a: number, now: number): number =>
@@ -172,6 +191,8 @@ const TARGET_HAS = 0;
 const TARGET_KIND = 1;
 const TARGET_HP_BELOW = 2;
 const STACKS_AT_LEAST = 3;
+/** stacksAtLeast 'max': as many stacks of ailment `a` as the target can hold, at least 1. */
+const STACKS_AT_MAX = 6;
 /** On the event's flags (src/sim/effects/flags.ts): every bit of `a` set, none of `b`. */
 const FLAGS = 4;
 /**
@@ -183,10 +204,11 @@ export const IN_ZONE = 5;
 /**
  * A condition compiled for checking: a code and two operands. Target conditions read the
  * target (held ailment ordinal; TARGET_KINDS ordinal; hp fraction; stack ailment ordinal and
- * stacks; zone source index); hitIs, victimHas and killedBy read the event's flags.
+ * stacks, or for 'max' that ordinal alone; zone source index); hitIs, victimHas and killedBy
+ * read the event's flags.
  */
 export interface CompiledCondition {
-  readonly code: 0 | 1 | 2 | 3 | 4 | 5;
+  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   readonly a: number;
   readonly b: number;
 }
@@ -220,7 +242,12 @@ export function compileCondition(
   }
   if ('stacksAtLeast' in condition) {
     const { ailment, stacks } = condition.stacksAtLeast;
-    return { code: STACKS_AT_LEAST, a: STACK_AILMENTS.indexOf(ailment), b: stacks };
+    const a = STACK_AILMENTS.indexOf(ailment);
+    if (stacks !== 'max') return { code: STACKS_AT_LEAST, a, b: stacks };
+    if (CAP_READERS[ailment] === null) {
+      throw new Error(`stacksAtLeast 'max' needs a stack cap, which ${ailment} has not`);
+    }
+    return { code: STACKS_AT_MAX, a, b: 0 };
   }
   if ('inZone' in condition && sources !== undefined) {
     return { code: IN_ZONE, a: sources.index(condition.inZone), b: 0 };
@@ -261,13 +288,15 @@ const kindOf = (enemy: Enemy): number => (enemy.boss ? BOSS : enemy.tough ? ELIT
 
 /**
  * Every condition holds for an event or instance on `target` (null: none, and then no target
- * condition holds) at tick `now`, carrying `flags`.
+ * condition holds) at tick `now`, carrying `flags`, in run `ctx` (null: none, and then no
+ * stacksAtLeast 'max' holds).
  */
 export function conditionsMet(
   conditions: readonly CompiledCondition[],
   target: Enemy | null,
   now: number,
   flags: number,
+  ctx: RunContext | null = null,
 ): boolean {
   for (let i = 0; i < conditions.length; i++) {
     const c = conditions[i] as CompiledCondition;
@@ -296,6 +325,12 @@ export function conditionsMet(
       case IN_ZONE:
         if (target.zoneSource !== c.a || target.zoneUntil <= now) return false;
         break;
+      case STACKS_AT_MAX: {
+        if (ctx === null) return false;
+        const cap = (capReader[c.a] as (ctx: RunContext, enemy: Enemy) => number)(ctx, target);
+        if (liveStacks(target, c.a, now) < Math.max(1, cap)) return false;
+        break;
+      }
     }
   }
   return true;
@@ -328,7 +363,7 @@ function evalDynamic(table: ModTable, at: number, stat: number, ev: Readonly<Eva
   const end = start + (table.dynCount[at] as number);
   for (let i = start; i < end; i++) {
     const mod = mods[dyn[i] as number] as CompiledMod;
-    if (mod.cond !== null && !conditionsMet(mod.cond, ev.target, ev.now, 0)) continue;
+    if (mod.cond !== null && !conditionsMet(mod.cond, ev.target, ev.now, 0, ev.ctx)) continue;
     const scaling = mod.scale;
     const c = scaling === null ? mod.value : scaledValue(mod.value, scaling, scaling.read(ev));
     if (mod.kind === FLAT) flat += c;
@@ -365,7 +400,7 @@ export function pctMaxHpFactor(
   for (let i = start; i < start + count; i++) {
     const mod = mods[dyn[i] as number] as CompiledMod;
     if (!mod.shatterOk) continue;
-    if (mod.cond !== null && !conditionsMet(mod.cond, ev.target, ev.now, 0)) continue;
+    if (mod.cond !== null && !conditionsMet(mod.cond, ev.target, ev.now, 0, ev.ctx)) continue;
     const scaling = mod.scale;
     const c = scaling === null ? mod.value : scaledValue(mod.value, scaling, scaling.read(ev));
     if (mod.kind === INCREASED) inc += c;

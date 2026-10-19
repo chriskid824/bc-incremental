@@ -243,6 +243,31 @@ export class RingPool {
     return moved;
   }
 
+  /**
+   * Takes `f` (0 < f ≤ 1) of the damage ring `r` has left: returns it, and scales what the ring
+   * deals from now on by 1 − f, every step's rate change and partial damage alike, so each
+   * stack keeps going, weaker, and the stack counts stay. f ≥ 1 takes it all and gives the ring
+   * back; its owner drops it from the enemy's slots.
+   */
+  consume(r: number, f: number): number {
+    const total = this.remaining[r] as number;
+    if (f >= 1) {
+      this.release(r);
+      return total;
+    }
+    this.ops++;
+    const keep = 1 - f;
+    this.rate[r] = (this.rate[r] as number) * keep;
+    this.remaining[r] = total * keep;
+    const b = r * RING_BUCKETS;
+    const { dRate, extra } = this;
+    for (let i = b; i < b + RING_BUCKETS; i++) {
+      dRate[i] = (dRate[i] as number) * keep;
+      extra[i] = (extra[i] as number) * keep;
+    }
+    return f * total;
+  }
+
   /** Doubles every array, keeping the rings in use. */
   private grow(): void {
     const capacity = this.capacity * 2;

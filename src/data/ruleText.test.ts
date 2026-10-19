@@ -52,7 +52,11 @@ function conditionNumbers(condition: Condition): string[][] {
   if ('chance' in condition) return [[percent(condition.chance)]];
   if ('cooldownSec' in condition) return [[String(condition.cooldownSec)]];
   if ('targetHpBelow' in condition) return [[percent(condition.targetHpBelow)]];
-  if ('stacksAtLeast' in condition) return [[String(condition.stacksAtLeast.stacks)]];
+  // 'max' is a word too: the stack cap the text names.
+  if ('stacksAtLeast' in condition) {
+    const stacks = condition.stacksAtLeast.stacks;
+    return stacks === 'max' ? [] : [[String(stacks)]];
+  }
   return [];
 }
 
@@ -99,6 +103,12 @@ function effectNumbers(effect: EffectSpec): string[][] {
       ];
     case 'repeatAttack':
       return [[String(effect.count)], [percent(effect.damagePct)]];
+    case 'detonate':
+      return [
+        ...(effect.fraction === undefined ? [] : [[percent(effect.fraction)]]),
+        ...(effect.damage === undefined ? [] : [[percent(effect.damage)]]),
+        ...(effect.maxTargets === undefined ? [] : [[String(effect.maxTargets)]]),
+      ];
   }
 }
 

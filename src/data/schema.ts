@@ -16,6 +16,7 @@ import { DAMAGE_TAGS } from './tags';
 import {
   APPLIED_AILMENTS,
   CONVERSION_TARGETS,
+  DETONATE_AILMENTS,
   HELD_AILMENTS,
   HIT_KINDS,
   KILL_KINDS,
@@ -130,7 +131,10 @@ export const TargetConditionSchema = exact<TargetCondition>()(
     z
       .strictObject({
         stacksAtLeast: z
-          .strictObject({ ailment: z.enum(STACK_AILMENTS), stacks: finite })
+          .strictObject({
+            ailment: z.enum(STACK_AILMENTS),
+            stacks: z.union([finite, z.literal('max')]),
+          })
           .readonly(),
       })
       .readonly(),
@@ -311,6 +315,17 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         count: finite,
         damagePct: finite,
         timing: z.enum(['now', 'nextAttack']).exactOptional(),
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('detonate'),
+        ailment: z.enum(DETONATE_AILMENTS),
+        fraction: finite.exactOptional(),
+        damage: finite.exactOptional(),
+        radius: finite.exactOptional(),
+        maxTargets: finite.exactOptional(),
+        order,
       })
       .readonly(),
   ]),

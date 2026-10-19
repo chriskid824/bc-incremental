@@ -283,6 +283,73 @@ describe('RingPool', () => {
     }
   });
 
+  it('consumes f of what a ring has left: every later step × (1 − f), the counts kept (R10)', () => {
+    for (const f of [0.25, 0.5, 0.9]) {
+      for (const seed of [41, 42, 43, 44]) {
+        const rng = createRng(seed);
+        const pool = new RingPool();
+        const r = pool.alloc(0, 0);
+        const naive = new Naive();
+        // Seed 41 consumes on a step tick, after its step; the others inside a step.
+        const at = seed === 41 ? 405 : 406 + rng.int(W - 1);
+        let stepped = 0;
+        for (let now = 1; now <= at; now++) {
+          if (rng.chance(0.15)) {
+            const { d, end, n } = randomStack(rng, now);
+            pool.apply(r, num(d), now, end, n);
+            naive.apply(d, now, end, n);
+          }
+          if (now % W === 0) {
+            stepped = now / W;
+            pool.step(r, stepped);
+          }
+        }
+        const label = `f ${f} seed ${seed}`;
+        const left = naive.left(W * stepped);
+        expect(left, label).toBeGreaterThan(0);
+        expectClose(pool.remaining[r] as number, left, left, `${label} left`);
+        const stacks = pool.stacks[r] as number;
+        expect(stacks, label).toBe(naive.live(stepped));
+        const ops = pool.ops;
+        expectClose(pool.consume(r, f), f * left, left, `${label} taken`);
+        expectClose(pool.remaining[r] as number, (1 - f) * left, left, `${label} kept`);
+        expect(pool.stacks[r], label).toBe(stacks);
+        expect([pool.ops - ops, pool.live], label).toEqual([1, 1]);
+        naive.stacks.forEach((s, i) => (naive.stacks[i] = { ...s, d: s.d * (1 - f) }));
+        // Stacks applied after the consume keep their full damage.
+        for (let now = at + 1; now <= at + 600; now++) {
+          if (now % W === 0) {
+            const k = now / W;
+            const dealt = toNumber(pool.step(r, k));
+            expectClose(dealt, naive.step(k), naive.scale(k), `${label} step ${k}`);
+            expect(pool.stacks[r], `${label} stacks after ${k}`).toBe(naive.live(k));
+          } else if (rng.chance(0.1)) {
+            const { d, end, n } = randomStack(rng, now);
+            pool.apply(r, num(d), now, end, n);
+            naive.apply(d, now, end, n);
+          }
+        }
+      }
+    }
+  });
+
+  it('takes all a ring has left with f = 1, giving the ring back', () => {
+    const pool = new RingPool();
+    const keep = pool.alloc(0, 0);
+    const r = pool.alloc(1, 2);
+    pool.apply(keep, num(1), 1, 100);
+    pool.apply(r, num(3), 1, 100, 2);
+    pool.step(r, 1);
+    const left = pool.remaining[r] as number;
+    expect(left).toBeCloseTo(6 * (100 - 15) * DT, 9);
+    expect(pool.consume(r, 1)).toBe(left);
+    expect(pool.live).toBe(1);
+    // The slot comes back from the free list, cleared.
+    expect(pool.alloc(0, 0)).toBe(r);
+    expect([pool.remaining[r], pool.stacks[r], pool.rate[r]]).toEqual([0, 0, 0]);
+    expect(pool.remaining[keep]).toBeCloseTo(99 * DT, 12);
+  });
+
   it('grows past its capacity, keeping the rings in use', () => {
     const pool = new RingPool(2);
     const rings = Array.from({ length: 9 }, (_, i) => {

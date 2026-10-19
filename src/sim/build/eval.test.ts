@@ -231,6 +231,7 @@ const on = (ctx: RunContext, target: Enemy | null): EvalInput => ({
   target,
   chainJump: 0,
   playerLifeFrac: 1,
+  ctx: null,
 });
 
 const holds = (condition: Condition, target: Enemy | null, now: number): boolean =>
@@ -334,6 +335,28 @@ describe('conditions', () => {
     ] as const satisfies readonly Condition[]) {
       expect(holds(condition, null, ctx.now)).toBe(false);
     }
+  });
+
+  it("reads stacksAtLeast 'max' against the run's cap, never without a run", () => {
+    const ctx = spawned(stationarySquares(1, 1), makeStats({ burnMaxStacks: 2 }));
+    const target = ctx.enemies[0] as Enemy;
+    const max = [compileCondition({ stacksAtLeast: { ailment: 'burn', stacks: 'max' } })];
+    expect(max[0]?.b).toBe(0);
+    addBurn(ctx, target, num(1), ctx.now + 30, 0, CENTER);
+    expect(conditionsMet(max, target, ctx.now, 0, ctx)).toBe(false);
+    addBurn(ctx, target, num(1), ctx.now + 60, 0, CENTER);
+    expect(conditionsMet(max, target, ctx.now, 0, ctx)).toBe(true);
+    // Live stacks only: one has ended at +30.
+    expect(conditionsMet(max, target, ctx.now + 30, 0, ctx)).toBe(false);
+    // No run, no cap: not met, whatever the stacks; no target, not met either.
+    expect(conditionsMet(max, target, ctx.now, 0)).toBe(false);
+    expect(conditionsMet(max, target, ctx.now, 0, null)).toBe(false);
+    expect(conditionsMet(max, null, ctx.now, 0, ctx)).toBe(false);
+    // An estimate's input has no run.
+    expect(staticInput().ctx).toBeNull();
+    expect(() => compileCondition({ stacksAtLeast: { ailment: 'poison', stacks: 'max' } })).toThrow(
+      "stacksAtLeast 'max' needs a stack cap, which poison has not",
+    );
   });
 
   it('reads hitIs, victimHas and killedBy from the flags, without a target', () => {

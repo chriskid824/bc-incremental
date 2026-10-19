@@ -23,7 +23,7 @@ export function holdsBleed(enemy: Enemy, now: number): boolean {
 }
 
 /** Damage of the enemy's bleed from tick `from` to now, its moving ticks weighted. */
-function accruedBleed(ctx: RunContext, enemy: Enemy, from: number): Num {
+export function accruedBleed(ctx: RunContext, enemy: Enemy, from: number): Num {
   const ticks = Math.min(enemy.bleedUntil, ctx.now) - Math.max(enemy.bleedStart, from);
   if (!(ticks > 0)) return ZERO;
   const still = ctx.bleedStationaryMult;
@@ -35,7 +35,7 @@ function accruedBleed(ctx: RunContext, enemy: Enemy, from: number): Num {
  * The last damage-over-time step the enemy took: the previous step tick, or this tick once the
  * step has reached it (Enemy.burnSteppedAt).
  */
-const lastStep = (ctx: RunContext, enemy: Enemy): number =>
+export const lastStep = (ctx: RunContext, enemy: Enemy): number =>
   Math.max(ctx.lastBurnTick, enemy.burnSteppedAt);
 
 /**

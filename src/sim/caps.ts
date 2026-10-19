@@ -44,3 +44,8 @@ export const PULSE_TICKS = 15;
  * repeatChargesDropped.
  */
 export const REPEAT_CHARGE_CAP = 8;
+/**
+ * Burn stacks that stacksAtLeast 'max' asks for under eternalFlame (BuildFlags.burnRings), where
+ * burns live in DoT rings and no cap refuses one (burnCapOf, src/sim/ailments/records.ts).
+ */
+export const BURN_RINGS_MAX_STACKS = 5;

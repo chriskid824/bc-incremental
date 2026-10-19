@@ -140,6 +140,10 @@ export type HeldAilment = (typeof HELD_AILMENTS)[number];
 export const STACK_AILMENTS = ['burn', 'poison', 'shock'] as const;
 export type StackAilment = (typeof STACK_AILMENTS)[number];
 
+/** Ailments whose damage left a detonate deals at once: those that deal damage over time. */
+export const DETONATE_AILMENTS = ['burn', 'poison', 'bleed'] as const;
+export type DetonateAilment = (typeof DETONATE_AILMENTS)[number];
+
 /** What dealt a killing blow (killedBy): a hit, or an ailment's damage over time. */
 export const KILL_KINDS = ['hit', 'burn', 'poison', 'bleed'] as const;
 export type KillKind = (typeof KILL_KINDS)[number];
@@ -170,14 +174,19 @@ export type HitKind = (typeof HIT_KINDS)[number];
  * poison: it has poison damage left to take; bleed: its bleed has not ended; shock: its shock
  * has not worn off; frost: its chill meter is above 0, or it is frozen; frozen: it is frozen).
  * targetHpBelow: its hp is below this fraction of its max hp. stacksAtLeast: it carries at least
- * this many stacks of the ailment. inZone: it stands in a ground zone of this source, one source
- * id and never a class (a zone pulse marks the enemies within it for 16 ticks, groundZone).
+ * this many stacks of the ailment, or with 'max' as many as it can hold (burn: its stack cap, at
+ * least 1, and 5 under eternalFlame, whose burns have no cap; shock: shockMaxStacks, at least 1;
+ * poison has no cap, so it takes a number). inZone: it stands in a ground zone of this source,
+ * one source id and never a class (a zone pulse marks the enemies within it for 16 ticks,
+ * groundZone).
  */
 export type TargetCondition =
   | { readonly targetHas: HeldAilment }
   | { readonly targetKind: TargetKind }
   | { readonly targetHpBelow: number }
-  | { readonly stacksAtLeast: { readonly ailment: StackAilment; readonly stacks: number } }
+  | {
+      readonly stacksAtLeast: { readonly ailment: StackAilment; readonly stacks: number | 'max' };
+    }
   | { readonly inZone: SourceSelector };
 
 /**
@@ -359,6 +368,26 @@ export interface RepeatAttackSpec {
 }
 
 /**
+ * Deals at once `fraction` (default 1) of the damage the ailment has yet to deal on the event's
+ * enemy, which loses that share of it (every stack keeps going, weaker by that share; all of it
+ * removes the ailment), × `damage` (default 1): to that enemy, or to up to `maxTargets` enemies
+ * within `radius` of it (in `order`), each taking the whole amount. Its hits are tagged with the
+ * ailment's kind and trigger (and area with a radius), never crit and roll no ailment, and the
+ * damage modifiers do not scale them again: the ailment's damage already had them. On kill,
+ * diedWithAilment and shatter events the enemy is dead: it needs a radius and a victimHas
+ * condition of the ailment, and deals what the victim had left at its death.
+ */
+export interface DetonateSpec {
+  readonly kind: 'detonate';
+  readonly ailment: DetonateAilment;
+  readonly fraction?: number;
+  readonly damage?: number;
+  readonly radius?: number;
+  readonly maxTargets?: number;
+  readonly order?: TargetOrder;
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -383,6 +412,7 @@ export interface RepeatAttackSpec {
  *   second (GroundZoneSpec).
  * - repeatAttack: the signature attack again, `count` times, at damagePct of its damage
  *   (RepeatAttackSpec).
+ * - detonate: the damage an ailment has left on the event's enemy, dealt at once (DetonateSpec).
  */
 export type EffectSpec =
   | {
@@ -422,7 +452,8 @@ export type EffectSpec =
   | { readonly kind: 'heal'; readonly lifePct: number }
   | { readonly kind: 'gainShards'; readonly fraction: number }
   | GroundZoneSpec
-  | RepeatAttackSpec;
+  | RepeatAttackSpec
+  | DetonateSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -449,6 +480,7 @@ export const COEF_FIELDS: {
   groundZone: ['damagePctPerSec', 'ailmentDamagePct'],
   // A share of the signature attack, whose damage the calibration does not scale.
   repeatAttack: [],
+  detonate: ['damage'],
 };
 
 /** When `on` happens and every `when` condition holds, run each effect of `do` in order. */
