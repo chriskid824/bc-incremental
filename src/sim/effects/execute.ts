@@ -44,6 +44,12 @@
  * from the grid's marked list (as a straight shot's path, shots.ts). With alwaysCrit its hits
  * crit whatever their roll, which is drawn all the same. A coinHit hits its live target once,
  * after its coin event; its payload carries the bypass bits (Payload.bypass).
+ *
+ * A chainBolt is an attack of its own (beginAttack, src/sim/combat/chain.ts) on its live target,
+ * or on the alive enemy nearest the event's point within the chain range: its first hit, which
+ * counts 1 in its chain budget, then exactly `jumps` jumps on the general chain path
+ * (chainGeneral, src/sim/combat/policy.ts) without a policy. Its payload shocks each enemy a
+ * jump leaves alive (Payload.shockOnHit), and the executor its first one alike.
  */
 
 import type { Num } from '../../core/num';
@@ -64,7 +70,9 @@ import { consumeAilment, remainingOf } from '../ailments/remaining';
 import { addShock } from '../ailments/shock';
 import { sizeOf } from '../build/size';
 import { REPEAT_CHARGE_CAP, SMALL_PROJECTILE_TICKS } from '../caps';
+import { beginAttack, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
+import { chainGeneral } from '../combat/policy';
 import { fireLobRepeat } from '../emitters/lob';
 import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
@@ -719,6 +727,28 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     ctx.events.push({ type: 'coin', x: target.x, y: target.y, targetId: target.id });
     const p = ctx.effectPayloads[entry.effect] as Payload;
     hitWithPayload(ctx, target, p, 0, 1, null, null, false, entry.depth, entry.origin);
+  },
+  // An attack of its own on the live target, or on the alive enemy nearest the event's point
+  // within the chain range ('nearestToPoint'): its first hit, counted in its budget, and
+  // shockStacks on it if the hit left it alive; then exactly `jumps` jumps, no roll, each
+  // shocking its enemy alike (Payload.shockOnHit).
+  chainBolt(ctx, spec, _fx, entry) {
+    const first =
+      spec.from === 'nearestToPoint'
+        ? ctx.grid.nearest(entry.x, entry.y, ctx.chainRangeSq)
+        : liveTarget(entry);
+    if (first === null) return;
+    const p = ctx.effectPayloads[entry.effect] as Payload;
+    const { depth, origin } = entry;
+    beginAttack(ctx);
+    ctx.chainBudget.hits++;
+    hitWithPayload(ctx, first, p, 0, 1, null, null, false, depth, origin);
+    const stacks = spec.shockStacks ?? 0;
+    if (stacks > 0 && first.alive) addShock(ctx, first, stacks, depth);
+    const roots = ctx.sys.chain.frontier;
+    roots[0] = first;
+    chainGeneral(ctx, p, roots, 1, spec.jumps, false, depth, origin);
+    endAttack(ctx);
   },
 };
 

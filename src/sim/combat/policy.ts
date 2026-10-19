@@ -6,11 +6,13 @@
  * attack has not hit as the policy's branch says, the last level to the farthest under 遠雷, and
  * every hit of a level keeps the level's share of the damage (ChainPolicy.scale). Jumps the
  * rules add, extra jumps (跳電) and bounces (回彈), are hits of the payload's extraJumpPayload and
- * count against EXTRA_JUMP_CAP; every hit counts against CHAIN_HIT_CAP (src/sim/caps.ts). With
- * the run's table without a policy (RunContext.sys.chain.noPolicy) it deals what the linear
- * path does (chainFrom, src/sim/combat/chain.ts), hit for hit.
+ * count against EXTRA_JUMP_CAP; every hit counts against CHAIN_HIT_CAP (src/sim/caps.ts). Each
+ * jump hit of a payload that shocks on hit (Payload.shockOnHit, a chainBolt's) then shocks its
+ * enemy if it is alive. With the run's table without a policy (RunContext.sys.chain.noPolicy)
+ * it deals what the linear path does (chainFrom, src/sim/combat/chain.ts), hit for hit.
  */
 
+import { addShock } from '../ailments/shock';
 import { CHAIN_HIT_CAP, EXTRA_JUMP_CAP } from '../caps';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
@@ -80,18 +82,7 @@ export function chainGeneral(
               bounced++;
               budget.extraJumps++;
               budget.hits++;
-              hitWithPayload(
-                ctx,
-                node,
-                p.extraJumpPayload,
-                k,
-                r,
-                node.x,
-                node.y,
-                steady,
-                depth,
-                origin,
-              );
+              jumpHit(ctx, p.extraJumpPayload, node, k, r, node.x, node.y, steady, depth, origin);
               next[nn++] = node;
             } else counters.extraJumpsCapped++;
           }
@@ -99,7 +90,7 @@ export function chainGeneral(
           break;
         }
         budget.hits++;
-        hitWithPayload(ctx, nxt, p, k, r, node.x, node.y, steady, depth, origin);
+        jumpHit(ctx, p, nxt, k, r, node.x, node.y, steady, depth, origin);
         next[nn++] = nxt;
         last = nxt;
         // 跳電: one roll per jump hit, none once the attack has its extra jumps.
@@ -136,10 +127,30 @@ export function chainGeneral(
     const k = kDone + 1 + e;
     const r = scale[Math.min(k, lastLevel)] as number;
     budget.hits++;
-    hitWithPayload(ctx, nxt, p.extraJumpPayload, k, r, last.x, last.y, steady, depth, origin);
+    jumpHit(ctx, p.extraJumpPayload, nxt, k, r, last.x, last.y, steady, depth, origin);
     last = nxt;
   }
   counters.chainHitCapped += capped;
+}
+
+/**
+ * Jump hit `k` of payload `q` on `enemy` at `scale` from (fromX, fromY), as hitWithPayload, then
+ * q's shockOnHit stacks of shock on the enemy if the hit left it alive, at `depth`.
+ */
+function jumpHit(
+  ctx: RunContext,
+  q: Payload,
+  enemy: Enemy,
+  k: number,
+  scale: number,
+  fromX: number,
+  fromY: number,
+  steady: boolean,
+  depth: number,
+  origin: number,
+): void {
+  hitWithPayload(ctx, enemy, q, k, scale, fromX, fromY, steady, depth, origin);
+  if (q.shockOnHit > 0 && enemy.alive) addShock(ctx, enemy, q.shockOnHit, depth);
 }
 
 /**

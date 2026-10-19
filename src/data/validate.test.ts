@@ -1391,6 +1391,92 @@ describe('trigger validation', () => {
     ).toEqual([]);
   });
 
+  it("accepts chainBolt from either start, from 'eventTarget' where a live enemy starts it", () => {
+    const bolt = { kind: 'chainBolt', jumps: 2, damagePct: 0.5 } as const;
+    const near = { ...bolt, from: 'nearestToPoint' } as const;
+    expect(
+      triggerIssues(
+        {
+          on: 'hit',
+          do: [
+            bolt,
+            { ...bolt, jumps: 0, shockStacks: 1, from: 'eventTarget' },
+            { ...bolt, jumps: 31, damagePct: 0, shockStacks: 3 },
+            near,
+          ],
+        },
+        { on: 'ailmentApplied', when: [{ ailment: 'shock' }], do: [bolt] },
+        { on: 'freeze', do: [bolt] },
+        { on: 'nthAttack', every: 3, do: [bolt] },
+        { on: 'kill', do: [near] },
+        { on: 'diedWithAilment', do: [near] },
+        { on: 'shatter', do: [{ ...near, shockStacks: 2 }] },
+        { on: 'contact', do: [near] },
+        { on: 'heroHit', do: [near] },
+        { on: 'periodic', every: 1, do: [near] },
+        { on: 'waveStart', do: [near] },
+        { on: 'periodic', every: 1, target: { pick: 'highestHp' }, do: [bolt] },
+        { on: 'kill', target: { pick: 'nearest' }, do: [bolt] },
+        { on: 'heroHit', target: { pick: 'nearest' }, do: [bolt] },
+        { on: 'periodic', every: 1, target: { pick: 'player' }, do: [near] },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects chainBolt jumps outside [0, 31] or not whole, a negative damagePct and shockStacks that is not a positive integer', () => {
+    const bolt = { kind: 'chainBolt', damagePct: 0.5 } as const;
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { ...bolt, jumps: 32 },
+          { ...bolt, jumps: -1 },
+          { ...bolt, jumps: 1.5 },
+          { ...bolt, jumps: Number.NaN },
+          { ...bolt, jumps: 2, damagePct: -0.5, shockStacks: 0 },
+          { ...bolt, jumps: 2, shockStacks: 1.5 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] jumps must be an integer in [0, 31] (got 32)`,
+      `${at} do[1] jumps must be an integer in [0, 31] (got -1)`,
+      `${at} do[2] jumps must be an integer in [0, 31] (got 1.5)`,
+      `${at} do[3] jumps must be an integer in [0, 31] (got NaN)`,
+      `${at} do[4] damagePct must be >= 0 (got -0.5)`,
+      `${at} do[4] shockStacks must be a positive integer (got 0)`,
+      `${at} do[5] shockStacks must be a positive integer (got 1.5)`,
+    ]);
+  });
+
+  it("rejects chainBolt from 'eventTarget' on events without a live enemy, and with a 'player' pick", () => {
+    const bolt = { kind: 'chainBolt', jumps: 2, damagePct: 0.5 } as const;
+    const problem = (on: string): string =>
+      `${at} do[0] chainBolt from 'eventTarget' needs a live enemy; on '${on}' events use from 'nearestToPoint'`;
+    const events: TriggerSpec[] = [
+      { on: 'periodic', every: 1, do: [bolt] },
+      { on: 'waveStart', do: [{ ...bolt, from: 'eventTarget' }] },
+      { on: 'heroHit', do: [bolt] },
+      { on: 'kill', do: [bolt] },
+      { on: 'diedWithAilment', do: [bolt] },
+      { on: 'shatter', do: [bolt] },
+      { on: 'contact', do: [bolt] },
+    ];
+    for (const trigger of events) {
+      expect(triggerIssues(trigger), trigger.on).toEqual([problem(trigger.on)]);
+    }
+    expect(
+      triggerIssues({
+        on: 'periodic',
+        every: 1,
+        target: { pick: 'player' },
+        do: [bolt, { ...bolt, from: 'eventTarget' }, { ...bolt, from: 'nearestToPoint' }],
+      }),
+    ).toEqual([
+      `${at} do[0] chainBolt needs an enemy, which target.pick 'player' does not give`,
+      `${at} do[1] chainBolt needs an enemy, which target.pick 'player' does not give`,
+    ]);
+  });
+
   it("rejects stacksAtLeast 'max' for poison, on a trigger and on a modifier", () => {
     const problem = "stacksAtLeast 'max' needs a stack cap, which poison has not; give a number";
     const max = { stacksAtLeast: { ailment: 'poison', stacks: 'max' } } as const;

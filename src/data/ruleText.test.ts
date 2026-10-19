@@ -125,6 +125,12 @@ function effectNumbers(effect: EffectSpec): string[][] {
       return [[percent(effect.damagePct)]];
     case 'coinHit':
       return [[`×${effect.multiplier}`, percent(effect.multiplier)]];
+    case 'chainBolt':
+      return [
+        ...(effect.jumps === 0 ? [] : [[String(effect.jumps)]]),
+        [percent(effect.damagePct)],
+        ...(effect.shockStacks === undefined ? [] : [[String(effect.shockStacks)]]),
+      ];
   }
 }
 

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../../core/rng';
 import type { EnemyId } from '../../data/types';
+import { activeShockStacks } from '../ailments/shock';
 import { compileBuild } from '../build/compile';
 import { CHAIN_HIT_CAP, EXTRA_JUMP_CAP } from '../caps';
 import { PRIMARY } from '../effects/flags';
@@ -1024,6 +1025,89 @@ function snapshotOf(ctx: RunContext): string {
 }
 
 const FIXTURE_TYPES: readonly EnemyId[] = ['square', 'triangle', 'pentagon', 'hexagon'];
+
+describe('shock on hit (C4.17)', () => {
+  const SHOCKS = makeStats({
+    chainRange: 5000,
+    critChance: 0,
+    igniteChance: 0,
+    shockMaxStacks: 10,
+  });
+
+  /**
+   * The signature payload of `ctx` again, shocking each enemy its jumps hit by `jump` stacks,
+   * and those its extraJumpPayload hits by `extra`.
+   */
+  function shocking(ctx: RunContext, jump: number, extra: number): Payload {
+    const p = signaturePayload(ctx);
+    const q = createPayload({ ...p, shockOnHit: jump });
+    (q as { extraJumpPayload: Payload }).extraJumpPayload = createPayload({
+      ...p,
+      shockOnHit: extra,
+    });
+    return q;
+  }
+
+  const shocks = (ctx: RunContext): number[] =>
+    ctx.enemies.map((e) => activeShockStacks(e, ctx.now));
+
+  it("shocks each enemy a jump hits by the payload's stacks and an extra jump's by extraJumpPayload's, after the hit; never the primary", () => {
+    // The target's shock stacks as each hit lands.
+    const before: number[] = [];
+    const ctx = withPolicy(line(6), (s) => (s.extraJumpChance = 1), {
+      stats: SHOCKS,
+      modules: [
+        (b) =>
+          b.hook('onHit', (c, hit) => {
+            before.push(activeShockStacks(hit.target, c.now));
+          }),
+      ],
+    });
+    const q = shocking(ctx, 1, 2);
+    expect(q.general).toBe(true);
+    chainAttack(ctx, q, ctx.enemies[0] as Enemy, 3, false, 0, -1);
+    // Jumps to 2, 3 and 4; the two extra jumps go on to 5 and 6.
+    expect(eventsOf([ctx.events], 'hit').map((hit) => hit.targetId)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(before).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(shocks(ctx)).toEqual([0, 1, 1, 1, 2, 2]);
+  });
+
+  it("shocks an enemy that bounces by extraJumpPayload's stacks on top of its jump's", () => {
+    const ctx = withPolicy(line(2), (s) => (s.bounces = 1), { stats: SHOCKS });
+    chainAttack(ctx, shocking(ctx, 1, 2), ctx.enemies[0] as Enemy, 2, false, 0, -1);
+    expect(eventsOf([ctx.events], 'hit').map((hit) => [hit.targetId, hit.chainIndex])).toEqual([
+      [1, 0],
+      [2, 1],
+      [2, 2],
+    ]);
+    expect(shocks(ctx)).toEqual([0, 3]);
+  });
+
+  it('shocks no enemy its jump killed, at the depth of the attack', () => {
+    const placed = [...line(4)];
+    placed[1] = { ...placed[1], hp: 1 } as PlacedEnemy;
+    const ctx = placedEnemies(placed, {
+      stats: makeStats({ chainRange: 5000, critChance: 0, igniteChance: 0, damage: 10 }),
+    });
+    const p = signaturePayload(ctx);
+    chainAttack(
+      ctx,
+      createPayload({ ...p, shockOnHit: 2 }),
+      ctx.enemies[0] as Enemy,
+      3,
+      false,
+      2,
+      7,
+    );
+    expect(eventsOf([ctx.events], 'hit').map((hit) => hit.targetId)).toEqual([1, 2, 3, 4]);
+    expect(ctx.enemies.map((e) => [e.alive, e.shockStacks, e.ailDepth])).toEqual([
+      [true, 0, 3],
+      [false, 0, 3],
+      [true, 2, 2],
+      [true, 2, 2],
+    ]);
+  });
+});
 
 describe('the differential test (§4.3)', () => {
   it('gives the linear path and the general one the same hits on 50 random chain fixtures', () => {

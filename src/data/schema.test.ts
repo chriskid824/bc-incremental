@@ -418,6 +418,9 @@ describe('EffectSpecSchema', () => {
     },
     { kind: 'coinHit', multiplier: 10 },
     { kind: 'coinHit', multiplier: 5, ignoreShield: true, ignoreArmour: false },
+    { kind: 'chainBolt', jumps: 2, damagePct: 0.5 },
+    { kind: 'chainBolt', jumps: 0, damagePct: 1, shockStacks: 1, from: 'eventTarget' },
+    { kind: 'chainBolt', jumps: 31, damagePct: 0.2, shockStacks: 3, from: 'nearestToPoint' },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -543,6 +546,15 @@ describe('EffectSpecSchema', () => {
     ['coinHit without a multiplier', { kind: 'coinHit' }],
     ['coinHit with tags', { kind: 'coinHit', multiplier: 10, tags: ['chain'] }],
     ['coinHit with shardCostPct (B4)', { kind: 'coinHit', multiplier: 10, shardCostPct: 0.1 }],
+    ['chainBolt without jumps', { kind: 'chainBolt', damagePct: 0.5 }],
+    ['chainBolt without damagePct', { kind: 'chainBolt', jumps: 2 }],
+    ['chainBolt from the player', { kind: 'chainBolt', jumps: 2, damagePct: 0.5, from: 'player' }],
+    ['chainBolt with an element', { kind: 'chainBolt', jumps: 2, damagePct: 0.5, element: 'cold' }],
+    ['chainBolt with tags', { kind: 'chainBolt', jumps: 2, damagePct: 0.5, tags: ['area'] }],
+    [
+      'chainBolt with a chain policy field',
+      { kind: 'chainBolt', jumps: 2, damagePct: 0.5, bounces: 1 },
+    ],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
   });

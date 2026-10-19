@@ -994,6 +994,76 @@ const policyModules = (): TestModule[] => [
   },
 ];
 
+/**
+ * C4.17's chain bolts on a volley that chains once and shocks a fifth of its hits: a primary hit
+ * now and then sends a 2-jump bolt on from its enemy that adds a shock stack to each enemy it
+ * hits; a crit, one of 3 jumps at the enemy nearest its enemy but that one (a selector), of 2
+ * stacks; a kill, one of 3 jumps from the enemy nearest the victim's point, without shock; and
+ * every 1.5 s a 4-jump bolt starts at the enemy nearest the player. Their hits crit, ignite,
+ * kill and trigger one another at depth, and the shocked enemies take more of every hit.
+ */
+const CHAIN_BOLT_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'outer.lightning',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'primary' }, { chance: 0.3 }],
+      do: [{ kind: 'chainBolt', jumps: 2, damagePct: 0.5, shockStacks: 1 }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'crit',
+      when: [{ chance: 0.3 }],
+      target: { pick: 'nearest', range: 300, excludeEventTarget: true },
+      do: [{ kind: 'chainBolt', jumps: 3, damagePct: 0.3, shockStacks: 2 }],
+    },
+  ],
+  [
+    'outer.lightning',
+    {
+      on: 'kill',
+      when: [{ chance: 0.5 }],
+      do: [{ kind: 'chainBolt', jumps: 3, damagePct: 0.4, from: 'nearestToPoint' }],
+    },
+  ],
+  [
+    'outer.barrage',
+    {
+      on: 'periodic',
+      every: 1.5,
+      do: [
+        {
+          kind: 'chainBolt',
+          jumps: 4,
+          damagePct: 0.6,
+          shockStacks: 1,
+          from: 'nearestToPoint',
+        },
+      ],
+    },
+  ],
+];
+const CHAIN_BOLT_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    shockChance: 0.2,
+    chainCount: 1,
+    chainRange: 300,
+  },
+  maskProbeMods(),
+  {
+    triggers: CHAIN_BOLT_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1099,6 +1169,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: POLICY_STATS, rules: [], startWave: 12 },
     modules: policyModules,
     expected: ['cb7ffbd5c0903d08', '587188bee3ffe3da'],
+  },
+  {
+    name: 'chainBolt',
+    config: { stats: CHAIN_BOLT_STATS, rules: [], startWave: 12 },
+    expected: ['deadf0cee6495706', '06f8577e803a60f4'],
   },
 ];
 

@@ -374,8 +374,8 @@ export interface RunContext {
   readonly effectQueue: EffectQueue;
   /**
    * Per effect index, the payload of its hits (explode, nova, detonate, projectiles, slashLine,
-   * coinHit) or of the hit its ailments count as (applyAilment), on the effects stream; null for
-   * the others. A repeatAttack's repeats take theirs from sys.repeat.
+   * coinHit, chainBolt) or of the hit its ailments count as (applyAilment), on the effects
+   * stream; null for the others. A repeatAttack's repeats take theirs from sys.repeat.
    */
   readonly effectPayloads: readonly (Payload | null)[];
   /** Some hit or crit trigger or onHit hook listens: the hit path dispatches. */
@@ -598,16 +598,18 @@ export const clamp01 = (value: number): number => Math.min(1, Math.max(0, value)
 export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
 
 /**
- * The payload of an effect that hits (explode, nova, detonate, projectiles, slashLine, coinHit),
- * applies an ailment (applyAilment) or makes a zone (groundZone), on the effects stream: its tags
- * and source, no flags, never chaining. An applied ailment's damage is that of a hit of the
- * payload, so only its burn row is read. A zone's pulses aggregate their hits, which crit and
- * roll ailments as any hit does, before the zone applies its own terms
+ * The payload of an effect that hits (explode, nova, detonate, projectiles, slashLine, coinHit,
+ * chainBolt), applies an ailment (applyAilment) or makes a zone (groundZone), on the effects
+ * stream: its tags and source, no flags, no chain policy, never chaining from an attack (a
+ * chainBolt's executor runs its chain, chainGeneral). An applied ailment's damage is that of a
+ * hit of the payload, so only its burn row is read. A zone's pulses aggregate their hits, which
+ * crit and roll ailments as any hit does, before the zone applies its own terms
  * (src/sim/systems/zones.ts); a zone without damage hits nothing, so its payload rolls none. A
  * detonate's hits deal the damage it hands them as it is (PRESCALED, base 1): no crit, no
  * ailment, no damage row, so its payload draws nothing. A slashLine's base damage is × (1 +
  * critScale × `critChance`), the build's crit chance read once here (A21); a coinHit's payload
- * carries its bypass bits.
+ * carries its bypass bits; a chainBolt's shocks each enemy its jumps hit by its shockStacks
+ * (Payload.shockOnHit), and raises no chainJump.
  */
 function effectPayload(fx: CompiledEffect, rng: Rng, critChance: number): Payload | null {
   const spec = fx.spec;
@@ -633,6 +635,7 @@ function effectPayload(fx: CompiledEffect, rng: Rng, critChance: number): Payloa
       ? (spec.ignoreShield === true ? IGNORE_SHIELD : 0) |
         (spec.ignoreArmour === true ? IGNORE_ARMOUR : 0)
       : 0,
+    shockOnHit: spec.kind === 'chainBolt' ? (spec.shockStacks ?? 0) : 0,
   });
 }
 

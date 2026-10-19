@@ -362,6 +362,15 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         ignoreArmour: z.boolean().exactOptional(),
       })
       .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('chainBolt'),
+        jumps: finite,
+        damagePct: finite,
+        shockStacks: finite.exactOptional(),
+        from: z.enum(['eventTarget', 'nearestToPoint']).exactOptional(),
+      })
+      .readonly(),
   ]),
 );
 

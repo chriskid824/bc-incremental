@@ -212,7 +212,10 @@ export interface Payload {
   readonly policy: ChainPolicy | null;
   /** Its chain jumps raise the chainJump center event (later in C4); false on every payload. */
   readonly raisesChainJump: boolean;
-  /** Shock stacks each of its chain hits adds (an effect chain's, later in C4); 0 for none. */
+  /**
+   * Shock stacks each of its chain jump hits adds, with no roll, to an enemy the hit leaves
+   * alive (a chainBolt's shockStacks, whose executor shocks its first hit too); 0 for none.
+   */
   readonly shockOnHit: number;
   /**
    * Its chains take the general path (chainGeneral, src/sim/combat/policy.ts): it has a policy,

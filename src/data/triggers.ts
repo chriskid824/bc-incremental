@@ -455,6 +455,27 @@ export interface CoinHitSpec {
 }
 
 /**
+ * A bolt of lightning that chains (電弧): one hit on its first enemy, then exactly `jumps`
+ * jumps, each from the enemy it last hit to the nearest one within the chain range it has not
+ * hit, for damagePct of the damage stat (a jump's × the chain retention once per jump), tagged
+ * hit, trigger, chain and lightning. Its first enemy is the event's (or the one the trigger's
+ * selector picked) with from 'eventTarget' (the default), or the enemy nearest the event's
+ * point within the chain range with from 'nearestToPoint'; without one it does nothing. Each of
+ * its hits that leaves its enemy alive then adds `shockStacks` (default 0) of shock to it, with
+ * no roll. Its hits crit and roll ailments as any hit does. It is an attack of its own, with its
+ * own chain budget (CHAIN_HIT_CAP, its first hit counting 1), but no chain policy, and it
+ * raises no chainJump.
+ */
+export interface ChainBoltSpec {
+  readonly kind: 'chainBolt';
+  /** Jumps after the first hit, 0 to 31: jumps 2 hits 3 enemies. */
+  readonly jumps: number;
+  readonly damagePct: number;
+  readonly shockStacks?: number;
+  readonly from?: 'eventTarget' | 'nearestToPoint';
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -488,6 +509,8 @@ export interface CoinHitSpec {
  * - slashLine: a line from the event's point or enemy that hits every enemy it crosses
  *   (SlashLineSpec).
  * - coinHit: one hit of `multiplier` × the damage stat on the event's enemy (CoinHitSpec).
+ * - chainBolt: a hit on the event's enemy, or the one nearest the event's point, and `jumps`
+ *   chain jumps from it, each shocking its enemy (ChainBoltSpec).
  */
 export type EffectSpec =
   | {
@@ -532,7 +555,8 @@ export type EffectSpec =
   | DetonateSpec
   | ProjectilesSpec
   | SlashLineSpec
-  | CoinHitSpec;
+  | CoinHitSpec
+  | ChainBoltSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -563,6 +587,7 @@ export const COEF_FIELDS: {
   projectiles: ['damagePct'],
   slashLine: ['damagePct'],
   coinHit: ['multiplier'],
+  chainBolt: ['damagePct'],
 };
 
 /** When `on` happens and every `when` condition holds, run each effect of `do` in order. */

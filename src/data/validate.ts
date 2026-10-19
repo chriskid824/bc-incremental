@@ -913,6 +913,28 @@ function effectIssues(
         issues.push(`coinHit needs a target on '${on}' events; add target {pick}`);
       }
       break;
+    case 'chainBolt': {
+      const { jumps } = effect;
+      if (!(Number.isInteger(jumps) && jumps >= 0 && jumps <= CHAIN_BOLT_JUMPS_MAX)) {
+        issues.push(`jumps must be an integer in [0, ${CHAIN_BOLT_JUMPS_MAX}] (got ${jumps})`);
+      }
+      nonNegative('damagePct', effect.damagePct);
+      count('shockStacks', effect.shockStacks);
+      // From 'eventTarget' it starts on the event's enemy, or the selector's, alive when the
+      // bolt runs (see the event's enemy above).
+      if ((effect.from ?? 'eventTarget') === 'eventTarget') {
+        if (target !== undefined) {
+          if (target.pick === 'player') {
+            issues.push("chainBolt needs an enemy, which target.pick 'player' does not give");
+          }
+        } else if (TARGETLESS_EVENTS.has(on) || dead || on === 'contact') {
+          issues.push(
+            `chainBolt from 'eventTarget' needs a live enemy; on '${on}' events use from 'nearestToPoint'`,
+          );
+        }
+      }
+      break;
+    }
   }
   return issues;
 }
@@ -922,6 +944,12 @@ const REPEAT_COUNT_MAX = 4;
 
 /** The most projectiles one projectiles effect fires. */
 const PROJECTILES_COUNT_MAX = 64;
+
+/**
+ * The most jumps one chainBolt makes: with its first hit, the CHAIN_HIT_CAP (32) hits one
+ * attack deals (src/sim/caps.ts).
+ */
+const CHAIN_BOLT_JUMPS_MAX = 31;
 
 /** Zone radii a groundZone accepts, in arena units. */
 const ZONE_RADIUS_MIN = 1;
