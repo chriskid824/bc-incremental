@@ -124,6 +124,26 @@ export interface ZonePoolState {
   readonly signature: Uint8Array;
 }
 
+/**
+ * The links of a segment emitter's last judgement (src/sim/systems/segments.ts): link i joins
+ * (x1[i], y1[i]) and (x2[i], y2[i]), its endpoints' positions at the judgement, for i < count;
+ * past count, stale. count is 0 after a judgement that found fewer than 2 endpoints, and before
+ * the first.
+ */
+export interface SegmentLinesState {
+  readonly count: number;
+  readonly x1: Float64Array;
+  readonly y1: Float64Array;
+  readonly x2: Float64Array;
+  readonly y2: Float64Array;
+}
+
+/** The segments (src/sim/systems/segments.ts) as render and tools read them. */
+export interface SegmentViewState {
+  /** One per segment emitter, in CompiledBuild.emitters order. */
+  readonly lines: readonly SegmentLinesState[];
+}
+
 export interface PlayerState {
   readonly x: number;
   readonly y: number;
@@ -152,6 +172,8 @@ export interface SimState {
   /** The ground zones; the first zoneCount slots are live. */
   readonly zones: ZonePoolState;
   zoneCount: number;
+  /** The segments' links of their last judgements. */
+  readonly segments: SegmentViewState;
   /** Currencies collected so far this run (before skip compensation, which meta adds). */
   shards: Num;
   cores: number;
@@ -295,8 +317,9 @@ export type SimEvent =
   | { readonly type: 'zoneEnd'; readonly id: number; readonly evicted: boolean }
   /**
    * One pulse, whose hits raise no hit events: `hits` enemies hit for `total` damage in all,
-   * `crits` the ids of those it crit. `id` is the zone's for kind 'zone'; the aura and segment
-   * pulses come later in C4.
+   * `crits` the ids of those it crit. `id` is the zone's for kind 'zone', and the emitter's index
+   * (CompiledBuild.emitters) for kind 'segment', one per judgement that found 2 endpoints or
+   * more; the aura pulses come later in C4.
    */
   | {
       readonly type: 'pulse';

@@ -101,6 +101,12 @@ export class SpatialGrid<T extends GridItem> {
   private best: T | null = null;
   private bestIndex = NO_INDEX;
   private bestDistSq = 0;
+  /** nearestTwo() state: the source index it skips, and the best two so far, the closer first. */
+  private twoSkip = -1;
+  private twoIndex0 = NO_INDEX;
+  private twoDistSq0 = 0;
+  private twoIndex1 = NO_INDEX;
+  private twoDistSq1 = 0;
 
   /**
    * `cellSize` must be a power of two: dividing by it is then exact, so every item lies
@@ -214,6 +220,30 @@ export class SpatialGrid<T extends GridItem> {
     const best = this.best;
     this.best = null;
     return best;
+  }
+
+  /**
+   * Source indices of the two alive items closest to (x, y) within squared distance maxDistSq
+   * (inclusive), the item at source index skipIndex left out: the closer in out[0], the other in
+   * out[1]; returns how many there are, 0 to 2, and leaves out alone past them. Ties go to the
+   * earlier source entry, as in nearest(). Searches rings of cells outwards from the cell of
+   * (x, y) and stops once the next ring cannot hold anything closer than the second best.
+   */
+  nearestTwo(x: number, y: number, maxDistSq: number, skipIndex: number, out: Int32Array): number {
+    if (this.stale) this.prepare();
+    this.twoSkip = skipIndex;
+    this.twoIndex0 = NO_INDEX;
+    this.twoDistSq0 = maxDistSq;
+    this.twoIndex1 = NO_INDEX;
+    this.twoDistSq1 = maxDistSq;
+    const source = this.source;
+    for (let i = this.size; i < source.length; i++) this.considerTwo(source[i] as T, i, x, y);
+    if (this.size > 0) this.searchTwo(x, y);
+    if (this.twoIndex0 === NO_INDEX) return 0;
+    out[0] = this.twoIndex0;
+    if (this.twoIndex1 === NO_INDEX) return 1;
+    out[1] = this.twoIndex1;
+    return 2;
   }
 
   /**
@@ -675,6 +705,70 @@ export class SpatialGrid<T extends GridItem> {
       this.best = item;
       this.bestIndex = index;
       this.bestDistSq = distSq;
+    }
+  }
+
+  /** nearestTwo() over the cells: searchRings' rings, bounded by the second best so far. */
+  private searchTwo(x: number, y: number): void {
+    const cols = this.cols;
+    const rows = this.rows;
+    const c0 = this.colOf(x);
+    const r0 = this.rowOf(y);
+    this.scanTwo(c0, r0, x, y);
+    for (let k = 1; ; k++) {
+      const gap = this.blockGap(x, y, c0 - k + 1, c0 + k - 1, r0 - k + 1, r0 + k - 1);
+      if (gap * gap > this.twoDistSq1) break;
+      const cMin = c0 - k;
+      const cMax = c0 + k;
+      const rMin = r0 - k;
+      const rMax = r0 + k;
+      const cFrom = cMin > 0 ? cMin : 0;
+      const cTo = cMax < cols - 1 ? cMax : cols - 1;
+      if (rMin >= 0) {
+        for (let c = cFrom; c <= cTo; c++) this.scanTwo(c, rMin, x, y);
+      }
+      if (rMax < rows) {
+        for (let c = cFrom; c <= cTo; c++) this.scanTwo(c, rMax, x, y);
+      }
+      const rFrom = rMin + 1 > 0 ? rMin + 1 : 0;
+      const rTo = rMax - 1 < rows - 1 ? rMax - 1 : rows - 1;
+      if (cMin >= 0) {
+        for (let r = rFrom; r <= rTo; r++) this.scanTwo(cMin, r, x, y);
+      }
+      if (cMax < cols) {
+        for (let r = rFrom; r <= rTo; r++) this.scanTwo(cMax, r, x, y);
+      }
+      if (cMin <= 0 && cMax >= cols - 1 && rMin <= 0 && rMax >= rows - 1) break;
+    }
+  }
+
+  private scanTwo(c: number, row: number, x: number, y: number): void {
+    const cell = row * this.cols + c;
+    const start = this.cellStart[cell] as number;
+    const end = this.cellStart[cell + 1] as number;
+    if (start === end || this.cellGapSq(c, row, x, y) > this.twoDistSq1) return;
+    const source = this.source;
+    const slotIndex = this.slotIndex;
+    for (let s = start; s < end; s++) {
+      const index = slotIndex[s] as number;
+      this.considerTwo(source[index] as T, index, x, y);
+    }
+  }
+
+  /** Puts the item at source index `index` among nearestTwo()'s best two when it beats one. */
+  private considerTwo(item: T, index: number, x: number, y: number): void {
+    if (index === this.twoSkip || !item.alive) return;
+    const dx = item.x - x;
+    const dy = item.y - y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq < this.twoDistSq0 || (distSq === this.twoDistSq0 && index < this.twoIndex0)) {
+      this.twoIndex1 = this.twoIndex0;
+      this.twoDistSq1 = this.twoDistSq0;
+      this.twoIndex0 = index;
+      this.twoDistSq0 = distSq;
+    } else if (distSq < this.twoDistSq1 || (distSq === this.twoDistSq1 && index < this.twoIndex1)) {
+      this.twoIndex1 = index;
+      this.twoDistSq1 = distSq;
     }
   }
 

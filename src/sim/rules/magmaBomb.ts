@@ -5,7 +5,8 @@
  * crowded spot and explodes: a center hit of 150% of the damage stat, tagged hit, area and
  * projectile, on every enemy within 60, the one nearest the landing point its primary hit, whose
  * chain follows. Then it leaves a fire zone (火地) of 60 that deals 30% of the damage stat a
- * second for 1.5 s. Its explosion hits always ignite (the igniteAlways row), and so do its fire
+ * second for 1.5 s. Its explosion hits always ignite (the igniteAlways row, which takes the
+ * center's area projectile hits, not a center-board segment's area hits), and so do its fire
  * zone's hits (ALWAYS_IGNITES on their payload), their rolls still drawn; its chain jumps, which
  * keep no area tag, roll the normal chance. Its forms, 遠投, 火山 and 連環爆, are rules of their
  * own that change its lob params (src/sim/rules/lobForms.ts).
@@ -34,13 +35,14 @@ export const magmaBomb: SignatureModule<Extract<SignatureSpec, { id: 'magmaBomb'
   compile(b) {
     // A firing throws projectileCount − 1 bombs: one at the base projectileCount of 2.
     b.offsetStat('projectileCount', -1);
-    // The center's area hits but triggered ones: the explosions, not a trigger's explode.
+    // The center's area projectile hits but triggered ones: the explosions, not a trigger's
+    // explode nor a center-board segment's hits, which are area hits but no projectile ones.
     b.addModifier({
       stat: 'igniteAlways',
       kind: 'flat',
       value: 1,
       scope: 'center',
-      tags: ['area'],
+      tags: ['area', 'projectile'],
       notTags: ['trigger'],
     });
     b.signature().lob = { farThrowEvery: 0, volcano: null, chainBlast: null, zone: { slow: 0 } };

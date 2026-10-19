@@ -3,8 +3,9 @@
  * member per system, each with its type and factory here. createRunContext builds `sys` as one
  * literal, so its shape is fixed when it is created. The systems import their state types from
  * this module, which stays a leaf: its value imports are only core/num.ts, caps.ts,
- * build/sources.ts and build/eval.ts, which reach nothing that imports systems/context.ts
- * (systemState.test.ts checks it); every other import is an `import type` declaration.
+ * build/sources.ts, build/eval.ts and systems/grid.ts, with grid.ts and types.ts, which reach
+ * nothing that imports systems/context.ts (systemState.test.ts checks it); every other import is
+ * an `import type` declaration.
  */
 
 import type { Num } from '../../core/num';
@@ -15,10 +16,11 @@ import { IN_ZONE } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import { MAX_SOURCES } from '../build/sources';
 import type { CompiledEffect } from '../effects/types';
-import type { Payload } from '../emitters/types';
-import type { GridPoint } from '../grid';
-import type { ZonePoolState } from '../types';
+import type { EmitterRuntime, Payload } from '../emitters/types';
+import type { GridPoint, SpatialGrid } from '../grid';
+import type { SegmentLinesState, SegmentViewState, ZonePoolState } from '../types';
 import type { Enemy } from './context';
+import { createEnemyGrid } from './grid';
 
 /** RunContext.sys: one member per system that keeps state of its own. */
 export interface SystemState {
@@ -32,6 +34,8 @@ export interface SystemState {
   readonly repeat: RepeatState;
   /** A kill's transfers to its split children (toSplitChildren, src/sim/systems/death.ts). */
   readonly split: SplitState;
+  /** The segments and their judgements (src/sim/systems/segments.ts), also SimState.segments. */
+  readonly segments: SegmentState;
 }
 
 /**
@@ -297,4 +301,70 @@ export function createSplitState(build: CompiledBuild): SplitState {
   }
   // A trigger passes at most once per kill.
   return { passed: new Int32Array(transfers.length), passedCount: 0, transfers };
+}
+
+/** One segment emitter's links (SegmentLinesState), with room for the pairs its arrays hold. */
+export interface SegmentLines extends SegmentLinesState {
+  count: number;
+  x1: Float64Array;
+  y1: Float64Array;
+  x2: Float64Array;
+  y2: Float64Array;
+}
+
+/**
+ * The segments of a run (RunContext.sys.segments, src/sim/systems/segments.ts), also
+ * SimState.segments: the segment emitters, the links of each one's last judgement, and the
+ * judgements' scratch. The scratch arrays grow with the endpoints, never shrink, and hold
+ * leftovers past what the current judgement wrote.
+ */
+export interface SegmentState extends SegmentViewState {
+  /** The segment emitters, in emitter order; the segment stage judges for each in turn. */
+  readonly emitters: readonly EmitterRuntime[];
+  /** The links of each emitter's last judgement, emitters[i]'s at i. */
+  readonly lines: readonly SegmentLines[];
+  /** The endpoint grid: the judgement's endpoints, `ends`, for their nearest others. */
+  readonly grid: SpatialGrid<Enemy>;
+  /** The last judgement's serial: the enemies it marks to hit carry it (Enemy.segMark). */
+  serial: number;
+  /** The judgement's endpoints, in id order; cut to their count before the grid takes them. */
+  readonly ends: Enemy[];
+  /** Each endpoint's first and second link, as an index into `ends`; −1 for none. */
+  pick1: Int32Array;
+  pick2: Int32Array;
+  /** The judgement's pairs, a[s] with b[s] as indices into `ends`: at most 2 per endpoint. */
+  a: Int32Array;
+  b: Int32Array;
+  /** SpatialGrid.nearestTwo's output. */
+  readonly nearTwo: Int32Array;
+}
+
+/** Endpoints the scratch of a segment judgement holds at first; it grows past them. */
+const SEGMENT_ENDS = 64;
+
+function createSegmentLines(): SegmentLines {
+  const n = 2 * SEGMENT_ENDS;
+  return {
+    count: 0,
+    x1: new Float64Array(n),
+    y1: new Float64Array(n),
+    x2: new Float64Array(n),
+    y2: new Float64Array(n),
+  };
+}
+
+/** No judgement yet, for the segment emitters `emitters`. */
+export function createSegmentState(emitters: readonly EmitterRuntime[]): SegmentState {
+  return {
+    emitters,
+    lines: emitters.map(createSegmentLines),
+    grid: createEnemyGrid(),
+    serial: 0,
+    ends: [],
+    pick1: new Int32Array(SEGMENT_ENDS),
+    pick2: new Int32Array(SEGMENT_ENDS),
+    a: new Int32Array(2 * SEGMENT_ENDS),
+    b: new Int32Array(2 * SEGMENT_ENDS),
+    nearTwo: new Int32Array(2),
+  };
 }

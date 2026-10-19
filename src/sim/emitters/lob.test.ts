@@ -246,7 +246,7 @@ function watch(): { module: TestModule; hits: SeenHit[]; centers: SeenCenter[] }
 }
 
 describe('magmaBomb', () => {
-  it('compiles to a lob of 150% that always ignites its area hits, its lob params neutral', () => {
+  it('compiles to a lob of 150% that always ignites its area projectile hits, its lob params neutral', () => {
     const build = compileBuild(makeStats(), [], MAGMA);
     expect(build.signature.lob).toEqual({
       farThrowEvery: 0,
@@ -270,7 +270,7 @@ describe('magmaBomb', () => {
     });
     const IGNITE_ALWAYS = SCOPED_INDEX.igniteAlways;
     expect(build.mods.filter((mod) => mod.stat === IGNITE_ALWAYS)).toMatchObject([
-      { kind: 0, value: 1, all: TAG.area, none: TAG.trigger },
+      { kind: 0, value: 1, all: TAG.area | TAG.projectile, none: TAG.trigger },
     ]);
     // projectileCount − 1 bombs a firing: one at the base 2.
     expect(build.values.projectileCount).toBe(1);

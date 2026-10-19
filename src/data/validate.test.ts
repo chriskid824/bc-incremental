@@ -1646,6 +1646,62 @@ describe('emitter grant validation', () => {
     ).toEqual([]);
   });
 
+  it('accepts segment grants between shocked enemies, with or without their fields', () => {
+    const full: EmitterGrant = {
+      kind: 'segment',
+      endpoints: 'shocked',
+      links: 1,
+      range: 150,
+      damagePct: 0.3,
+      shockStacks: 2,
+      periodSec: 0.5,
+    };
+    for (const grant of [{ kind: 'segment', endpoints: 'shocked' } as const, full]) {
+      expect(grantIssues({ id: 'outer.lightning.web', emitters: [grant] })).toEqual([]);
+    }
+  });
+
+  it('rejects segment links but 1 or 2, a range not above 0, and the endpoints C5 adds', () => {
+    const segment = (fields: object): EmitterGrant =>
+      ({ kind: 'segment', endpoints: 'shocked', ...fields }) as EmitterGrant;
+    expect(
+      grantIssues({
+        id: 'outer.lightning.web',
+        emitters: [
+          segment({ links: 3 }),
+          segment({ links: 0, range: 0 }),
+          segment({ links: 1.5, range: -10 }),
+          segment({ endpoints: 'drones' }),
+          segment({ endpoints: 'summons', links: 2 }),
+          segment({ endpoints: 'enemies' }),
+        ],
+      }).filter((issue) => !issue.startsWith('talents: emitter segment')),
+    ).toEqual([
+      "talent 'outer.lightning.web': emitters[0] links must be 1 or 2 (got 3)",
+      "talent 'outer.lightning.web': emitters[1] links must be 1 or 2 (got 0)",
+      "talent 'outer.lightning.web': emitters[1] range must be > 0 (got 0)",
+      "talent 'outer.lightning.web': emitters[2] links must be 1 or 2 (got 1.5)",
+      "talent 'outer.lightning.web': emitters[2] range must be > 0 (got -10)",
+      "talent 'outer.lightning.web': emitters[3] segment endpoints 'drones' come from drones and " +
+        'summons, which the simulation adds in C5',
+      "talent 'outer.lightning.web': emitters[4] segment endpoints 'summons' come from drones and " +
+        'summons, which the simulation adds in C5',
+      "talent 'outer.lightning.web': emitters[5] endpoints must be 'shocked' (got enemies)",
+    ]);
+  });
+
+  it('keeps one segment emitter per source and endpoints, and rejects two that differ', () => {
+    const web = (range: number): Leaf => ({
+      id: `outer.lightning.web${range}`,
+      emitters: [{ kind: 'segment', endpoints: 'shocked', range }],
+    });
+    expect(grantIssues(web(150), web(250))).toEqual([
+      "talents: emitter segment 'shocked' is granted twice by source 'outer.lightning' with " +
+        'different fields; keep it on one node',
+    ]);
+    expect(grantIssues(web(150), { ...web(250), id: 'hub.web' })).toEqual([]);
+  });
+
   it('accepts a keystone whose behaviour is a grant, and needs a descKey for one', () => {
     expect(
       issuesAfter((d) => {

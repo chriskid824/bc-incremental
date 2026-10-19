@@ -305,6 +305,64 @@ describe('SpatialGrid', () => {
     });
   });
 
+  describe('nearestTwo', () => {
+    it('finds the two closest alive items but the skipped one, ties to the earlier entry', () => {
+      const items = [
+        item(1, 0, 0),
+        item(2, 30, 0),
+        item(3, 0, 30),
+        item(4, 10, 0, false),
+        item(5, 50, 0),
+      ];
+      const grid = gridOf(items);
+      const out = new Int32Array(2);
+      const query = (x: number, y: number, maxDistSq: number, skip: number): number[] => {
+        out.fill(-9);
+        return [grid.nearestTwo(x, y, maxDistSq, skip, out), ...out];
+      };
+      // 2 and 3 tie at 30 from 1: the earlier entry first; the dead 4 is never found.
+      expect(query(0, 0, Infinity, 0)).toEqual([2, 1, 2]);
+      // The limit is inclusive; 1 itself, at 0, when nothing is skipped.
+      expect(query(0, 0, 900, -1)).toEqual([2, 0, 1]);
+      expect(query(0, 0, 900, 1)).toEqual([2, 0, 2]);
+      // Fewer than two within: the rest of out is left alone.
+      expect(query(0, 0, 899, 0)).toEqual([0, -9, -9]);
+      expect(query(50, 0, 400, 4)).toEqual([1, 1, -9]);
+      // An item added after the sort counts, by its source index.
+      items.push(item(6, 1, 0));
+      expect(query(0, 0, Infinity, 0)).toEqual([2, 5, 1]);
+      expect(query(0, 0, Infinity, 5)).toEqual([2, 0, 1]);
+    });
+
+    it('searches the outer rings for a second item past the first ring that holds one', () => {
+      const items = [
+        item(1, 64, 64),
+        item(2, 70, 64),
+        item(3, 64 + 5 * CELL, 64),
+        item(4, -900, 64),
+      ];
+      const grid = gridOf(items);
+      const out = new Int32Array(2);
+      expect(grid.nearestTwo(64, 64, Infinity, 0, out)).toBe(2);
+      expect([...out]).toEqual([1, 2]);
+      expect(grid.nearestTwo(64, 64, Infinity, 1, out)).toBe(2);
+      expect([...out]).toEqual([0, 2]);
+      // Off the arena: the outer ring's cell.
+      expect(grid.nearestTwo(-1000, 64, Infinity, -1, out)).toBe(2);
+      expect([...out]).toEqual([3, 0]);
+    });
+
+    it('searches a ring as far as the second best, for a tie the earlier entry wins', () => {
+      // From (246, 192), 10 short of its cell's right edge: 2 and 3 in its cell, at 6 and 10;
+      // 1, in the next ring, also at 10 and an earlier entry than 3, takes its place.
+      const items = [item(1, 2 * CELL, 192), item(2, 246, 186), item(3, 236, 192)];
+      const grid = gridOf(items);
+      const out = new Int32Array(2);
+      expect(grid.nearestTwo(246, 192, Infinity, -1, out)).toBe(2);
+      expect([...out]).toEqual([1, 0]);
+    });
+  });
+
   it('scans a source smaller than linearBelow instead of sorting it', () => {
     const grid = newGrid(4);
     const many = [item(1, 0, 0, true, true), item(2, 5, 5), item(3, 9, 9), item(4, 1, 1)];
@@ -695,5 +753,129 @@ describe('the shot queries match the linear scans', () => {
     expect(small.sortCount).toBe(0);
     small.sortNow();
     expect([small.sortCount, small.linearSource()]).toEqual([1, null]);
+  });
+});
+
+// ---- nearestTwo (src/sim/systems/segments.ts) against a linear scan ----
+
+/** The source indices of the two alive items nearest (x, y) within maxDistSq but `skip`. */
+function linearNearestTwo(
+  items: readonly Item[],
+  x: number,
+  y: number,
+  maxDistSq: number,
+  skip: number,
+): number[] {
+  const found: [number, number][] = [];
+  items.forEach((t, i) => {
+    if (i === skip || !t.alive) return;
+    const distSq = (t.x - x) * (t.x - x) + (t.y - y) * (t.y - y);
+    if (distSq <= maxDistSq) found.push([distSq, i]);
+  });
+  found.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  return found.slice(0, 2).map(([, i]) => i);
+}
+
+interface TwoTally {
+  queries: number;
+  /** Queries whose second and third candidates, or first and second, shared a distance. */
+  ties: number;
+  /** Queries that saw items added after the sort. */
+  late: number;
+  /** Queries from outside the arena, in the outer ring's cells. */
+  outside: number;
+  /** Queries with two answers. */
+  pairs: number;
+}
+
+function checkNearestTwo(
+  rng: Rng,
+  grid: SpatialGrid<Item>,
+  items: readonly Item[],
+  anchors: readonly Point[],
+  tally: TwoTally,
+  late: boolean,
+): void {
+  const out = new Int32Array(2);
+  for (let q = 0; q < 6; q++) {
+    // Mostly from an item, skipping it, as a segment endpoint asks.
+    let x: number;
+    let y: number;
+    let skip = -1;
+    if (items.length > 0 && rng.chance(0.6)) {
+      skip = rng.int(items.length);
+      const from = items[skip] as Item;
+      [x, y] = [from.x, from.y];
+    } else {
+      [x, y] = rng.chance(0.5) ? rng.pick(anchors) : randomPoint(rng, anchors, items);
+      if (rng.chance(0.3)) skip = rng.int(items.length + 2) - 1;
+    }
+    const maxDistSq = randomRadiusSq(rng, x, y, items);
+    const expected = linearNearestTwo(items, x, y, maxDistSq, skip);
+    out.fill(-9);
+    const count = grid.nearestTwo(x, y, maxDistSq, skip, out);
+    expect([count, ...Array.from(out.subarray(0, count))]).toEqual([expected.length, ...expected]);
+    for (let k = count; k < 2; k++) expect(out[k]).toBe(-9);
+    const three = linearNearestTwo(
+      items.map((t, i) => (i === expected[0] ? { ...t, alive: false } : t)),
+      x,
+      y,
+      maxDistSq,
+      skip,
+    );
+    const distOf = (i: number | undefined): number => {
+      if (i === undefined) return NaN;
+      const t = items[i] as Item;
+      return (t.x - x) * (t.x - x) + (t.y - y) * (t.y - y);
+    };
+    if (distOf(expected[0]) === distOf(expected[1]) || distOf(three[0]) === distOf(three[1])) {
+      tally.ties++;
+    }
+    if (late) tally.late++;
+    if (x < 0 || y < 0 || x > ARENA_WIDTH || y > ARENA_HEIGHT) tally.outside++;
+    if (count === 2) tally.pairs++;
+    tally.queries++;
+  }
+}
+
+/**
+ * Lower bounds for the nearestTwo tallies; seed 20261019 gives 194 scanned states, 490 ties,
+ * 2628 late, 2109 outside and 2555 pairs.
+ */
+const TWO_MIN = { scanned: 120, ties: 300, late: 1600, outside: 1300, pairs: 1600 };
+
+describe('nearestTwo matches a linear scan', () => {
+  it('sorted or scanned, with ties, late and dead items, skips and outer-ring queries', () => {
+    const rng = createRng(20261019);
+    const sorting = newGrid();
+    const scanning = newGrid(128);
+    const tally: TwoTally = { queries: 0, ties: 0, late: 0, outside: 0, pairs: 0 };
+    let scanned = 0;
+    let nextId = 1;
+    for (let state = 0; state < 500; state++) {
+      const grid = rng.chance(0.4) ? scanning : sorting;
+      const anchors: Point[] = [PLAYER];
+      for (let a = 0; a < 3; a++) anchors.push(randomPoint(rng, anchors, []));
+      const offset = (): number => rng.pick(OFFSETS) * (rng.chance(0.5) ? 1 : -1);
+      anchors.push([edge(rng, 15) + offset(), edge(rng, 9) + offset()]);
+      const items: Item[] = [];
+      const count = [0, 1, 2, 3, 5, 20, 80, 170, 320][rng.int(9)] as number;
+      for (let i = 0; i < count; i++) items.push(randomItem(rng, nextId++, anchors, items));
+      grid.rebuild(items, isTough);
+      if (grid.linearSource() !== null) scanned++;
+      checkNearestTwo(rng, grid, items, anchors, tally, false);
+
+      // Later in the tick: kills and split children, appended after the sort.
+      for (const target of items) if (rng.chance(0.1)) target.alive = false;
+      const extra = rng.int(6);
+      for (let i = 0; i < extra; i++) items.push(randomItem(rng, nextId++, anchors, items));
+      checkNearestTwo(rng, grid, items, anchors, tally, extra > 0);
+    }
+    expect(tally.queries).toBe(500 * 2 * 6);
+    expect(scanned).toBeGreaterThan(TWO_MIN.scanned);
+    expect(tally.ties).toBeGreaterThan(TWO_MIN.ties);
+    expect(tally.late).toBeGreaterThan(TWO_MIN.late);
+    expect(tally.outside).toBeGreaterThan(TWO_MIN.outside);
+    expect(tally.pairs).toBeGreaterThan(TWO_MIN.pairs);
   });
 });

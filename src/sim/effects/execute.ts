@@ -348,9 +348,16 @@ function slashTargets(
 /**
  * Squared distance from (px, py) to the segment from (ax, ay) to (bx, by), ends included: to
  * the nearer end when the point lies beyond it, else to the line (the cross product over the
- * length).
+ * length). The segment stage's links share it (src/sim/systems/segments.ts).
  */
-function segDistSq(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+export function segDistSq(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
   const dx = bx - ax;
   const dy = by - ay;
   const toAx = px - ax;

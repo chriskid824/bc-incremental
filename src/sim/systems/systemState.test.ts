@@ -18,8 +18,19 @@ const SRC = fileURLToPath(new URL('../../', import.meta.url));
 const LEAF = 'sim/systems/systemState.ts';
 const CONTEXT = 'sim/systems/context.ts';
 
-/** The modules systemState.ts may value-import (§0.7's exhaustive list at C4.6). */
-const LEAF_IMPORTS = ['core/num.ts', 'sim/caps.ts', 'sim/build/sources.ts', 'sim/build/eval.ts'];
+/**
+ * The modules systemState.ts may value-import (§0.7's exhaustive list: C4.6's four, and from
+ * C4.14 systems/grid.ts, for the segment endpoints' grid, with the two modules it imports).
+ */
+const LEAF_IMPORTS = [
+  'core/num.ts',
+  'sim/caps.ts',
+  'sim/build/sources.ts',
+  'sim/build/eval.ts',
+  'sim/systems/grid.ts',
+  'sim/grid.ts',
+  'sim/types.ts',
+];
 
 const REMAINING = 'sim/ailments/remaining.ts';
 

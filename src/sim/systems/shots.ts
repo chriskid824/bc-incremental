@@ -477,8 +477,11 @@ function remember(shots: ShotPool, s: number, id: number): void {
   shots.memHead[s] = head + 1 === SHOT_MEMORY ? 0 : head + 1;
 }
 
-/** Grows RunContext.candidates and shotHits.t to hold at least `n` enemies. */
-function growShotScratch(ctx: RunContext, n: number): void {
+/**
+ * Grows RunContext.candidates and shotHits.t to hold at least `n` enemies; the segment stage's
+ * box queries share them (src/sim/systems/segments.ts).
+ */
+export function growShotScratch(ctx: RunContext, n: number): void {
   const size = Math.max(n, 2 * ctx.candidates.length);
   ctx.candidates = new Int32Array(size);
   ctx.shotHits.t = new Float64Array(size);

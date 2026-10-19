@@ -449,10 +449,23 @@ export const GRANT_SCHEMAS = {
   thorns: z
     .strictObject({ kind: z.literal('thorns'), damagePct: finite.exactOptional() })
     .readonly(),
+  // Only the endpoints the simulation has; drones and summons come in C5 (validate.ts names
+  // them for data checked without the schema).
+  segment: z
+    .strictObject({
+      kind: z.literal('segment'),
+      endpoints: z.literal('shocked'),
+      links: finite.exactOptional(),
+      range: finite.exactOptional(),
+      damagePct: finite.exactOptional(),
+      shockStacks: finite.exactOptional(),
+      periodSec: finite.exactOptional(),
+    })
+    .readonly(),
 } as const satisfies { readonly [K in GrantKind]: z.ZodType<Extract<EmitterGrant, { kind: K }>> };
 
 export const EmitterGrantSchema = exact<EmitterGrant>()(
-  z.discriminatedUnion('kind', [GRANT_SCHEMAS.thorns]),
+  z.discriminatedUnion('kind', [GRANT_SCHEMAS.thorns, GRANT_SCHEMAS.segment]),
 );
 
 export const EnemyDefSchema = exact<EnemyDef>()(

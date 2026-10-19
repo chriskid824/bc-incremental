@@ -75,6 +75,7 @@ import {
   createLobState,
   createPulseAcc,
   createRepeatState,
+  createSegmentState,
   createSplitState,
   createZonePool,
 } from './systemState';
@@ -203,6 +204,11 @@ export interface Enemy extends EnemyState {
   zoneUntil: number;
   /** Serial of the last attack that hit this enemy, so chains skip it. */
   hitMark: number;
+  /**
+   * Serial of the last segment judgement that marked it to hit (SegmentState.serial,
+   * src/sim/systems/segments.ts), so each judgement hits it once.
+   */
+  segMark: number;
   /** Projectiles in flight towards this enemy (see src/sim/targeting.ts). */
   inbound: number;
   /** Serial of the last volley that targeted this enemy. */
@@ -347,11 +353,10 @@ export interface RunContext {
    */
   readonly emitters: readonly EmitterRuntime[];
   /**
-   * The emitters of the kinds another stage runs, each list in emitter order: the contact stage's
-   * thorns (src/sim/systems/contact.ts) and the segment stage's, which come later in C4.
+   * The thorns emitters, in emitter order, which the contact stage runs
+   * (src/sim/systems/contact.ts); the segment stage's are in sys.segments.
    */
   readonly thornsEmitters: readonly EmitterRuntime[];
-  readonly segmentEmitters: readonly EmitterRuntime[];
 
   // ---- Triggers and effects (src/sim/effects/) ----
   /**
@@ -692,7 +697,7 @@ export function createRunContext(
   const startWaveNumber = config.startWave;
 
   // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
-  // contact stage the thorns.
+  // contact stage the thorns and the segment stage the segments.
   const emitters = build.emitters.map((spec, index) =>
     createEmitterRuntime(
       spec,
@@ -725,6 +730,7 @@ export function createRunContext(
   const projectiles: Projectile[] = [];
   const shots = createShotPool();
   const zones = createZonePool(build);
+  const segments = createSegmentState(emitters.filter((em) => em.spec.kind === 'segment'));
   let shotPad = 0;
   for (const id of ENEMY_IDS) {
     if (!isToughType(id)) shotPad = Math.max(shotPad, data.enemies[id].radius);
@@ -748,6 +754,7 @@ export function createRunContext(
     shotCount: 0,
     zones,
     zoneCount: 0,
+    segments,
     shards: ZERO,
     cores: 0,
     finished: false,
@@ -878,7 +885,6 @@ export function createRunContext(
 
     emitters,
     thornsEmitters,
-    segmentEmitters: [],
 
     // Its run is this context, set once the literal is built.
     evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1, ctx: null },
@@ -919,6 +925,7 @@ export function createRunContext(
       lob: createLobState(),
       repeat: createRepeatState(repeatPayloads),
       split: createSplitState(build),
+      segments,
     },
 
     enemies,

@@ -350,6 +350,25 @@ function grantIssues(grant: EmitterGrant): string[] {
         issues.push(`damagePct must be > 0 (got ${grant.damagePct})`);
       }
       break;
+    case 'segment': {
+      // The schema takes only shocked endpoints; data checked without it can still name the
+      // drones' or the summons'.
+      const endpoints: string = grant.endpoints;
+      if (endpoints === 'drones' || endpoints === 'summons') {
+        issues.push(
+          `segment endpoints '${endpoints}' come from drones and summons, which the simulation adds in C5`,
+        );
+      } else if (endpoints !== 'shocked') {
+        issues.push(`endpoints must be 'shocked' (got ${endpoints})`);
+      }
+      if (grant.links !== undefined && grant.links !== 1 && grant.links !== 2) {
+        issues.push(`links must be 1 or 2 (got ${grant.links})`);
+      }
+      if (grant.range !== undefined && !(grant.range > 0)) {
+        issues.push(`range must be > 0 (got ${grant.range})`);
+      }
+      break;
+    }
   }
   return issues;
 }

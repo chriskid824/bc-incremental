@@ -907,6 +907,54 @@ const SLASH_COIN_STATS = makeStats(
   },
 );
 
+/**
+ * C4.14's segments: 雷網 on outer.lightning at its defaults (2 links within 200, 10% of the
+ * damage stat, 1 shock stack, every 0.25 s) and a center-board segment of 1 link within 150, 30%
+ * of the damage stat and 2 stacks every 0.5 s, on a volley that shocks a third of its hits and
+ * chains once. The segments' hits crit and kill (pentagons among them, whose shards appear on
+ * the links), and their shock keeps the endpoints shocked; a kill trigger on outer.lightning
+ * explodes some of the kills.
+ */
+const SEGMENT_STATS = makeStats(
+  {
+    damage: 5,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    shockChance: 0.3,
+    chainCount: 1,
+  },
+  maskProbeMods(),
+  {
+    triggers: [
+      {
+        source: 'outer.lightning',
+        spec: {
+          on: 'kill',
+          when: [{ chance: 0.3 }],
+          do: [{ kind: 'explode', radius: 60, damagePct: 0.5 }],
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [
+      { source: 'outer.lightning', grant: { kind: 'segment', endpoints: 'shocked' } },
+      {
+        source: 'center',
+        grant: {
+          kind: 'segment',
+          endpoints: 'shocked',
+          links: 1,
+          range: 150,
+          damagePct: 0.3,
+          shockStacks: 2,
+          periodSec: 0.5,
+        },
+      },
+    ],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1001,6 +1049,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'slashCoin',
     config: { stats: SLASH_COIN_STATS, rules: [], startWave: 12 },
     expected: ['d6f12b8bbb528bfb', '27b2f38e6d4dacc2'],
+  },
+  {
+    name: 'segments',
+    config: { stats: SEGMENT_STATS, rules: [], startWave: 12 },
+    expected: ['a2136f80c726b22c', 'f6cab0da957c63a6'],
   },
 ];
 

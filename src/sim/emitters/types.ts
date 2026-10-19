@@ -5,13 +5,14 @@
  * flags and the ModTable rows of its hits and ailments, cached by slot. The signature attack is
  * the emitter at index 0 (CompiledBuild.emitters); M1's is the volley (volley.ts), 熔核's the lob
  * (lob.ts). The talent nodes' emitter grants (src/data/emitters.ts) follow it, such as thorns,
- * whose hits the contact stage deals (src/sim/systems/contact.ts).
+ * whose hits the contact stage deals (src/sim/systems/contact.ts), and segments, whose
+ * judgements the segment stage makes (src/sim/systems/segments.ts).
  */
 
 import type { Num } from '../../core/num';
 import { mul, num } from '../../core/num';
 import type { Rng } from '../../core/rng';
-import { THORNS_DAMAGE_PCT } from '../../data/emitters';
+import { SEGMENT_DEFAULTS, THORNS_DAMAGE_PCT } from '../../data/emitters';
 import type { EmitterGrant } from '../../data/emitters';
 import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
@@ -69,8 +70,23 @@ export interface ThornsSpec extends EmitterBase {
   readonly kind: 'thorns';
 }
 
+/**
+ * A segment grant (雷網): every periodSec, the alive shocked enemies each link to their `links`
+ * nearest others within `range`, and every enemy on a link takes one hit, then shockStacks shock
+ * stacks (src/sim/systems/segments.ts).
+ */
+export interface SegmentSpec extends EmitterBase {
+  readonly kind: 'segment';
+  readonly endpoints: 'shocked';
+  /** 1 or 2. */
+  readonly links: number;
+  readonly range: number;
+  readonly shockStacks: number;
+  readonly periodSec: number;
+}
+
 /** What an emitter is; `kind` says how it deals its damage. */
-export type EmitterSpec = VolleySpec | LobSpec | ThornsSpec;
+export type EmitterSpec = VolleySpec | LobSpec | ThornsSpec | SegmentSpec;
 
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
@@ -88,6 +104,23 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
         chains: false,
         rollsAilments: true,
         canCrit: true,
+      };
+    case 'segment':
+      // Its hits roll no ailments: its shock is its own, given after each hit.
+      return {
+        kind: 'segment',
+        signature: false,
+        source,
+        damagePct: grant.damagePct ?? SEGMENT_DEFAULTS.damagePct,
+        tags: TAG.hit | TAG.lightning | TAG.area,
+        chains: false,
+        rollsAilments: false,
+        canCrit: true,
+        endpoints: grant.endpoints,
+        links: grant.links ?? SEGMENT_DEFAULTS.links,
+        range: grant.range ?? SEGMENT_DEFAULTS.range,
+        shockStacks: grant.shockStacks ?? SEGMENT_DEFAULTS.shockStacks,
+        periodSec: grant.periodSec ?? SEGMENT_DEFAULTS.periodSec,
       };
   }
 }
@@ -173,8 +206,9 @@ export interface Payload {
   /** The payload of the zone each attack of it leaves: a lob's fire zone (火地); null for none. */
   readonly zoneVariant: Payload | null;
   /**
-   * A pulse's payload (a zone's): its hits add to the pulse's tally (PulseAcc) instead of each
-   * raising a hit event, and the pulse raises one pulse event (src/sim/systems/zones.ts).
+   * A pulse's payload (a zone's, a segment's): its hits add to the pulse's tally (PulseAcc)
+   * instead of each raising a hit event, and the pulse raises one pulse event
+   * (src/sim/systems/zones.ts, src/sim/systems/segments.ts).
    */
   readonly aggregate: boolean;
   /** IGNORE_SHIELD and IGNORE_ARMOUR: a coinHit's; 0 for every other payload. */
@@ -240,7 +274,8 @@ function sharedRows(spec: PayloadSpec): Int32Array {
 
 /**
  * The payload of an emitter: its share of the damage stat, its tags and source, on `rng`; a
- * lob's carries its fire zone's (lobZonePayload).
+ * lob's carries its fire zone's (lobZonePayload); a segment's is a pulse's, one tally per
+ * judgement.
  */
 export function emitterPayload(build: CompiledBuild, spec: EmitterSpec, rng: Rng): Payload {
   return createPayload({
@@ -254,6 +289,7 @@ export function emitterPayload(build: CompiledBuild, spec: EmitterSpec, rng: Rng
     canCrit: spec.canCrit,
     damageMode: ROWS,
     zoneVariant: spec.kind === 'lob' ? lobZonePayload(build, spec, rng) : null,
+    aggregate: spec.kind === 'segment',
   });
 }
 
@@ -307,8 +343,17 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
     case 'thorns':
       // Its hits come with the contacts, not on a period.
       return Infinity;
+    case 'segment':
+      // Its judgements keep their period whatever the attack speed.
+      return periodTicks(1 / spec.periodSec);
   }
 }
+
+/**
+ * The ticks a periodic emitter's phase rule counts in: an emitter of index i takes the phase
+ * (3 + 4 × i) % PHASE_TICKS, so emitters of one period act on different ticks.
+ */
+const PHASE_TICKS = 15;
 
 /** One emitter of the run: its spec, payload and counters. */
 export interface EmitterRuntime {
@@ -324,6 +369,11 @@ export interface EmitterRuntime {
   interval: number;
   /** Ticks accumulated towards the next attack, cadence per tick. */
   acc: number;
+  /**
+   * Ticks counted towards the next judgement of a segment, one per tick (stepSegments); it
+   * starts its phase below 0, so segments judge on different ticks. 0 for the other kinds.
+   */
+  timer: number;
   /** Shots fired (a volley's projectiles, a lob's bombs), for steadyAim's every-Nth shot. */
   shots: number;
   /** Attacks made, for steadyAim's every-Nth attack; nthAttack triggers count in TriggerState. */
@@ -348,6 +398,7 @@ export function createEmitterRuntime(
     index,
     interval,
     acc: 0,
+    timer: spec.kind === 'segment' ? -((3 + 4 * index) % PHASE_TICKS) : 0,
     shots: 0,
     attacks: 0,
     volley: 0,

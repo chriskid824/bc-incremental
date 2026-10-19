@@ -109,7 +109,7 @@ describe('volley', () => {
       expect(stepped).toHaveLength(1);
       expect(stepped[0]).toBe(volley);
       expect(ctx.thornsEmitters).toEqual([]);
-      expect(ctx.segmentEmitters).toEqual([]);
+      expect(ctx.sys.segments.emitters).toEqual([]);
     }
   });
 

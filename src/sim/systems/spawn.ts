@@ -108,6 +108,7 @@ export function addEnemy(
     zoneSource: -1,
     zoneUntil: 0,
     hitMark: 0,
+    segMark: 0,
     inbound: 0,
     volleyMark: 0,
     tough: isToughType(def.id),

@@ -630,6 +630,15 @@ describe('ConversionSpecSchema', () => {
 
 const SAMPLE_GRANTS: { readonly [K in GrantKind]: Extract<EmitterGrant, { kind: K }> } = {
   thorns: { kind: 'thorns', damagePct: 2 },
+  segment: {
+    kind: 'segment',
+    endpoints: 'shocked',
+    links: 1,
+    range: 150,
+    damagePct: 0.2,
+    shockStacks: 2,
+    periodSec: 0.5,
+  },
 };
 
 describe('EmitterGrantSchema', () => {
@@ -640,6 +649,8 @@ describe('EmitterGrantSchema', () => {
       expect(GRANT_SCHEMAS[kind].parse(grant)).toEqual(grant);
     }
     expect(EmitterGrantSchema.parse({ kind: 'thorns' })).toEqual({ kind: 'thorns' });
+    const bare = { kind: 'segment', endpoints: 'shocked' };
+    expect(EmitterGrantSchema.parse(bare)).toEqual(bare);
   });
 
   it.each([
@@ -647,6 +658,11 @@ describe('EmitterGrantSchema', () => {
     ['a damage share that is not a number', { kind: 'thorns', damagePct: '3' }],
     ['a damage share that is not finite', { kind: 'thorns', damagePct: Infinity }],
     ['an unknown key', { kind: 'thorns', radius: 40 }],
+    ['a segment without endpoints', { kind: 'segment', links: 2 }],
+    ['a segment between the drones, which C5 adds', { kind: 'segment', endpoints: 'drones' }],
+    ['a segment between the summons, which C5 adds', { kind: 'segment', endpoints: 'summons' }],
+    ['a segment range that is not finite', { kind: 'segment', endpoints: 'shocked', range: NaN }],
+    ['a segment with an unknown key', { kind: 'segment', endpoints: 'shocked', radius: 40 }],
   ])('rejects %s', (_label, grant) => {
     expect(EmitterGrantSchema.safeParse(grant).success).toBe(false);
   });

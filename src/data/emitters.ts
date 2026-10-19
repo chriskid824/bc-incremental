@@ -18,11 +18,45 @@ export interface ThornsGrant {
   readonly damagePct?: number;
 }
 
-export type EmitterGrant = ThornsGrant;
+/**
+ * A segment (雷網): every periodSec, each endpoint links to its `links` nearest other endpoints
+ * within `range`, and every enemy on a link takes one hit and shockStacks shock stacks
+ * (src/sim/systems/segments.ts). The hit is tagged hit, lightning and area, can crit and rolls
+ * no ailments.
+ */
+export interface SegmentGrant {
+  readonly kind: 'segment';
+  /**
+   * What the links join: the alive shocked enemies. Drones and summons come with them in C5,
+   * and validation rejects them until then.
+   */
+  readonly endpoints: 'shocked';
+  /** Links each endpoint makes: 1 or 2; SEGMENT_DEFAULTS.links when omitted. */
+  readonly links?: number;
+  /** Longest link; SEGMENT_DEFAULTS.range when omitted. */
+  readonly range?: number;
+  /** Base damage of its hit as a fraction of the damage stat; SEGMENT_DEFAULTS.damagePct. */
+  readonly damagePct?: number;
+  /** Shock stacks each enemy it hits takes after the hit; SEGMENT_DEFAULTS.shockStacks. */
+  readonly shockStacks?: number;
+  /** Seconds between its judgements; SEGMENT_DEFAULTS.periodSec when omitted. */
+  readonly periodSec?: number;
+}
+
+export type EmitterGrant = ThornsGrant | SegmentGrant;
 export type GrantKind = EmitterGrant['kind'];
 
 /** A thorns hit's base damage when its grant names none: 300% of the damage stat. */
 export const THORNS_DAMAGE_PCT = 3;
+
+/** A segment grant's fields when it omits them. */
+export const SEGMENT_DEFAULTS = {
+  links: 2,
+  range: 200,
+  damagePct: 0.1,
+  shockStacks: 1,
+  periodSec: 0.25,
+} as const;
 
 /** An emitter grant of an allocated node, with the source of its node (sourceOfNode). */
 export interface SourcedEmitter {
@@ -33,11 +67,14 @@ export interface SourcedEmitter {
 
 /**
  * What tells two grants of one kind and source apart: grants that share it are one emitter, and
- * the build keeps the first. A source has one thorns emitter, so thorns has no key.
+ * the build keeps the first. A source has one thorns emitter, so thorns has no key; it has one
+ * segment emitter per kind of endpoint.
  */
 export function grantKey(grant: EmitterGrant): string {
   switch (grant.kind) {
     case 'thorns':
       return '';
+    case 'segment':
+      return grant.endpoints;
   }
 }

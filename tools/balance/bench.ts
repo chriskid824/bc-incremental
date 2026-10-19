@@ -33,7 +33,13 @@
  *   damage keeps the alive band. Its report adds the zone workload: zones created per source,
  *   pulses, zone hits and hits per pulse, and the average live effect and signature zones over
  *   ticks 301–1800; and the bombs: bombs a second and per firing, explosions and their hits,
- *   freezes, ignites and µs per firing's lob aim.
+ *   freezes, ignites and µs per firing's lob aim. v3 (C4.14, the C4 final) adds 雷網全開: a
+ *   shock chance of .3 and 雷網, the segment grant, on outer.lightning, whose judgements link
+ *   the shocked enemies 4 times a second; its report adds the segment workload: judgements, the
+ *   endpoints, links and hits of each, and the average shocked. Its local report (not --check)
+ *   adds segmentsAllShocked: its runs with every alive enemy shocked before each judgement,
+ *   timed in turn with normal's, and their ratio, printed and never gated (docs/v3 C4 design
+ *   §7.3, §7.6).
  * - shots: a stress-family scenario (C4.12) whose triggers fire rings of small projectiles
  *   (src/sim/effects/execute.ts): 12 from the player 5 times a second and 4 from each kill, on
  *   M1's attack. Its report's peak shots counts them (the shot pool's), and its local report
@@ -64,13 +70,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadGameData, targetDamage } from '../../src/data';
 import type { GameData, StatBlock } from '../../src/data';
+import type { SourcedEmitter } from '../../src/data/emitters';
 import type { Modifier, StatExtras } from '../../src/data/stats';
 import type { TriggerSpec } from '../../src/data/triggers';
 import { COUNTER_IDS, createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { CounterId, RunConfig } from '../../src/sim';
+import { addShock } from '../../src/sim/ailments/shock';
 import { PROJECTILE_CAP } from '../../src/sim/caps';
 import { aimDense, beginAim } from '../../src/sim/emitters/lob';
 import type { TestModule } from '../../src/sim/rules';
+import type { RunContext } from '../../src/sim/systems/context';
 import {
   centerTriggers,
   makeStats,
@@ -153,6 +162,12 @@ interface Scenario {
    * local report runs; --check does not (docs/v3 C4 design §7.6).
    */
   capProbe?(seed: number): RunConfig;
+  /**
+   * Its local report adds segmentsAllShocked (ALL_SHOCKED): its runs with every alive enemy
+   * shocked before each segment judgement, timed in turn with normal's; --check does not run it
+   * (docs/v3 C4 design §7.3, §7.6).
+   */
+  readonly allShocked?: boolean;
 }
 
 /**
@@ -220,6 +235,37 @@ const R1_SCOPED: readonly Modifier[] = [
 const FROST_FIRE: TestModule = (b) => {
   const lob = b.signature().lob;
   if (lob !== null) lob.zone.slow = 0.3;
+};
+
+/**
+ * stress v3's 雷網 (docs/v3 C4 design §7.3): the segment grant on outer.lightning, which every
+ * 0.25 s links each shocked enemy to its 2 nearest shocked others within 200 and hits every
+ * enemy on a link for 10% of the damage stat, then gives it a shock stack.
+ */
+const WEB: SourcedEmitter = {
+  source: 'outer.lightning',
+  grant: {
+    kind: 'segment',
+    endpoints: 'shocked',
+    links: 2,
+    range: 200,
+    damagePct: 0.1,
+    shockStacks: 1,
+  },
+};
+const R1_WEB_EXTRAS: StatExtras = { ...R1_EXTRAS, emitters: [WEB] };
+
+/**
+ * segmentsAllShocked's module: on a tick a segment emitter judges, every alive enemy takes a
+ * shock stack first (the tick hooks run before the segment stage), so every one is an endpoint.
+ */
+const ALL_SHOCKED: TestModule = (b) => {
+  b.hook('tick', (ctx) => {
+    let due = false;
+    for (const em of ctx.sys.segments.emitters) if (em.timer + 1 >= em.interval) due = true;
+    if (!due) return;
+    for (const enemy of ctx.enemies) if (enemy.alive) addShock(ctx, enemy, 1, 0);
+  });
 };
 
 /**
@@ -304,12 +350,13 @@ const stressConfig = (seed: number, build: StressBuild): RunConfig => ({
 /**
  * A stress-family scenario: `build`'s runs on the stress fixture, 20 timed and 3 warm-up runs
  * of 30 s from STRESS_START_WAVE, whatever --start-wave says; `probe`, when given, is its cap
- * probe's build.
+ * probe's build, and `allShocked` adds segmentsAllShocked to its local report.
  */
 function stressScenario(
   build: StressBuild,
   testModules?: readonly TestModule[],
   probe?: StressBuild,
+  allShocked = false,
 ): Scenario {
   return {
     runs: 20,
@@ -323,6 +370,7 @@ function stressScenario(
     ...(testModules === undefined ? {} : { testModules }),
     config: (seed) => stressConfig(seed, build),
     ...(probe === undefined ? {} : { capProbe: (seed: number) => stressConfig(seed, probe) }),
+    ...(allShocked ? { allShocked } : {}),
   };
 }
 
@@ -446,8 +494,8 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   },
   // About 300 alive from tick 300 on, under M1's attack (docs/v3 C4 design §7.2).
   stressM1: stressScenario(() => ({ stats: stressStats(), rules: [] })),
-  // v2 (C4.7): R1-12, 6 firings of 2 bombs a second; a third of stressStats' damage keeps the
-  // alive band.
+  // v3 (C4.14): v2, R1-12 (6 firings of 2 bombs a second; a third of stressStats' damage keeps
+  // the alive band), with 雷網全開: shockChance .3 and 雷網.
   stress: stressScenario(
     () => ({
       stats: stressStats(
@@ -455,15 +503,18 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
           attackSpeed: 16,
           projectileCount: 3,
           poisonChance: 0.3,
+          shockChance: 0.3,
           damage: targetDamage(STRESS_START_WAVE) / 7.5,
         },
-        R1_EXTRAS,
+        R1_WEB_EXTRAS,
         R1_SCOPED,
       ),
       rules: [],
       signature: { id: 'magmaBomb' },
     }),
     [FROST_FIRE],
+    undefined,
+    true,
   ),
   // C4.12: rings of small projectiles from the player and from each kill, on M1's attack; the
   // cap probe adds a ring that fills the shot pool.
@@ -547,6 +598,22 @@ interface Workload {
   readonly counters: readonly (readonly [CounterId, number])[];
   /** Microseconds per firing's lob aim (lobAimMicros); null when the signature is not the lob. */
   readonly lobAimMicros: number | null;
+  /** The shocked and the segment judgements (segmentWorkload). */
+  readonly segments: SegmentWorkload;
+}
+
+/** What the segment stage did in an untimed run, and the shocked it judged (segmentWorkload). */
+interface SegmentWorkload {
+  /** Alive enemies holding shock after each tick past ALIVE_FROM_TICK, averaged. */
+  readonly averageShocked: number;
+  /** Judgements, and those with 2 endpoints or more: the ones that link and raise a pulse. */
+  readonly judgements: number;
+  readonly linked: number;
+  /** Over the linked judgements: their endpoints, links and hits in all, and the most endpoints. */
+  readonly endpoints: number;
+  readonly links: number;
+  readonly hits: number;
+  readonly peakEndpoints: number;
 }
 
 /** The workload of an untimed run of `config`. */
@@ -648,6 +715,66 @@ function measureWorkload(
       (id) => [id, result.counters[id]] as const,
     ),
     lobAimMicros: lobAimMicros(config, data, testModules),
+    segments: segmentWorkload(config, data, testModules),
+  };
+}
+
+/**
+ * The segment workload of another untimed run of `config`, the same run, which a test module
+ * watches: after each tick, its segment judgements (SegmentState: the serial, and the endpoints
+ * and links of a judgement that raised a pulse; the segment emitters of one period judge on
+ * different ticks) and, past ALIVE_FROM_TICK, the alive enemies holding shock.
+ */
+function segmentWorkload(
+  config: RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[],
+): SegmentWorkload {
+  const seen: { ctx: RunContext | null } = { ctx: null };
+  const watch: TestModule = (b) => {
+    b.hook('tick', (ctx) => {
+      seen.ctx = ctx;
+    });
+  };
+  const sim = createSimulation(config, data, [...testModules, watch]);
+  let shockedSum = 0;
+  let shockedTicks = 0;
+  let linked = 0;
+  let endpoints = 0;
+  let links = 0;
+  let hits = 0;
+  let peakEndpoints = 0;
+  while (!sim.state.finished) {
+    const events = sim.step(NO_INPUT);
+    const ctx = seen.ctx;
+    if (ctx === null) continue;
+    const sg = ctx.sys.segments;
+    for (const event of events) {
+      if (event.type !== 'pulse' || event.kind !== 'segment') continue;
+      const ends = sg.ends.length;
+      const i = sg.emitters.findIndex((em) => em.index === event.id);
+      linked++;
+      endpoints += ends;
+      links += sg.lines[i]?.count ?? 0;
+      hits += event.hits;
+      if (ends > peakEndpoints) peakEndpoints = ends;
+    }
+    if (ctx.now > ALIVE_FROM_TICK) {
+      const now = ctx.now;
+      for (const enemy of ctx.enemies) {
+        if (enemy.alive && enemy.shockStacks > 0 && enemy.shockUntil > now) shockedSum++;
+      }
+      shockedTicks++;
+    }
+  }
+  return {
+    averageShocked: shockedTicks === 0 ? NaN : shockedSum / shockedTicks,
+    judgements: seen.ctx?.sys.segments.serial ?? 0,
+    linked,
+    endpoints,
+    links,
+    hits,
+    peakEndpoints,
   };
 }
 
@@ -773,7 +900,62 @@ function workloadText(workload: Workload): string {
   return (
     `peak ${workload.peakAlive} alive, peak ${workload.peakShots} shots, ` +
     `${workload.kills} kills, ${bombs}${zones}${workload.freezes} freezes, ` +
-    `${workload.ignites} ignites, counters: ${counters}${aim}`
+    `${workload.ignites} ignites, ${segmentText(workload.segments)}counters: ${counters}${aim}`
+  );
+}
+
+/** The segment workload as report text: the average shocked, and the judgements if any. */
+function segmentText(segments: SegmentWorkload): string {
+  const shocked = `average ${segments.averageShocked.toFixed(1)} shocked, `;
+  if (segments.judgements === 0) return shocked;
+  const per = (n: number): string => (segments.linked === 0 ? 0 : n / segments.linked).toFixed(1);
+  return (
+    shocked +
+    `${segments.judgements} segment judgements (${segments.linked} with 2 endpoints or more: ` +
+    `${per(segments.endpoints)} endpoints, ${per(segments.links)} links and ` +
+    `${per(segments.hits)} hits each, at most ${segments.peakEndpoints} endpoints), `
+  );
+}
+
+/**
+ * segmentsAllShocked (docs/v3 C4 design §7.3): `runs` runs of `config(i)` with ALL_SHOCKED
+ * among the test modules, each timed in turn with a normal run (seeds from `seed`, normal's
+ * start wave 30), after `warmup` of each; prints their medians, the ratio and the probe run's
+ * segment workload. Printed, never gated; --check does not run it (§7.6).
+ */
+function allShockedReport(
+  config: (i: number) => RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[],
+  { runs, warmup, seed }: { runs: number; warmup: number; seed: number },
+): void {
+  const normal = SCENARIOS.normal;
+  const realData = loadGameData();
+  const modules = [...testModules, ALL_SHOCKED];
+  const normalRun = (i: number): number =>
+    runOnce(normal.config(seed + i, DEFAULT_START_WAVE, ''), realData).ms;
+  const probeRun = (i: number): number => runOnce(config(i), data, modules).ms;
+  for (let i = 0; i < warmup; i++) {
+    normalRun(runs + i);
+    probeRun(runs + i);
+  }
+  const normalMs: number[] = [];
+  const probeMs: number[] = [];
+  for (let i = 0; i < runs; i++) {
+    if (i % 2 === 0) {
+      normalMs.push(normalRun(i));
+      probeMs.push(probeRun(i));
+    } else {
+      probeMs.push(probeRun(i));
+      normalMs.push(normalRun(i));
+    }
+  }
+  const segments = segmentWorkload(config(0), data, modules);
+  console.log(
+    `segmentsAllShocked (report only, seeds from ${seed}): median ${median(probeMs).toFixed(2)} ` +
+      `ms, ratio ${(median(probeMs) / median(normalMs)).toFixed(3)} to normal's median ` +
+      `${median(normalMs).toFixed(2)} ms timed in turn; ${segmentText(segments)}` +
+      `of ${runs} runs`,
   );
 }
 
@@ -970,6 +1152,13 @@ function main(): void {
             `${probe.capped}), against ${probe.ownMicros.toFixed(1)} µs per tick of its own run ` +
             `past tick ${ALIVE_FROM_TICK}`,
         );
+      }
+      if (scenario.allShocked === true) {
+        allShockedReport((i) => configFor(variant, i), data, modules ?? [], {
+          runs,
+          warmup,
+          seed,
+        });
       }
     }
     return p50;
