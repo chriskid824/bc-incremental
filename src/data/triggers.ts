@@ -401,6 +401,9 @@ export interface DetonateSpec {
  *   their damage, to every other enemy within `radius` of it. A transfer: it deals no damage.
  *   Poison only: `stacks` is the fraction of the stacks each enemy gets (default 1, the
  *   longest-lasting first), and `maxTargets` caps how many enemies it reaches (in `order`).
+ *   `toSplitChildren`, on a kill trigger that runs at the kill: each enemy the victim splits
+ *   into gets that fraction of the victim's poison stacks and of their damage left, wherever
+ *   it is and whatever `effect`, `stacks` and `maxTargets` say.
  * - explode: hits up to `maxTargets` enemies within `radius` of the event (in `order`).
  * - nova: hits every enemy within `radius` of the player, or of the event with at 'event'.
  * - push: moves the enemies within `radius` of the event `distance` further from the player.
@@ -438,6 +441,7 @@ export type EffectSpec =
       readonly stacks?: number;
       readonly maxTargets?: number;
       readonly order?: TargetOrder;
+      readonly toSplitChildren?: number;
     }
   | ExplodeSpec
   | NovaSpec

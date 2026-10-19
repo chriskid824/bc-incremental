@@ -4,7 +4,8 @@
  * 1. the kill's transfer triggers (Pandemic's spread; src/sim/effects/dispatch.ts), then the rule
  *    modules' onKill hooks, while the victim still holds its ailments;
  * 2. removal, drops, the kill event and split children, so later hits of the same tick can
- *    reach the children;
+ *    reach the children; then (2b) the transfer triggers of step 1 with a toSplitChildren spread
+ *    give each child its share of the victim's poison;
  * 3. the kill's other triggers, recorded as pending kills (a frozen victim's shatter with them);
  * 4. its DoT rings go back to the pool (src/sim/ailments/apply.ts).
  * The death step of the tick order dispatches the pending kills (their effects run next tick),
@@ -12,12 +13,16 @@
  */
 
 import { add, mul, num } from '../../core/num';
-import { releaseAilments } from '../ailments/apply';
+import { releaseAilments, spreadPoisonToChildren } from '../ailments/apply';
 import { heldFlags } from '../build/eval';
 import { fireInlineKill, recordPendingKills } from '../effects/dispatch';
 import { HIT_BITS, KILL_KIND_SHIFT } from '../effects/flags';
+import { MAX_DEPTH } from '../effects/types';
+import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import type { Enemy, Projectile, RunContext } from './context';
 import { split } from './spawn';
+import { toSplitOf } from './systemState';
+import type { SplitState } from './systemState';
 
 /** Marks the enemy dead: it leaves targeting at once and the arrays at compaction. */
 export function removeEnemy(ctx: RunContext, enemy: Enemy): void {
@@ -72,10 +77,34 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlag
     shards,
     cores,
   });
-  // The children are ctx.enemies[split(...) ..]; C4's toSplitChildren transfers to them here.
-  split(ctx, enemy);
+  // The children are ctx.enemies[first ..].
+  const first = split(ctx, enemy);
+  const ss = ctx.sys.split;
+  if (ss.passedCount > 0) splitTransfers(ctx, enemy, first, ss);
   if (ctx.killPending.length !== 0) recordPendingKills(ctx, enemy, origin, flags, shards);
   releaseAilments(ctx, enemy);
+}
+
+/**
+ * Kill step 2b: for each transfer trigger with a toSplitChildren spread that passed at this kill
+ * (ss.passed, fireInlineKill), each such spread gives every child of the victim,
+ * ctx.enemies[first ..], its share of the victim's poison, one depth more than the kill, at most
+ * MAX_DEPTH. Then the record is cleared, children or not.
+ */
+function splitTransfers(ctx: RunContext, victim: Enemy, first: number, ss: SplitState): void {
+  const end = ctx.enemies.length;
+  if (first < end) {
+    const { triggers, effects } = ctx.build;
+    const depth = Math.min(victim.killDepth + 1, MAX_DEPTH);
+    for (let n = 0; n < ss.passedCount; n++) {
+      const t = triggers[ss.passed[n] as number] as CompiledTrigger;
+      for (let e = t.effectStart; e < t.effectEnd; e++) {
+        const f = toSplitOf(effects[e] as CompiledEffect);
+        if (f > 0) spreadPoisonToChildren(ctx, victim, first, end, f, depth);
+      }
+    }
+  }
+  ss.passedCount = 0;
 }
 
 /** Removes dead entities in place, preserving id order. */

@@ -174,10 +174,8 @@ export function applyPoison(
 /**
  * Moves the burn or poison of `source`'s rings (first: RING_BURN or RING_POISON) to every
  * other alive enemy within `radiusSq` of it, `maxTargets` of them at most: the first in id order,
- * or with `nearest` the nearest to `source`, nearest first (ties by id). Each takes `f` of their
- * damage left and floor(sf × their live stacks) stack counts, keeping each ring's class and
- * credit, at trigger depth `depth`. A ring whose stacks have all ended moves nothing. Returns
- * the enemies reached, or −1 when `source` holds no such stack.
+ * or with `nearest` the nearest to `source`, nearest first (ties by id), each as moveRings gives
+ * it. Returns the enemies reached, or −1 when `source` holds no such stack.
  */
 function spreadRings(
   ctx: RunContext,
@@ -190,11 +188,8 @@ function spreadRings(
   depth: number,
   nearest: boolean,
 ): number {
-  const pool = ctx.rings;
-  const now = ctx.now;
   // As spreadBurns: only stacks that have not ended move, and none means no spread.
-  if (ringEnd(source, first) <= now) return -1;
-  const from = source.rings;
+  if (ringEnd(source, first) <= ctx.now) return -1;
   // In id order, or nearest first; moving stacks kills nothing, so collecting the targets first
   // changes nothing.
   const targets = ctx.spreadTargets;
@@ -206,19 +201,60 @@ function spreadRings(
   for (let i = 0; i < count && spreadTo < maxTargets; i++) {
     const enemy = targets[i] as Enemy;
     if (enemy === source) continue;
-    for (let slot = first; slot < first + 3; slot++) {
-      const r = from[slot] as number;
-      if (r < 0 || (pool.end[r] as number) <= now) continue;
-      // A new ring may grow the pool: take it before reading the pool's arrays.
-      const d = ringFor(ctx, enemy, slot, pool.credit[r] as number);
-      pool.spread(r, d, f, sf, now);
-      extendRingEnd(ctx, enemy, first, d);
-    }
-    syncRingStacks(ctx, enemy, first);
-    if (depth < enemy.ailDepth) enemy.ailDepth = depth;
+    moveRings(ctx, source, enemy, first, f, sf, depth);
     spreadTo++;
   }
   return spreadTo;
+}
+
+/**
+ * Gives `enemy` the burn or poison of `source`'s rings (first: RING_BURN or RING_POISON): `f`
+ * of their damage left and floor(sf × their live stacks) stack counts, keeping each ring's
+ * class and credit, at trigger depth `depth`. A ring whose stacks have all ended moves nothing.
+ */
+function moveRings(
+  ctx: RunContext,
+  source: Enemy,
+  enemy: Enemy,
+  first: number,
+  f: number,
+  sf: number,
+  depth: number,
+): void {
+  const pool = ctx.rings;
+  const now = ctx.now;
+  const from = source.rings;
+  for (let slot = first; slot < first + 3; slot++) {
+    const r = from[slot] as number;
+    if (r < 0 || (pool.end[r] as number) <= now) continue;
+    // A new ring may grow the pool: take it before reading the pool's arrays.
+    const d = ringFor(ctx, enemy, slot, pool.credit[r] as number);
+    pool.spread(r, d, f, sf, now);
+    extendRingEnd(ctx, enemy, first, d);
+  }
+  syncRingStacks(ctx, enemy, first);
+  if (depth < enemy.ailDepth) enemy.ailDepth = depth;
+}
+
+/**
+ * toSplitChildren (kill step 2b, src/sim/systems/death.ts): each of the children `source` split
+ * into, ctx.enemies[first .. end), takes `f` of its poison's damage left and of its live stacks
+ * (moveRings), at trigger depth `depth`; no grid query, no target cap, no event. Nothing moves
+ * once its poison stacks have all ended.
+ */
+export function spreadPoisonToChildren(
+  ctx: RunContext,
+  source: Enemy,
+  first: number,
+  end: number,
+  f: number,
+  depth: number,
+): void {
+  if (source.poisonRingEnd <= ctx.now) return;
+  const enemies = ctx.enemies;
+  for (let i = first; i < end; i++) {
+    moveRings(ctx, source, enemies[i] as Enemy, RING_POISON, f, f, depth);
+  }
 }
 
 /**

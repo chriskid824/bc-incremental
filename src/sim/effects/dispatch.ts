@@ -228,7 +228,8 @@ function passes(
  * alive and holds its ailments, `flags` is the kill's snapshot (killEnemy). No depth gate: they
  * fire at any kill depth, and their effects run one deeper, at most MAX_DEPTH. Their gates see
  * the victim's point; their effects always act on the victim (validation keeps selectors off
- * them).
+ * them). Each that passes with a toSplitChildren spread is recorded in sys.split, for the
+ * victim's children (killEnemy's step 2b).
  */
 export function fireInlineKill(
   ctx: RunContext,
@@ -239,11 +240,14 @@ export function fireInlineKill(
   const list = ctx.killInline;
   const triggers = ctx.build.triggers;
   const depth = Math.min(victim.killDepth + 1, MAX_DEPTH);
+  const ss = ctx.sys.split;
+  const transfers = ss.transfers;
   for (let n = 0; n < list.length; n++) {
     const i = list[n] as number;
     const t = triggers[i] as CompiledTrigger;
     if (t.on === EVENT.diedWithAilment && (flags & HELD_MASK) === 0) continue;
     if (passes(ctx, i, origin, null, flags, victim.x, victim.y) === null) continue;
+    if (transfers.length !== 0 && transfers.includes(i)) ss.passed[ss.passedCount++] = i;
     const entry = ctx.inlineEntry;
     for (let e = t.effectStart; e < t.effectEnd; e++) {
       entry.effect = e;

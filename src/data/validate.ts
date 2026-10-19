@@ -579,8 +579,11 @@ function triggerIssues(trigger: TriggerSpec): string[] {
     issues.push('mixes transfer and other effects on a kill event; split it into two triggers');
   }
   issues.push(...detonateIssues(trigger));
+  const atKill = runsAtKill(trigger);
   trigger.do.forEach((effect, i) => {
-    for (const problem of effectIssues(effect, on, target)) issues.push(`do[${i}] ${problem}`);
+    for (const problem of effectIssues(effect, on, target, atKill)) {
+      issues.push(`do[${i}] ${problem}`);
+    }
   });
   return issues;
 }
@@ -676,12 +679,13 @@ function conversionIssues(conversion: ConversionSpec): string[] {
 
 /**
  * Parameter ranges of one effect, and whether it can run on events `on` for a trigger with the
- * target selector `target`, if any.
+ * target selector `target`, if any, which runs at the kill when `atKill` (runsAtKill).
  */
 function effectIssues(
   effect: EffectSpec,
   on: TriggerEventId,
   target: TargetSelector | undefined,
+  atKill: boolean,
 ): string[] {
   const issues: string[] = [];
   const positive = (name: string, value: number | undefined): void => {
@@ -758,6 +762,17 @@ function effectIssues(
           issues.push(`stacks must be in (0, 1] (got ${effect.stacks})`);
         }
         count('maxTargets', effect.maxTargets);
+        const share = effect.toSplitChildren;
+        if (share !== undefined && !(share > 0 && share <= 1)) {
+          issues.push(`toSplitChildren must be in (0, 1] (got ${share})`);
+        }
+        // The children appear at the kill, after its transfers and before its other triggers.
+        if (share !== undefined && !atKill) {
+          issues.push('toSplitChildren runs at the kill: use it on an inline kill trigger');
+        }
+      } else if ('toSplitChildren' in effect) {
+        // The schema rejects it; data checked without the schema can still carry it.
+        issues.push('toSplitChildren moves poison only');
       }
       break;
     case 'explode':

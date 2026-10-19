@@ -14,6 +14,7 @@ import type { CompiledBuild } from '../build/compile';
 import { IN_ZONE } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import { MAX_SOURCES } from '../build/sources';
+import type { CompiledEffect } from '../effects/types';
 import type { Payload } from '../emitters/types';
 import type { GridPoint } from '../grid';
 import type { ZonePoolState } from '../types';
@@ -29,6 +30,8 @@ export interface SystemState {
   readonly lob: LobState;
   /** The repeats of the signature attack (repeatAttack, src/sim/effects/execute.ts). */
   readonly repeat: RepeatState;
+  /** A kill's transfers to its split children (toSplitChildren, src/sim/systems/death.ts). */
+  readonly split: SplitState;
 }
 
 /**
@@ -253,4 +256,45 @@ export function createRepeatState(payloads: readonly (Payload | null)[]): Repeat
       count: 0,
     },
   };
+}
+
+/**
+ * A kill's transfers to the enemies its victim splits into (RunContext.sys.split): the kill's
+ * transfer triggers that carry a toSplitChildren spread and pass at the kill are recorded here
+ * (fireInlineKill in src/sim/effects/dispatch.ts), and once split() has appended the children,
+ * killEnemy moves the victim's poison to them for each (step 2b, src/sim/systems/death.ts).
+ */
+export interface SplitState {
+  /** The triggers of `transfers` that passed at the kill being resolved: passed[0 .. passedCount). */
+  readonly passed: Int32Array;
+  passedCount: number;
+  /**
+   * The kill triggers that run at the kill (CompiledTrigger.inline) with a toSplitChildren
+   * spread, in trigger order; empty: no kill records anything.
+   */
+  readonly transfers: readonly number[];
+}
+
+/** The share of the victim's poison effect `fx` moves to each split child: toSplitChildren, or 0. */
+export function toSplitOf(fx: CompiledEffect): number {
+  const spec = fx.spec;
+  return spec.kind === 'spreadAilment' && spec.ailment === 'poison'
+    ? (spec.toSplitChildren ?? 0)
+    : 0;
+}
+
+/** Nothing recorded, for `build`'s transfer triggers with a toSplitChildren spread. */
+export function createSplitState(build: CompiledBuild): SplitState {
+  const transfers: number[] = [];
+  for (const t of build.triggers) {
+    if (!t.inline) continue;
+    for (let e = t.effectStart; e < t.effectEnd; e++) {
+      if (toSplitOf(build.effects[e] as CompiledEffect) > 0) {
+        transfers.push(t.index);
+        break;
+      }
+    }
+  }
+  // A trigger passes at most once per kill.
+  return { passed: new Int32Array(transfers.length), passedCount: 0, transfers };
 }

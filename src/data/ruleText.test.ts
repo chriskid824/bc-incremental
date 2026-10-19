@@ -73,7 +73,12 @@ function effectNumbers(effect: EffectSpec): string[][] {
         ...(effect.maxTargets === undefined ? [] : [[String(effect.maxTargets)]]),
       ];
     case 'spreadAilment':
-      return effect.effect === undefined ? [] : [[percent(effect.effect)]];
+      return [
+        ...(effect.effect === undefined ? [] : [[percent(effect.effect)]]),
+        ...(effect.ailment === 'poison' && effect.toSplitChildren !== undefined
+          ? [[percent(effect.toSplitChildren)]]
+          : []),
+      ];
     case 'explode':
       return [
         [percent(effect.damagePct)],

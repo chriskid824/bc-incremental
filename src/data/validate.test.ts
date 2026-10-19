@@ -824,6 +824,37 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('takes toSplitChildren in (0, 1] on a poison spread that runs at the kill only', () => {
+    const toChildren = (toSplitChildren: number) =>
+      ({ kind: 'spreadAilment', ailment: 'poison', radius: 100, toSplitChildren }) as const;
+    expect(
+      triggerIssues(
+        { on: 'kill', when: [{ victimHas: 'poison' }], do: [toChildren(1)] },
+        { on: 'diedWithAilment', do: [toChildren(0.5), toChildren(0.25)] },
+      ),
+    ).toEqual([]);
+    expect(
+      triggerIssues({ on: 'kill', do: [toChildren(0), toChildren(1.5), toChildren(Number.NaN)] }),
+    ).toEqual([
+      `${at} do[0] toSplitChildren must be in (0, 1] (got 0)`,
+      `${at} do[1] toSplitChildren must be in (0, 1] (got 1.5)`,
+      `${at} do[2] toSplitChildren must be in (0, 1] (got NaN)`,
+    ]);
+    // The children appear at the kill: a trigger that runs later has none to give to.
+    const notAtKill = `do[0] toSplitChildren runs at the kill: use it on an inline kill trigger`;
+    expect(triggerIssues({ on: 'hit', do: [toChildren(0.5)] })).toEqual([`${at} ${notAtKill}`]);
+    expect(triggerIssues({ on: 'kill', do: [toChildren(0.5), explode] })).toEqual([
+      `${at} mixes transfer and other effects on a kill event; split it into two triggers`,
+      `${at} ${notAtKill}`,
+    ]);
+    expect(triggerIssues({ on: 'shatter', do: [toChildren(0.5)] })).toContain(`${at} ${notAtKill}`);
+    // The schema refuses it on a burn spread; data checked without it still gets the issue.
+    const burn = { kind: 'spreadAilment', ailment: 'burn', radius: 100, toSplitChildren: 0.5 };
+    expect(
+      triggerIssues({ on: 'kill', do: [burn as unknown as TriggerSpec['do'][number]] }),
+    ).toEqual([`${at} do[0] toSplitChildren moves poison only`]);
+  });
+
   it('accepts target selectors with every pick where they can run', () => {
     expect(
       triggerIssues(

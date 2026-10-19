@@ -648,6 +648,78 @@ const DETONATE_STATS = makeStats(
   },
 );
 
+/**
+ * C4.11's toSplitChildren on waves of pentagons: a poisoned victim's kill spreads half its
+ * poison stacks to the two nearest within 120 and gives each child half its poison; half the
+ * time a poisoned victim's death also spreads half its poison's damage within 60 and gives each
+ * child all of it. A quarter of kills explode, next tick, among the children.
+ */
+const SPLIT_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'outer.poison',
+    {
+      on: 'kill',
+      when: [{ victimHas: 'poison' }],
+      do: [
+        {
+          kind: 'spreadAilment',
+          ailment: 'poison',
+          radius: 120,
+          stacks: 0.5,
+          maxTargets: 2,
+          order: 'nearest',
+          toSplitChildren: 0.5,
+        },
+      ],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'diedWithAilment',
+      when: [{ victimHas: 'poison' }, { chance: 0.5 }],
+      do: [
+        { kind: 'spreadAilment', ailment: 'poison', radius: 60, effect: 0.5, toSplitChildren: 1 },
+      ],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'kill',
+      when: [{ chance: 0.25 }],
+      do: [{ kind: 'explode', radius: 70, damagePct: 0.6 }],
+    },
+  ],
+];
+const SPLIT_STATS = makeStats(
+  {
+    damage: 20,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    poisonChance: 0.5,
+    chainCount: 1,
+    projectileCount: 2,
+  },
+  [...maskProbeMods()],
+  {
+    triggers: SPLIT_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+/** makeTestData() with pentagons from wave 1, 6 of them and one more per wave up to 16. */
+const splitData = (): GameData =>
+  makeTestData({
+    waves: {
+      rules: [
+        { enemy: 'triangle', fromWave: 1, base: 6, perWave: 0.6, maxCount: 40 },
+        { enemy: 'pentagon', fromWave: 1, base: 6, perWave: 1, maxCount: 16 },
+      ],
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -726,6 +798,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'detonate',
     config: { stats: DETONATE_STATS, rules: [], startWave: 12 },
     expected: ['7d2fd5f83ec324ff', '9f3742425233f89b'],
+  },
+  {
+    name: 'splitChildren',
+    config: { stats: SPLIT_STATS, rules: [], startWave: 12 },
+    data: splitData,
+    expected: ['e2045f8b27967b7c', '38b84da29c1e58e6'],
   },
 ];
 

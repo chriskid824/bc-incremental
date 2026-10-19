@@ -388,6 +388,7 @@ describe('EffectSpecSchema', () => {
     { kind: 'detonate', ailment: 'burn' },
     { kind: 'detonate', ailment: 'poison', fraction: 0.5, damage: 2 },
     { kind: 'detonate', ailment: 'bleed', radius: 120, maxTargets: 3, order: 'nearest' },
+    { kind: 'spreadAilment', ailment: 'poison', radius: 100, toSplitChildren: 0.5 },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -400,6 +401,10 @@ describe('EffectSpecSchema', () => {
     [
       'spreadAilment burn with maxTargets',
       { kind: 'spreadAilment', ailment: 'burn', radius: 250, maxTargets: 3 },
+    ],
+    [
+      'spreadAilment burn with toSplitChildren',
+      { kind: 'spreadAilment', ailment: 'burn', radius: 250, toSplitChildren: 0.5 },
     ],
     ...['frost', 'frozen'].map((ailment): [string, unknown] => [
       `applyAilment ${ailment}`,

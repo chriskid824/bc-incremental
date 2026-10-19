@@ -69,7 +69,13 @@ import { createEnemyGrid } from './grid';
 import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
 import { isToughType } from './spawn';
-import { createLobState, createPulseAcc, createRepeatState, createZonePool } from './systemState';
+import {
+  createLobState,
+  createPulseAcc,
+  createRepeatState,
+  createSplitState,
+  createZonePool,
+} from './systemState';
 import type { SystemState } from './systemState';
 
 const DAMAGE = SCOPED_INDEX.damage;
@@ -404,7 +410,10 @@ export interface RunContext {
   readonly selection: SelectionScratch;
 
   // ---- Systems with state of their own (src/sim/systems/systemState.ts) ----
-  /** One member per system: the pulse tally, the zone pool, the lob and the repeats. */
+  /**
+   * One member per system: the pulse tally, the zone pool, the lob, the repeats and a kill's
+   * transfers to its split children.
+   */
   readonly sys: SystemState;
 
   // ---- Entities and public state ----
@@ -897,6 +906,7 @@ export function createRunContext(
       zones,
       lob: createLobState(),
       repeat: createRepeatState(repeatPayloads),
+      split: createSplitState(build),
     },
 
     enemies,
