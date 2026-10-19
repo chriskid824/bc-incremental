@@ -34,6 +34,16 @@
  * live target or at the nearest enemies, or straight out around its start or in a fan at its
  * target. They carry the entry's depth and origin and are no attack: round −1 (never a fan
  * round's primary) and owner −1. They count nothing in Enemy.inbound.
+ *
+ * A slashLine cuts a line `length` long from the event's point, or from its live target, away
+ * from the player, at the alive enemy nearest to its start (but one right on it), or at the live
+ * target; without a direction it does nothing. Its slash event comes before its hits. It hits
+ * once each, in id order, the enemies within half its width and their radius of the line: those
+ * whose centre lies in the line's box grown by half the width and ctx.shotPad
+ * (grid.inSegmentBox), then the tough ones outside the box, whose radius is larger than the pad,
+ * from the grid's marked list (as a straight shot's path, shots.ts). With alwaysCrit its hits
+ * crit whatever their roll, which is drawn all the same. A coinHit hits its live target once,
+ * after its coin event; its payload carries the bypass bits (Payload.bypass).
  */
 
 import type { Num } from '../../core/num';
@@ -260,6 +270,97 @@ function nearestAlive(ctx: RunContext, max: number, x: number, y: number): numbe
     if (enemy.alive) out[n++] = enemy;
   }
   return orderNearest(out, n, max, x, y);
+}
+
+/**
+ * Enemies within this squared distance of a slash's start give it no direction: 'nearest' runs
+ * at the nearest one farther out, so a slash from the event's enemy never aims at that enemy.
+ */
+const SLASH_START_SQ = 1;
+
+/**
+ * The alive enemy nearest to (x, y) farther than SLASH_START_SQ from it, ties to the lower id
+ * (ctx.enemies is in id order); null for none.
+ */
+function nearestFrom(ctx: RunContext, x: number, y: number): Enemy | null {
+  const enemies = ctx.enemies;
+  let best: Enemy | null = null;
+  let bestSq = Infinity;
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i] as Enemy;
+    if (!enemy.alive) continue;
+    const dx = enemy.x - x;
+    const dy = enemy.y - y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq > SLASH_START_SQ && distSq < bestSq) {
+      best = enemy;
+      bestSq = distSq;
+    }
+  }
+  return best;
+}
+
+/**
+ * The alive enemies a slash from (ax, ay) to (bx, by) may reach, into ctx.effectTargets in id
+ * order; returns how many. Those whose centre lies in the line's bounding box grown by `pad`
+ * (grid.inSegmentBox), then the tough ones whose centre lies outside it (grid.marked): their
+ * radius can be larger than the pad, so no enemy within reach is left out, and none is listed
+ * twice.
+ */
+function slashTargets(
+  ctx: RunContext,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  pad: number,
+): number {
+  const grid = ctx.grid;
+  const out = ctx.effectTargets;
+  let count = grid.inSegmentBox(ax, ay, bx, by, pad, out);
+  // The box of inSegmentBox, bound for bound.
+  const minX = Math.min(ax, bx) - pad;
+  const maxX = Math.max(ax, bx) + pad;
+  const minY = Math.min(ay, by) - pad;
+  const maxY = Math.max(ay, by) + pad;
+  const marked = grid.markedCount();
+  for (let k = 0; k < marked; k++) {
+    const enemy = grid.marked(k);
+    if (!enemy.tough || !enemy.alive) continue;
+    const x = enemy.x;
+    const y = enemy.y;
+    if (x >= minX && x <= maxX && y >= minY && y <= maxY) continue;
+    out[count++] = enemy;
+  }
+  // Two runs, each in id order: an insertion sort merges them.
+  for (let i = 1; i < count; i++) {
+    const enemy = out[i] as Enemy;
+    let j = i - 1;
+    while (j >= 0 && (out[j] as Enemy).id > enemy.id) {
+      out[j + 1] = out[j] as Enemy;
+      j--;
+    }
+    out[j + 1] = enemy;
+  }
+  return count;
+}
+
+/**
+ * Squared distance from (px, py) to the segment from (ax, ay) to (bx, by), ends included: to
+ * the nearer end when the point lies beyond it, else to the line (the cross product over the
+ * length).
+ */
+function segDistSq(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const toAx = px - ax;
+  const toAy = py - ay;
+  if (dx * toAx + dy * toAy <= 0) return toAx * toAx + toAy * toAy;
+  const toBx = px - bx;
+  const toBy = py - by;
+  if (dx * toBx + dy * toBy >= 0) return toBx * toBx + toBy * toBy;
+  const cross = dx * toAy - dy * toAx;
+  return (cross * cross) / (dx * dx + dy * dy);
 }
 
 /**
@@ -555,6 +656,62 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
         target,
       );
     }
+  },
+  // A line from the event's point, or from the live target with from 'target', `length` long:
+  // away from the player ('outward'), at the alive enemy nearest to its start ('nearest'), or at
+  // the live target ('eventTarget'); nothing without a direction. Each enemy within half its
+  // width and its own radius of the line is hit once, in id order, on the effect's payload (its
+  // critScale already in the base), forced to crit with alwaysCrit.
+  slashLine(ctx, spec, _fx, entry) {
+    const target = liveTarget(entry);
+    let ax = entry.x;
+    let ay = entry.y;
+    if (spec.from === 'target') {
+      if (target === null) return;
+      ax = target.x;
+      ay = target.y;
+    }
+    let dx: number;
+    let dy: number;
+    if (spec.toward === 'outward') {
+      dx = ax - ctx.player.x;
+      dy = ay - ctx.player.y;
+    } else {
+      const to = spec.toward === 'nearest' ? nearestFrom(ctx, ax, ay) : target;
+      if (to === null) return;
+      dx = to.x - ax;
+      dy = to.y - ay;
+    }
+    if (dx === 0 && dy === 0) return;
+    const norm = Math.sqrt(dx * dx + dy * dy);
+    const length = spec.length;
+    const bx = ax + (dx / norm) * length;
+    const by = ay + (dy / norm) * length;
+    const half = spec.width / 2;
+    ctx.events.push({ type: 'slash', x1: ax, y1: ay, x2: bx, y2: by, width: spec.width });
+    const targets = ctx.effectTargets;
+    const count = slashTargets(ctx, ax, ay, bx, by, half + ctx.shotPad);
+    const p = ctx.effectPayloads[entry.effect] as Payload;
+    const forced = spec.alwaysCrit === true;
+    const { depth, origin } = entry;
+    for (let i = 0; i < count; i++) {
+      const enemy = targets[i] as Enemy;
+      // An enemy that died earlier in this slash is passed over.
+      if (!enemy.alive) continue;
+      const reach = half + enemy.radius;
+      if (segDistSq(enemy.x, enemy.y, ax, ay, bx, by) <= reach * reach) {
+        hitWithPayload(ctx, enemy, p, 0, 1, null, null, forced, depth, origin);
+      }
+    }
+  },
+  // One hit on the live target, at multiplier × the damage stat (its payload's base), whose
+  // payload carries its bypass bits.
+  coinHit(ctx, _spec, _fx, entry) {
+    const target = liveTarget(entry);
+    if (target === null) return;
+    ctx.events.push({ type: 'coin', x: target.x, y: target.y, targetId: target.id });
+    const p = ctx.effectPayloads[entry.effect] as Payload;
+    hitWithPayload(ctx, target, p, 0, 1, null, null, false, entry.depth, entry.origin);
   },
 };
 

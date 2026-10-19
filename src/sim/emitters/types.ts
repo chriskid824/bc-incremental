@@ -107,6 +107,14 @@ export const SIGNATURE = 1;
 export const ALWAYS_IGNITES = 1 << 20;
 
 /**
+ * Bits of Payload.bypass: its hits pass through an enemy's shield, its armour (coinHit's
+ * ignoreShield and ignoreArmour). No enemy has either yet; the defences that read them come
+ * with C7.
+ */
+export const IGNORE_SHIELD = 1;
+export const IGNORE_ARMOUR = 2;
+
+/**
  * Payload.damageMode: rows multiplies a hit by its damage row; prescaled deals baseDamage × crit
  * multiplier × scale as given, whatever the damage rows hold; pctMaxHp, a shatter's, multiplies
  * it by pctMaxHpFactor of its damage row only (src/sim/build/eval.ts), with scale its share of
@@ -169,12 +177,15 @@ export interface Payload {
    * raising a hit event, and the pulse raises one pulse event (src/sim/systems/zones.ts).
    */
   readonly aggregate: boolean;
+  /** IGNORE_SHIELD and IGNORE_ARMOUR: a coinHit's; 0 for every other payload. */
+  readonly bypass: number;
 }
 
 /**
  * What a payload is made of; jumpSource defaults to source, zoneVariant to null, aggregate to
- * false. `rowsOf` is a payload of the same tags, source and jumpSource, so whose slots key the
- * same rows: the new payload shares its row cache (Payload.rows) instead of starting its own.
+ * false, bypass to 0. `rowsOf` is a payload of the same tags, source and jumpSource, so whose
+ * slots key the same rows: the new payload shares its row cache (Payload.rows) instead of
+ * starting its own.
  */
 export interface PayloadSpec {
   readonly baseDamage: Num;
@@ -189,6 +200,7 @@ export interface PayloadSpec {
   readonly damageMode: DamageMode;
   readonly zoneVariant?: Payload | null;
   readonly aggregate?: boolean;
+  readonly bypass?: number;
   readonly rowsOf?: Payload;
 }
 
@@ -210,6 +222,7 @@ export function createPayload(spec: PayloadSpec): Payload {
     rows: spec.rowsOf === undefined ? new Int32Array(SLOT_COUNT).fill(-1) : sharedRows(spec),
     zoneVariant: spec.zoneVariant ?? null,
     aggregate: spec.aggregate ?? false,
+    bypass: spec.bypass ?? 0,
   };
   payload.extraJumpPayload = payload;
   return payload;

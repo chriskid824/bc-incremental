@@ -121,6 +121,10 @@ function effectNumbers(effect: EffectSpec): string[][] {
         ...(effect.pierce === undefined || effect.pierce <= 0 ? [] : [[String(effect.pierce)]]),
         ...(effect.bounce === undefined || effect.bounce === 0 ? [] : [[String(effect.bounce)]]),
       ];
+    case 'slashLine':
+      return [[percent(effect.damagePct)]];
+    case 'coinHit':
+      return [[`×${effect.multiplier}`, percent(effect.multiplier)]];
   }
 }
 

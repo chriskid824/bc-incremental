@@ -5,7 +5,7 @@ import { loadGameData, parseGameData } from './index';
 import { TALENTS } from './talents';
 import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
-import type { ConversionSpec, TriggerSpec } from './triggers';
+import type { ConversionSpec, SlashLineSpec, TriggerSpec } from './triggers';
 import type { GameData, TalentNode } from './types';
 import { MAX_KEYSTONES, starArchetypeIssues, validateGameData } from './validate';
 import { WAVES } from './waves';
@@ -1286,6 +1286,107 @@ describe('trigger validation', () => {
             { ...shots, aim: 'distinct' },
           ],
         },
+      ),
+    ).toEqual([]);
+  });
+
+  it('accepts slashLine in every direction from either point, and coinHit, on wired events', () => {
+    const cut = { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5 } as const;
+    expect(
+      triggerIssues(
+        {
+          on: 'hit',
+          do: [
+            { ...cut, toward: 'outward' },
+            { ...cut, toward: 'nearest', from: 'event', alwaysCrit: true, critScale: 1 },
+            { ...cut, toward: 'eventTarget', from: 'target', critScale: 0, tags: ['chain'] },
+            { kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true },
+          ],
+        },
+        { on: 'kill', do: [{ ...cut, toward: 'nearest' }] },
+        { on: 'periodic', every: 1, do: [{ ...cut, toward: 'outward' }] },
+        {
+          on: 'periodic',
+          every: 1,
+          target: { pick: 'highestHp' },
+          do: [
+            { ...cut, toward: 'eventTarget' },
+            { kind: 'coinHit', multiplier: 10 },
+          ],
+        },
+        { on: 'heroHit', target: { pick: 'nearest' }, do: [{ kind: 'coinHit', multiplier: 2 }] },
+        { on: 'waveStart', do: [{ ...cut, toward: 'nearest' }] },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects slashLine and coinHit parameters out of range', () => {
+    const cut = { kind: 'slashLine', toward: 'outward' } as const;
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { ...cut, length: 0, width: -1, damagePct: 0, critScale: -0.5 },
+          { ...cut, length: Number.NaN, width: Number.NaN, damagePct: Number.NaN },
+          { ...cut, length: 300, width: 24, damagePct: 0.5, tags: ['chain', 'chain'] },
+          { kind: 'coinHit', multiplier: 0 },
+          { kind: 'coinHit', multiplier: -2 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] length must be > 0 (got 0)`,
+      `${at} do[0] width must be > 0 (got -1)`,
+      `${at} do[0] damagePct must be > 0 (got 0)`,
+      `${at} do[0] critScale must be >= 0 (got -0.5)`,
+      `${at} do[1] length must be > 0 (got NaN)`,
+      `${at} do[1] width must be > 0 (got NaN)`,
+      `${at} do[1] damagePct must be > 0 (got NaN)`,
+      `${at} do[2] tags must be unique and not empty; omit the field instead`,
+      `${at} do[3] multiplier must be > 0 (got 0)`,
+      `${at} do[4] multiplier must be > 0 (got -2)`,
+    ]);
+  });
+
+  it("rejects toward 'flight' until C5, and a direction the simulation does not run", () => {
+    const cut = { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5 } as const;
+    const toward = (direction: string): SlashLineSpec =>
+      ({ ...cut, toward: direction }) as unknown as SlashLineSpec;
+    expect(triggerIssues({ on: 'hit', do: [toward('flight'), toward('sideways')] })).toEqual([
+      `${at} do[0] toward 'flight' needs a drone direction, which the simulation adds in C5`,
+      `${at} do[1] toward must be 'outward', 'nearest' or 'eventTarget' (got sideways)`,
+    ]);
+  });
+
+  it("rejects toward 'eventTarget' and coinHit without an enemy on targetless events, but not with a selector's", () => {
+    const cut = { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5 } as const;
+    const coin = { kind: 'coinHit', multiplier: 10 } as const;
+    expect(
+      triggerIssues({
+        on: 'periodic',
+        every: 1,
+        do: [{ ...cut, toward: 'eventTarget' }, coin, { ...cut, toward: 'outward' }],
+      }),
+    ).toEqual([
+      `${at} do[0] toward 'eventTarget' needs the event's enemy, which 'periodic' events have not`,
+      `${at} do[1] coinHit needs a target on 'periodic' events; add target {pick}`,
+    ]);
+    expect(
+      triggerIssues({ on: 'heroHit', do: [{ ...cut, toward: 'eventTarget', from: 'target' }] }),
+    ).toEqual([
+      `${at} do[0] toward 'eventTarget' needs the event's enemy, which 'heroHit' events have not`,
+    ]);
+    expect(triggerIssues({ on: 'waveStart', do: [coin] })).toEqual([
+      `${at} do[0] coinHit needs a target on 'waveStart' events; add target {pick}`,
+    ]);
+    expect(
+      triggerIssues(
+        {
+          on: 'periodic',
+          every: 2,
+          target: { pick: 'farthest' },
+          do: [{ ...cut, toward: 'eventTarget' }],
+        },
+        { on: 'heroHit', target: { pick: 'nearest' }, do: [coin] },
       ),
     ).toEqual([]);
   });

@@ -306,6 +306,20 @@ export type SimEvent =
       readonly total: Num;
       readonly crits: readonly number[];
     }
+  /**
+   * A slashLine effect (src/sim/effects/execute.ts) cut along the line from (x1, y1) to (x2, y2),
+   * `width` wide, before its hits.
+   */
+  | {
+      readonly type: 'slash';
+      readonly x1: number;
+      readonly y1: number;
+      readonly x2: number;
+      readonly y2: number;
+      readonly width: number;
+    }
+  /** A coinHit effect struck enemy `targetId` at (x, y), before its hit. */
+  | { readonly type: 'coin'; readonly x: number; readonly y: number; readonly targetId: number }
   | {
       readonly type: 'enemyKilled';
       readonly enemyId: number;

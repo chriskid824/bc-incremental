@@ -403,6 +403,21 @@ describe('EffectSpecSchema', () => {
       tags: ['chain'],
       element: 'lightning',
     },
+    { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5, toward: 'outward' },
+    { kind: 'slashLine', length: 200, width: 30, damagePct: 1, toward: 'nearest', from: 'event' },
+    {
+      kind: 'slashLine',
+      length: 400,
+      width: 40,
+      damagePct: 0.8,
+      toward: 'eventTarget',
+      from: 'target',
+      alwaysCrit: true,
+      critScale: 1,
+      tags: ['chain'],
+    },
+    { kind: 'coinHit', multiplier: 10 },
+    { kind: 'coinHit', multiplier: 5, ignoreShield: true, ignoreArmour: false },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -486,6 +501,48 @@ describe('EffectSpecSchema', () => {
       'projectiles with an unknown key',
       { kind: 'projectiles', count: 3, damagePct: 0.5, aim: 'radial', radius: 100 },
     ],
+    ...(['flight', 'along', 'player'] as const).map((toward): [string, unknown] => [
+      `slashLine toward '${toward}'`,
+      { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5, toward },
+    ]),
+    ['slashLine without toward', { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5 }],
+    [
+      'slashLine without length',
+      { kind: 'slashLine', width: 24, damagePct: 0.5, toward: 'outward' },
+    ],
+    [
+      'slashLine without width',
+      { kind: 'slashLine', length: 300, damagePct: 0.5, toward: 'outward' },
+    ],
+    [
+      'slashLine without damagePct',
+      { kind: 'slashLine', length: 300, width: 24, toward: 'outward' },
+    ],
+    [
+      'slashLine from an unknown point',
+      {
+        kind: 'slashLine',
+        length: 300,
+        width: 24,
+        damagePct: 0.5,
+        toward: 'outward',
+        from: 'player',
+      },
+    ],
+    [
+      'slashLine with an element',
+      {
+        kind: 'slashLine',
+        length: 300,
+        width: 24,
+        damagePct: 0.5,
+        toward: 'outward',
+        element: 'cold',
+      },
+    ],
+    ['coinHit without a multiplier', { kind: 'coinHit' }],
+    ['coinHit with tags', { kind: 'coinHit', multiplier: 10, tags: ['chain'] }],
+    ['coinHit with shardCostPct (B4)', { kind: 'coinHit', multiplier: 10, shardCostPct: 0.1 }],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
   });

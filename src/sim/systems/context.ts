@@ -37,6 +37,8 @@ import {
   createPayload,
   emitterInterval,
   emitterPayload,
+  IGNORE_ARMOUR,
+  IGNORE_SHIELD,
   PRESCALED,
   ROWS,
   SIGNATURE,
@@ -361,9 +363,9 @@ export interface RunContext {
   readonly triggerState: TriggerState;
   readonly effectQueue: EffectQueue;
   /**
-   * Per effect index, the payload of its hits (explode, nova, detonate) or of the hit its
-   * ailments count as (applyAilment), on the effects stream; null for the others. A
-   * repeatAttack's repeats take theirs from sys.repeat.
+   * Per effect index, the payload of its hits (explode, nova, detonate, projectiles, slashLine,
+   * coinHit) or of the hit its ailments count as (applyAilment), on the effects stream; null for
+   * the others. A repeatAttack's repeats take theirs from sys.repeat.
    */
   readonly effectPayloads: readonly (Payload | null)[];
   /** Some hit or crit trigger or onHit hook listens: the hit path dispatches. */
@@ -586,23 +588,28 @@ export const clamp01 = (value: number): number => Math.min(1, Math.max(0, value)
 export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
 
 /**
- * The payload of an effect that hits (explode, nova, detonate), applies an ailment (applyAilment)
- * or makes a zone (groundZone), on the effects stream: its tags and source, no flags, never
- * chaining. An applied ailment's damage is that of a hit of the payload, so only its burn row is
- * read. A zone's pulses aggregate their hits, which crit and roll ailments as any hit does,
- * before the zone applies its own terms (src/sim/systems/zones.ts); a zone without damage hits
- * nothing, so its payload rolls none. A detonate's hits deal the damage it hands them as it is
- * (PRESCALED, base 1): no crit, no ailment, no damage row, so its payload draws nothing.
+ * The payload of an effect that hits (explode, nova, detonate, projectiles, slashLine, coinHit),
+ * applies an ailment (applyAilment) or makes a zone (groundZone), on the effects stream: its tags
+ * and source, no flags, never chaining. An applied ailment's damage is that of a hit of the
+ * payload, so only its burn row is read. A zone's pulses aggregate their hits, which crit and
+ * roll ailments as any hit does, before the zone applies its own terms
+ * (src/sim/systems/zones.ts); a zone without damage hits nothing, so its payload rolls none. A
+ * detonate's hits deal the damage it hands them as it is (PRESCALED, base 1): no crit, no
+ * ailment, no damage row, so its payload draws nothing. A slashLine's base damage is × (1 +
+ * critScale × `critChance`), the build's crit chance read once here (A21); a coinHit's payload
+ * carries its bypass bits.
  */
-function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
+function effectPayload(fx: CompiledEffect, rng: Rng, critChance: number): Payload | null {
   const spec = fx.spec;
   // A shatter's payload depends on its credit (RunContext.shatterPayloads).
   if (fx.tags === 0 || spec.kind === 'shatter') return null;
   const zone = spec.kind === 'groundZone';
   const detonate = spec.kind === 'detonate';
   const hits = spec.kind !== 'applyAilment' && !detonate;
+  const critScale = spec.kind === 'slashLine' ? (spec.critScale ?? 0) : 0;
+  const coin = spec.kind === 'coinHit';
   return createPayload({
-    baseDamage: fx.baseDamage,
+    baseDamage: critScale > 0 ? mul(fx.baseDamage, 1 + critScale * critChance) : fx.baseDamage,
     tags: fx.tags,
     source: fx.source,
     flags: 0,
@@ -612,6 +619,10 @@ function effectPayload(fx: CompiledEffect, rng: Rng): Payload | null {
     canCrit: hits,
     damageMode: detonate ? PRESCALED : ROWS,
     aggregate: zone,
+    bypass: coin
+      ? (spec.ignoreShield === true ? IGNORE_SHIELD : 0) |
+        (spec.ignoreArmour === true ? IGNORE_ARMOUR : 0)
+      : 0,
   });
 }
 
@@ -756,7 +767,8 @@ export function createRunContext(
     .map((i) => triggers[i] as CompiledTrigger);
   const killInline = Int32Array.from(killTriggers.filter((t) => t.inline).map((t) => t.index));
   const killPending = Int32Array.from(killTriggers.filter((t) => !t.inline).map((t) => t.index));
-  const effectPayloads = effects.map((fx) => effectPayload(fx, effectsRng));
+  const critChance = clamp01(values.critChance);
+  const effectPayloads = effects.map((fx) => effectPayload(fx, effectsRng, critChance));
   const repeatPayloads = effects.map((fx) => repeatPayload(fx, signaturePayload, effectsRng));
   // Who burn damage can be credited to: the applier of every payload whose hits ignite, an
   // emitter's zone payload among them (Payload.zoneVariant), and of every applyAilment and

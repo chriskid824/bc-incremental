@@ -139,15 +139,17 @@ export interface CompiledEffect {
    * Tags of its hits (explode, nova: hit, trigger and area, plus its tags and element; shatter:
    * hit, area and cold; groundZone: hit and zone, plus its tags and element; detonate: its
    * ailment's kind and trigger, plus area with a radius; projectiles: hit, trigger and
-   * projectile, plus its tags and element) or of the hit an ailment it applies counts as
-   * (applyAilment: hit and trigger); 0 for the others.
+   * projectile, plus its tags and element; slashLine: hit and trigger, plus its tags; coinHit:
+   * hit and trigger) or of the hit an ailment it applies counts as (applyAilment: hit and
+   * trigger); 0 for the others.
    */
   readonly tags: TagMask;
   /**
-   * Damage of a hit or of the hit an applied ailment counts as: damage stat × damagePct; 1 for
-   * shatter, whose hits scale it by the victim's max life, and for detonate, whose hits deal the
-   * damage it takes from the ailment; the damage stat for groundZone, whose pulses scale it by
-   * damagePctPerSec × 0.25 and its ailment by ailmentDamagePct.
+   * Damage of a hit or of the hit an applied ailment counts as: damage stat × damagePct (coinHit:
+   * × multiplier; a slashLine's payload scales it by its critScale, RunContext.effectPayloads);
+   * 1 for shatter, whose hits scale it by the victim's max life, and for detonate, whose hits
+   * deal the damage it takes from the ailment; the damage stat for groundZone, whose pulses
+   * scale it by damagePctPerSec × 0.25 and its ailment by ailmentDamagePct.
    */
   readonly baseDamage: Num;
   /** spreadAilment's radius and effect (src/sim/ailments/apply.ts); null for the other kinds. */
@@ -333,6 +335,14 @@ export function compileEffect(
         tagMask(scaled.tags ?? []) |
         (scaled.element === undefined ? 0 : TAG[scaled.element]);
       baseDamage = mul(num(damage), scaled.damagePct);
+      break;
+    case 'slashLine':
+      tags = TAG.hit | TAG.trigger | tagMask(scaled.tags ?? []);
+      baseDamage = mul(num(damage), scaled.damagePct);
+      break;
+    case 'coinHit':
+      tags = TAG.hit | TAG.trigger;
+      baseDamage = mul(num(damage), scaled.multiplier);
       break;
     case 'applyAilment':
       tags = TAG.hit | TAG.trigger;

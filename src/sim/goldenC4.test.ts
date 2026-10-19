@@ -809,6 +809,104 @@ const PROJECTILES_STATS = makeStats(
   },
 );
 
+/**
+ * C4.13's slashes and coins: a primary hit now and then slashes outward from its enemy, and
+ * another toward the other enemy nearest to it within 500, which a selector picks; a crit now
+ * and then slashes at the enemy nearest to it, always critting, scaled by the crit chance, or
+ * flips a coin at its enemy, ignoring armour; a kill now and then slashes at the enemy nearest
+ * to the victim; and every 2 s a coin of 10× hits the enemy with the most hp, ignoring
+ * shields. Their hits crit, ignite and trigger one another at depth.
+ */
+const SLASH_COIN_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'outer.barrage',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'primary' }, { chance: 0.3 }],
+      do: [
+        {
+          kind: 'slashLine',
+          length: 250,
+          width: 30,
+          damagePct: 0.4,
+          toward: 'outward',
+          from: 'target',
+          tags: ['chain'],
+        },
+      ],
+    },
+  ],
+  [
+    'outer.barrage',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'primary' }, { chance: 0.2 }],
+      target: { pick: 'nearest', range: 500, excludeEventTarget: true },
+      do: [{ kind: 'slashLine', length: 400, width: 20, damagePct: 0.25, toward: 'eventTarget' }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'crit',
+      when: [{ chance: 0.5 }],
+      do: [
+        {
+          kind: 'slashLine',
+          length: 300,
+          width: 24,
+          damagePct: 0.3,
+          toward: 'nearest',
+          alwaysCrit: true,
+          critScale: 1,
+        },
+      ],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'crit',
+      when: [{ chance: 0.2 }],
+      do: [{ kind: 'coinHit', multiplier: 3, ignoreArmour: true }],
+    },
+  ],
+  [
+    'outer.ice',
+    {
+      on: 'kill',
+      when: [{ chance: 0.5 }],
+      do: [{ kind: 'slashLine', length: 200, width: 40, damagePct: 0.5, toward: 'nearest' }],
+    },
+  ],
+  [
+    'outer.barrage',
+    {
+      on: 'periodic',
+      every: 2,
+      target: { pick: 'highestHp' },
+      do: [{ kind: 'coinHit', multiplier: 10, ignoreShield: true }],
+    },
+  ],
+];
+const SLASH_COIN_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.25,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1,
+    projectileCount: 2,
+  },
+  maskProbeMods(),
+  {
+    triggers: SLASH_COIN_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -898,6 +996,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'projectiles',
     config: { stats: PROJECTILES_STATS, rules: [], startWave: 12 },
     expected: ['67db1660d5f8b4f9', 'c977d99b8cea8a4c'],
+  },
+  {
+    name: 'slashCoin',
+    config: { stats: SLASH_COIN_STATS, rules: [], startWave: 12 },
+    expected: ['d6f12b8bbb528bfb', '27b2f38e6d4dacc2'],
   },
 ];
 

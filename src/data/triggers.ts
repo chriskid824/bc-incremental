@@ -416,6 +416,45 @@ export interface ProjectilesSpec extends DamagePart {
 }
 
 /**
+ * A slash: a line `length` long from the event's point, or from the event's enemy with from
+ * 'target', that hits once each, in id order, every enemy within width / 2 + its own radius of
+ * the line, for damagePct of the damage stat, tagged hit and trigger plus its tags. It runs by
+ * `toward`:
+ * - 'outward': straight away from the player;
+ * - 'nearest': at the enemy nearest to its start but one right on it (the event's enemy, when
+ *   the slash starts on it);
+ * - 'eventTarget': at the event's enemy (or the one the trigger's selector picked).
+ * Without a direction (its start on the player or on the enemy it runs at, or no enemy to run
+ * at) it does nothing. Its hits crit and roll ailments as any hit does, and always crit with
+ * alwaysCrit; `critScale` k (default 0) scales its damage by 1 + k × the crit chance.
+ */
+export interface SlashLineSpec {
+  readonly kind: 'slashLine';
+  readonly length: number;
+  readonly width: number;
+  readonly damagePct: number;
+  readonly toward: 'outward' | 'nearest' | 'eventTarget';
+  readonly from?: 'event' | 'target';
+  readonly alwaysCrit?: boolean;
+  readonly critScale?: number;
+  /** More delivery tags of its hits: owner or geometry tags (src/data/tags.ts). */
+  readonly tags?: readonly DamageTag[];
+}
+
+/**
+ * One hit on the event's enemy (or the one the trigger's selector picked; on explode, the
+ * explosion's primary) for `multiplier` × the damage stat, tagged hit and trigger. With
+ * ignoreShield and ignoreArmour it passes through an enemy's shield and armour, which no enemy
+ * has yet.
+ */
+export interface CoinHitSpec {
+  readonly kind: 'coinHit';
+  readonly multiplier: number;
+  readonly ignoreShield?: boolean;
+  readonly ignoreArmour?: boolean;
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -446,6 +485,9 @@ export interface ProjectilesSpec extends DamagePart {
  * - detonate: the damage an ailment has left on the event's enemy, dealt at once (DetonateSpec).
  * - projectiles: `count` small projectiles from the event's point or the player, homing or
  *   straight by `aim` (ProjectilesSpec).
+ * - slashLine: a line from the event's point or enemy that hits every enemy it crosses
+ *   (SlashLineSpec).
+ * - coinHit: one hit of `multiplier` × the damage stat on the event's enemy (CoinHitSpec).
  */
 export type EffectSpec =
   | {
@@ -488,7 +530,9 @@ export type EffectSpec =
   | GroundZoneSpec
   | RepeatAttackSpec
   | DetonateSpec
-  | ProjectilesSpec;
+  | ProjectilesSpec
+  | SlashLineSpec
+  | CoinHitSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -517,6 +561,8 @@ export const COEF_FIELDS: {
   repeatAttack: [],
   detonate: ['damage'],
   projectiles: ['damagePct'],
+  slashLine: ['damagePct'],
+  coinHit: ['multiplier'],
 };
 
 /** When `on` happens and every `when` condition holds, run each effect of `do` in order. */

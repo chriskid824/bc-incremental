@@ -870,6 +870,30 @@ function effectIssues(
       delivery(effect.tags);
       break;
     }
+    case 'slashLine': {
+      positive('length', effect.length);
+      positive('width', effect.width);
+      positive('damagePct', effect.damagePct);
+      nonNegative('critScale', effect.critScale);
+      // The schema takes only the directions the simulation runs; data checked without it can
+      // still carry another, such as a drone's flight.
+      const toward: string = effect.toward;
+      if (toward === 'flight') {
+        issues.push("toward 'flight' needs a drone direction, which the simulation adds in C5");
+      } else if (toward !== 'outward' && toward !== 'nearest' && toward !== 'eventTarget') {
+        issues.push(`toward must be 'outward', 'nearest' or 'eventTarget' (got ${toward})`);
+      } else if (toward === 'eventTarget' && target === undefined && TARGETLESS_EVENTS.has(on)) {
+        issues.push(`toward 'eventTarget' needs the event's enemy, which '${on}' events have not`);
+      }
+      delivery(effect.tags);
+      break;
+    }
+    case 'coinHit':
+      positive('multiplier', effect.multiplier);
+      if (target === undefined && TARGETLESS_EVENTS.has(on)) {
+        issues.push(`coinHit needs a target on '${on}' events; add target {pick}`);
+      }
+      break;
   }
   return issues;
 }

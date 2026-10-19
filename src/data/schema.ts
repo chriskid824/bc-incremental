@@ -341,6 +341,27 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         ...damagePart,
       })
       .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('slashLine'),
+        length: finite,
+        width: finite,
+        damagePct: finite,
+        toward: z.enum(['outward', 'nearest', 'eventTarget']),
+        from: z.enum(['event', 'target']).exactOptional(),
+        alwaysCrit: z.boolean().exactOptional(),
+        critScale: finite.exactOptional(),
+        tags: damagePart.tags,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('coinHit'),
+        multiplier: finite,
+        ignoreShield: z.boolean().exactOptional(),
+        ignoreArmour: z.boolean().exactOptional(),
+      })
+      .readonly(),
   ]),
 );
 
