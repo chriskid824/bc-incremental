@@ -955,6 +955,45 @@ const SEGMENT_STATS = makeStats(
   },
 );
 
+/**
+ * C4.16's chain policies on a volley that chains 2.5 times and repeats (REPEAT_TRIGGERS): two
+ * modules write the build's one policy, a fork by 2 at level 1 (渦流), 電荷 and 蓄電, and a 30%
+ * extra jump (跳電), one bounce (回彈) and the farthest enemy at the last level (遠雷). The
+ * signature's repeats chain by it too.
+ */
+const POLICY_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 2.5,
+    chainRetention: 0.7,
+    attackSpeed: 5,
+  },
+  maskProbeMods(),
+  {
+    triggers: REPEAT_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+const policyModules = (): TestModule[] => [
+  (b) => {
+    const spec = b.chainPolicy();
+    spec.branchFirst = 2;
+    spec.decay.push({ from: 1, to: 1, factor: 1 });
+  },
+  (b) => {
+    const spec = b.chainPolicy();
+    spec.extraJumpChance = 0.3;
+    spec.bounces = 1;
+    spec.lastFarthest = true;
+    spec.decay.push({ from: 3, factor: 1.15 });
+  },
+];
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1054,6 +1093,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'segments',
     config: { stats: SEGMENT_STATS, rules: [], startWave: 12 },
     expected: ['a2136f80c726b22c', 'f6cab0da957c63a6'],
+  },
+  {
+    name: 'policy',
+    config: { stats: POLICY_STATS, rules: [], startWave: 12 },
+    modules: policyModules,
+    expected: ['cb7ffbd5c0903d08', '587188bee3ffe3da'],
   },
 ];
 

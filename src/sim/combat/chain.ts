@@ -3,7 +3,8 @@
  * position to the nearest enemy the attack has not hit yet, each keeping chainRetention of the
  * one before (src/sim/combat/hit.ts). An attack runs between beginAttack and endAttack: its
  * serial marks the enemies it hits, and its budget counts its hits against CHAIN_HIT_CAP
- * (src/sim/caps.ts).
+ * (src/sim/caps.ts). A payload with a chain policy, or whose chain hits do more than hit
+ * (Payload.general), chains on the general path instead (src/sim/combat/policy.ts).
  */
 
 import { CHAIN_HIT_CAP } from '../caps';
@@ -12,6 +13,7 @@ import type { Payload } from '../emitters/types';
 import { rollCount } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { hitWithPayload } from './hit';
+import { chainGeneral } from './policy';
 
 /**
  * Alive enemy closest to (x, y) within chain range (inclusive) not hit by the current attack;
@@ -99,7 +101,8 @@ export function chainAttack(
  * The current attack's chain from `from`: `count` jumps (its fraction is the chance of one
  * more, rolled on the payload's stream), each to the nearest enemy the attack has not hit,
  * until none is left in range. Once the attack has dealt CHAIN_HIT_CAP hits, the jumps left
- * are refused and counted in chainHitCapped.
+ * are refused and counted in chainHitCapped. A general payload (Payload.general) makes the same
+ * roll and chains on the general path from it (chainGeneral).
  */
 export function chainFrom(
   ctx: RunContext,
@@ -112,6 +115,12 @@ export function chainFrom(
 ): void {
   const rng = p.rng;
   const jumps = rollCount(count, (c) => rng.chance(c));
+  if (p.general) {
+    const roots = ctx.sys.chain.frontier;
+    roots[0] = from;
+    chainGeneral(ctx, p, roots, 1, jumps, steady, depth, origin);
+    return;
+  }
   const budget = ctx.chainBudget;
   let fromX = from.x;
   let fromY = from.y;

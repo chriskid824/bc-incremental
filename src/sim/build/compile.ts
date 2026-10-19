@@ -42,6 +42,8 @@ import { grantEmitter } from '../emitters/types';
 import type { EmitterSpec } from '../emitters/types';
 import { RULE_MODULES, SIGNATURES } from '../rules';
 import type { BuildCompiler, HookName, Hooks, TestModule } from '../rules';
+import { NO_POLICY_SPEC } from '../systems/systemState';
+import type { ChainPolicySpec } from '../systems/systemState';
 import { statAt, staticInput } from './eval';
 import { compileConversions, compileMods, ModTable } from './modTable';
 import type { CompiledConversion, CompiledMod } from './modTable';
@@ -152,6 +154,11 @@ export interface CompiledBuild {
   readonly effects: readonly CompiledEffect[];
   /** The damage conversions (StatBlock.conversions), in data order; the table's. */
   readonly conversions: readonly CompiledConversion[];
+  /**
+   * What the modules wrote through BuildCompiler.chainPolicy(); null when none called it.
+   * createRunContext compiles it once per run for the signature payload and its repeats.
+   */
+  readonly chainPolicy: ChainPolicySpec | null;
 }
 
 function compileRule<K extends RuleId>(
@@ -299,6 +306,7 @@ export function compileBuild(
     }
     return instance;
   };
+  let chainPolicy: ChainPolicySpec | null = null;
 
   const compiler: BuildCompiler = {
     values,
@@ -337,6 +345,10 @@ export function compileBuild(
     },
     addEmitter(source, grant) {
       grants.push({ source, grant });
+    },
+    chainPolicy() {
+      chainPolicy ??= { ...NO_POLICY_SPEC, decay: [] };
+      return chainPolicy;
     },
   };
 
@@ -396,6 +408,7 @@ export function compileBuild(
     triggersOn,
     effects,
     conversions,
+    chainPolicy,
   };
 }
 

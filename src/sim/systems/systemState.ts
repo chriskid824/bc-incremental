@@ -10,7 +10,13 @@
 
 import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
-import { REPEAT_CHARGE_CAP, SIGNATURE_ZONE_CAP, ZONE_CAP } from '../caps';
+import {
+  CHAIN_HIT_CAP,
+  EXTRA_JUMP_CAP,
+  REPEAT_CHARGE_CAP,
+  SIGNATURE_ZONE_CAP,
+  ZONE_CAP,
+} from '../caps';
 import type { CompiledBuild } from '../build/compile';
 import { IN_ZONE } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
@@ -36,6 +42,8 @@ export interface SystemState {
   readonly split: SplitState;
   /** The segments and their judgements (src/sim/systems/segments.ts), also SimState.segments. */
   readonly segments: SegmentState;
+  /** The general chain path's levels and the run's table without a policy (combat/policy.ts). */
+  readonly chain: ChainState;
 }
 
 /**
@@ -366,5 +374,115 @@ export function createSegmentState(emitters: readonly EmitterRuntime[]): Segment
     a: new Int32Array(2 * SEGMENT_ENDS),
     b: new Int32Array(2 * SEGMENT_ENDS),
     nearTwo: new Int32Array(2),
+  };
+}
+
+/**
+ * A payload's chain policy (Payload.policy), compiled once per run from the build's
+ * ChainPolicySpec (compilePolicy): what the general chain path (chainGeneral,
+ * src/sim/combat/policy.ts) reads at each level k of the chain, the primary hit at level 0.
+ */
+export interface ChainPolicy {
+  /**
+   * Jumps from each enemy of level k − 1 to level k: branch[min(k, length − 1)]; [1, 1]: no
+   * fork.
+   */
+  readonly branch: Uint8Array;
+  /** Chance of one extra jump per jump hit (跳電); 0: none. */
+  readonly extraJumpChance: number;
+  /** Times the chain re-hits the enemy it ends on when no other is in range (回彈); 0: none. */
+  readonly bounces: number;
+  /** The last level's jumps go to the farthest enemy in range, not the nearest (遠雷). */
+  readonly lastFarthest: boolean;
+  /**
+   * The share of the attack's damage at level k, for k in 0 .. CHAIN_HIT_CAP + EXTRA_JUMP_CAP:
+   * the running product of chainRetention, a decay entry's factor in its place on its levels.
+   */
+  readonly scale: Float64Array;
+}
+
+/**
+ * The chain policy the build's rules write through BuildCompiler.chainPolicy()
+ * (CompiledBuild.chainPolicy): branches 1 or more, extraJumpChance in [0, 1], bounces 0 or more.
+ */
+export interface ChainPolicySpec {
+  /** Jumps from the primary hit, and from each enemy of the later levels. */
+  branchFirst: number;
+  branchLater: number;
+  extraJumpChance: number;
+  bounces: number;
+  lastFarthest: boolean;
+  /**
+   * Levels from `from` to `to` (inclusive; no end without it) whose damage keeps `factor` of the
+   * level before instead of chainRetention; of the entries covering a level, the last counts.
+   */
+  decay: { from: number; to?: number; factor: number }[];
+}
+
+const NO_DECAY: ChainPolicySpec['decay'] = [];
+Object.freeze(NO_DECAY);
+
+/** No fork, no extra jumps, no bounces, no decay: the linear chain's policy. */
+export const NO_POLICY_SPEC: Readonly<ChainPolicySpec> = Object.freeze({
+  branchFirst: 1,
+  branchLater: 1,
+  extraJumpChance: 0,
+  bounces: 0,
+  lastFarthest: false,
+  decay: NO_DECAY,
+});
+
+/**
+ * `spec` for a run whose chain jumps keep `chainRetention` of the level before. Without decay,
+ * scale[k] is the product the linear chain forms over k jumps, in the same order (chainFrom).
+ */
+export function compilePolicy(
+  spec: Readonly<ChainPolicySpec>,
+  chainRetention: number,
+): ChainPolicy {
+  const fork = spec.branchFirst !== 1 || spec.branchLater !== 1;
+  const n = CHAIN_HIT_CAP + EXTRA_JUMP_CAP + 1;
+  const scale = new Float64Array(n);
+  scale[0] = 1;
+  for (let k = 1; k < n; k++) {
+    let factor = chainRetention;
+    for (const d of spec.decay) {
+      if (k >= d.from && (d.to === undefined || k <= d.to)) factor = d.factor;
+    }
+    scale[k] = (scale[k - 1] as number) * factor;
+  }
+  return {
+    branch: fork ? Uint8Array.of(1, spec.branchFirst, spec.branchLater) : Uint8Array.of(1, 1),
+    extraJumpChance: spec.extraJumpChance,
+    bounces: spec.bounces,
+    lastFarthest: spec.lastFarthest,
+    scale,
+  };
+}
+
+/**
+ * The general chain path's state (RunContext.sys.chain, src/sim/combat/policy.ts). Chains never
+ * nest (a hit starts none), so one set of level buffers serves every chain.
+ */
+export interface ChainState {
+  /**
+   * The enemies of the level the chain jumps from, and of the level it jumps to: at most
+   * CHAIN_HIT_CAP each. A chain's caller places its roots in frontier.
+   */
+  readonly frontier: Enemy[];
+  readonly next: Enemy[];
+  /** NO_POLICY_SPEC for this run's chainRetention: the policy of a payload without one. */
+  readonly noPolicy: ChainPolicy;
+  /** farthestChainTarget's within() output. */
+  readonly far: Enemy[];
+}
+
+/** Empty levels, and the table without a policy of a run whose jumps keep `chainRetention`. */
+export function createChainState(chainRetention: number): ChainState {
+  return {
+    frontier: [],
+    next: [],
+    noPolicy: compilePolicy(NO_POLICY_SPEC, chainRetention),
+    far: [],
   };
 }

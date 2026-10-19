@@ -313,7 +313,7 @@ describe('signatureRows', () => {
     const spec = build.emitters[0] as EmitterSpec;
     const tags = spec.tags | TAG.cold | TAG.minion;
     const moved: CompiledBuild = { ...build, emitters: [{ ...spec, tags, source: 'outer.ice' }] };
-    const payload = emitterPayload(moved, moved.emitters[0] as EmitterSpec, createRng(1));
+    const payload = emitterPayload(moved, moved.emitters[0] as EmitterSpec, createRng(1), null);
     // The payload's rows first: a wrong key would then add a row of its own.
     const slots = [SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP, SLOT_JUMP_CRIT].map((slot) =>
       slotRow(moved, payload, slot),

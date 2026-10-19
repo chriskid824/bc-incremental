@@ -405,6 +405,11 @@ export const COUNTER_IDS = [
   'zonesEvicted',
   /** Repeats dropped because REPEAT_CHARGE_CAP were already waiting for the next attack. */
   'repeatChargesDropped',
+  /**
+   * Extra-jump rolls not made and bounces refused because their attack had added
+   * EXTRA_JUMP_CAP jumps.
+   */
+  'extraJumpsCapped',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

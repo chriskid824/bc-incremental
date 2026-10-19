@@ -19,6 +19,7 @@ import type { TagMask } from '../../data/tags';
 import type { CompiledBuild } from '../build/compile';
 import { ailmentCredit, rowKey } from '../build/sources';
 import type { RunContext } from '../systems/context';
+import type { ChainPolicy } from '../systems/systemState';
 import { TICK_RATE } from '../types';
 
 /** What every emitter kind has: how its payload is made (emitterPayload). */
@@ -203,6 +204,21 @@ export interface Payload {
   readonly damageMode: DamageMode;
   /** ModTable row of each slot (SLOT_*), −1 until first use (slotRow). */
   readonly rows: Int32Array;
+  /**
+   * The build's chain policy, which createRunContext compiles for the signature payload and its
+   * repeats; null for every other payload, whose chains take the run's table without one
+   * (RunContext.sys.chain.noPolicy).
+   */
+  readonly policy: ChainPolicy | null;
+  /** Its chain jumps raise the chainJump center event (later in C4); false on every payload. */
+  readonly raisesChainJump: boolean;
+  /** Shock stacks each of its chain hits adds (an effect chain's, later in C4); 0 for none. */
+  readonly shockOnHit: number;
+  /**
+   * Its chains take the general path (chainGeneral, src/sim/combat/policy.ts): it has a policy,
+   * raises chainJump or shocks on hit. Fixed when it is created; false: the linear path.
+   */
+  readonly general: boolean;
   /** The payload of the zone each attack of it leaves: a lob's fire zone (火地); null for none. */
   readonly zoneVariant: Payload | null;
   /**
@@ -216,10 +232,10 @@ export interface Payload {
 }
 
 /**
- * What a payload is made of; jumpSource defaults to source, zoneVariant to null, aggregate to
- * false, bypass to 0. `rowsOf` is a payload of the same tags, source and jumpSource, so whose
- * slots key the same rows: the new payload shares its row cache (Payload.rows) instead of
- * starting its own.
+ * What a payload is made of; jumpSource defaults to source, policy to null, raisesChainJump to
+ * false, shockOnHit to 0, zoneVariant to null, aggregate to false, bypass to 0. `rowsOf` is a
+ * payload of the same tags, source and jumpSource, so whose slots key the same rows: the new
+ * payload shares its row cache (Payload.rows) instead of starting its own.
  */
 export interface PayloadSpec {
   readonly baseDamage: Num;
@@ -232,6 +248,9 @@ export interface PayloadSpec {
   readonly rollsAilments: boolean;
   readonly canCrit: boolean;
   readonly damageMode: DamageMode;
+  readonly policy?: ChainPolicy | null;
+  readonly raisesChainJump?: boolean;
+  readonly shockOnHit?: number;
   readonly zoneVariant?: Payload | null;
   readonly aggregate?: boolean;
   readonly bypass?: number;
@@ -240,6 +259,9 @@ export interface PayloadSpec {
 
 /** A payload with every member written in one order, so all payloads share one shape. */
 export function createPayload(spec: PayloadSpec): Payload {
+  const policy = spec.policy ?? null;
+  const raisesChainJump = spec.raisesChainJump ?? false;
+  const shockOnHit = spec.shockOnHit ?? 0;
   const payload: { -readonly [K in keyof Payload]: Payload[K] } = {
     baseDamage: spec.baseDamage,
     tags: spec.tags,
@@ -254,6 +276,10 @@ export function createPayload(spec: PayloadSpec): Payload {
     canCrit: spec.canCrit,
     damageMode: spec.damageMode,
     rows: spec.rowsOf === undefined ? new Int32Array(SLOT_COUNT).fill(-1) : sharedRows(spec),
+    policy,
+    raisesChainJump,
+    shockOnHit,
+    general: policy !== null || raisesChainJump || shockOnHit > 0,
     zoneVariant: spec.zoneVariant ?? null,
     aggregate: spec.aggregate ?? false,
     bypass: spec.bypass ?? 0,
@@ -273,11 +299,17 @@ function sharedRows(spec: PayloadSpec): Int32Array {
 }
 
 /**
- * The payload of an emitter: its share of the damage stat, its tags and source, on `rng`; a
- * lob's carries its fire zone's (lobZonePayload); a segment's is a pulse's, one tally per
- * judgement.
+ * The payload of an emitter: its share of the damage stat, its tags and source, on `rng`, with
+ * the chain policy `policy` (the signature's, which createRunContext compiles; null for the
+ * others); a lob's carries its fire zone's (lobZonePayload); a segment's is a pulse's, one tally
+ * per judgement.
  */
-export function emitterPayload(build: CompiledBuild, spec: EmitterSpec, rng: Rng): Payload {
+export function emitterPayload(
+  build: CompiledBuild,
+  spec: EmitterSpec,
+  rng: Rng,
+  policy: ChainPolicy | null,
+): Payload {
   return createPayload({
     baseDamage: mul(num(build.values.damage), spec.damagePct),
     tags: spec.tags,
@@ -288,6 +320,7 @@ export function emitterPayload(build: CompiledBuild, spec: EmitterSpec, rng: Rng
     rollsAilments: spec.rollsAilments,
     canCrit: spec.canCrit,
     damageMode: ROWS,
+    policy,
     zoneVariant: spec.kind === 'lob' ? lobZonePayload(build, spec, rng) : null,
     aggregate: spec.kind === 'segment',
   });
@@ -441,12 +474,13 @@ export function nextShotSteady(ctx: RunContext, em: EmitterRuntime): boolean {
 
 /**
  * What one attack and its chain have used of their caps; one reused object per run, reset at
- * each attack (beginAttack, src/sim/combat/chain.ts). CHAIN_HIT_CAP reads hits; the caps that
- * read the other fields come later in C4.
+ * each attack (beginAttack, src/sim/combat/chain.ts). CHAIN_HIT_CAP reads hits, EXTRA_JUMP_CAP
+ * extraJumps; the cap that reads centerEvents comes later in C4.
  */
 export interface ChainBudget {
   /** Hits of the attack so far, its primary hit included (CHAIN_HIT_CAP, src/sim/caps.ts). */
   hits: number;
+  /** Extra jumps and bounces the build's rules added to it (EXTRA_JUMP_CAP, src/sim/caps.ts). */
   extraJumps: number;
   centerEvents: number;
 }

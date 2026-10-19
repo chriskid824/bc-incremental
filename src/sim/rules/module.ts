@@ -22,6 +22,7 @@ import type { EffectSpec, TriggerSpec } from '../../data/triggers';
 import type { BuildFlags, SignatureParams } from '../build/compile';
 import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
+import type { ChainPolicySpec } from '../systems/systemState';
 
 export interface RuleModule<P extends RuleSpec> {
   readonly id: P['id'];
@@ -86,6 +87,12 @@ export interface BuildCompiler {
    * and key (grantKey, src/data/emitters.ts).
    */
   addEmitter(source: string, grant: EmitterGrant): void;
+  /**
+   * The build's chain policy, which the modules write in place: NO_POLICY_SPEC's values at the
+   * first call, the same object after it. The signature payload and its repeats chain by it
+   * (CompiledBuild.chainPolicy); a build whose modules never call it chains without one.
+   */
+  chainPolicy(): ChainPolicySpec;
 }
 
 /**

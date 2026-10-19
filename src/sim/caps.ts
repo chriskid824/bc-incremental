@@ -10,6 +10,12 @@
  */
 export const CHAIN_HIT_CAP = 32;
 /**
+ * Jumps the build's rules add to one attack's chain, extra jumps (跳電) and bounces (回彈)
+ * together (src/sim/combat/policy.ts); an extra-jump roll not made and a bounce refused count
+ * in extraJumpsCapped. They count against CHAIN_HIT_CAP too.
+ */
+export const EXTRA_JUMP_CAP = 2;
+/**
  * Projectiles in flight at once: the volley's homing projectiles and the shot pool's shots
  * together (src/sim/systems/shots.ts). A spawn at the cap is refused and counted in
  * projectilesCapped.

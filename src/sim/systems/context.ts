@@ -73,6 +73,8 @@ import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
 import { isToughType } from './spawn';
 import {
+  compilePolicy,
+  createChainState,
   createLobState,
   createPulseAcc,
   createRepeatState,
@@ -421,8 +423,8 @@ export interface RunContext {
 
   // ---- Systems with state of their own (src/sim/systems/systemState.ts) ----
   /**
-   * One member per system: the pulse tally, the zone pool, the lob, the repeats and a kill's
-   * transfers to its split children.
+   * One member per system: the pulse tally, the zone pool, the lob, the repeats, a kill's
+   * transfers to its split children, the segments and the general chain path's levels.
    */
   readonly sys: SystemState;
 
@@ -637,10 +639,11 @@ function effectPayload(fx: CompiledEffect, rng: Rng, critChance: number): Payloa
 /**
  * The payload of a repeatAttack effect's repeats (RunContext.sys.repeat): the signature
  * payload's at the effect's damagePct of its damage, on the effects stream, flagged SIGNATURE
- * and REPEAT. Its tags and sources are the signature's, so it shares its rows. A lob's carries
- * its own fire zone's payload, the signature's 火地 at the same share on the effects stream,
- * which rolls ailments and always ignites as 火地 does, flagged REPEAT too: its pulse hits and
- * their kills fire no repeat (rule 7, Hoshi's Q5/F1). Null for every other effect.
+ * and REPEAT. Its tags, sources and chain policy are the signature's, so it shares its rows. A
+ * lob's carries its own fire zone's payload, the signature's 火地 at the same share on the
+ * effects stream, which rolls ailments and always ignites as 火地 does, flagged REPEAT too: its
+ * pulse hits and their kills fire no repeat (rule 7, Hoshi's Q5/F1). Null for every other
+ * effect.
  */
 function repeatPayload(fx: CompiledEffect, signature: Payload, rng: Rng): Payload | null {
   const spec = fx.spec;
@@ -658,6 +661,7 @@ function repeatPayload(fx: CompiledEffect, signature: Payload, rng: Rng): Payloa
     rollsAilments: signature.rollsAilments,
     canCrit: signature.canCrit,
     damageMode: signature.damageMode,
+    policy: signature.policy,
     zoneVariant:
       zone === null
         ? null
@@ -699,12 +703,18 @@ export function createRunContext(
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
+  // The build's chain policy, compiled once for this run's chainRetention: the signature payload
+  // carries it, and its repeats (repeatPayload).
+  const chainRetention = clamp01(values.chainRetention);
+  const policy =
+    build.chainPolicy === null ? null : compilePolicy(build.chainPolicy, chainRetention);
+
   // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
   // contact stage the thorns and the segment stage the segments.
   const emitters = build.emitters.map((spec, index) =>
     createEmitterRuntime(
       spec,
-      emitterPayload(build, spec, combatRng),
+      emitterPayload(build, spec, combatRng, index === 0 ? policy : null),
       index,
       emitterInterval(build, spec),
     ),
@@ -879,7 +889,7 @@ export function createRunContext(
     hitsFrost,
     converts: build.conversions.length !== 0,
     chainCount: Math.max(0, values.chainCount),
-    chainRetention: clamp01(values.chainRetention),
+    chainRetention,
     projectileCount: Math.max(1, values.projectileCount),
     chainRangeSq: Math.max(0, values.chainRange) ** 2,
     projectileStep: values.projectileSpeed * DT,
@@ -931,6 +941,7 @@ export function createRunContext(
       repeat: createRepeatState(repeatPayloads),
       split: createSplitState(build),
       segments,
+      chain: createChainState(chainRetention),
     },
 
     enemies,
