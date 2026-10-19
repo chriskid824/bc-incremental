@@ -70,6 +70,11 @@ export interface ShotPool extends ShotPoolState {
   readonly payload: (Payload | null)[];
   /** A homing shot's target; null for the others. */
   readonly target: (Enemy | null)[];
+  /**
+   * Scratch of a projectiles effect with aim 'distinct' (src/sim/effects/execute.ts): the
+   * enemies it fires at, nearest first. Only its spawn loop reads it.
+   */
+  readonly distinct: Enemy[];
 }
 
 /**
@@ -112,6 +117,7 @@ export function createShotPool(): ShotPool {
     memBase,
     payload: new Array<Payload | null>(n).fill(null),
     target: new Array<Enemy | null>(n).fill(null),
+    distinct: [],
   };
 }
 

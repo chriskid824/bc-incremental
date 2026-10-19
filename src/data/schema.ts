@@ -216,7 +216,7 @@ export const ModifierSchema = exact<Modifier>()(
 /** Which of the enemies within an effect's radius its maxTargets keeps (TARGET_ORDERS). */
 const order = z.enum(TARGET_ORDERS).exactOptional();
 
-/** Fields of an explode's or a nova's hits (src/data/triggers.ts DamagePart). */
+/** Fields of an explode's, a nova's or projectiles' hits (src/data/triggers.ts DamagePart). */
 const damagePart = {
   damagePct: finite,
   tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
@@ -327,6 +327,18 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         radius: finite.exactOptional(),
         maxTargets: finite.exactOptional(),
         order,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('projectiles'),
+        count: finite,
+        aim: z.enum(['target', 'distinct', 'radial', 'fan']),
+        from: z.enum(['event', 'player']).exactOptional(),
+        pierce: finite.exactOptional(),
+        bounce: finite.exactOptional(),
+        spreadDeg: finite.exactOptional(),
+        ...damagePart,
       })
       .readonly(),
   ]),

@@ -138,8 +138,9 @@ export interface CompiledEffect {
   /**
    * Tags of its hits (explode, nova: hit, trigger and area, plus its tags and element; shatter:
    * hit, area and cold; groundZone: hit and zone, plus its tags and element; detonate: its
-   * ailment's kind and trigger, plus area with a radius) or of the hit an ailment it applies
-   * counts as (applyAilment: hit and trigger); 0 for the others.
+   * ailment's kind and trigger, plus area with a radius; projectiles: hit, trigger and
+   * projectile, plus its tags and element) or of the hit an ailment it applies counts as
+   * (applyAilment: hit and trigger); 0 for the others.
    */
   readonly tags: TagMask;
   /**
@@ -320,6 +321,15 @@ export function compileEffect(
         TAG.hit |
         TAG.trigger |
         TAG.area |
+        tagMask(scaled.tags ?? []) |
+        (scaled.element === undefined ? 0 : TAG[scaled.element]);
+      baseDamage = mul(num(damage), scaled.damagePct);
+      break;
+    case 'projectiles':
+      tags =
+        TAG.hit |
+        TAG.trigger |
+        TAG.projectile |
         tagMask(scaled.tags ?? []) |
         (scaled.element === undefined ? 0 : TAG[scaled.element]);
       baseDamage = mul(num(damage), scaled.damagePct);

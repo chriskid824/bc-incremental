@@ -114,6 +114,13 @@ function effectNumbers(effect: EffectSpec): string[][] {
         ...(effect.damage === undefined ? [] : [[percent(effect.damage)]]),
         ...(effect.maxTargets === undefined ? [] : [[String(effect.maxTargets)]]),
       ];
+    case 'projectiles':
+      return [
+        [String(effect.count)],
+        [percent(effect.damagePct)],
+        ...(effect.pierce === undefined || effect.pierce <= 0 ? [] : [[String(effect.pierce)]]),
+        ...(effect.bounce === undefined || effect.bounce === 0 ? [] : [[String(effect.bounce)]]),
+      ];
   }
 }
 

@@ -720,6 +720,95 @@ const splitData = (): GameData =>
     },
   });
 
+/**
+ * C4.12's projectiles, every aim: a ring of 10 from the player twice a second, each shot
+ * piercing once and bouncing once; two homing shots at the enemy with the most hp every 1.5 s;
+ * a crit now and then sends two homing shots at its enemy; a kill now and then one at each of
+ * the 3 enemies nearest to it; and a primary hit now and then a cold fan of 5 from the player
+ * over 40°, piercing every enemy. Their hits crit, ignite and trigger one another at depth.
+ */
+const PROJECTILES_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'outer.barrage',
+    {
+      on: 'periodic',
+      every: 0.5,
+      do: [
+        {
+          kind: 'projectiles',
+          count: 10,
+          aim: 'radial',
+          from: 'player',
+          damagePct: 0.3,
+          pierce: 1,
+          bounce: 1,
+        },
+      ],
+    },
+  ],
+  [
+    'outer.barrage',
+    {
+      on: 'periodic',
+      every: 1.5,
+      target: { pick: 'highestHp' },
+      do: [{ kind: 'projectiles', count: 2, aim: 'target', damagePct: 0.8 }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'crit',
+      when: [{ chance: 0.4 }],
+      do: [{ kind: 'projectiles', count: 2, aim: 'target', damagePct: 0.4 }],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'kill',
+      when: [{ chance: 0.5 }],
+      do: [{ kind: 'projectiles', count: 3, aim: 'distinct', damagePct: 0.5 }],
+    },
+  ],
+  [
+    'outer.ice',
+    {
+      on: 'hit',
+      when: [{ hitIs: 'primary' }, { chance: 0.25 }],
+      do: [
+        {
+          kind: 'projectiles',
+          count: 5,
+          aim: 'fan',
+          from: 'player',
+          spreadDeg: 40,
+          pierce: -1,
+          damagePct: 0.2,
+          element: 'cold',
+        },
+      ],
+    },
+  ],
+];
+const PROJECTILES_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.25,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1,
+    projectileCount: 2,
+  },
+  maskProbeMods(),
+  {
+    triggers: PROJECTILES_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -804,6 +893,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: SPLIT_STATS, rules: [], startWave: 12 },
     data: splitData,
     expected: ['e2045f8b27967b7c', '38b84da29c1e58e6'],
+  },
+  {
+    name: 'projectiles',
+    config: { stats: PROJECTILES_STATS, rules: [], startWave: 12 },
+    expected: ['67db1660d5f8b4f9', 'c977d99b8cea8a4c'],
   },
 ];
 

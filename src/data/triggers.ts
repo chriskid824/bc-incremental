@@ -298,7 +298,10 @@ export interface TargetSelector {
 export const TARGET_ORDERS = ['id', 'nearest'] as const;
 export type TargetOrder = (typeof TARGET_ORDERS)[number];
 
-/** The damage of an explode or nova: its hits are tagged hit, trigger and area. */
+/**
+ * The damage of an explode, a nova or projectiles: their hits are tagged hit and trigger, and
+ * area (explode, nova) or projectile (projectiles).
+ */
 interface DamagePart {
   /** Damage of each hit as a fraction of the damage stat. */
   readonly damagePct: number;
@@ -388,6 +391,31 @@ export interface DetonateSpec {
 }
 
 /**
+ * `count` small projectiles, each hitting for damagePct of the damage stat, tagged hit, trigger
+ * and projectile plus its tags and element, as no attack. They start at the event's point, or
+ * at the player with from 'player', and fly by `aim`:
+ * - 'target': each homes in on the event's enemy (or the one the trigger's selector picked);
+ * - 'distinct': one homes in on each of the `count` enemies nearest to the start;
+ * - 'radial': straight out, evenly spaced around the start, the first one directly away from
+ *   the player (along +x from the player itself);
+ * - 'fan': straight at the event's enemy, spread over `spreadDeg` (default 30) degrees.
+ * A straight one hits the enemies on its line, `pierce` (default 0) more after the first, or
+ * every one with -1, and turns back at the arena's edge `bounce` (default 0) times. A homing
+ * one hits its enemy and ends; when that enemy dies first it turns to the enemy nearest to it,
+ * or fades. Each lasts 120 ticks (2 s).
+ */
+export interface ProjectilesSpec extends DamagePart {
+  readonly kind: 'projectiles';
+  /** Projectiles, 1 to 64. */
+  readonly count: number;
+  readonly aim: 'target' | 'distinct' | 'radial' | 'fan';
+  readonly from?: 'event' | 'player';
+  readonly pierce?: number;
+  readonly bounce?: number;
+  readonly spreadDeg?: number;
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -416,6 +444,8 @@ export interface DetonateSpec {
  * - repeatAttack: the signature attack again, `count` times, at damagePct of its damage
  *   (RepeatAttackSpec).
  * - detonate: the damage an ailment has left on the event's enemy, dealt at once (DetonateSpec).
+ * - projectiles: `count` small projectiles from the event's point or the player, homing or
+ *   straight by `aim` (ProjectilesSpec).
  */
 export type EffectSpec =
   | {
@@ -457,7 +487,8 @@ export type EffectSpec =
   | { readonly kind: 'gainShards'; readonly fraction: number }
   | GroundZoneSpec
   | RepeatAttackSpec
-  | DetonateSpec;
+  | DetonateSpec
+  | ProjectilesSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -485,6 +516,7 @@ export const COEF_FIELDS: {
   // A share of the signature attack, whose damage the calibration does not scale.
   repeatAttack: [],
   detonate: ['damage'],
+  projectiles: ['damagePct'],
 };
 
 /** When `on` happens and every `when` condition holds, run each effect of `do` in order. */

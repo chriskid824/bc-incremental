@@ -1197,6 +1197,99 @@ describe('trigger validation', () => {
     ).toEqual([`${at} do[0] detonate needs an enemy, which target.pick 'player' does not give`]);
   });
 
+  it('accepts projectiles of 1 to 64, every aim, from either point, on wired events', () => {
+    const shots = { kind: 'projectiles', count: 1, damagePct: 0.5 } as const;
+    expect(
+      triggerIssues(
+        {
+          on: 'hit',
+          do: [
+            { ...shots, aim: 'target' },
+            { ...shots, count: 64, aim: 'fan' },
+          ],
+        },
+        { on: 'crit', do: [{ ...shots, aim: 'distinct', from: 'player', pierce: -1 }] },
+        { on: 'kill', do: [{ ...shots, count: 4, aim: 'radial', pierce: 2, bounce: 3 }] },
+        { on: 'kill', do: [{ ...shots, count: 4, aim: 'radial', pierce: 0, bounce: 0 }] },
+        {
+          on: 'hit',
+          do: [{ ...shots, aim: 'fan', spreadDeg: 60, tags: ['chain'], element: 'cold' }],
+        },
+        { on: 'periodic', every: 0.2, do: [{ ...shots, count: 12, aim: 'radial' }] },
+        {
+          on: 'periodic',
+          every: 1,
+          target: { pick: 'highestHp' },
+          do: [
+            { ...shots, aim: 'target' },
+            { ...shots, aim: 'distinct', damagePct: 0 },
+          ],
+        },
+        { on: 'waveStart', do: [{ ...shots, count: 8, aim: 'radial', from: 'player' }] },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects projectiles parameters out of range, and spreadDeg off a fan', () => {
+    const shots = { kind: 'projectiles', damagePct: 0.5, aim: 'radial' } as const;
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { ...shots, count: 0, damagePct: -0.5 },
+          { ...shots, count: 65, pierce: -2, bounce: -1 },
+          { ...shots, count: 1.5, pierce: 0.5, bounce: 1.5 },
+          { ...shots, count: Number.NaN, pierce: Number.NaN, bounce: Number.NaN },
+          { ...shots, count: 2, spreadDeg: 30 },
+          { ...shots, count: 2, aim: 'target', spreadDeg: 30, tags: ['zone', 'zone'] },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] count must be an integer in [1, 64] (got 0)`,
+      `${at} do[0] damagePct must be >= 0 (got -0.5)`,
+      `${at} do[1] count must be an integer in [1, 64] (got 65)`,
+      `${at} do[1] pierce must be an integer >= -1 (-1: every enemy) (got -2)`,
+      `${at} do[1] bounce must be a non-negative integer (got -1)`,
+      `${at} do[2] count must be an integer in [1, 64] (got 1.5)`,
+      `${at} do[2] pierce must be an integer >= -1 (-1: every enemy) (got 0.5)`,
+      `${at} do[2] bounce must be a non-negative integer (got 1.5)`,
+      `${at} do[3] count must be an integer in [1, 64] (got NaN)`,
+      `${at} do[3] pierce must be an integer >= -1 (-1: every enemy) (got NaN)`,
+      `${at} do[3] bounce must be a non-negative integer (got NaN)`,
+      `${at} do[4] spreadDeg only applies to aim 'fan'`,
+      `${at} do[5] spreadDeg only applies to aim 'fan'`,
+      `${at} do[5] tags must be unique and not empty; omit the field instead`,
+    ]);
+  });
+
+  it("rejects homing projectiles without a target on targetless events, but not 'radial' or a selector's", () => {
+    const shots = { kind: 'projectiles', count: 2, damagePct: 0.5 } as const;
+    expect(triggerIssues({ on: 'periodic', every: 1, do: [{ ...shots, aim: 'target' }] })).toEqual([
+      `${at} do[0] projectiles aim 'target' needs a target on 'periodic' events; add target {pick} or use aim 'radial'`,
+    ]);
+    expect(triggerIssues({ on: 'heroHit', do: [{ ...shots, aim: 'distinct' }] })).toEqual([
+      `${at} do[0] projectiles aim 'distinct' needs a target on 'heroHit' events; add target {pick} or use aim 'radial'`,
+    ]);
+    expect(
+      triggerIssues({ on: 'waveStart', do: [{ ...shots, aim: 'target', from: 'player' }] }),
+    ).toEqual([
+      `${at} do[0] projectiles aim 'target' needs a target on 'waveStart' events; add target {pick} or use aim 'radial'`,
+    ]);
+    expect(
+      triggerIssues(
+        { on: 'periodic', every: 1, do: [{ ...shots, aim: 'radial' }] },
+        { on: 'heroHit', target: { pick: 'nearest' }, do: [{ ...shots, aim: 'distinct' }] },
+        {
+          on: 'hit',
+          do: [
+            { ...shots, aim: 'target' },
+            { ...shots, aim: 'distinct' },
+          ],
+        },
+      ),
+    ).toEqual([]);
+  });
+
   it("rejects stacksAtLeast 'max' for poison, on a trigger and on a modifier", () => {
     const problem = "stacksAtLeast 'max' needs a stack cap, which poison has not; give a number";
     const max = { stacksAtLeast: { ailment: 'poison', stacks: 'max' } } as const;

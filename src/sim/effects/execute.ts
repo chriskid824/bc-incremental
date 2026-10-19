@@ -28,6 +28,12 @@
  * (src/sim/ailments/remaining.ts) and deals it at once, as it is (PRESCALED); on a kill trigger,
  * whose target is dead, it deals that share of what the victim had left, its entry's value
  * (recordPendingKills, dispatch.ts), and consumes nothing.
+ *
+ * A projectiles effect spawns its small projectiles in the shot pool (src/sim/systems/shots.ts),
+ * through spawnShot and PROJECTILE_CAP, from the event's point or the player: homing at its
+ * live target or at the nearest enemies, or straight out around its start or in a fan at its
+ * target. They carry the entry's depth and origin and are no attack: round −1 (never a fan
+ * round's primary) and owner −1. They count nothing in Enemy.inbound.
  */
 
 import type { Num } from '../../core/num';
@@ -47,7 +53,7 @@ import { addFrost } from '../ailments/frost';
 import { consumeAilment, remainingOf } from '../ailments/remaining';
 import { addShock } from '../ailments/shock';
 import { sizeOf } from '../build/size';
-import { REPEAT_CHARGE_CAP } from '../caps';
+import { REPEAT_CHARGE_CAP, SMALL_PROJECTILE_TICKS } from '../caps';
 import { hitWithPayload } from '../combat/hit';
 import { fireLobRepeat } from '../emitters/lob';
 import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
@@ -55,6 +61,7 @@ import type { EmitterRuntime, Payload } from '../emitters/types';
 import { fireVolleyRepeat } from '../emitters/volley';
 import type { Enemy, RunContext } from '../systems/context';
 import { rebuildGrid } from '../systems/grid';
+import { MOTION_HOMING, MOTION_STRAIGHT, spawnShot } from '../systems/shots';
 import { addZone, PULSES_PER_SECOND } from '../systems/zones';
 import { raiseFreeze } from './centerEvents';
 import { fireApplied, fireOne } from './dispatch';
@@ -238,6 +245,21 @@ function shatterPayload(ctx: RunContext, fx: CompiledEffect, source: number): Pa
   });
   ctx.shatterPayloads[source] = payload;
   return payload;
+}
+
+/**
+ * The alive enemies nearest to (x, y), at most `max`, nearest first, ties to the lower id, into
+ * ctx.shots.distinct; returns how many it holds.
+ */
+function nearestAlive(ctx: RunContext, max: number, x: number, y: number): number {
+  const out = ctx.shots.distinct;
+  const enemies = ctx.enemies;
+  let n = 0;
+  for (let i = 0; i < enemies.length; i++) {
+    const enemy = enemies[i] as Enemy;
+    if (enemy.alive) out[n++] = enemy;
+  }
+  return orderNearest(out, n, max, x, y);
 }
 
 /**
@@ -457,6 +479,81 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     for (let i = 0; i < count; i++) {
       const enemy = targets[i] as Enemy;
       if (enemy.alive) hitWithPayload(ctx, enemy, p, 0, amount, null, null, false, depth, origin);
+    }
+  },
+  // `count` small projectiles from the event's point, or the player with from 'player', each
+  // through spawnShot and the cap (a refused one is counted and the rest still try): homing at
+  // the live target ('target') or one at each of the nearest alive enemies ('distinct'), or
+  // straight, evenly spaced from the outward angle, player to start ('radial'; +x when the two
+  // coincide), or over spreadDeg at the live target ('fan'). Pierce 0 is one hit, −1 every
+  // enemy on the line.
+  projectiles(ctx, spec, _fx, entry) {
+    const aim = spec.aim;
+    const player = ctx.player;
+    const fromPlayer = spec.from === 'player';
+    const x = fromPlayer ? player.x : entry.x;
+    const y = fromPlayer ? player.y : entry.y;
+    const n = spec.count;
+    const homing = aim === 'target' || aim === 'distinct';
+    let target: Enemy | null = null;
+    let shots = n;
+    // The straight ones: the first one's angle, and a fan's half spread.
+    let first = 0;
+    let half = 0;
+    if (aim === 'distinct') {
+      shots = nearestAlive(ctx, n, x, y);
+    } else if (aim === 'radial') {
+      const dx = x - player.x;
+      const dy = y - player.y;
+      first = dx === 0 && dy === 0 ? 0 : Math.atan2(dy, dx);
+    } else {
+      target = liveTarget(entry);
+      if (target === null) return;
+      if (aim === 'fan') {
+        half = ((spec.spreadDeg ?? 30) * Math.PI) / 360;
+        first = Math.atan2(target.y - y, target.x - x) - (n === 1 ? 0 : half);
+        target = null;
+      }
+    }
+    const p = ctx.effectPayloads[entry.effect] as Payload;
+    const pierce = spec.pierce ?? 0;
+    const hits = pierce < 0 ? -1 : pierce + 1;
+    const bounce = spec.bounce ?? 0;
+    const until = ctx.now + SMALL_PROJECTILE_TICKS;
+    const { depth, origin } = entry;
+    const motion = homing ? MOTION_HOMING : MOTION_STRAIGHT;
+    const step = ctx.projectileStep;
+    const distinct = ctx.shots.distinct;
+    const gap = aim === 'radial' ? (2 * Math.PI) / n : n === 1 ? 0 : (2 * half) / (n - 1);
+    for (let i = 0; i < shots; i++) {
+      let vx = 0;
+      let vy = 0;
+      if (aim === 'distinct') {
+        target = distinct[i] as Enemy;
+      } else if (!homing) {
+        const a = first + gap * i;
+        vx = Math.cos(a) * step;
+        vy = Math.sin(a) * step;
+      }
+      spawnShot(
+        ctx,
+        motion,
+        x,
+        y,
+        vx,
+        vy,
+        until,
+        p,
+        1,
+        hits,
+        bounce,
+        depth,
+        origin,
+        false,
+        -1,
+        -1,
+        target,
+      );
     }
   },
 };

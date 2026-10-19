@@ -389,6 +389,20 @@ describe('EffectSpecSchema', () => {
     { kind: 'detonate', ailment: 'poison', fraction: 0.5, damage: 2 },
     { kind: 'detonate', ailment: 'bleed', radius: 120, maxTargets: 3, order: 'nearest' },
     { kind: 'spreadAilment', ailment: 'poison', radius: 100, toSplitChildren: 0.5 },
+    { kind: 'projectiles', count: 3, damagePct: 0.5, aim: 'target' },
+    { kind: 'projectiles', count: 4, damagePct: 0.2, aim: 'distinct', from: 'player' },
+    { kind: 'projectiles', count: 12, damagePct: 0.1, aim: 'radial', pierce: -1, bounce: 2 },
+    {
+      kind: 'projectiles',
+      count: 5,
+      damagePct: 0.3,
+      aim: 'fan',
+      from: 'event',
+      pierce: 1,
+      spreadDeg: 45,
+      tags: ['chain'],
+      element: 'lightning',
+    },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -456,6 +470,21 @@ describe('EffectSpecSchema', () => {
     [
       'repeatAttack with an unknown key',
       { kind: 'repeatAttack', count: 1, damagePct: 0.5, radius: 100 },
+    ],
+    ['projectiles without an aim', { kind: 'projectiles', count: 3, damagePct: 0.5 }],
+    ['projectiles without a count', { kind: 'projectiles', damagePct: 0.5, aim: 'radial' }],
+    ['projectiles without damagePct', { kind: 'projectiles', count: 3, aim: 'radial' }],
+    [
+      'projectiles at an unknown aim',
+      { kind: 'projectiles', count: 3, damagePct: 0.5, aim: 'nearest' },
+    ],
+    [
+      'projectiles from an unknown point',
+      { kind: 'projectiles', count: 3, damagePct: 0.5, aim: 'radial', from: 'target' },
+    ],
+    [
+      'projectiles with an unknown key',
+      { kind: 'projectiles', count: 3, damagePct: 0.5, aim: 'radial', radius: 100 },
     ],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);

@@ -34,8 +34,13 @@
  *   pulses, zone hits and hits per pulse, and the average live effect and signature zones over
  *   ticks 301–1800; and the bombs: bombs a second and per firing, explosions and their hits,
  *   freezes, ignites and µs per firing's lob aim.
+ * - shots: a stress-family scenario (C4.12) whose triggers fire rings of small projectiles
+ *   (src/sim/effects/execute.ts): 12 from the player 5 times a second and 4 from each kill, on
+ *   M1's attack. Its report's peak shots counts them (the shot pool's), and its local report
+ *   (not --check) adds the cap probe: a ring of 64 bouncing shots every 2 ticks on top, which
+ *   fills the pool, and the µs per tick at its PROJECTILE_CAP shots against the scenario's own.
  *
- *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress]
+ *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>]
@@ -63,6 +68,7 @@ import type { Modifier, StatExtras } from '../../src/data/stats';
 import type { TriggerSpec } from '../../src/data/triggers';
 import { COUNTER_IDS, createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
 import type { CounterId, RunConfig } from '../../src/sim';
+import { PROJECTILE_CAP } from '../../src/sim/caps';
 import { aimDense, beginAim } from '../../src/sim/emitters/lob';
 import type { TestModule } from '../../src/sim/rules';
 import {
@@ -95,6 +101,7 @@ const SCENARIO_IDS = [
   'poisonBoss',
   'stressM1',
   'stress',
+  'shots',
 ] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
@@ -141,6 +148,11 @@ interface Scenario {
   readonly stress?: boolean;
   /** Config of one run; runs differ only in their seed. */
   config(seed: number, startWave: number, variant: string): RunConfig;
+  /**
+   * Config of a stress-family scenario's cap probe run for a seed (capProbe), which only the
+   * local report runs; --check does not (docs/v3 C4 design §7.6).
+   */
+  capProbe?(seed: number): RunConfig;
 }
 
 /**
@@ -210,6 +222,50 @@ const FROST_FIRE: TestModule = (b) => {
   if (lob !== null) lob.zone.slow = 0.3;
 };
 
+/**
+ * The shots scenario's projectiles (docs/v3 C4 design §7.3), all from 'outer.barrage': a ring of
+ * 12 small projectiles from the player 5 times a second, and a ring of 4 from each kill. A ring's
+ * shots fly straight and end on the first enemy they hit or at the arena's edge.
+ */
+const SHOTS_TRIGGERS: readonly TriggerSpec[] = [
+  {
+    on: 'periodic',
+    every: 0.2,
+    do: [{ kind: 'projectiles', count: 12, aim: 'radial', from: 'player', damagePct: 0.1 }],
+  },
+  {
+    on: 'kill',
+    do: [{ kind: 'projectiles', count: 4, aim: 'radial', from: 'event', damagePct: 0.1 }],
+  },
+];
+
+/**
+ * The shots cap probe's ring (capProbe): 64 shots from the player every 2 ticks, each bouncing
+ * off the arena's edge 6 times, more than the shot pool holds.
+ */
+const CAP_PROBE_TRIGGER: TriggerSpec = {
+  on: 'periodic',
+  every: 2 / TICK_RATE,
+  do: [
+    { kind: 'projectiles', count: 64, aim: 'radial', from: 'player', bounce: 6, damagePct: 0.1 },
+  ],
+};
+
+/**
+ * The shots scenario's build, `triggers` from 'outer.barrage': stressStats' own damage, which
+ * keeps the alive band (average 288.9 at seed 1).
+ */
+function shotsStats(triggers: readonly TriggerSpec[]): StatBlock {
+  return stressStats(
+    {},
+    {
+      triggers: triggers.map((spec) => ({ source: 'outer.barrage', spec })),
+      conversions: [],
+      emitters: [],
+    },
+  );
+}
+
 /** The poisonBoss scenario's poison chance per variant. */
 const POISON_BOSS_CHANCE: Readonly<Record<string, number>> = {
   '500 stacks': 0.99,
@@ -233,13 +289,27 @@ function normalStats(startWave: number, extras?: StatExtras): StatBlock {
   );
 }
 
+/** What a stress-family scenario's runs vary: the build. */
+type StressBuild = () => Pick<RunConfig, 'stats' | 'rules' | 'signature'>;
+
+/** A run of `build` on the stress fixture: 30 s from STRESS_START_WAVE. */
+const stressConfig = (seed: number, build: StressBuild): RunConfig => ({
+  seed,
+  ...build(),
+  startWave: STRESS_START_WAVE,
+  mode: 'auto',
+  maxTicks: STRESS_SECONDS * TICK_RATE,
+});
+
 /**
  * A stress-family scenario: `build`'s runs on the stress fixture, 20 timed and 3 warm-up runs
- * of 30 s from STRESS_START_WAVE, whatever --start-wave says.
+ * of 30 s from STRESS_START_WAVE, whatever --start-wave says; `probe`, when given, is its cap
+ * probe's build.
  */
 function stressScenario(
-  build: () => Pick<RunConfig, 'stats' | 'rules' | 'signature'>,
+  build: StressBuild,
   testModules?: readonly TestModule[],
+  probe?: StressBuild,
 ): Scenario {
   return {
     runs: 20,
@@ -251,13 +321,8 @@ function stressScenario(
     stress: true,
     data: stressData,
     ...(testModules === undefined ? {} : { testModules }),
-    config: (seed) => ({
-      seed,
-      ...build(),
-      startWave: STRESS_START_WAVE,
-      mode: 'auto',
-      maxTicks: STRESS_SECONDS * TICK_RATE,
-    }),
+    config: (seed) => stressConfig(seed, build),
+    ...(probe === undefined ? {} : { capProbe: (seed: number) => stressConfig(seed, probe) }),
   };
 }
 
@@ -399,6 +464,13 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
       signature: { id: 'magmaBomb' },
     }),
     [FROST_FIRE],
+  ),
+  // C4.12: rings of small projectiles from the player and from each kill, on M1's attack; the
+  // cap probe adds a ring that fills the shot pool.
+  shots: stressScenario(
+    () => ({ stats: shotsStats(SHOTS_TRIGGERS), rules: [] }),
+    undefined,
+    () => ({ stats: shotsStats([...SHOTS_TRIGGERS, CAP_PROBE_TRIGGER]), rules: [] }),
   ),
 };
 
@@ -618,6 +690,55 @@ function lobAimMicros(
   const sim = createSimulation(config, data, [...testModules, timer]);
   while (!sim.state.finished) sim.step(NO_INPUT);
   return aims === 0 ? null : (ms * 1000) / aims;
+}
+
+/** A shots cap probe's timings (capProbe). */
+interface CapProbe {
+  /** Microseconds per tick past ALIVE_FROM_TICK of the scenario's own run. */
+  readonly ownMicros: number;
+  /** Microseconds per tick of the probe run's ticks that start with PROJECTILE_CAP shots live. */
+  readonly fullMicros: number;
+  /** Those ticks, and the probe run's projectilesCapped. */
+  readonly fullTicks: number;
+  readonly capped: number;
+}
+
+/**
+ * The cap probe (docs/v3 C4 design §7.3, §7.4): an untimed run of the scenario's `config`, each
+ * tick past ALIVE_FROM_TICK timed on its own, and one of `probe`, whose extra ring fills the shot
+ * pool, each tick that starts with PROJECTILE_CAP shots live timed on its own. Printed by the
+ * local report, not asserted.
+ */
+function capProbe(
+  config: RunConfig,
+  probe: RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[] = [],
+): CapProbe {
+  // With `full`, the ticks that start with the pool full; otherwise those past ALIVE_FROM_TICK.
+  const timeTicks = (run: RunConfig, full: boolean): readonly [number, number, number] => {
+    const sim = createSimulation(run, data, testModules);
+    const { state } = sim;
+    let ms = 0;
+    let ticks = 0;
+    while (!state.finished) {
+      const timed = full ? state.shotCount >= PROJECTILE_CAP : state.tick >= ALIVE_FROM_TICK;
+      const start = performance.now();
+      sim.step(NO_INPUT);
+      if (timed) {
+        ms += performance.now() - start;
+        ticks++;
+      }
+    }
+    return [
+      ticks === 0 ? NaN : (ms * 1000) / ticks,
+      ticks,
+      sim.result().counters.projectilesCapped,
+    ];
+  };
+  const [ownMicros] = timeTicks(config, false);
+  const [fullMicros, fullTicks, capped] = timeTicks(probe, true);
+  return { ownMicros, fullMicros, fullTicks, capped };
 }
 
 /** The workload as report text: everything but the average alive. */
@@ -841,6 +962,15 @@ function main(): void {
           `over ticks ${ALIVE_FROM_TICK + 1}+ (--check band ${ALIVE_MIN}–${ALIVE_MAX} at seed 1), ` +
           workloadText(workload),
       );
+      if (scenario.capProbe !== undefined) {
+        const probe = capProbe(configFor(variant, 0), scenario.capProbe(seed), data, modules);
+        console.log(
+          `cap probe (seed ${seed}): ${probe.fullMicros.toFixed(1)} µs per tick at ` +
+            `${PROJECTILE_CAP} shots (${probe.fullTicks} ticks, projectilesCapped ` +
+            `${probe.capped}), against ${probe.ownMicros.toFixed(1)} µs per tick of its own run ` +
+            `past tick ${ALIVE_FROM_TICK}`,
+        );
+      }
     }
     return p50;
   });

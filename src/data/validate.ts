@@ -841,12 +841,44 @@ function effectIssues(
       }
       break;
     }
+    case 'projectiles': {
+      const { count: shots, aim, pierce, bounce } = effect;
+      if (!(Number.isInteger(shots) && shots >= 1 && shots <= PROJECTILES_COUNT_MAX)) {
+        issues.push(`count must be an integer in [1, ${PROJECTILES_COUNT_MAX}] (got ${shots})`);
+      }
+      nonNegative('damagePct', effect.damagePct);
+      if (pierce !== undefined && !(Number.isInteger(pierce) && pierce >= -1)) {
+        issues.push(`pierce must be an integer >= -1 (-1: every enemy) (got ${pierce})`);
+      }
+      if (bounce !== undefined && !(Number.isInteger(bounce) && bounce >= 0)) {
+        issues.push(`bounce must be a non-negative integer (got ${bounce})`);
+      }
+      if (effect.spreadDeg !== undefined && aim !== 'fan') {
+        issues.push("spreadDeg only applies to aim 'fan'");
+      }
+      // The homing aims on a targetless event take their enemy from a selector: 'target' homes
+      // in on it, and 'distinct' asks for one too (docs/v3 C4 design §10.2).
+      if (
+        (aim === 'target' || aim === 'distinct') &&
+        target === undefined &&
+        TARGETLESS_EVENTS.has(on)
+      ) {
+        issues.push(
+          `projectiles aim '${aim}' needs a target on '${on}' events; add target {pick} or use aim 'radial'`,
+        );
+      }
+      delivery(effect.tags);
+      break;
+    }
   }
   return issues;
 }
 
 /** The most repeats one repeatAttack makes. */
 const REPEAT_COUNT_MAX = 4;
+
+/** The most projectiles one projectiles effect fires. */
+const PROJECTILES_COUNT_MAX = 64;
 
 /** Zone radii a groundZone accepts, in arena units. */
 const ZONE_RADIUS_MIN = 1;
