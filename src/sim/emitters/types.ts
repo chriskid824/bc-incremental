@@ -350,6 +350,22 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
 }
 
 /**
+ * Whether an emitter of `spec` sends its damage as shots that fly to their targets (volley, lob),
+ * so the damage in flight can be counted for targeting (RunContext.projectileEstimate). Thorns
+ * and segments hit where they are.
+ */
+export function shotsInFlight(spec: EmitterSpec): boolean {
+  switch (spec.kind) {
+    case 'volley':
+    case 'lob':
+      return true;
+    case 'thorns':
+    case 'segment':
+      return false;
+  }
+}
+
+/**
  * The ticks a periodic emitter's phase rule counts in: an emitter of index i takes the phase
  * (3 + 4 × i) % PHASE_TICKS, so emitters of one period act on different ticks.
  */

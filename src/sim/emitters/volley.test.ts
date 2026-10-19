@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toNumber } from '../../core/num';
 import { createRng } from '../../core/rng';
 import type { RuleSpec } from '../../data/rules';
 import { BASE_STATS } from '../../data/stats';
@@ -9,7 +10,8 @@ import { EMITTER_STEPS } from '../systems/emitters';
 import { makeConfig, makeStats, makeTestData, stationarySquares } from '../testing';
 import { NO_INPUT, TICK_RATE } from '../types';
 import type { RunConfig } from '../types';
-import { BASE_ATTACK_SPEED, VOLLEY_RATE } from './types';
+import { BASE_ATTACK_SPEED, grantEmitter, shotsInFlight, VOLLEY_RATE } from './types';
+import type { EmitterRuntime } from './types';
 
 /**
  * The steady flag of each attack's projectiles, in attack order. Every attack fires within one
@@ -141,5 +143,59 @@ describe('volley', () => {
       if (actual.join() !== expected.join()) mismatches++;
     }
     expect(mismatches).toBe(0);
+  });
+});
+
+describe('projectileEstimate', () => {
+  // ×3 on projectile hits, ×2 on area hits, ×5 on crits: the estimate is a non-crit hit.
+  const stats = makeStats({ damage: 10 }, [
+    { stat: 'damage', kind: 'more', value: 2, tags: ['projectile'] },
+    { stat: 'damage', kind: 'more', value: 1, tags: ['area'] },
+    { stat: 'damage', kind: 'more', value: 4, tags: ['crit'] },
+  ]);
+  const m1 = createRunContext(makeConfig({ stats }), makeTestData());
+  const magma = createRunContext(
+    makeConfig({ stats, signature: { id: 'magmaBomb' } }),
+    makeTestData(),
+  );
+
+  it("is the signature's non-crit primary hit, through its hit row, for volleys and lobs", () => {
+    expect(toNumber(m1.projectileEstimate)).toBe(10 * 3);
+    // 熔核's explosions: 150% of the damage stat, hit, area and projectile.
+    expect(toNumber(magma.projectileEstimate)).toBe(10 * 1.5 * 3 * 2);
+  });
+
+  it("is the signature's, whatever emitters are granted after it", () => {
+    // A thorns and a segment grant, whose kinds send no shots: the estimate stays the signature's.
+    const granted = makeStats({ damage: 10 }, stats.scoped, {
+      triggers: [],
+      conversions: [],
+      emitters: [
+        { source: 'center', grant: { kind: 'thorns' } },
+        { source: 'outer.lightning', grant: { kind: 'segment', endpoints: 'shocked' } },
+      ],
+    });
+    const m1Granted = createRunContext(makeConfig({ stats: granted }), makeTestData());
+    const magmaGranted = createRunContext(
+      makeConfig({ stats: granted, signature: { id: 'magmaBomb' } }),
+      makeTestData(),
+    );
+    for (const ctx of [m1Granted, magmaGranted]) {
+      expect(ctx.emitters.map((em) => em.spec.kind).slice(1)).toEqual(['thorns', 'segment']);
+    }
+    expect(toNumber(m1Granted.projectileEstimate)).toBe(10 * 3);
+    expect(toNumber(magmaGranted.projectileEstimate)).toBe(10 * 1.5 * 3 * 2);
+  });
+
+  it('counts the shots of volleys and lobs in flight, not thorns or segments', () => {
+    const signature = (ctx: typeof m1) => (ctx.emitters[0] as EmitterRuntime).spec;
+    expect(signature(m1).kind).toBe('volley');
+    expect(shotsInFlight(signature(m1))).toBe(true);
+    expect(signature(magma).kind).toBe('lob');
+    expect(shotsInFlight(signature(magma))).toBe(true);
+    expect(shotsInFlight(grantEmitter('center', { kind: 'thorns' }))).toBe(false);
+    expect(
+      shotsInFlight(grantEmitter('outer.lightning', { kind: 'segment', endpoints: 'shocked' })),
+    ).toBe(false);
   });
 });

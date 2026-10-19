@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadGameData } from '../data';
+import type { GameData } from '../data';
 import { TAG } from '../data/tags';
 import { num, toNumber } from '../core/num';
 import {
@@ -107,6 +108,38 @@ describe('Session', () => {
     expect(damageRow(stats, hit)).toBe(0.5);
     expect(damageRow(stats, hit, rules)).toBe(0.5 * 2);
     expect(session.run.typicalHit).toBe(stats.values.damage * damageRow(stats, hit, rules));
+  });
+
+  it("scales damage numbers by the signature attack's hit row, projectile modifiers included", () => {
+    // Searing Crits with a ×3 on projectile hits: M1's hits are hit and projectile.
+    const projectileMore = {
+      stat: 'damage',
+      kind: 'more',
+      value: 2,
+      tags: ['projectile'],
+    } as const;
+    const withProjectile: GameData = {
+      ...data,
+      talents: data.talents.map((node) =>
+        node.id === 'searingCrits'
+          ? { ...node, modifiers: [...node.modifiers, projectileMore] }
+          : node,
+      ),
+    };
+    const meta = createMetaState();
+    meta.allocated.add('searingCrits');
+    const session = new Session(withProjectile, meta, {
+      runStarted: () => undefined,
+      runFinished: () => undefined,
+      talentsOpened: () => undefined,
+      profileChanged: () => undefined,
+    });
+    session.start();
+    const { stats, rules } = session.run.config;
+    expect(session.run.config.signature).toBeUndefined();
+    expect(damageRow(stats, TAG.hit, rules)).toBe(0.5);
+    expect(damageRow(stats, TAG.hit | TAG.projectile, rules)).toBe(0.5 * 3);
+    expect(session.run.typicalHit).toBe(stats.values.damage * 0.5 * 3);
   });
 
   it('settles a finished run, saves and shows the result', () => {

@@ -15,8 +15,8 @@
  *
  * The source table, the attribution's outer sources and the ModTable rows grow while a run
  * uses them, so createRunContext compiles a fresh build for every run. The talent screen and
- * the balance tools compile their own for estimates (centerStat, centerDamage) and never pass
- * one into a run.
+ * the balance tools compile their own for estimates (signatureRows, keyedStat, centerStat,
+ * centerDamage) and never pass one into a run.
  */
 
 import { grantKey } from '../../data/emitters';
@@ -25,6 +25,7 @@ import { M1_SIGNATURE } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { isScopedStat, SCOPED_STATS, STAT_IDS } from '../../data/stats';
 import type { Modifier, StatBlock, StatId } from '../../data/stats';
+import { jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { TRIGGER_EVENTS } from '../../data/triggers';
 import type { EffectSpec, TriggerSpec } from '../../data/triggers';
@@ -399,9 +400,51 @@ export function compileBuild(
 }
 
 /**
+ * ModTable keys (rowKey) of the signature attack's hits, from its emitter's tags and source
+ * (CompiledBuild.emitters[0]): its primary hit's without and with crit, and its chain jumps',
+ * jumpMask of the tags credited to the same source (an emitter payload's jumpSource), without
+ * and with crit. They are the rows its payload's SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP and
+ * SLOT_JUMP_CRIT read in a run (src/sim/emitters/types.ts); the estimates outside a run read
+ * them too (the talent screen's summary, typicalHit, the balance tools): M1's hits are hit and
+ * projectile, 熔核's explosions hit, area and projectile.
+ */
+export interface SignatureRows {
+  readonly hit: number;
+  readonly hitCrit: number;
+  readonly jump: number;
+  readonly jumpCrit: number;
+}
+
+/**
+ * The signature attack's row keys (SignatureRows), with no payload or RNG; its source numbered
+ * in `build.sources` on first use, as its payload numbers it in a run.
+ */
+export function signatureRows(build: CompiledBuild): SignatureRows {
+  const spec = build.emitters[0] as EmitterSpec;
+  const source = build.sources.index(spec.source);
+  const jump = jumpMask(spec.tags);
+  return {
+    hit: rowKey(spec.tags, source),
+    hitCrit: rowKey(spec.tags | TAG.crit, source),
+    jump: rowKey(jump, source),
+    jumpCrit: rowKey(jump | TAG.crit, source),
+  };
+}
+
+/**
+ * Scoped stat `stat` (SCOPED_INDEX) of the instances of ModTable key `key` (rowKey, e.g. a
+ * signatureRows key), `chainJump` jumps into their chain (0 for a primary hit), for estimates
+ * outside a run: without a target, so conditional modifiers are left out.
+ */
+export function keyedStat(build: CompiledBuild, key: number, stat: number, chainJump = 0): number {
+  // Row first: filling it may grow, and so replace, the table's arrays.
+  const row = build.table.row(key);
+  return statAt(build.table, row, stat, staticInput(chainJump));
+}
+
+/**
  * Scoped stat `stat` (SCOPED_INDEX) of a center instance with tags `mask`, `chainJump` jumps
- * into its chain (0 for a primary hit), for estimates outside a run: without a target, so
- * conditional modifiers are left out.
+ * into its chain (0 for a primary hit), for estimates outside a run (keyedStat).
  */
 export function centerStat(
   build: CompiledBuild,
@@ -409,9 +452,7 @@ export function centerStat(
   stat: number,
   chainJump = 0,
 ): number {
-  // Row first: filling it may grow, and so replace, the table's arrays.
-  const row = build.table.row(rowKey(mask, CENTER));
-  return statAt(build.table, row, stat, staticInput(chainJump));
+  return keyedStat(build, rowKey(mask, CENTER), stat, chainJump);
 }
 
 /**

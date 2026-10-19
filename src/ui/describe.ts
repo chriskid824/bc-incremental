@@ -2,14 +2,15 @@
 
 import { formatNum } from '../core/format';
 import { num } from '../core/num';
-import type { RuleSpec } from '../data/rules';
+import { M1_SIGNATURE } from '../data/rules';
+import type { RuleSpec, SignatureSpec } from '../data/rules';
 import type { Modifier, StatBlock, StatId } from '../data/stats';
 import { isBehaviourModifier } from '../data/stats';
 import { TAG } from '../data/tags';
 import type { DamageTag } from '../data/tags';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
-import { centerDamage, compileBuild } from '../sim/build/compile';
+import { centerDamage, compileBuild, signatureRows } from '../sim/build/compile';
 
 /** Flat values of these stats are fractions shown as percentages (0.05 → 5%). */
 const PERCENT_STATS: ReadonlySet<StatId> = new Set([
@@ -82,26 +83,33 @@ const pct = (value: number): string => `${trim(value * 100)}%`;
 
 /**
  * The few stats that tell builds apart, for the talent screen's summary. Values are what the
- * simulation plays with once keystone rules apply (src/sim/build/compile.ts and
- * src/sim/systems/): hit damage is a non-crit primary hit, a crit hit is one primary crit, a burn
- * stack is what a non-crit hit ignites, the first chain jump is a non-crit jump, and steadyAim
- * replaces the crit chance with its every-Nth-shot rhythm. Damage reads each instance's damage
- * row, so tagged modifiers (Searing Crits' non-crit half and Pandemic's hit cost included) and
- * rule-added ones (Glass Cannon's) count. Each archetype's nodes move at least one line.
+ * simulation plays with once keystone rules and the signature attack apply
+ * (src/sim/build/compile.ts and src/sim/systems/): hit damage is a non-crit primary hit, a crit
+ * hit is one primary crit, a burn stack is what a non-crit hit ignites, the first chain jump is a
+ * non-crit jump, and steadyAim replaces the crit chance with its rhythm, every Nth shot or every
+ * Nth attack. Hits read the signature attack's rows (signatureRows: M1's are hit and projectile),
+ * so tagged modifiers (Searing Crits' non-crit half and Pandemic's hit cost included) and
+ * rule-added ones (Glass Cannon's) count; the projectile count is the compiled one, 熔核's bombs
+ * a firing. Each archetype's nodes move at least one line.
  */
-export function describeBuild(stats: StatBlock, rules: readonly RuleSpec[] = []): BuildLine[] {
-  const build = compileBuild(stats, rules);
+export function describeBuild(
+  stats: StatBlock,
+  rules: readonly RuleSpec[] = [],
+  signature: SignatureSpec = M1_SIGNATURE,
+): BuildLine[] {
+  const build = compileBuild(stats, rules, signature);
   const { values, flags } = build;
-  const multAt = (mask: number): number => centerDamage(build, mask);
-  const { hit: HIT, crit: CRIT, burn: BURN, chain: CHAIN } = TAG;
-  const hit = values.damage * multAt(HIT);
-  const critHit = values.damage * values.critMultiplier * multAt(HIT | CRIT);
-  const burnPerSecond = values.damage * values.burnDamage * multAt(BURN);
+  const rows = signatureRows(build);
+  const multAt = (key: number): number => build.table.damage(key);
+  const hit = values.damage * multAt(rows.hit);
+  const critHit = values.damage * values.critMultiplier * multAt(rows.hitCrit);
+  const burnPerSecond = values.damage * values.burnDamage * centerDamage(build, TAG.burn);
   const retention = Math.min(1, Math.max(0, values.chainRetention));
-  const chainJump = values.damage * retention * multAt(HIT | CHAIN);
-  const every = build.signature.forceCritEvery;
-  const crit =
-    every > 0 ? t('build.critEveryNth', { n: every }) : pct(Math.min(1, values.critChance));
+  const chainJump = values.damage * retention * multAt(rows.jump);
+  const { forceCritEvery: every, counts } = build.signature;
+  const steady: MessageKey =
+    counts === 'attack' ? 'build.critEveryNthAttack' : 'build.critEveryNth';
+  const crit = every > 0 ? t(steady, { n: every }) : pct(Math.min(1, values.critChance));
   const short = (value: number): string => formatNum(num(value), { format: 'short' });
   return [
     { label: t('stat.damage.hit'), value: short(hit) },

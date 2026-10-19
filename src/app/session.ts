@@ -9,7 +9,6 @@
  */
 
 import type { Num } from '../core/num';
-import { TAG } from '../data/tags';
 import type { GameData } from '../data/types';
 import {
   DEFAULT_ECONOMY,
@@ -25,7 +24,7 @@ import {
   statBlockFor,
 } from '../meta';
 import type { EconomyConfig, MetaState, Settlement } from '../meta';
-import { NO_INPUT, centerDamage, compileBuild, createSimulation } from '../sim';
+import { NO_INPUT, compileBuild, createSimulation, signatureRows } from '../sim';
 import type { RunConfig, RunResult, SimEvent, Simulation } from '../sim';
 
 /** How long the result screen stays up before the next run starts (a click skips it). */
@@ -60,7 +59,10 @@ export interface ActiveRun {
   readonly number: number;
   readonly config: RunConfig;
   readonly sim: Simulation;
-  /** Damage of a plain (non-crit, non-chain) hit; scales damage numbers and screen shake. */
+  /**
+   * Damage of a plain (non-crit, non-chain) hit: the damage stat through the hit row of the run's
+   * signature attack (signatureRows); scales damage numbers and screen shake.
+   */
   readonly typicalHit: number;
 }
 
@@ -498,9 +500,10 @@ export class Session {
       mode: 'auto',
       ...(this.waveCap === undefined ? {} : { waveCap: Math.max(this.waveCap, this.startWave) }),
     };
-    // The damage row includes Searing Crits' ×0.5, Glass Cannon's ×2 and Pandemic's ×0.7.
-    const build = compileBuild(stats, config.rules);
-    const typicalHit = build.values.damage * centerDamage(build, TAG.hit);
+    // The signature attack's hit row includes Searing Crits' ×0.5, Glass Cannon's ×2 and
+    // Pandemic's ×0.7.
+    const build = compileBuild(stats, config.rules, config.signature);
+    const typicalHit = build.values.damage * build.table.damage(signatureRows(build).hit);
     this.active = {
       number: this.meta.runs + 1,
       config,

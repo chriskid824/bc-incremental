@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadGameData, TAG } from '../../src/data';
+import type { SignatureSpec } from '../../src/data';
 import { createMetaState, DEFAULT_ECONOMY, statBlockFor } from '../../src/meta';
 import { damageRow, makeStats } from '../../src/sim/testing';
 import {
@@ -125,6 +126,120 @@ describe('attackDamage and crowdDps', () => {
         { id: 'steadyAim', everyNth: 2, critMultiplierMore: 0, counts: 'shot' },
       ]),
     ).toBeCloseTo(10 * (1 + retention) * (0.5 + 0.5 * 2), 12);
+  });
+});
+
+describe("the estimators on the signature attack's rows", () => {
+  const MAGMA_BOMB: SignatureSpec = { id: 'magmaBomb' };
+  const noCrit = { critChance: 0, igniteChance: 0, burnDamage: 0 };
+
+  it('count the compiled projectiles: 熔核 throws one bomb a firing at base (D28)', () => {
+    const stats = makeStats({ attackSpeed: 3 });
+    expect(stats.values.projectileCount).toBe(2);
+    expect(crowdDps(stats, [], MAGMA_BOMB)).toBe(attackDamage(stats, [], MAGMA_BOMB) * 3 * 1);
+    expect(crowdDps(stats)).toBe(attackDamage(stats) * 3 * 2);
+    // The fraction above the offset counts as it does for M1.
+    const more = makeStats({ attackSpeed: 3, projectileCount: 3.5 });
+    expect(crowdDps(more, [], MAGMA_BOMB)).toBe(attackDamage(more, [], MAGMA_BOMB) * 3 * 2.5);
+    // Below one after the offset, a firing still throws one bomb (ctx.projectileCount).
+    const fewer = makeStats({ attackSpeed: 3, projectileCount: 1.5 });
+    expect(crowdDps(fewer, [], MAGMA_BOMB)).toBe(attackDamage(fewer, [], MAGMA_BOMB) * 3 * 1);
+  });
+
+  it('read the primary hit from the hit row and the jumps from the jump row', () => {
+    // ×2 on projectile hits, ×3 on area hits, ×5 on chain hits.
+    const stats = makeStats({ ...noCrit, chainCount: 1, chainRetention: 0.5 }, [
+      { stat: 'damage', kind: 'more', value: 1, tags: ['projectile'] },
+      { stat: 'damage', kind: 'more', value: 2, tags: ['area'] },
+      { stat: 'damage', kind: 'more', value: 4, tags: ['chain'] },
+    ]);
+    expect(effectiveHit(stats)).toBe(10 * 2);
+    expect(effectiveHit(stats, [], MAGMA_BOMB)).toBe(10 * 6);
+    expect(attackDamage(stats)).toBe(10 * (2 + 0.5 * 5));
+    expect(attackDamage(stats, [], MAGMA_BOMB)).toBe(10 * (6 + 0.5 * 5));
+  });
+
+  it('read the crit chance and multiplier from the hit and hit-crit rows', () => {
+    const stats = makeStats({ ...noCrit, critMultiplier: 2 }, [
+      { stat: 'critChance', kind: 'flat', value: 0.5, tags: ['projectile'] },
+      { stat: 'critMultiplier', kind: 'flat', value: 1, tags: ['projectile', 'crit'] },
+      { stat: 'damage', kind: 'more', value: 1, tags: ['projectile', 'crit'] },
+    ]);
+    // Half the hits crit at ×3 through a ×2 crit row: 0.5 × 1 + 0.5 × 3 × 2.
+    expect(effectiveHit(stats)).toBe(10 * (0.5 + 0.5 * 3 * 2));
+  });
+
+  it('read whether a hit crits from its hit row, not its hit-crit row (combat/hit.ts)', () => {
+    // On the hit-crit row only: no hit crits.
+    const critRowOnly = makeStats({ ...noCrit, critMultiplier: 2 }, [
+      { stat: 'critChance', kind: 'flat', value: 0.5, tags: ['projectile', 'crit'] },
+      { stat: 'critAlways', kind: 'flat', value: 1, tags: ['projectile', 'crit'] },
+    ]);
+    expect(effectiveHit(critRowOnly)).toBe(10);
+    // On the hit row only: half the hits crit, then every hit.
+    const chance = makeStats({ ...noCrit, critMultiplier: 2 }, [
+      { stat: 'critChance', kind: 'flat', value: 0.5, tags: ['projectile'], notTags: ['crit'] },
+    ]);
+    expect(effectiveHit(chance)).toBe(10 * (0.5 + 0.5 * 2));
+    const always = makeStats({ ...noCrit, critMultiplier: 2 }, [
+      { stat: 'critAlways', kind: 'flat', value: 1, tags: ['projectile'], notTags: ['crit'] },
+    ]);
+    expect(effectiveHit(always)).toBe(10 * 2);
+  });
+
+  it("read a jump's crit chance from the jump row and its multiplier from the jump-crit row", () => {
+    // Jumps crit half the time at ×3; primary hits never crit (they would at ×2).
+    const stats = makeStats({ ...noCrit, critMultiplier: 2, chainCount: 1, chainRetention: 0.5 }, [
+      { stat: 'critChance', kind: 'flat', value: 0.5, tags: ['chain'] },
+      { stat: 'critMultiplier', kind: 'flat', value: 1, tags: ['chain', 'crit'] },
+    ]);
+    expect(effectiveHit(stats)).toBe(10);
+    expect(attackDamage(stats)).toBeCloseTo(10 * (1 + 0.5 * (0.5 * 1 + 0.5 * 3)), 12);
+  });
+
+  it('read primary crits from the hit-crit row and jump crits from the jump-crit row', () => {
+    // Every hit crits at ×2: ×2 more on primary crits (projectile), ×3 on jump crits (chain).
+    const stats = makeStats(
+      { ...noCrit, critChance: 1, critMultiplier: 2, chainCount: 1, chainRetention: 0.5 },
+      [
+        { stat: 'damage', kind: 'more', value: 1, tags: ['projectile', 'crit'] },
+        { stat: 'damage', kind: 'more', value: 2, tags: ['chain', 'crit'] },
+      ],
+    );
+    expect(effectiveHit(stats)).toBe(10 * 2 * 2);
+    expect(attackDamage(stats)).toBe(10 * (2 * 2 + 0.5 * 2 * 3));
+  });
+
+  it("ignite 熔核's explosions always (its area projectile rows), its jumps at the chance", () => {
+    const stats = makeStats(
+      { critChance: 0, igniteChance: 0.2, burnDamage: 1, burnDuration: 2, chainCount: 1 },
+      [],
+    );
+    const retention = stats.values.chainRetention;
+    // A hit's burn: burnDamage × duration × the ignite chance, per point of damage.
+    expect(effectiveHit(stats)).toBeCloseTo(10 * (1 + 2 * 0.2), 12);
+    expect(effectiveHit(stats, [], MAGMA_BOMB)).toBeCloseTo(10 * (1 + 2 * 1), 12);
+    expect(attackDamage(stats, [], MAGMA_BOMB)).toBeCloseTo(
+      10 * (1 + 2 * 1 + retention * (1 + 2 * 0.2)),
+      12,
+    );
+  });
+
+  it("read a jump's burn from the burn row at jump 0: burns are no chain instances", () => {
+    // ×(1 + jumps) on burns: read at the jump, the jump's burn would double.
+    const stats = makeStats(
+      {
+        critChance: 0,
+        igniteChance: 1,
+        burnDamage: 1,
+        burnDuration: 2,
+        chainCount: 1,
+        chainRetention: 0.5,
+      },
+      [{ stat: 'damage', kind: 'more', value: 1, tags: ['burn'], scaling: { per: 'chainJump' } }],
+    );
+    // Each hit deals 1 and ignites a burn of 1 × 2 × 1.
+    expect(attackDamage(stats)).toBeCloseTo(10 * (3 + 0.5 * 3), 12);
   });
 });
 

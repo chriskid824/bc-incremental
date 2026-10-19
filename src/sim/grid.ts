@@ -26,8 +26,10 @@
  *
  * From the first query after rebuild() until the next rebuild(), the source array may only
  * grow: entries must not move, be removed, or change position. The simulation rebuilds right
- * after enemy movement and compacts its arrays after the tick's last query; an entity moved
- * during a tick (knockback, none yet) is found at its new cell only from the next tick on.
+ * after enemy movement, and again whenever a push effect has moved enemies (effects/execute.ts),
+ * so the queries after the push in the same tick find them at their new cells; it compacts its
+ * arrays after the tick's last query. rebuild() only marks the cells stale and the next query
+ * sorts, so only the first query after a move sorts and the queries after it share that sort.
  * Positions must be finite.
  */
 

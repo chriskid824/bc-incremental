@@ -2,6 +2,6 @@
 
 export * from './types';
 export { BURN_TICK_INTERVAL, createSimulation } from './simulation';
-export { centerDamage, centerStat, compileBuild } from './build/compile';
-export type { BuildFlags, CompiledBuild, SignatureParams } from './build/compile';
+export { centerDamage, centerStat, compileBuild, keyedStat, signatureRows } from './build/compile';
+export type { BuildFlags, CompiledBuild, SignatureParams, SignatureRows } from './build/compile';
 export { SCOPED_INDEX } from './build/modTable';

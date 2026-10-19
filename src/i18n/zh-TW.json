@@ -199,6 +199,7 @@
   "intro.talents": "局與局之間，用碎片點天賦網，組出暴擊、燃燒或連鎖流派。",
   "intro.start": "開始 · Space",
   "build.critEveryNth": "每 {n} 發一次",
+  "build.critEveryNthAttack": "每 {n} 次攻擊",
   "talents.priceGrowth": "每點一個天賦，下一個的價格就 ×{growth}（可重複升級的天賦不算）。",
   "talents.startWaveAbove": "目前配置應該能清到第 {reach} 波。清不掉起始波次就拿不到跳波補償。",
   "talents.startWaveLoweredBuild": "已自動調降：目前配置應該能清到第 {reach} 波。",

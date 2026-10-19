@@ -6,8 +6,10 @@
  * without queries skip the sort, and so do ticks with fewer than GRID_LINEAR_BELOW enemies,
  * whose queries scan them linearly, unless many straight shots fly (projectiles.ts). Enemies
  * that die later in the tick stay in their cells and are skipped; enemies added later in the
- * tick (split children) are scanned linearly by every query. Nothing moves enemies after
- * movement yet; whatever will (knockback) is seen at its new cell from the next tick.
+ * tick (split children) are scanned linearly by every query. A push effect that moves enemies
+ * later in the tick rebuilds again (effects/execute.ts), so the queries after it in the same tick
+ * see the new positions. The sort waits for the next query: only the first query after a push's
+ * move sorts, the queries after it share that sort, and a push that moved nothing does not rebuild.
  */
 
 import { SpatialGrid } from '../grid';

@@ -44,6 +44,7 @@ import {
   SIGNATURE,
   SLOT_HIT,
   SLOT_HIT_CRIT,
+  shotsInFlight,
   slotRow,
 } from '../emitters/types';
 import type { ChainBudget, EmitterRuntime, Payload } from '../emitters/types';
@@ -341,7 +342,9 @@ export interface RunContext {
   readonly expectedHit: number;
   /**
    * Damage a projectile in flight is expected to deal, for targeting: the signature attack's
-   * non-crit primary hit.
+   * non-crit primary hit when the signature sends shots in flight (volley, lob; shotsInFlight),
+   * ZERO otherwise. Only a volley counts its shots in Enemy.inbound, so only a volley's targeting
+   * reads it today.
    */
   readonly projectileEstimate: Num;
 
@@ -724,7 +727,9 @@ export function createRunContext(
     toNumber(signaturePayload.baseDamage) *
     ((1 - averageCrit) * hitMult + averageCrit * critMultiplier * critHitMult);
 
-  const projectileEstimate = mul(signaturePayload.baseDamage, hitMult);
+  const projectileEstimate = shotsInFlight(signatureEmitter.spec)
+    ? mul(signaturePayload.baseDamage, hitMult)
+    : ZERO;
 
   const enemies: Enemy[] = [];
   const projectiles: Projectile[] = [];

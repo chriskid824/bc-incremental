@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { RuleSpec } from '../data/rules';
+import type { RuleSpec, SignatureSpec } from '../data/rules';
 import { BASE_STATS } from '../data/stats';
 import { DAMAGE_TAGS } from '../data/tags';
 import { TALENTS } from '../data/talents';
@@ -8,9 +8,17 @@ import { makeStats, PANDEMIC_MODS, SEARING_CRITS_MODS } from '../sim/testing';
 import { describeBuild, describeModifier } from './describe';
 
 /** describeBuild as a label → value record. */
-function build(rules: readonly RuleSpec[] = [], stats = makeStats()): Record<string, string> {
-  return Object.fromEntries(describeBuild(stats, rules).map((line) => [line.label, line.value]));
+function build(
+  rules: readonly RuleSpec[] = [],
+  stats = makeStats(),
+  signature?: SignatureSpec,
+): Record<string, string> {
+  return Object.fromEntries(
+    describeBuild(stats, rules, signature).map((line) => [line.label, line.value]),
+  );
 }
+
+const MAGMA_BOMB: SignatureSpec = { id: 'magmaBomb' };
 
 describe('describeBuild', () => {
   afterEach(() => setLocale('en'));
@@ -69,6 +77,47 @@ describe('describeBuild', () => {
         t('stat.critChance')
       ],
     ).toBe('每 3 發一次');
+  });
+
+  it('shows the steadyAim rhythm in attacks when it counts attacks', () => {
+    const steady = {
+      id: 'steadyAim',
+      everyNth: 3,
+      critMultiplierMore: 0.5,
+      counts: 'attack',
+    } as const;
+    expect(build([steady])[t('stat.critChance')]).toBe('Every 3 attacks');
+    setLocale('zh-TW');
+    expect(build([steady])[t('stat.critChance')]).toBe('每 3 次攻擊');
+  });
+
+  it("reads the signature attack's rows: projectile hits for M1, area projectile hits for 熔核", () => {
+    // ×2 on projectile hits, ×3 on area hits, ×5 on chain hits; none on M1's base rows.
+    const stats = makeStats({ critChance: 0 }, [
+      { stat: 'damage', kind: 'more', value: 1, tags: ['projectile'] },
+      { stat: 'damage', kind: 'more', value: 2, tags: ['area'] },
+      { stat: 'damage', kind: 'more', value: 4, tags: ['chain'] },
+    ]);
+    const m1 = build([], stats);
+    expect(m1[t('stat.damage.hit')]).toBe('20');
+    expect(m1[t('build.critHit')]).toBe('30');
+    expect(m1[t('build.chainJump')]).toBe('35');
+    const magma = build([], stats, MAGMA_BOMB);
+    expect(magma[t('stat.damage.hit')]).toBe('60');
+    expect(magma[t('build.critHit')]).toBe('90');
+    // Its jumps keep no area or projectile tag.
+    expect(magma[t('build.chainJump')]).toBe('35');
+    // A burn is no projectile or area hit: both read the plain burn row.
+    expect(m1[t('build.burnPerStack')]).toBe('15/s');
+    expect(magma[t('build.burnPerStack')]).toBe('15/s');
+  });
+
+  it('shows the compiled projectile count: one bomb a firing for 熔核 at base (D28)', () => {
+    expect(build()[t('stat.projectileCount')]).toBe(String(BASE_STATS.projectileCount));
+    expect(build([], makeStats(), MAGMA_BOMB)[t('stat.projectileCount')]).toBe(
+      String(BASE_STATS.projectileCount - 1),
+    );
+    expect(BASE_STATS.projectileCount - 1).toBe(1);
   });
 
   it('applies glassCannon, Pandemic’s hit cost and overload', () => {

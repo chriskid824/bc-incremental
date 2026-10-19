@@ -1,18 +1,31 @@
 import { describe, expect, it } from 'vitest';
+import { createRng } from '../../core/rng';
 import { THORNS_DAMAGE_PCT } from '../../data/emitters';
 import type { EmitterGrant } from '../../data/emitters';
-import type { RuleSpec } from '../../data/rules';
+import { M1_SIGNATURE } from '../../data/rules';
+import type { RuleSpec, SignatureSpec } from '../../data/rules';
 import { SCOPED_STATS } from '../../data/stats';
 import type { Modifier } from '../../data/stats';
 import { TAG } from '../../data/tags';
 import { SHATTER_TRIGGER, shatterTrigger } from '../effects/types';
+import {
+  emitterPayload,
+  SLOT_HIT,
+  SLOT_HIT_CRIT,
+  SLOT_JUMP,
+  SLOT_JUMP_CRIT,
+  slotRow,
+} from '../emitters/types';
+import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
 import type { TestModule } from '../rules';
-import { damageRow, makeStats, maskProbeMods } from '../testing';
-import { centerDamage, centerStat, compileBuild } from './compile';
+import { damageRow, makeStats, maskProbeMods, placedEnemies } from '../testing';
+import { centerDamage, centerStat, compileBuild, keyedStat, signatureRows } from './compile';
+import type { CompiledBuild } from './compile';
 import { modTableFor, SCOPED_INDEX } from './modTable';
+import { CENTER, rowKey } from './sources';
 
 const S = SCOPED_STATS.length;
-const { critChance: CRIT_CHANCE, critMultiplier: CRIT_MULTIPLIER } = SCOPED_INDEX;
+const { critChance: CRIT_CHANCE, critMultiplier: CRIT_MULTIPLIER, damage: DAMAGE } = SCOPED_INDEX;
 
 /** Masks of the M1 tags, plus a poison minion row no M1 modifier reaches. */
 const MASKS = [...Array.from({ length: 16 }, (_, mask) => mask), TAG.poison | TAG.minion];
@@ -218,5 +231,123 @@ describe('compileBuild', () => {
     }
     // Without grants, the signature alone.
     expect(compileBuild(makeStats(), []).emitters.map((em) => em.kind)).toEqual(['volley']);
+  });
+});
+
+describe('signatureRows', () => {
+  const MAGMA_BOMB: SignatureSpec = { id: 'magmaBomb' };
+  const { hit: HIT, crit: CRIT, chain: CHAIN, area: AREA, projectile: PROJECTILE } = TAG;
+
+  it('keys m1Volley hits hit and projectile, its jumps hit and chain, at the center', () => {
+    expect(signatureRows(compileBuild(makeStats(), []))).toEqual({
+      hit: rowKey(HIT | PROJECTILE, CENTER),
+      hitCrit: rowKey(HIT | PROJECTILE | CRIT, CENTER),
+      jump: rowKey(HIT | CHAIN, CENTER),
+      jumpCrit: rowKey(HIT | CHAIN | CRIT, CENTER),
+    });
+  });
+
+  it('keys magmaBomb hits hit, area and projectile, its jumps hit and chain (Q3 (B))', () => {
+    expect(signatureRows(compileBuild(makeStats(), [], MAGMA_BOMB))).toEqual({
+      hit: rowKey(HIT | AREA | PROJECTILE, CENTER),
+      hitCrit: rowKey(HIT | AREA | PROJECTILE | CRIT, CENTER),
+      jump: rowKey(HIT | CHAIN, CENTER),
+      jumpCrit: rowKey(HIT | CHAIN | CRIT, CENTER),
+    });
+  });
+
+  it('are the rows the signature payload reads in a run', () => {
+    for (const signature of [M1_SIGNATURE, MAGMA_BOMB]) {
+      const ctx = placedEnemies([], { signature });
+      const payload = (ctx.emitters[0] as EmitterRuntime).payload;
+      // The payload's rows first: a wrong key would then add a row of its own.
+      const slots = [SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP, SLOT_JUMP_CRIT].map((slot) =>
+        slotRow(ctx.build, payload, slot),
+      );
+      const rows = signatureRows(ctx.build);
+      const keys = [rows.hit, rows.hitCrit, rows.jump, rows.jumpCrit];
+      expect(keys.map((key) => ctx.build.table.row(key))).toEqual(slots);
+      expect(new Set(slots).size).toBe(4);
+    }
+  });
+
+  it("credits every row to the signature emitter's source", () => {
+    const build = compileBuild(makeStats(), []);
+    const spec = build.emitters[0] as EmitterSpec;
+    const moved: CompiledBuild = { ...build, emitters: [{ ...spec, source: 'outer.fire' }] };
+    const rows = signatureRows(moved);
+    const source = build.sources.index('outer.fire');
+    expect(source).not.toBe(CENTER);
+    expect(rows).toEqual({
+      hit: rowKey(HIT | PROJECTILE, source),
+      hitCrit: rowKey(HIT | PROJECTILE | CRIT, source),
+      jump: rowKey(HIT | CHAIN, source),
+      jumpCrit: rowKey(HIT | CHAIN | CRIT, source),
+    });
+  });
+
+  it('reads the signature at emitters[0], not the grants after it', () => {
+    // A thorns grant (at the center or at its outer source) and a segment grant.
+    const grants = (source: string) =>
+      makeStats({}, [], {
+        triggers: [],
+        conversions: [],
+        emitters: [
+          { source, grant: { kind: 'thorns' } },
+          { source: 'outer.lightning', grant: { kind: 'segment', endpoints: 'shocked' } },
+        ],
+      });
+    for (const signature of [M1_SIGNATURE, MAGMA_BOMB]) {
+      const alone = signatureRows(compileBuild(makeStats(), [], signature));
+      for (const source of ['center', 'outer.thorns']) {
+        const build = compileBuild(grants(source), [], signature);
+        expect(build.emitters.map((em) => em.kind).slice(1)).toEqual(['thorns', 'segment']);
+        expect(signatureRows(build)).toEqual(alone);
+      }
+    }
+  });
+
+  it("are the rows an emitter payload of the signature's spec reads, any tags and source", () => {
+    // An element and an owner tag, which a chain jump keeps (jumpMask), at an outer source.
+    const build = compileBuild(makeStats(), []);
+    const spec = build.emitters[0] as EmitterSpec;
+    const tags = spec.tags | TAG.cold | TAG.minion;
+    const moved: CompiledBuild = { ...build, emitters: [{ ...spec, tags, source: 'outer.ice' }] };
+    const payload = emitterPayload(moved, moved.emitters[0] as EmitterSpec, createRng(1));
+    // The payload's rows first: a wrong key would then add a row of its own.
+    const slots = [SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP, SLOT_JUMP_CRIT].map((slot) =>
+      slotRow(moved, payload, slot),
+    );
+    const rows = signatureRows(moved);
+    const keys = [rows.hit, rows.hitCrit, rows.jump, rows.jumpCrit];
+    expect(keys.map((key) => moved.table.row(key))).toEqual(slots);
+    expect(new Set(slots).size).toBe(4);
+    const source = build.sources.index('outer.ice');
+    expect(rows.jump).toBe(rowKey(HIT | CHAIN | TAG.cold | TAG.minion, source));
+    expect(rows.jumpCrit).toBe(rowKey(HIT | CHAIN | TAG.cold | TAG.minion | CRIT, source));
+  });
+
+  it('reads a key with keyedStat, which centerStat is at the center', () => {
+    // ×3 on projectile hits, +0.25 crit chance on the second jump of a chain and later.
+    const stats = makeStats({}, [
+      { stat: 'damage', kind: 'more', value: 2, tags: ['projectile'] },
+      {
+        stat: 'critChance',
+        kind: 'flat',
+        value: 0.25,
+        tags: ['chain'],
+        scaling: { per: 'chainJump' },
+      },
+    ]);
+    const build = compileBuild(stats, []);
+    const rows = signatureRows(build);
+    expect(keyedStat(build, rows.hit, DAMAGE)).toBe(3);
+    expect(keyedStat(build, rowKey(HIT, CENTER), DAMAGE)).toBe(1);
+    for (const jump of [0, 1, 2]) {
+      expect(keyedStat(build, rows.jump, CRIT_CHANCE, jump)).toBe(
+        centerStat(build, HIT | CHAIN, CRIT_CHANCE, jump),
+      );
+    }
+    expect(keyedStat(build, rows.jump, CRIT_CHANCE, 2)).toBe(stats.values.critChance + 0.5);
   });
 });

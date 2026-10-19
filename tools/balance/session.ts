@@ -6,8 +6,8 @@
 
 import { assertFinite, num, toNumber } from '../../src/core/num';
 import { deriveSeed } from '../../src/core/rng';
-import { loadGameData, stdHp, TAG } from '../../src/data';
-import type { GameData, RuleSpec, StatBlock } from '../../src/data';
+import { loadGameData, M1_SIGNATURE, stdHp, TAG } from '../../src/data';
+import type { GameData, RuleSpec, SignatureSpec, StatBlock } from '../../src/data';
 import {
   allowedStartWave,
   collectRules,
@@ -20,11 +20,20 @@ import {
   centerStat,
   compileBuild,
   createSimulation,
+  keyedStat,
   NO_INPUT,
   SCOPED_INDEX,
+  signatureRows,
   TICK_RATE,
 } from '../../src/sim';
-import type { CompiledBuild, EndReason, RunConfig, SimEvent, SimState } from '../../src/sim';
+import type {
+  CompiledBuild,
+  EndReason,
+  RunConfig,
+  SignatureRows,
+  SimEvent,
+  SimState,
+} from '../../src/sim';
 import { spend } from './strategies';
 import type { StrategyId } from './strategies';
 
@@ -90,10 +99,8 @@ export function runSeed(seed: number, session: number, run: number): number {
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
-const HIT = TAG.hit;
 const CRIT = TAG.crit;
 const BURN = TAG.burn;
-const CHAIN = TAG.chain;
 
 const DAMAGE = SCOPED_INDEX.damage;
 const CRIT_CHANCE = SCOPED_INDEX.critChance;
@@ -105,35 +112,32 @@ const IGNITE_ALWAYS = SCOPED_INDEX.igniteAlways;
 /**
  * Expected damage, per point of base damage before retention, of one hit `jump` chain jumps
  * after the primary target (0 = the primary): the hit with its crit expectation plus the
- * burn it is expected to cause. Mirrors the simulation (src/sim/combat/hit.ts): the crit
- * chance comes from the hit's row, everything else from the row of its outcome (hit|crit for
- * crits), jumps add the chain tag to the hit (not to its burn), a crit's burn is computed from
- * the crit hit with the burn|crit row, a steady shot crits on every jump, *Always stats make
- * their chance 1, and rules apply as compileBuild compiles them (src/sim/build/compile.ts).
+ * burn it is expected to cause. Mirrors the simulation (src/sim/combat/hit.ts): hits read the
+ * signature attack's rows (`rows`, signatureRows: its primary hit's, its jumps' from jump 1), the
+ * crit chance comes from the hit's row, everything else from the row of its outcome (its crit
+ * row for crits), a crit's burn is computed from the crit hit with the burn|crit row, a steady
+ * shot crits on every jump, *Always stats make their chance 1, and rules apply as compileBuild
+ * compiles them (src/sim/build/compile.ts).
  */
-function hitValue(build: CompiledBuild, jump: number): number {
+function hitValue(build: CompiledBuild, rows: SignatureRows, jump: number): number {
   const { values } = build;
-  const chain = jump > 0 ? CHAIN : 0;
-  // Burns are no chain instances: their rows read at jump 0, as in the simulation.
-  const at = (mask: number, stat: number): number =>
-    centerStat(build, mask, stat, (mask & BURN) === 0 ? jump : 0);
-  const mult = (mask: number): number => at(mask, DAMAGE);
+  const plain = jump > 0 ? rows.jump : rows.hit;
+  const crit = jump > 0 ? rows.jumpCrit : rows.hitCrit;
+  const at = (key: number, stat: number): number => keyedStat(build, key, stat, jump);
   /** A roll's chance, or 1 when its *Always stat forces it. */
-  const chance = (mask: number, stat: number, always: number): number =>
-    at(mask, always) > 0 ? 1 : clamp01(at(mask, stat));
+  const chance = (key: number, stat: number, always: number): number =>
+    at(key, always) > 0 ? 1 : clamp01(at(key, stat));
+  // Burns are no chain instances: their rows read at jump 0, as in the simulation.
+  const burnMult = (mask: number): number => centerStat(build, mask, DAMAGE);
   const every = build.signature.forceCritEvery;
   const critChance =
-    at(HIT | chain, CRIT_ALWAYS) > 0
-      ? 1
-      : every > 0
-        ? 1 / every
-        : clamp01(at(HIT | chain, CRIT_CHANCE));
-  const critFactor = critChance * at(HIT | CRIT | chain, CRIT_MULTIPLIER);
-  const hit = (1 - critChance) * mult(HIT | chain) + critFactor * mult(HIT | CRIT | chain);
-  const ignite = chance(HIT | chain, IGNITE_CHANCE, IGNITE_ALWAYS);
-  const critIgnite = chance(HIT | CRIT | chain, IGNITE_CHANCE, IGNITE_ALWAYS);
+    at(plain, CRIT_ALWAYS) > 0 ? 1 : every > 0 ? 1 / every : clamp01(at(plain, CRIT_CHANCE));
+  const critFactor = critChance * at(crit, CRIT_MULTIPLIER);
+  const hit = (1 - critChance) * at(plain, DAMAGE) + critFactor * at(crit, DAMAGE);
+  const ignite = chance(plain, IGNITE_CHANCE, IGNITE_ALWAYS);
+  const critIgnite = chance(crit, IGNITE_CHANCE, IGNITE_ALWAYS);
   const burnPerDamage =
-    (1 - critChance) * ignite * mult(BURN) + critFactor * critIgnite * mult(BURN | CRIT);
+    (1 - critChance) * ignite * burnMult(BURN) + critFactor * critIgnite * burnMult(BURN | CRIT);
   const burn = values.burnDamage * Math.max(0, values.burnDuration) * burnPerDamage;
   return hit + burn;
 }
@@ -143,34 +147,54 @@ function hitValue(build: CompiledBuild, jump: number): number {
  * hit including crits, plus the total burn that hit is expected to cause. Ignores chain jumps,
  * burn stack caps, pandemic spread and hits that kill before burning.
  */
-export function effectiveHit(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
-  const build = compileBuild(stats, rules);
-  return build.values.damage * hitValue(build, 0);
+export function effectiveHit(
+  stats: StatBlock,
+  rules: readonly RuleSpec[] = [],
+  signature: SignatureSpec = M1_SIGNATURE,
+): number {
+  const build = compileBuild(stats, rules, signature);
+  return build.values.damage * hitValue(build, signatureRows(build), 0);
+}
+
+/** attackDamage of a compiled build. */
+function attackValue(build: CompiledBuild): number {
+  const { values } = build;
+  const rows = signatureRows(build);
+  const jumps = Math.max(0, values.chainCount);
+  const retention = clamp01(values.chainRetention);
+  const whole = Math.floor(jumps);
+  let total = hitValue(build, rows, 0);
+  for (let k = 1; k <= whole; k++) total += retention ** k * hitValue(build, rows, k);
+  total += (jumps - whole) * retention ** (whole + 1) * hitValue(build, rows, whole + 1);
+  return values.damage * total;
 }
 
 /**
  * Expected damage of one projectile over its primary target and all its chain jumps: `D`
  * plus the jumps, each scaled by the retention, assuming every jump finds a target.
  */
-export function attackDamage(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
-  const build = compileBuild(stats, rules);
-  const { values } = build;
-  const jumps = Math.max(0, values.chainCount);
-  const retention = clamp01(values.chainRetention);
-  const whole = Math.floor(jumps);
-  let total = hitValue(build, 0);
-  for (let k = 1; k <= whole; k++) total += retention ** k * hitValue(build, k);
-  total += (jumps - whole) * retention ** (whole + 1) * hitValue(build, whole + 1);
-  return values.damage * total;
+export function attackDamage(
+  stats: StatBlock,
+  rules: readonly RuleSpec[] = [],
+  signature: SignatureSpec = M1_SIGNATURE,
+): number {
+  return attackValue(compileBuild(stats, rules, signature));
 }
 
 /**
  * Damage per second against a crowd: attackDamage × attacks per second × projectiles, as if
- * every projectile and jump found a target. Ignores overkill and pandemic spread.
+ * every projectile and jump found a target. Ignores overkill and pandemic spread. The
+ * projectiles are the compiled projectileCount, after the signature's and the rules' changes
+ * (熔核 throws projectileCount − 1 bombs a firing).
  */
-export function crowdDps(stats: StatBlock, rules: readonly RuleSpec[] = []): number {
-  const { values } = stats;
-  return attackDamage(stats, rules) * values.attackSpeed * Math.max(1, values.projectileCount);
+export function crowdDps(
+  stats: StatBlock,
+  rules: readonly RuleSpec[] = [],
+  signature: SignatureSpec = M1_SIGNATURE,
+): number {
+  const build = compileBuild(stats, rules, signature);
+  const projectiles = Math.max(1, build.values.projectileCount);
+  return attackValue(build) * stats.values.attackSpeed * projectiles;
 }
 
 /** Talent ids whose node belongs to a crit, DoT or chain sector (not bridges or generic). */
