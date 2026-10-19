@@ -27,7 +27,7 @@ import type { CenterEventState } from '../effects/centerEvents';
 import { REPEAT } from '../effects/flags';
 import { createEffectEntry, createEffectQueue } from '../effects/queue';
 import type { EffectEntry, EffectQueue, PendingKill, TriggerState } from '../effects/queue';
-import { createSelectionScratch, selectable } from '../effects/select';
+import { compileSelector, createSelectionScratch, selectable } from '../effects/select';
 import type { SelectionScratch } from '../effects/select';
 import { EVENT } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
@@ -713,13 +713,15 @@ export function createRunContext(
     build.chainPolicy === null ? null : compilePolicy(build.chainPolicy, chainRetention);
 
   // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
-  // contact stage the thorns and the segment stage the segments.
+  // contact stage the thorns and the segment stage the segments. A strike picks its target as a
+  // periodic trigger does, from the player.
   const emitters = build.emitters.map((spec, index) =>
     createEmitterRuntime(
       spec,
       emitterPayload(build, spec, combatRng, index === 0 ? policy : null),
       index,
       emitterInterval(build, spec),
+      spec.kind === 'strike' ? compileSelector(spec.target, 'periodic') : null,
     ),
   );
   const thornsEmitters = emitters.filter((em) => em.spec.kind === 'thorns');

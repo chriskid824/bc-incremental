@@ -369,9 +369,34 @@ function grantIssues(grant: EmitterGrant): string[] {
       }
       break;
     }
+    case 'strike': {
+      if (!(grant.periodSec >= STRIKE_PERIOD_MIN)) {
+        issues.push(`periodSec must be >= 1/60 (got ${grant.periodSec})`);
+      }
+      const jumps = grant.chainJumps;
+      if (
+        jumps !== undefined &&
+        !(Number.isInteger(jumps) && jumps >= 0 && jumps <= STRIKE_CHAIN_JUMPS_MAX)
+      ) {
+        issues.push(
+          `chainJumps must be an integer in [0, ${STRIKE_CHAIN_JUMPS_MAX}] (got ${jumps})`,
+        );
+      }
+      if (grant.target.pick === 'player') {
+        issues.push("target.pick 'player' has no enemy to strike; pick an enemy");
+      }
+      issues.push(...selectorIssues('periodic', false, grant.target));
+      break;
+    }
   }
   return issues;
 }
+
+/** The shortest period of a strike: one tick of the simulation's 60 a second. */
+const STRIKE_PERIOD_MIN = 1 / 60;
+
+/** The most jumps a strike's chain makes. */
+const STRIKE_CHAIN_JUMPS_MAX = 8;
 
 /** Parameter ranges of one rule; the simulation relies on them (src/sim/rules/). */
 function ruleIssues(rule: RuleSpec): string[] {
@@ -588,7 +613,7 @@ function triggerIssues(trigger: TriggerSpec): string[] {
     if ((counts.get(key) ?? 0) > 1) issues.push(`at most one ${key} condition`);
   }
   const target = trigger.target;
-  if (target !== undefined) issues.push(...selectorIssues(trigger, target));
+  if (target !== undefined) issues.push(...selectorIssues(on, runsAtKill(trigger), target));
 
   if (trigger.do.length === 0) issues.push('needs at least one effect');
   const kill = KILL_EVENTS.includes(on);
@@ -638,17 +663,17 @@ function detonateIssues(trigger: TriggerSpec): string[] {
 }
 
 /**
- * Where a trigger's target selector can run and what it needs: no waveStart (nothing has
- * spawned to pick when it fires), no kill trigger that runs at the kill (its transfers act on
- * the victim), no pick that scans every enemy on events that come per hit, mostStacks with
- * exactly its ailment, a range above 0, and the event's enemy to exclude.
+ * Where a target selector can run, for a trigger on events `on` that runs at the kill when
+ * `atKill` (runsAtKill), and what it needs: no waveStart (nothing has spawned to pick when it
+ * fires), no kill trigger that runs at the kill (its transfers act on the victim), no pick that
+ * scans every enemy on events that come per hit, mostStacks with exactly its ailment, a range
+ * above 0, and the event's enemy to exclude. A strike's target runs as a periodic trigger's.
  */
-function selectorIssues(trigger: TriggerSpec, target: TargetSelector): string[] {
-  const on = trigger.on;
+function selectorIssues(on: TriggerEventId, atKill: boolean, target: TargetSelector): string[] {
   if (on === 'waveStart') {
     return ["target is not allowed on 'waveStart' events; use a periodic trigger with a selector"];
   }
-  if (runsAtKill(trigger)) {
+  if (atKill) {
     return [
       'target is not allowed on a kill trigger that runs at the kill; it always acts on the victim',
     ];

@@ -471,10 +471,25 @@ export const GRANT_SCHEMAS = {
       periodSec: finite.exactOptional(),
     })
     .readonly(),
+  // Any selector; validate.ts rejects the 'player' pick, which has no enemy to strike, and holds
+  // the target to the rules of a periodic trigger's.
+  strike: z
+    .strictObject({
+      kind: z.literal('strike'),
+      name: z.string(),
+      periodSec: finite,
+      target: TargetSelectorSchema,
+      damagePct: finite,
+      radius: finite.exactOptional(),
+      element: z.enum(['cold', 'lightning']).exactOptional(),
+      chainJumps: finite.exactOptional(),
+      shockStacks: finite.exactOptional(),
+    })
+    .readonly(),
 } as const satisfies { readonly [K in GrantKind]: z.ZodType<Extract<EmitterGrant, { kind: K }>> };
 
 export const EmitterGrantSchema = exact<EmitterGrant>()(
-  z.discriminatedUnion('kind', [GRANT_SCHEMAS.thorns, GRANT_SCHEMAS.segment]),
+  z.discriminatedUnion('kind', [GRANT_SCHEMAS.thorns, GRANT_SCHEMAS.segment, GRANT_SCHEMAS.strike]),
 );
 
 export const EnemyDefSchema = exact<EnemyDef>()(

@@ -1064,6 +1064,81 @@ const CHAIN_BOLT_STATS = makeStats(
   },
 );
 
+/**
+ * C4.18's strikes beside a thorns grant, on a volley that chains once and shocks a fifth of its
+ * hits: 落雷 every second at the enemy nearest the player, its hit and the enemies within 50 of
+ * it, a shock stack on the target; 雷鳴 every 1.5 s at the enemy of the most hp within 400,
+ * bosses left out, chaining 4 jumps that shock 2 stacks each; and a cold strike every 0.75 s at
+ * the most shocked enemy, over 80, with no shock of its own. Their hits crit, ignite and kill,
+ * and a kill trigger on outer.lightning explodes some of the kills.
+ */
+const STRIKE_STATS = makeStats(
+  {
+    damage: 5,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    shockChance: 0.2,
+    chainCount: 1,
+  },
+  maskProbeMods(),
+  {
+    triggers: [
+      {
+        source: 'outer.lightning',
+        spec: {
+          on: 'kill',
+          when: [{ chance: 0.3 }],
+          do: [{ kind: 'explode', radius: 60, damagePct: 0.5 }],
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [
+      { source: 'center', grant: { kind: 'thorns', damagePct: 1 } },
+      {
+        source: 'outer.lightning',
+        grant: {
+          kind: 'strike',
+          name: 'lightningStrike',
+          periodSec: 1,
+          target: { pick: 'nearest' },
+          damagePct: 2,
+          radius: 50,
+          element: 'lightning',
+          shockStacks: 1,
+        },
+      },
+      {
+        source: 'outer.lightning',
+        grant: {
+          kind: 'strike',
+          name: 'thunder',
+          periodSec: 1.5,
+          target: { pick: 'highestHp', range: 400, excludeBoss: true },
+          damagePct: 1.5,
+          element: 'lightning',
+          chainJumps: 4,
+          shockStacks: 2,
+        },
+      },
+      {
+        source: 'center',
+        grant: {
+          kind: 'strike',
+          name: 'frostfall',
+          periodSec: 0.75,
+          target: { pick: 'mostStacks', ailment: 'shock' },
+          damagePct: 1,
+          radius: 80,
+          element: 'cold',
+        },
+      },
+    ],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1174,6 +1249,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'chainBolt',
     config: { stats: CHAIN_BOLT_STATS, rules: [], startWave: 12 },
     expected: ['deadf0cee6495706', '06f8577e803a60f4'],
+  },
+  {
+    name: 'strike',
+    config: { stats: STRIKE_STATS, rules: [], startWave: 12 },
+    expected: ['2164cf2e374eae13', '9eee8e2dc745d1d0'],
   },
 ];
 

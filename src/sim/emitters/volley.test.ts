@@ -166,13 +166,16 @@ describe('projectileEstimate', () => {
   });
 
   it("is the signature's, whatever emitters are granted after it", () => {
-    // A thorns and a segment grant, whose kinds send no shots: the estimate stays the signature's.
+    // A thorns, a segment and a strike grant, whose kinds send no shots: the estimate stays the
+    // signature's.
+    const strike = { kind: 'strike', name: 'bolt', periodSec: 1, damagePct: 9 } as const;
     const granted = makeStats({ damage: 10 }, stats.scoped, {
       triggers: [],
       conversions: [],
       emitters: [
         { source: 'center', grant: { kind: 'thorns' } },
         { source: 'outer.lightning', grant: { kind: 'segment', endpoints: 'shocked' } },
+        { source: 'outer.lightning', grant: { ...strike, target: { pick: 'nearest' } } },
       ],
     });
     const m1Granted = createRunContext(makeConfig({ stats: granted }), makeTestData());
@@ -181,13 +184,17 @@ describe('projectileEstimate', () => {
       makeTestData(),
     );
     for (const ctx of [m1Granted, magmaGranted]) {
-      expect(ctx.emitters.map((em) => em.spec.kind).slice(1)).toEqual(['thorns', 'segment']);
+      expect(ctx.emitters.map((em) => em.spec.kind).slice(1)).toEqual([
+        'thorns',
+        'segment',
+        'strike',
+      ]);
     }
     expect(toNumber(m1Granted.projectileEstimate)).toBe(10 * 3);
     expect(toNumber(magmaGranted.projectileEstimate)).toBe(10 * 1.5 * 3 * 2);
   });
 
-  it('counts the shots of volleys and lobs in flight, not thorns or segments', () => {
+  it('counts the shots of volleys and lobs in flight, not thorns, segments or strikes', () => {
     const signature = (ctx: typeof m1) => (ctx.emitters[0] as EmitterRuntime).spec;
     expect(signature(m1).kind).toBe('volley');
     expect(shotsInFlight(signature(m1))).toBe(true);
@@ -197,5 +204,13 @@ describe('projectileEstimate', () => {
     expect(
       shotsInFlight(grantEmitter('outer.lightning', { kind: 'segment', endpoints: 'shocked' })),
     ).toBe(false);
+    const strike = grantEmitter('outer.lightning', {
+      kind: 'strike',
+      name: 'bolt',
+      periodSec: 1,
+      target: { pick: 'nearest' },
+      damagePct: 2,
+    });
+    expect(shotsInFlight(strike)).toBe(false);
   });
 });

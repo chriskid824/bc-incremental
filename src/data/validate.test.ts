@@ -1788,6 +1788,105 @@ describe('emitter grant validation', () => {
     expect(grantIssues(web(150), { ...web(250), id: 'hub.web' })).toEqual([]);
   });
 
+  const strike = (fields: object): EmitterGrant =>
+    ({
+      kind: 'strike',
+      name: 'bolt',
+      periodSec: 1,
+      target: { pick: 'nearest' },
+      damagePct: 2,
+      ...fields,
+    }) as EmitterGrant;
+
+  it('accepts strike grants, with or without their optional fields', () => {
+    const full = strike({
+      target: { pick: 'highestHp', range: 400, excludeBoss: true },
+      radius: 60,
+      element: 'lightning',
+      chainJumps: 3,
+      shockStacks: 2,
+    });
+    for (const grant of [strike({}), full]) {
+      expect(grantIssues({ id: 'outer.lightning.bolt', emitters: [grant] })).toEqual([]);
+    }
+    // The bounds: one tick, no jump, eight jumps.
+    for (const fields of [{ periodSec: 1 / 60 }, { chainJumps: 0 }, { chainJumps: 8 }]) {
+      expect(grantIssues({ id: 'outer.lightning.bolt', emitters: [strike(fields)] })).toEqual([]);
+    }
+  });
+
+  it("rejects a strike period under a tick, jumps outside 0..8 and the 'player' pick", () => {
+    expect(
+      grantIssues({
+        id: 'outer.lightning.bolt',
+        emitters: [
+          strike({ name: 'a', periodSec: 0.01 }),
+          strike({ name: 'b', periodSec: 0 }),
+          strike({ name: 'c', chainJumps: 9 }),
+          strike({ name: 'd', chainJumps: -1 }),
+          strike({ name: 'e', chainJumps: 1.5 }),
+          strike({ name: 'f', target: { pick: 'player' } }),
+          strike({ name: 'g', periodSec: NaN, chainJumps: 12, target: { pick: 'player' } }),
+        ],
+      }),
+    ).toEqual([
+      "talent 'outer.lightning.bolt': emitters[0] periodSec must be >= 1/60 (got 0.01)",
+      "talent 'outer.lightning.bolt': emitters[1] periodSec must be >= 1/60 (got 0)",
+      "talent 'outer.lightning.bolt': emitters[2] chainJumps must be an integer in [0, 8] (got 9)",
+      "talent 'outer.lightning.bolt': emitters[3] chainJumps must be an integer in [0, 8] (got -1)",
+      "talent 'outer.lightning.bolt': emitters[4] chainJumps must be an integer in [0, 8] (got 1.5)",
+      "talent 'outer.lightning.bolt': emitters[5] target.pick 'player' has no enemy to strike; " +
+        'pick an enemy',
+      "talent 'outer.lightning.bolt': emitters[6] periodSec must be >= 1/60 (got NaN)",
+      "talent 'outer.lightning.bolt': emitters[6] chainJumps must be an integer in [0, 8] (got 12)",
+      "talent 'outer.lightning.bolt': emitters[6] target.pick 'player' has no enemy to strike; " +
+        'pick an enemy',
+    ]);
+  });
+
+  it("holds a strike's target to a periodic trigger's selector rules", () => {
+    expect(
+      grantIssues({
+        id: 'outer.lightning.bolt',
+        emitters: [
+          strike({ name: 'a', target: { pick: 'mostStacks' } }),
+          strike({ name: 'b', target: { pick: 'nearest', ailment: 'shock' } }),
+          strike({ name: 'c', target: { pick: 'nearest', range: 0 } }),
+          strike({ name: 'd', target: { pick: 'nearest', excludeEventTarget: true } }),
+          // A scanning pick is fine: a periodic event is not frequent.
+          strike({ name: 'e', target: { pick: 'farthest' } }),
+          strike({ name: 'f', target: { pick: 'mostStacks', ailment: 'shock' } }),
+        ],
+      }),
+    ).toEqual([
+      "talent 'outer.lightning.bolt': emitters[0] target.pick 'mostStacks' needs target.ailment " +
+        '(burn, poison or shock)',
+      "talent 'outer.lightning.bolt': emitters[1] target.ailment only applies to pick 'mostStacks'",
+      "talent 'outer.lightning.bolt': emitters[2] target.range must be > 0 (got 0)",
+      "talent 'outer.lightning.bolt': emitters[3] target.excludeEventTarget needs the event's " +
+        "enemy, which 'periodic' events have not",
+    ]);
+  });
+
+  it('keeps one strike per source and name, and rejects two of one name that differ', () => {
+    const bolt = (id: string, name: string, damagePct: number): Leaf => ({
+      id,
+      emitters: [strike({ name, damagePct })],
+    });
+    expect(
+      grantIssues(bolt('outer.lightning.bolt', 'bolt', 2), bolt('outer.lightning.clap', 'bolt', 3)),
+    ).toEqual([
+      "talents: emitter strike 'bolt' is granted twice by source 'outer.lightning' with " +
+        'different fields; keep it on one node',
+    ]);
+    expect(
+      grantIssues(bolt('outer.lightning.bolt', 'bolt', 2), bolt('outer.lightning.clap', 'clap', 3)),
+    ).toEqual([]);
+    expect(
+      grantIssues(bolt('outer.lightning.bolt', 'bolt', 2), bolt('outer.lightning.clap', 'bolt', 2)),
+    ).toEqual([]);
+  });
+
   it('accepts a keystone whose behaviour is a grant, and needs a descKey for one', () => {
     expect(
       issuesAfter((d) => {

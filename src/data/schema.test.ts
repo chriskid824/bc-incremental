@@ -651,6 +651,17 @@ const SAMPLE_GRANTS: { readonly [K in GrantKind]: Extract<EmitterGrant, { kind: 
     shockStacks: 2,
     periodSec: 0.5,
   },
+  strike: {
+    kind: 'strike',
+    name: 'thunderclap',
+    periodSec: 2,
+    target: { pick: 'highestHp', range: 400, excludeBoss: true },
+    damagePct: 3,
+    radius: 60,
+    element: 'lightning',
+    chainJumps: 3,
+    shockStacks: 1,
+  },
 };
 
 describe('EmitterGrantSchema', () => {
@@ -663,6 +674,17 @@ describe('EmitterGrantSchema', () => {
     expect(EmitterGrantSchema.parse({ kind: 'thorns' })).toEqual({ kind: 'thorns' });
     const bare = { kind: 'segment', endpoints: 'shocked' };
     expect(EmitterGrantSchema.parse(bare)).toEqual(bare);
+    const strike = {
+      kind: 'strike',
+      name: 'lightningStrike',
+      periodSec: 1,
+      target: { pick: 'nearest' },
+      damagePct: 2,
+    };
+    expect(EmitterGrantSchema.parse(strike)).toEqual(strike);
+    // validate.ts rejects the 'player' pick and a jump count outside 0..8, not the schema.
+    const unchecked = { ...strike, target: { pick: 'player' }, chainJumps: 9.5 };
+    expect(EmitterGrantSchema.parse(unchecked)).toEqual(unchecked);
   });
 
   it.each([
@@ -675,6 +697,16 @@ describe('EmitterGrantSchema', () => {
     ['a segment between the summons, which C5 adds', { kind: 'segment', endpoints: 'summons' }],
     ['a segment range that is not finite', { kind: 'segment', endpoints: 'shocked', range: NaN }],
     ['a segment with an unknown key', { kind: 'segment', endpoints: 'shocked', radius: 40 }],
+    ['a strike without a name', { ...SAMPLE_GRANTS.strike, name: undefined }],
+    ['a strike without a period', { ...SAMPLE_GRANTS.strike, periodSec: undefined }],
+    ['a strike without a target', { ...SAMPLE_GRANTS.strike, target: undefined }],
+    ['a strike without a damage share', { ...SAMPLE_GRANTS.strike, damagePct: undefined }],
+    ['a strike with a pick name alone', { ...SAMPLE_GRANTS.strike, target: 'nearest' }],
+    ['a strike with an unknown pick', { ...SAMPLE_GRANTS.strike, target: { pick: 'random' } }],
+    ['a strike of a fire element', { ...SAMPLE_GRANTS.strike, element: 'fire' }],
+    ['a strike jump count that is not finite', { ...SAMPLE_GRANTS.strike, chainJumps: Infinity }],
+    ['a strike radius that is not a number', { ...SAMPLE_GRANTS.strike, radius: '60' }],
+    ['a strike with an unknown key', { ...SAMPLE_GRANTS.strike, links: 2 }],
   ])('rejects %s', (_label, grant) => {
     expect(EmitterGrantSchema.safeParse(grant).success).toBe(false);
   });

@@ -7,6 +7,8 @@
  * (GRANT_SCHEMAS), their checks in src/data/validate.ts.
  */
 
+import type { TargetSelector } from './triggers';
+
 /**
  * Thorns: each enemy that touches the player takes a thorns hit first, and one it kills does not
  * reach the player (src/sim/systems/contact.ts). The hit is tagged hit and thorns, can crit and
@@ -43,7 +45,35 @@ export interface SegmentGrant {
   readonly periodSec?: number;
 }
 
-export type EmitterGrant = ThornsGrant | SegmentGrant;
+/**
+ * A strike (落雷, 雷鳴): every periodSec, whatever the attack speed, it picks an enemy by its
+ * target selector, measured from the player as a periodic trigger's is, and hits it; enemies
+ * within `radius` of it take the same hit, and with chainJumps the strike chains on from it that
+ * many jumps (src/sim/emitters/strike.ts). The target and each jump take shockStacks shock
+ * stacks after their hit. The hits are tagged hit, strike and area plus the element, can crit
+ * and roll ailments.
+ */
+export interface StrikeGrant {
+  readonly kind: 'strike';
+  /** What tells two strikes of one source apart (grantKey). */
+  readonly name: string;
+  /** Seconds between its strikes, at least one tick. */
+  readonly periodSec: number;
+  /** The enemy it strikes; never 'player', which has no enemy to strike. */
+  readonly target: TargetSelector;
+  /** Base damage of its hits as a fraction of the damage stat. */
+  readonly damagePct: number;
+  /** Radius of its area around the target; STRIKE_DEFAULTS.radius (0, the target only). */
+  readonly radius?: number;
+  /** The element its hits carry. */
+  readonly element?: 'cold' | 'lightning';
+  /** Jumps of its chain from the target, an integer in [0, 8]; STRIKE_DEFAULTS.chainJumps. */
+  readonly chainJumps?: number;
+  /** Shock stacks the target and each jump take after their hit; STRIKE_DEFAULTS.shockStacks. */
+  readonly shockStacks?: number;
+}
+
+export type EmitterGrant = ThornsGrant | SegmentGrant | StrikeGrant;
 export type GrantKind = EmitterGrant['kind'];
 
 /** A thorns hit's base damage when its grant names none: 300% of the damage stat. */
@@ -58,6 +88,13 @@ export const SEGMENT_DEFAULTS = {
   periodSec: 0.25,
 } as const;
 
+/** A strike grant's fields when it omits them: no area, no chain, no shock. */
+export const STRIKE_DEFAULTS = {
+  radius: 0,
+  chainJumps: 0,
+  shockStacks: 0,
+} as const;
+
 /** An emitter grant of an allocated node, with the source of its node (sourceOfNode). */
 export interface SourcedEmitter {
   /** Source id (src/data/sources.ts) its damage is credited to. */
@@ -68,7 +105,7 @@ export interface SourcedEmitter {
 /**
  * What tells two grants of one kind and source apart: grants that share it are one emitter, and
  * the build keeps the first. A source has one thorns emitter, so thorns has no key; it has one
- * segment emitter per kind of endpoint.
+ * segment emitter per kind of endpoint, and one strike per name.
  */
 export function grantKey(grant: EmitterGrant): string {
   switch (grant.kind) {
@@ -76,5 +113,7 @@ export function grantKey(grant: EmitterGrant): string {
       return '';
     case 'segment':
       return grant.endpoints;
+    case 'strike':
+      return grant.name;
   }
 }

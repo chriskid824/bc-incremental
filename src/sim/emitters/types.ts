@@ -5,20 +5,23 @@
  * flags and the ModTable rows of its hits and ailments, cached by slot. The signature attack is
  * the emitter at index 0 (CompiledBuild.emitters); M1's is the volley (volley.ts), 熔核's the lob
  * (lob.ts). The talent nodes' emitter grants (src/data/emitters.ts) follow it, such as thorns,
- * whose hits the contact stage deals (src/sim/systems/contact.ts), and segments, whose
- * judgements the segment stage makes (src/sim/systems/segments.ts).
+ * whose hits the contact stage deals (src/sim/systems/contact.ts), segments, whose judgements
+ * the segment stage makes (src/sim/systems/segments.ts), and strikes, which the emitter stage
+ * fires after the signature (strike.ts).
  */
 
 import type { Num } from '../../core/num';
 import { mul, num } from '../../core/num';
 import type { Rng } from '../../core/rng';
-import { SEGMENT_DEFAULTS, THORNS_DAMAGE_PCT } from '../../data/emitters';
+import { SEGMENT_DEFAULTS, STRIKE_DEFAULTS, THORNS_DAMAGE_PCT } from '../../data/emitters';
 import type { EmitterGrant } from '../../data/emitters';
 import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
+import type { TargetSelector } from '../../data/triggers';
 import type { CompiledBuild } from '../build/compile';
 import { ailmentCredit, rowKey } from '../build/sources';
-import type { RunContext } from '../systems/context';
+import type { CompiledSelector } from '../effects/select';
+import type { Enemy, RunContext } from '../systems/context';
 import type { ChainPolicy } from '../systems/systemState';
 import { TICK_RATE } from '../types';
 
@@ -86,12 +89,31 @@ export interface SegmentSpec extends EmitterBase {
   readonly periodSec: number;
 }
 
+/**
+ * A strike grant (落雷, 雷鳴): every periodSec, whatever the attack speed, it hits the enemy its
+ * `target` selector picks from the player, then the other enemies within `radius` of it, and
+ * chains from it chainJumps jumps; the target and each jump take shockStacks shock stacks after
+ * their hit (strike.ts).
+ */
+export interface StrikeSpec extends EmitterBase {
+  readonly kind: 'strike';
+  readonly name: string;
+  readonly periodSec: number;
+  readonly target: TargetSelector;
+  /** 0: the target only. */
+  readonly radius: number;
+  /** An integer in [0, 8]. */
+  readonly chainJumps: number;
+  readonly shockStacks: number;
+}
+
 /** What an emitter is; `kind` says how it deals its damage. */
-export type EmitterSpec = VolleySpec | LobSpec | ThornsSpec | SegmentSpec;
+export type EmitterSpec = VolleySpec | LobSpec | ThornsSpec | SegmentSpec | StrikeSpec;
 
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
- * never the signature attack, never chaining.
+ * never the signature attack, never chaining from an attack (a strike runs its own chain,
+ * chainGeneral).
  */
 export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
   switch (grant.kind) {
@@ -122,6 +144,24 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
         range: grant.range ?? SEGMENT_DEFAULTS.range,
         shockStacks: grant.shockStacks ?? SEGMENT_DEFAULTS.shockStacks,
         periodSec: grant.periodSec ?? SEGMENT_DEFAULTS.periodSec,
+      };
+    case 'strike':
+      return {
+        kind: 'strike',
+        signature: false,
+        source,
+        damagePct: grant.damagePct,
+        tags:
+          TAG.hit | TAG.strike | TAG.area | (grant.element === undefined ? 0 : TAG[grant.element]),
+        chains: false,
+        rollsAilments: true,
+        canCrit: true,
+        name: grant.name,
+        periodSec: grant.periodSec,
+        target: grant.target,
+        radius: grant.radius ?? STRIKE_DEFAULTS.radius,
+        chainJumps: grant.chainJumps ?? STRIKE_DEFAULTS.chainJumps,
+        shockStacks: grant.shockStacks ?? STRIKE_DEFAULTS.shockStacks,
       };
   }
 }
@@ -380,15 +420,16 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
       // Its hits come with the contacts, not on a period.
       return Infinity;
     case 'segment':
-      // Its judgements keep their period whatever the attack speed.
+    case 'strike':
+      // Its judgements or strikes keep their period whatever the attack speed.
       return periodTicks(1 / spec.periodSec);
   }
 }
 
 /**
  * Whether an emitter of `spec` sends its damage as shots that fly to their targets (volley, lob),
- * so the damage in flight can be counted for targeting (RunContext.projectileEstimate). Thorns
- * and segments hit where they are.
+ * so the damage in flight can be counted for targeting (RunContext.projectileEstimate). Thorns,
+ * segments and strikes hit where they are.
  */
 export function shotsInFlight(spec: EmitterSpec): boolean {
   switch (spec.kind) {
@@ -397,6 +438,7 @@ export function shotsInFlight(spec: EmitterSpec): boolean {
       return true;
     case 'thorns':
     case 'segment':
+    case 'strike':
       return false;
   }
 }
@@ -422,10 +464,23 @@ export interface EmitterRuntime {
   /** Ticks accumulated towards the next attack, cadence per tick. */
   acc: number;
   /**
-   * Ticks counted towards the next judgement of a segment, one per tick (stepSegments); it
-   * starts its phase below 0, so segments judge on different ticks. 0 for the other kinds.
+   * Ticks counted towards the next judgement of a segment (stepSegments) or the next strike of a
+   * strike (runStrike), one per tick; a segment's starts its phase below 0, so segments judge on
+   * different ticks. 0 for the other kinds.
    */
   timer: number;
+  /**
+   * A strike's chain payload: its payload's, whose jump hits shock by its shockStacks
+   * (Payload.shockOnHit), without a chain policy. Null for the other kinds.
+   */
+  chainPayload: Payload | null;
+  /**
+   * A strike's target selector, compiled as a periodic trigger's (from the player) by
+   * createRunContext. Null for the other kinds.
+   */
+  selector: CompiledSelector | null;
+  /** A strike's area hits, its within() output, allocated once; null for the other kinds. */
+  readonly targets: Enemy[] | null;
   /** Shots fired (a volley's projectiles, a lob's bombs), for steadyAim's every-Nth shot. */
   shots: number;
   /** Attacks made, for steadyAim's every-Nth attack; nthAttack triggers count in TriggerState. */
@@ -438,11 +493,17 @@ export interface EmitterRuntime {
   cadence: number;
 }
 
+/**
+ * The runtime of the emitter of `spec` at `index`, with its payload, its interval and, for a
+ * strike, its compiled target selector (null for the other kinds): a strike's chain payload and
+ * area buffer are made here, once.
+ */
 export function createEmitterRuntime(
   spec: EmitterSpec,
   payload: Payload,
   index: number,
   interval: number,
+  selector: CompiledSelector | null,
 ): EmitterRuntime {
   return {
     spec,
@@ -451,12 +512,36 @@ export function createEmitterRuntime(
     interval,
     acc: 0,
     timer: spec.kind === 'segment' ? -((3 + 4 * index) % PHASE_TICKS) : 0,
+    chainPayload: spec.kind === 'strike' ? strikeChainPayload(payload, spec.shockStacks) : null,
+    selector,
+    targets: spec.kind === 'strike' ? [] : null,
     shots: 0,
     attacks: 0,
     volley: 0,
     steadyAttack: false,
     cadence: 1,
   };
+}
+
+/**
+ * A strike's chain payload: its payload `p`'s, sharing its rows, whose jump hits each shock
+ * their enemy by shockStacks (none at 0); no chain policy.
+ */
+function strikeChainPayload(p: Payload, shockStacks: number): Payload {
+  return createPayload({
+    baseDamage: p.baseDamage,
+    tags: p.tags,
+    source: p.source,
+    jumpSource: p.jumpSource,
+    flags: p.flags,
+    rng: p.rng,
+    chains: p.chains,
+    rollsAilments: p.rollsAilments,
+    canCrit: p.canCrit,
+    damageMode: p.damageMode,
+    shockOnHit: shockStacks,
+    rowsOf: p,
+  });
 }
 
 /**

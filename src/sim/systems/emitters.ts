@@ -1,11 +1,13 @@
 /**
  * Emitters system (docs/v3/implementation-plan-v3.md §2.15): every emitter of the build that
- * attacks in this stage does, in emitter order, the signature attack first (src/sim/emitters/);
- * then the rule modules' tick hooks run. runEmitters skips the kinds whose EMITTER_STEPS entry is
- * null, which another stage runs (thorns in the contact stage, segments in their own).
+ * attacks in this stage does, in emitter order, the signature attack first (src/sim/emitters/),
+ * then the grants' strikes; then the rule modules' tick hooks run. runEmitters skips the kinds
+ * whose EMITTER_STEPS entry is null, which another stage runs (thorns in the contact stage,
+ * segments in their own).
  */
 
 import { runLob } from '../emitters/lob';
+import { runStrike } from '../emitters/strike';
 import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
 import { runVolley } from '../emitters/volley';
 import type { RunContext } from './context';
@@ -24,6 +26,7 @@ export const EMITTER_STEPS: { readonly [K in EmitterSpec['kind']]: EmitterStep |
   thorns: null,
   // Its judgements come in the segment stage (src/sim/systems/segments.ts).
   segment: null,
+  strike: runStrike,
 };
 
 /**
