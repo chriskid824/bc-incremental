@@ -343,6 +343,12 @@ export type SimEvent =
     }
   /** A coinHit effect struck enemy `targetId` at (x, y), before its hit. */
   | { readonly type: 'coin'; readonly x: number; readonly y: number; readonly targetId: number }
+  /**
+   * A discharge of the signature arc (src/sim/emitters/arc.ts) from its coil `coil` struck enemy
+   * `targetId`, before its hit; a discharge at two targets raises one for each, from the next
+   * coil.
+   */
+  | { readonly type: 'discharge'; readonly coil: number; readonly targetId: number }
   | {
       readonly type: 'enemyKilled';
       readonly enemyId: number;
@@ -410,6 +416,11 @@ export const COUNTER_IDS = [
    * EXTRA_JUMP_CAP jumps.
    */
   'extraJumpsCapped',
+  /**
+   * chainJump trigger firings refused, drawing nothing, because the trigger had fired
+   * CHAIN_JUMP_EVENT_CAP times in the attack.
+   */
+  'centerEventsCapped',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

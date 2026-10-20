@@ -61,6 +61,7 @@ describe('compileBuild', () => {
       id: 'm1Volley',
       lob: null,
       fan: null,
+      arc: null,
     });
     expect(build.hooks).toEqual({
       tick: [],
@@ -238,6 +239,7 @@ describe('compileBuild', () => {
 describe('signatureRows', () => {
   const MAGMA_BOMB: SignatureSpec = { id: 'magmaBomb' };
   const ICE_FAN: SignatureSpec = { id: 'iceFan' };
+  const TRIPHASE_ARC: SignatureSpec = { id: 'triphaseArc' };
   const {
     hit: HIT,
     crit: CRIT,
@@ -245,6 +247,7 @@ describe('signatureRows', () => {
     area: AREA,
     projectile: PROJECTILE,
     cold: COLD,
+    lightning: LIGHTNING,
   } = TAG;
 
   it('keys m1Volley hits hit and projectile, its jumps hit and chain, at the center', () => {
@@ -272,6 +275,54 @@ describe('signatureRows', () => {
       jump: rowKey(HIT | CHAIN | COLD, CENTER),
       jumpCrit: rowKey(HIT | CHAIN | COLD | CRIT, CENTER),
     });
+  });
+
+  it('keys triphaseArc hits and jumps alike hit, chain and lightning (A32, F15)', () => {
+    expect(signatureRows(compileBuild(makeStats(), [], TRIPHASE_ARC))).toEqual({
+      hit: rowKey(HIT | CHAIN | LIGHTNING, CENTER),
+      hitCrit: rowKey(HIT | CHAIN | LIGHTNING | CRIT, CENTER),
+      jump: rowKey(HIT | CHAIN | LIGHTNING, CENTER),
+      jumpCrit: rowKey(HIT | CHAIN | LIGHTNING | CRIT, CENTER),
+    });
+  });
+
+  it('are the rows the triphaseArc payload reads in a run, its hit and jump slots one row', () => {
+    const ctx = placedEnemies([], { signature: TRIPHASE_ARC });
+    const payload = (ctx.emitters[0] as EmitterRuntime).payload;
+    const slots = [SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP, SLOT_JUMP_CRIT].map((slot) =>
+      slotRow(ctx.build, payload, slot),
+    );
+    const rows = signatureRows(ctx.build);
+    const keys = [rows.hit, rows.hitCrit, rows.jump, rows.jumpCrit];
+    expect(keys.map((key) => ctx.build.table.row(key))).toEqual(slots);
+    expect([slots[0] === slots[2], slots[1] === slots[3], new Set(slots).size]).toEqual([
+      true,
+      true,
+      2,
+    ]);
+  });
+
+  it('★過載 on triphaseArc: its jump row ×4.5, and its primary row, the same row (A32), too; M1’s ×1', () => {
+    // gd's ★過載: the chain more on [chain, hit].
+    const OVERLOAD: RuleSpec = {
+      id: 'overload',
+      chainCountMultiplier: 2,
+      retentionPenalty: 0.2,
+      chainMore: 3.5,
+    };
+    const arc = compileBuild(makeStats(), [OVERLOAD], TRIPHASE_ARC);
+    const rows = signatureRows(arc);
+    expect(keyedStat(arc, rows.jump, DAMAGE, 1)).toBeCloseTo(4.5, 12);
+    expect(keyedStat(arc, rows.jumpCrit, DAMAGE, 1)).toBeCloseTo(4.5, 12);
+    // Every arc hit is a chain hit, its primary hits too: one row.
+    expect(rows.hit).toBe(rows.jump);
+    expect(keyedStat(arc, rows.hit, DAMAGE)).toBeCloseTo(4.5, 12);
+    expect(keyedStat(compileBuild(makeStats(), [], TRIPHASE_ARC), rows.hit, DAMAGE)).toBe(1);
+    // A volley's primary hit is no chain hit: ×1 there.
+    const m1 = compileBuild(makeStats(), [OVERLOAD]);
+    const m1Rows = signatureRows(m1);
+    expect(keyedStat(m1, m1Rows.hit, DAMAGE)).toBe(1);
+    expect(keyedStat(m1, m1Rows.jump, DAMAGE, 1)).toBeCloseTo(4.5, 12);
   });
 
   it('are the rows the signature payload reads in a run', () => {
@@ -315,7 +366,7 @@ describe('signatureRows', () => {
           { source: 'outer.lightning', grant: { kind: 'segment', endpoints: 'shocked' } },
         ],
       });
-    for (const signature of [M1_SIGNATURE, MAGMA_BOMB, ICE_FAN]) {
+    for (const signature of [M1_SIGNATURE, MAGMA_BOMB, ICE_FAN, TRIPHASE_ARC]) {
       const alone = signatureRows(compileBuild(makeStats(), [], signature));
       for (const source of ['center', 'outer.thorns']) {
         const build = compileBuild(grants(source), [], signature);

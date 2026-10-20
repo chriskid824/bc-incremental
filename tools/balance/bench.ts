@@ -48,8 +48,14 @@
  * - fan: a stress-family scenario (C4.19), 霜晶's iceFan at 7.5 rounds a second of 9 cones
  *   (attackSpeed 12, projectileCount 6 and the fan's 3), each through two enemies, with a sixth
  *   of the damage of the stress start wave's target (src/sim/emitters/fan.ts).
+ * - arc: a stress-family scenario (C4.20), 雷塔's triphaseArc under 六線圈, 6 discharges a second
+ *   at two targets each, chaining 8 times (chainCount 6 and the arc's 2) from both by a test
+ *   policy that forks every jump by 2 and adds an extra jump on half of them, so its attacks
+ *   reach CHAIN_HIT_CAP, with a sixth of the damage of the stress start wave's target
+ *   (src/sim/emitters/arc.ts).
  *
- *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan]
+ *   npm run bench --
+ *     [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan|arc]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>]
@@ -115,6 +121,7 @@ const SCENARIO_IDS = [
   'stress',
   'shots',
   'fan',
+  'arc',
 ] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
@@ -315,6 +322,18 @@ function shotsStats(triggers: readonly TriggerSpec[]): StatBlock {
     },
   );
 }
+
+/**
+ * The arc scenario's chain policy (docs/v3 C4 design §7.3, branch [1, 2]): every jump forks by 2,
+ * and each jump hit adds an extra jump on half of them, so a discharge at two targets reaches
+ * CHAIN_HIT_CAP's 32 hits by its fourth level.
+ */
+const ARC_POLICY: TestModule = (b) => {
+  const spec = b.chainPolicy();
+  spec.branchFirst = 2;
+  spec.branchLater = 2;
+  spec.extraJumpChance = 0.5;
+};
 
 /** The poisonBoss scenario's poison chance per variant. */
 const POISON_BOSS_CHANCE: Readonly<Record<string, number>> = {
@@ -537,6 +556,16 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     rules: [],
     signature: { id: 'iceFan' },
   })),
+  // C4.20: 雷塔's arc under 六線圈, its chains forking by 2 at every jump up to CHAIN_HIT_CAP; a
+  // sixth of the target's damage keeps the alive band (average 290.3 at seed 1).
+  arc: stressScenario(
+    () => ({
+      stats: stressStats({ chainCount: 6, damage: targetDamage(STRESS_START_WAVE) / 6 }),
+      rules: [{ id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55 }],
+      signature: { id: 'triphaseArc' },
+    }),
+    [ARC_POLICY],
+  ),
 };
 
 function positiveInt(name: string, text: string, min = 1): number {

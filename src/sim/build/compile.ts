@@ -98,6 +98,8 @@ export interface SignatureParams {
   lob: LobParams | null;
   /** The fan's (iceFan, src/sim/emitters/fan.ts); null for another signature. */
   fan: FanParams | null;
+  /** The arc's (triphaseArc, src/sim/emitters/arc.ts); null for another signature. */
+  arc: ArcParams | null;
 }
 
 /**
@@ -139,6 +141,23 @@ export interface FanParams {
    * hits scaled by min(1 + maxBonus, 1 + perPierce × the enemies it passed before); or null.
    */
   prism: { perPierce: number; maxBonus: number } | null;
+}
+
+/**
+ * The arc's parameters, which its signature module sets: its spec's coils, one target, its full
+ * damage. Its form, 六線圈, changes them (src/sim/rules/sixCoils.ts).
+ */
+export interface ArcParams {
+  /**
+   * Discharges a second at the base attack speed, which take turns from this many coils
+   * (EmitterRuntime.coil): ArcSpec.coils as the signature module copies it, or 六線圈's. The run
+   * reads the count here only, never from the spec.
+   */
+  coils: number;
+  /** Enemies a discharge strikes, each a primary hit of its one chain. */
+  targets: 1 | 2;
+  /** The factor on the arc's damage, folded into its payload's base damage. */
+  damageMult: number;
 }
 
 export interface CompiledBuild {
@@ -281,6 +300,7 @@ export function compileBuild(
     id: signature.id,
     lob: null,
     fan: null,
+    arc: null,
   };
   const hooks: { [K in HookName]: Hooks[K][] } = {
     tick: [],
@@ -438,7 +458,8 @@ export function compileBuild(
  * and with crit. They are the rows its payload's SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP and
  * SLOT_JUMP_CRIT read in a run (src/sim/emitters/types.ts); the estimates outside a run read
  * them too (the talent screen's summary, typicalHit, the balance tools): M1's hits are hit and
- * projectile, 熔核's explosions hit, area and projectile, 霜晶's cones hit, projectile and cold.
+ * projectile, 熔核's explosions hit, area and projectile, 霜晶's cones hit, projectile and cold,
+ * and 雷塔's discharges hit, chain and lightning, so their jumps share their rows.
  */
 export interface SignatureRows {
   readonly hit: number;

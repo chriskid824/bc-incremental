@@ -39,6 +39,13 @@ function quotedNumbers(rule: RuleSpec): string[][] {
       return [[String(rule.every)], [percent(rule.damagePct)]];
     case 'prism':
       return [[signedPercent(rule.perPierce)], [signedPercent(rule.maxBonus)]];
+    case 'sixCoils':
+      // The GDD words it as coils +3 (6 a second), −45% a discharge and 2 targets.
+      return [
+        [String(rule.coils), `+${rule.coils - 3}`],
+        [String(rule.targets)],
+        [signedPercent(rule.damageMult - 1), percent(rule.damageMult), `×${rule.damageMult}`],
+      ];
   }
 }
 

@@ -8,16 +8,24 @@
  * rules add, extra jumps (跳電) and bounces (回彈), are hits of the payload's extraJumpPayload and
  * count against EXTRA_JUMP_CAP; every hit counts against CHAIN_HIT_CAP (src/sim/caps.ts). Each
  * jump hit of a payload that shocks on hit (Payload.shockOnHit, a chainBolt's) then shocks its
- * enemy if it is alive. With the run's table without a policy (RunContext.sys.chain.noPolicy)
- * it deals what the linear path does (chainFrom, src/sim/combat/chain.ts), hit for hit.
+ * enemy if it is alive, and each of the signature arc's (Payload.raisesChainJump), extra jumps
+ * and bounces included, raises the chainJump center event at its enemy (raiseChainJump). With
+ * the run's table without a policy (RunContext.sys.chain.noPolicy) it deals what the linear path
+ * does (chainFrom, src/sim/combat/chain.ts), hit for hit.
  */
 
+import { num } from '../../core/num';
 import { addShock } from '../ailments/shock';
 import { CHAIN_HIT_CAP, EXTRA_JUMP_CAP } from '../caps';
+import { emitCenterEvent } from '../effects/centerEvents';
+import { CHAIN_JUMP, REPEAT } from '../effects/flags';
+import { EVENT } from '../effects/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
 import { nearestChainTarget } from './chain';
 import { hitWithPayload } from './hit';
+
+const EV_CHAIN_JUMP = EVENT.chainJump;
 
 /**
  * The current attack's chain of payload `p` from the nRoots enemies roots[0 .. nRoots) (level
@@ -82,7 +90,19 @@ export function chainGeneral(
               bounced++;
               budget.extraJumps++;
               budget.hits++;
-              jumpHit(ctx, p.extraJumpPayload, node, k, r, node.x, node.y, steady, depth, origin);
+              jumpHit(
+                ctx,
+                p,
+                p.extraJumpPayload,
+                node,
+                k,
+                r,
+                node.x,
+                node.y,
+                steady,
+                depth,
+                origin,
+              );
               next[nn++] = node;
             } else counters.extraJumpsCapped++;
           }
@@ -90,7 +110,7 @@ export function chainGeneral(
           break;
         }
         budget.hits++;
-        jumpHit(ctx, p, nxt, k, r, node.x, node.y, steady, depth, origin);
+        jumpHit(ctx, p, p, nxt, k, r, node.x, node.y, steady, depth, origin);
         next[nn++] = nxt;
         last = nxt;
         // 跳電: one roll per jump hit, none once the attack has its extra jumps.
@@ -127,18 +147,20 @@ export function chainGeneral(
     const k = kDone + 1 + e;
     const r = scale[Math.min(k, lastLevel)] as number;
     budget.hits++;
-    jumpHit(ctx, p.extraJumpPayload, nxt, k, r, last.x, last.y, steady, depth, origin);
+    jumpHit(ctx, p, p.extraJumpPayload, nxt, k, r, last.x, last.y, steady, depth, origin);
     last = nxt;
   }
   counters.chainHitCapped += capped;
 }
 
 /**
- * Jump hit `k` of payload `q` on `enemy` at `scale` from (fromX, fromY), as hitWithPayload, then
- * q's shockOnHit stacks of shock on the enemy if the hit left it alive, at `depth`.
+ * Jump hit `k` of payload `q` (p's, or p's extraJumpPayload) of p's chain on `enemy` at `scale`
+ * from (fromX, fromY), as hitWithPayload, then q's shockOnHit stacks of shock on the enemy if
+ * the hit left it alive, at `depth`, then p's chainJump event when p raises one.
  */
 function jumpHit(
   ctx: RunContext,
+  p: Payload,
   q: Payload,
   enemy: Enemy,
   k: number,
@@ -151,6 +173,46 @@ function jumpHit(
 ): void {
   hitWithPayload(ctx, enemy, q, k, scale, fromX, fromY, steady, depth, origin);
   if (q.shockOnHit > 0 && enemy.alive) addShock(ctx, enemy, q.shockOnHit, depth);
+  if (p.raisesChainJump) raiseChainJump(ctx, enemy, fromX, fromY, depth, origin, p.flags);
+}
+
+/**
+ * The chainJump center event of a jump hit on `enemy` from (fromX, fromY), at the enemy, a hit
+ * at `depth` from trigger `origin` of a payload with `flags`: nothing for a repeat's (REPEAT), or
+ * when no trigger and no onCenterEvent hook listens (RunContext.centerEvents), which draws and
+ * writes nothing. Otherwise it counts in the attack's budget (ChainBudget.centerEvents) and
+ * carries no list, its start in the scratch's (fromX, fromY) and the jump's angle as its value.
+ */
+export function raiseChainJump(
+  ctx: RunContext,
+  enemy: Enemy,
+  fromX: number,
+  fromY: number,
+  depth: number,
+  origin: number,
+  flags: number,
+): void {
+  if ((flags & REPEAT) !== 0) return;
+  const center = ctx.centerEvents;
+  if (center.listeners[EV_CHAIN_JUMP] === 0 && center.hooks === 0) return;
+  ctx.chainBudget.centerEvents++;
+  const scratch = ctx.centerScratch;
+  scratch.fromX = fromX;
+  scratch.fromY = fromY;
+  // No list: a hook must not read the last explode's or freeze's as this event's.
+  scratch.listCount = 0;
+  const angle = Math.atan2(enemy.y - fromY, enemy.x - fromX);
+  emitCenterEvent(
+    ctx,
+    EV_CHAIN_JUMP,
+    depth,
+    origin,
+    enemy,
+    enemy.x,
+    enemy.y,
+    flags | CHAIN_JUMP,
+    num(angle),
+  );
 }
 
 /**

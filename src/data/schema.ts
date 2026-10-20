@@ -347,7 +347,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         length: finite,
         width: finite,
         damagePct: finite,
-        toward: z.enum(['outward', 'nearest', 'eventTarget']),
+        toward: z.enum(['outward', 'nearest', 'eventTarget', 'along']),
         from: z.enum(['event', 'target']).exactOptional(),
         alwaysCrit: z.boolean().exactOptional(),
         critScale: finite.exactOptional(),
@@ -448,6 +448,14 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       .readonly(),
     z.strictObject({ id: z.literal('icicle'), every: finite, damagePct: finite }).readonly(),
     z.strictObject({ id: z.literal('prism'), perPierce: finite, maxBonus: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('sixCoils'),
+        coils: finite,
+        targets: finite,
+        damageMult: finite,
+      })
+      .readonly(),
   ]),
 );
 

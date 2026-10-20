@@ -69,7 +69,18 @@ export type RuleSpec =
    * its line; each enemy it passed adds perPierce to the factor of its later hits, at most
    * maxBonus. The first instance's.
    */
-  | { readonly id: 'prism'; readonly perPierce: number; readonly maxBonus: number };
+  | { readonly id: 'prism'; readonly perPierce: number; readonly maxBonus: number }
+  /**
+   * 六線圈 (triphaseArc): `coils` discharges a second at the base attack speed instead of three,
+   * each at `targets` enemies (1 or 2; two distinct ones, picked before either is hit, share one
+   * chain) for damageMult × its damage. The first instance's.
+   */
+  | {
+      readonly id: 'sixCoils';
+      readonly coils: number;
+      readonly targets: number;
+      readonly damageMult: number;
+    };
 
 export type RuleId = RuleSpec['id'];
 
@@ -83,6 +94,7 @@ export const RULE_IDS: readonly RuleId[] = [
   'chainBlast',
   'icicle',
   'prism',
+  'sixCoils',
 ];
 
 /**
@@ -101,7 +113,13 @@ export type SignatureSpec =
    * 霜晶's ice-cone fan: rounds of straight cones spread over 30° about the target, each through
    * two enemies, that chill what they hit (src/sim/emitters/fan.ts).
    */
-  | { readonly id: 'iceFan' };
+  | { readonly id: 'iceFan' }
+  /**
+   * 雷塔's three-phase arc: discharges that strike the volley's pick of target at any range and
+   * chain on from it at once, every hit a lightning chain hit that shocks, its three coils taking
+   * turns (src/sim/emitters/arc.ts).
+   */
+  | { readonly id: 'triphaseArc' };
 
 export type SignatureId = SignatureSpec['id'];
 

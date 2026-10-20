@@ -104,9 +104,15 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  *   its chain, at its landing point; the target is the enemy nearest that point among those it
  *   hit, none when it hit nothing. Its list is the first enemies of the blast, by id. Each bomb
  *   raises its own.
+ * - chainJump: a chain jump of the signature arc (triphaseArc) hit an enemy, at that enemy:
+ *   every jump hit of its discharges, forks, extra jumps and bounces included, never a
+ *   discharge's own hit nor a repeat's hits. Its value is the jump's angle from the enemy it
+ *   jumped from; it has no list. Its triggers take no chance condition: each fires at 30% × its
+ *   coefficient, at most 3 times an attack (CHAIN_JUMP_EVENT_CAP, src/sim/caps.ts).
  */
 export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
   'explode',
+  'chainJump',
   'hit',
   'crit',
   'kill',
@@ -216,6 +222,7 @@ export const conditionKey = (condition: Condition): ConditionKey =>
 /** Events with an enemy target, on which target conditions can be checked. */
 const TARGETED: readonly TriggerEventId[] = [
   'explode',
+  'chainJump',
   'hit',
   'crit',
   'nthAttack',
@@ -423,7 +430,8 @@ export interface ProjectilesSpec extends DamagePart {
  * - 'outward': straight away from the player;
  * - 'nearest': at the enemy nearest to its start but one right on it (the event's enemy, when
  *   the slash starts on it);
- * - 'eventTarget': at the event's enemy (or the one the trigger's selector picked).
+ * - 'eventTarget': at the event's enemy (or the one the trigger's selector picked);
+ * - 'along' (chainJump only): on along the jump, the way it went from the enemy it jumped from.
  * Without a direction (its start on the player or on the enemy it runs at, or no enemy to run
  * at) it does nothing. Its hits crit and roll ailments as any hit does, and always crit with
  * alwaysCrit; `critScale` k (default 0) scales its damage by 1 + k × the crit chance.
@@ -433,7 +441,7 @@ export interface SlashLineSpec {
   readonly length: number;
   readonly width: number;
   readonly damagePct: number;
-  readonly toward: 'outward' | 'nearest' | 'eventTarget';
+  readonly toward: 'outward' | 'nearest' | 'eventTarget' | 'along';
   readonly from?: 'event' | 'target';
   readonly alwaysCrit?: boolean;
   readonly critScale?: number;

@@ -161,8 +161,8 @@ export interface HitScratch {
 
 /**
  * The center event an onCenterEvent hook sees (RunContext.centerScratch). Its producer fills
- * the list and its radius before raising it (src/sim/effects/centerEvents.ts); emitCenterEvent
- * fills the rest for the hooks.
+ * the list and its radius, and a chainJump's its start, before raising it
+ * (src/sim/effects/centerEvents.ts); emitCenterEvent fills the rest for the hooks.
  */
 export interface CenterEventScratch {
   /** Its CENTER_EVENTS ordinal. */
@@ -189,9 +189,11 @@ export interface CenterEventScratch {
   readonly list: Enemy[];
   /** 0 for an event without a list. */
   listCount: number;
-  /** A chain jump's start, the enemy it jumped from; chainJump comes later in C4. */
+  /** A chainJump's start, the position of the enemy it jumped from; read it only on chainJump. */
   fromX: number;
   fromY: number;
+  /** The event's value: a chainJump's angle from (fromX, fromY) to its enemy; ZERO otherwise. */
+  value: Num;
 }
 
 /** Points in the tick where the simulation calls rule modules. Hooks allocate nothing. */

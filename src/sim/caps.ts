@@ -16,6 +16,12 @@ export const CHAIN_HIT_CAP = 32;
  */
 export const EXTRA_JUMP_CAP = 2;
 /**
+ * Times one chainJump trigger fires in one attack (passes, src/sim/effects/dispatch.ts): after
+ * that it passes over the attack's later jumps, drawing nothing, each counted in
+ * centerEventsCapped.
+ */
+export const CHAIN_JUMP_EVENT_CAP = 3;
+/**
  * Projectiles in flight at once: the volley's homing projectiles and the shot pool's shots
  * together (src/sim/systems/shots.ts). A spawn at the cap is refused and counted in
  * projectilesCapped.

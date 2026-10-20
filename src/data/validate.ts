@@ -469,6 +469,18 @@ function ruleIssues(rule: RuleSpec): string[] {
       }
       if (!(rule.maxBonus >= 0)) issues.push(`prism.maxBonus must be >= 0 (got ${rule.maxBonus})`);
       break;
+    case 'sixCoils':
+      // Its discharges cycle through the coils (EmitterRuntime.coil), and pick one or two roots.
+      if (!isPositiveInt(rule.coils)) {
+        issues.push(`sixCoils.coils must be a positive integer (got ${rule.coils})`);
+      }
+      if (rule.targets !== 1 && rule.targets !== 2) {
+        issues.push(`sixCoils.targets must be 1 or 2 (got ${rule.targets})`);
+      }
+      if (!(rule.damageMult > 0)) {
+        issues.push(`sixCoils.damageMult must be > 0 (got ${rule.damageMult})`);
+      }
+      break;
   }
   return issues;
 }
@@ -621,6 +633,12 @@ function triggerIssues(trigger: TriggerSpec): string[] {
     counts.set(key, (counts.get(key) ?? 0) + 1);
     if (!CONDITION_CONTEXTS[key].includes(on)) {
       issues.push(`when[${i}] ${key} does not apply to '${on}' events`);
+    }
+    // A chainJump trigger's chance is fixed: compileTrigger sets it (src/sim/effects/types.ts).
+    if (key === 'chance' && on === 'chainJump') {
+      issues.push(
+        `when[${i}] chainJump triggers fire at 30% × the fusion coefficient; drop the chance condition`,
+      );
     }
     for (const problem of conditionIssues(condition)) issues.push(`when[${i}] ${problem}`);
   });
@@ -939,10 +957,20 @@ function effectIssues(
       const toward: string = effect.toward;
       if (toward === 'flight') {
         issues.push("toward 'flight' needs a drone direction, which the simulation adds in C5");
-      } else if (toward !== 'outward' && toward !== 'nearest' && toward !== 'eventTarget') {
-        issues.push(`toward must be 'outward', 'nearest' or 'eventTarget' (got ${toward})`);
+      } else if (
+        toward !== 'outward' &&
+        toward !== 'nearest' &&
+        toward !== 'eventTarget' &&
+        toward !== 'along'
+      ) {
+        issues.push(
+          `toward must be 'outward', 'nearest', 'eventTarget' or 'along' (got ${toward})`,
+        );
       } else if (toward === 'eventTarget' && target === undefined && TARGETLESS_EVENTS.has(on)) {
         issues.push(`toward 'eventTarget' needs the event's enemy, which '${on}' events have not`);
+      } else if (toward === 'along' && on !== 'chainJump') {
+        // Its direction is the jump's angle, the chainJump event's value.
+        issues.push("toward 'along' follows a chain jump, which only 'chainJump' events have");
       }
       delivery(effect.tags);
       break;
@@ -1063,6 +1091,7 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'chainBlast':
     case 'icicle':
     case 'prism':
+    case 'sixCoils':
       return [];
   }
 }

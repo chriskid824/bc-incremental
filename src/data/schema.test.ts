@@ -45,6 +45,7 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   chainBlast: { id: 'chainBlast', radius: 40, damagePct: 0.5, perBomb: 2 },
   icicle: { id: 'icicle', every: 4, damagePct: 4 },
   prism: { id: 'prism', perPierce: 0.2, maxBonus: 2 },
+  sixCoils: { id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55 },
 };
 
 describe('ModifierSchema', () => {
@@ -407,6 +408,7 @@ describe('EffectSpecSchema', () => {
     },
     { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5, toward: 'outward' },
     { kind: 'slashLine', length: 200, width: 30, damagePct: 1, toward: 'nearest', from: 'event' },
+    { kind: 'slashLine', length: 250, width: 20, damagePct: 0.3, toward: 'along' },
     {
       kind: 'slashLine',
       length: 400,
@@ -506,7 +508,7 @@ describe('EffectSpecSchema', () => {
       'projectiles with an unknown key',
       { kind: 'projectiles', count: 3, damagePct: 0.5, aim: 'radial', radius: 100 },
     ],
-    ...(['flight', 'along', 'player'] as const).map((toward): [string, unknown] => [
+    ...(['flight', 'player'] as const).map((toward): [string, unknown] => [
       `slashLine toward '${toward}'`,
       { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5, toward },
     ]),
@@ -752,6 +754,15 @@ describe('RuleSpecSchema', () => {
     ],
     ['a fan form parameter that is not a number', { id: 'prism', perPierce: '0.2', maxBonus: 2 }],
     ['a fan form with an unknown key', { id: 'icicle', every: 4, damagePct: 4, perPierce: 0.2 }],
+    ['an arc form missing a parameter', { id: 'sixCoils', coils: 6, targets: 2 }],
+    [
+      'an arc form with the params name',
+      { id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55, arc: null },
+    ],
+    [
+      'an arc form parameter that is not a number',
+      { id: 'sixCoils', coils: 6, targets: '2', damageMult: 0.55 },
+    ],
     ['a non-numeric parameter', { id: 'eternalFlame', durationMore: '-0.5' }],
     [
       'an undefined optional parameter',

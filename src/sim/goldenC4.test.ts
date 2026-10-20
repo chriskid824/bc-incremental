@@ -1167,6 +1167,58 @@ const ICE_FAN_STATS = makeStats(
   },
 );
 
+/**
+ * C4.20's three-phase arc under 六線圈: six discharges a second, each at two targets for 55% of
+ * the damage, chaining 3.5 times (1.5, and the arc's 2) from both in one chain, which forks by 2
+ * at level 1, jumps once more on 30% and bounces; every hit shocks; crits, ignites and steadyAim
+ * on every fourth discharge, and maskProbeMods() to tell its hits (hit, chain and lightning)
+ * apart. Its jumps raise chainJump for two listeners, each at most 3 times an attack: a data
+ * trigger that cuts a slashLine on along the jump at 30%, and a fusion's at coefficient 0.5
+ * that burns the enemy jumped to at 15%. C4.9's repeat triggers fire the arc's repeat
+ * discharges, now and with the next one.
+ */
+const ARC_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  ...REPEAT_TRIGGERS,
+  [
+    'center',
+    {
+      on: 'chainJump',
+      do: [{ kind: 'slashLine', length: 220, width: 24, damagePct: 0.4, toward: 'along' }],
+    },
+  ],
+];
+const ARC_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1.5,
+    attackSpeed: 4,
+  },
+  maskProbeMods(),
+  {
+    triggers: ARC_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+const arcModules = (): TestModule[] => [
+  (b) => {
+    const spec = b.chainPolicy();
+    spec.branchFirst = 2;
+    spec.extraJumpChance = 0.3;
+    spec.bounces = 1;
+  },
+  (b) =>
+    b.addTrigger(
+      'fusion.lightning.fire',
+      { on: 'chainJump', do: [{ kind: 'applyAilment', ailment: 'burn', stacks: 1 }] },
+      0.5,
+    ),
+];
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1295,6 +1347,20 @@ const ENTRIES: readonly GoldenC4Entry[] = [
       startWave: 12,
     },
     expected: ['527efef683bfb207', '992e37c19000ccfb'],
+  },
+  {
+    name: 'triphaseArc',
+    config: {
+      stats: ARC_STATS,
+      rules: [
+        { id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55 },
+        { id: 'steadyAim', everyNth: 4, critMultiplierMore: 0.5, counts: 'shot' },
+      ],
+      signature: { id: 'triphaseArc' },
+      startWave: 12,
+    },
+    modules: arcModules,
+    expected: ['ed41b60b5b8bfa02', 'cfb324913970c72d'],
   },
 ];
 

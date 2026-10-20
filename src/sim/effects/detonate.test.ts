@@ -825,7 +825,8 @@ describe('compiling a detonate', () => {
     const keys = Object.keys(
       compileTrigger(1, { on: 'kill', do: [{ kind: 'heal', lifePct: 0.1 }] }, 0, 1, 0),
     );
-    expect(keys.at(-1)).toBe('detonateAilment');
+    // C4.20 appends perAttackCap after C4.10's detonateAilment: 18 members.
+    expect([keys.length, ...keys.slice(-2)]).toEqual([18, 'detonateAilment', 'perAttackCap']);
     expect(Object.keys(moduleTrigger(3, 0))).toEqual(keys);
     expect(Object.keys(shatterTrigger(true, 4))).toEqual(keys);
     expect(Object.keys(shatterTrigger(false, 0))).toEqual(keys);

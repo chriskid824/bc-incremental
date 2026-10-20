@@ -48,6 +48,7 @@ describe('steadyAim', () => {
       id: 'm1Volley',
       lob: null,
       fan: null,
+      arc: null,
     });
     expect(build.values.critMultiplier).toBe(2 * (1.5 * 1.25));
     const plain = compileBuild(makeStats(), []);
@@ -58,6 +59,7 @@ describe('steadyAim', () => {
       id: 'm1Volley',
       lob: null,
       fan: null,
+      arc: null,
     });
   });
 

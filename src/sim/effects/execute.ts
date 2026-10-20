@@ -36,8 +36,9 @@
  * round's primary) and owner −1. They count nothing in Enemy.inbound.
  *
  * A slashLine cuts a line `length` long from the event's point, or from its live target, away
- * from the player, at the alive enemy nearest to its start (but one right on it), or at the live
- * target; without a direction it does nothing. Its slash event comes before its hits. It hits
+ * from the player, at the alive enemy nearest to its start (but one right on it), at the live
+ * target, or on along a chain jump, at the angle its chainJump event carries as its value;
+ * without a direction it does nothing. Its slash event comes before its hits. It hits
  * once each, in id order, the enemies within half its width and their radius of the line: those
  * whose centre lies in the line's box grown by half the width and ctx.shotPad
  * (grid.inSegmentBox), then the tough ones outside the box, whose radius is larger than the pad,
@@ -73,6 +74,7 @@ import { REPEAT_CHARGE_CAP, SMALL_PROJECTILE_TICKS } from '../caps';
 import { beginAttack, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { chainGeneral } from '../combat/policy';
+import { fireArcRepeat } from '../emitters/arc';
 import { fireFanRepeat } from '../emitters/fan';
 import { fireLobRepeat } from '../emitters/lob';
 import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
@@ -400,12 +402,13 @@ export const REPEAT_STEPS: { readonly [K in SignatureId]: RepeatStep } = {
   m1Volley: fireVolleyRepeat,
   magmaBomb: fireLobRepeat,
   iceFan: fireFanRepeat,
+  triphaseArc: fireArcRepeat,
 };
 
 /**
  * Fires the repeats waiting for the signature attack's next own firing, oldest first, each with
  * its own payload, depth and origin: right after each counted attack of `em`, the signature
- * (runVolley, runLob, runFan).
+ * (runVolley, runLob, runFan, runArc).
  */
 export function drainRepeatCharges(ctx: RunContext, em: EmitterRuntime): void {
   const charges = ctx.sys.repeat.charges;
@@ -675,10 +678,11 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     }
   },
   // A line from the event's point, or from the live target with from 'target', `length` long:
-  // away from the player ('outward'), at the alive enemy nearest to its start ('nearest'), or at
-  // the live target ('eventTarget'); nothing without a direction. Each enemy within half its
-  // width and its own radius of the line is hit once, in id order, on the effect's payload (its
-  // critScale already in the base), forced to crit with alwaysCrit.
+  // away from the player ('outward'), at the alive enemy nearest to its start ('nearest'), at
+  // the live target ('eventTarget'), or on along the chain jump whose angle is the event's value
+  // ('along'); nothing without a direction. Each enemy within half its width and its own radius
+  // of the line is hit once, in id order, on the effect's payload (its critScale already in the
+  // base), forced to crit with alwaysCrit.
   slashLine(ctx, spec, _fx, entry) {
     const target = liveTarget(entry);
     let ax = entry.x;
@@ -693,6 +697,9 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     if (spec.toward === 'outward') {
       dx = ax - ctx.player.x;
       dy = ay - ctx.player.y;
+    } else if (spec.toward === 'along') {
+      dx = Math.cos(entry.value);
+      dy = Math.sin(entry.value);
     } else {
       const to = spec.toward === 'nearest' ? nearestFrom(ctx, ax, ay) : target;
       if (to === null) return;

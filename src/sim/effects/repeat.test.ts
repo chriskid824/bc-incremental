@@ -12,6 +12,7 @@ import type { RuleSpec } from '../../data/rules';
 import type { StatId } from '../../data/stats';
 import type { EffectSpec, TriggerSpec } from '../../data/triggers';
 import { REPEAT_CHARGE_CAP } from '../caps';
+import { fireArcRepeat } from '../emitters/arc';
 import { fireFanRepeat } from '../emitters/fan';
 import { fireLobRepeat } from '../emitters/lob';
 import type { EmitterRuntime, Payload } from '../emitters/types';
@@ -620,6 +621,7 @@ describe('REPEAT_STEPS (§0.7, F5-27)', () => {
       m1Volley: fireVolleyRepeat,
       magmaBomb: fireLobRepeat,
       iceFan: fireFanRepeat,
+      triphaseArc: fireArcRepeat,
     });
   });
 
@@ -627,6 +629,7 @@ describe('REPEAT_STEPS (§0.7, F5-27)', () => {
     '../emitters/volley',
     '../emitters/lob',
     '../emitters/fan',
+    '../emitters/arc',
     './execute',
     '../systems/context',
   ])('defines every entry when %s is imported first', async (first) => {

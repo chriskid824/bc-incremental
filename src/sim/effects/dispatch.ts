@@ -2,8 +2,9 @@
  * Trigger dispatch (docs/v3/implementation-plan-v3.md §2.6, §2.15): an event happens, and each
  * trigger listening to it that passes its gates queues its effects (queue.ts). The gates, in
  * order: the depth (MAX_DEPTH), the trigger's own damage (rule 3), the signature (rule 8,
- * hitIs 'signature'), the nthAttack count, the cooldown, the conditions, the target selector
- * (select.ts), then the chance, rolled on the trigger stream. A trigger stopped by its selector,
+ * hitIs 'signature'), the nthAttack count, the cooldown, the conditions, the per-attack cap of a
+ * chainJump trigger (CHAIN_JUMP_EVENT_CAP firings an attack), the target selector (select.ts),
+ * then the chance, rolled on the trigger stream. A trigger stopped by its cap or its selector,
  * which found no enemy to pick, rolls nothing and keeps its cooldown, but its nthAttack count
  * has counted the event, as with a failed condition. fire() and fireOne() only queue, pick and
  * roll, so a hit can dispatch mid-resolution without re-entering anything. A trigger without a
@@ -193,8 +194,10 @@ function fanOut(
 }
 
 /**
- * Trigger `i` if it fires on this event on `target` at (x, y) (its cooldown restarts, and its
- * selector's pick is in ctx.selected), else null.
+ * Trigger `i` if it fires on this event on `target` at (x, y) (its cooldown restarts, its
+ * firing counts towards its per-attack cap, and its selector's pick is in ctx.selected), else
+ * null. A trigger at its cap passes the attack's later events over before its selector and
+ * chance, counting each in centerEventsCapped.
  */
 function passes(
   ctx: RunContext,
@@ -217,8 +220,21 @@ function passes(
   if (now < (state.readyAt[i] as number) || !conditionsMet(t.conds, target, now, flags, ctx)) {
     return null;
   }
+  const cap = t.perAttackCap;
+  if (cap > 0) {
+    // The count belongs to the attack it was made in: a later attack starts it anew.
+    if (state.capSerial[i] !== ctx.attackSerial) {
+      state.capSerial[i] = ctx.attackSerial;
+      state.capCount[i] = 0;
+    }
+    if ((state.capCount[i] as number) >= cap) {
+      ctx.counters.centerEventsCapped++;
+      return null;
+    }
+  }
   if (t.selector !== null && !select(ctx, t.selector, target, x, y)) return null;
   if (t.chance < 1 && !ctx.triggerRng.chance(t.chance)) return null;
+  if (cap > 0) state.capCount[i] = (state.capCount[i] as number) + 1;
   state.readyAt[i] = now + t.cooldownTicks;
   return t;
 }

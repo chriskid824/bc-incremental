@@ -46,7 +46,10 @@ export interface EffectEntry {
   /** Where the event happened: its enemy's position, or the player's. */
   x: number;
   y: number;
-  /** The event's value: a kill's drop for gainShards, a shatter's victim's max life, else 0. */
+  /**
+   * The event's value: a kill's drop for gainShards, a shatter's victim's max life, a chain jump's
+   * angle (chainJump), else 0.
+   */
   value: number;
   /** The event's enemy; null for events without one and for kills. */
   target: Enemy | null;
@@ -169,6 +172,12 @@ export interface TriggerState {
   readonly readyAt: Float64Array;
   /** periodic: tick of its next firing. */
   readonly nextPeriodic: Float64Array;
+  /**
+   * A trigger with a per-attack cap (CompiledTrigger.perAttackCap): the attack (attackSerial)
+   * whose firings capCount counts; a later attack's first event starts the count again at 0.
+   */
+  readonly capSerial: Int32Array;
+  readonly capCount: Int32Array;
 }
 
 /**

@@ -214,6 +214,7 @@ describe('bench.baseline.json', () => {
       'stress',
       'shots',
       'fan',
+      'arc',
     ]);
   });
 });

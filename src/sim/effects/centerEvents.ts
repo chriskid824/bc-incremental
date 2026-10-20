@@ -4,10 +4,11 @@
  * raises them (rule 8): an event without SIGNATURE in its flags raises nothing, and neither does
  * one with REPEAT, a repeat of the signature attack. Freeze is the exception: a chill meter fills
  * from any frost, and its freeze is raised all the same. The producers: freeze (raiseFreeze,
- * once src/sim/ailments/frost.ts's addFrost fills a meter) and explode (each signature bomb's
- * landing, src/sim/emitters/lob.ts); chainJump comes later in C4. Each calls emitCenterEvent,
- * which returns at once when no trigger and no onCenterEvent hook listens to the event
- * (RunContext.centerEvents).
+ * once src/sim/ailments/frost.ts's addFrost fills a meter), explode (each signature bomb's
+ * landing, src/sim/emitters/lob.ts) and chainJump (each jump hit of the signature arc,
+ * raiseChainJump in src/sim/combat/policy.ts, with the jump's angle as its value). Each calls
+ * emitCenterEvent, which returns at once when no trigger and no onCenterEvent hook listens to
+ * the event (RunContext.centerEvents).
  *
  * An event can carry a list of enemies (CenterEventScratch.list), which its producer fills right
  * before raising it: a freeze's is the frozen enemy and up to LIST_MAX − 1 others within
@@ -25,6 +26,7 @@
  * and every other listener still runs; the freeze counts in freezePayloadsLimited.
  */
 
+import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
 import { CENTER_EVENTS } from '../../data/triggers';
 import type { CompiledBuild } from '../build/compile';
@@ -84,9 +86,10 @@ export function createCenterEventState(build: CompiledBuild): CenterEventState {
 
 /**
  * Center event `event` (its CENTER_EVENTS ordinal, which is its TRIGGER_EVENTS ordinal) at depth
- * `depth`, from damage of trigger `origin`, on `target` at (x, y) with `flags`: the triggers
- * listening to it, then the onCenterEvent hooks. Its producer has filled the scratch's list and
- * radius (listCount 0 for none); the rest of the scratch is written once something listens.
+ * `depth`, from damage of trigger `origin`, on `target` at (x, y) with `flags` and `value` (a
+ * chainJump's angle): the triggers listening to it, then the onCenterEvent hooks. Its producer
+ * has filled the scratch's list and radius (listCount 0 for none); the rest of the scratch is
+ * written once something listens.
  */
 export function emitCenterEvent(
   ctx: RunContext,
@@ -97,6 +100,7 @@ export function emitCenterEvent(
   x: number,
   y: number,
   flags: number,
+  value: Num = ZERO,
 ): void {
   // Rule 8: the signature attack's own events, not its repeats'; a freeze from any frost.
   if (event !== FREEZE && (flags & (SIGNATURE | REPEAT)) !== SIGNATURE) return;
@@ -114,11 +118,12 @@ export function emitCenterEvent(
   scratch.target = target;
   scratch.x = x;
   scratch.y = y;
+  scratch.value = value;
   if (limited) {
     ctx.counters.freezePayloadsLimited++;
-    fireExcept(ctx, event, limiter.fusionTrigger, depth, origin, target, x, y, flags, ZERO);
+    fireExcept(ctx, event, limiter.fusionTrigger, depth, origin, target, x, y, flags, value);
   } else {
-    fire(ctx, event, depth, origin, target, x, y, flags, ZERO);
+    fire(ctx, event, depth, origin, target, x, y, flags, value);
   }
   const hooks = ctx.build.hooks.onCenterEvent;
   for (let h = 0; h < hooks.length; h++) {

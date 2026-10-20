@@ -14,7 +14,9 @@ import { m1Volley } from './m1Volley';
 import { magmaBomb } from './magmaBomb';
 import type { RuleModule, SignatureModule } from './module';
 import { overload } from './overload';
+import { sixCoils } from './sixCoils';
 import { steadyAim } from './steadyAim';
+import { triphaseArc } from './triphaseArc';
 
 export type {
   BuildCompiler,
@@ -43,6 +45,7 @@ export const RULE_MODULES: {
   chainBlast,
   icicle,
   prism,
+  sixCoils,
 };
 
 export const SIGNATURES: {
@@ -51,4 +54,5 @@ export const SIGNATURES: {
   m1Volley,
   magmaBomb,
   iceFan,
+  triphaseArc,
 };

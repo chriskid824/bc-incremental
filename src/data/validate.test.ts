@@ -381,6 +381,24 @@ describe('validateGameData: talents', () => {
     ).toEqual([]);
   });
 
+  it('rejects arc form parameters out of range, and takes them at their edges', () => {
+    const coils = (coils: number, targets: number, damageMult: number) =>
+      issuesAfter((d) => {
+        talent(d, 'steadyAim').rules = [{ id: 'sixCoils', coils, targets, damageMult }];
+      });
+    expect(coils(0, 3, 0)).toEqual([
+      "talent 'steadyAim': rule 'sixCoils' sixCoils.coils must be a positive integer (got 0)",
+      "talent 'steadyAim': rule 'sixCoils' sixCoils.targets must be 1 or 2 (got 3)",
+      "talent 'steadyAim': rule 'sixCoils' sixCoils.damageMult must be > 0 (got 0)",
+    ]);
+    expect(coils(2.5, 1.5, -1)).toEqual([
+      "talent 'steadyAim': rule 'sixCoils' sixCoils.coils must be a positive integer (got 2.5)",
+      "talent 'steadyAim': rule 'sixCoils' sixCoils.targets must be 1 or 2 (got 1.5)",
+      "talent 'steadyAim': rule 'sixCoils' sixCoils.damageMult must be > 0 (got -1)",
+    ]);
+    expect([coils(1, 1, 0.01), coils(6, 2, 0.55)]).toEqual([[], []]);
+  });
+
   it('rejects invalid costs', () => {
     const issues = issuesAfter((d) => {
       talent(d, 'precision').coreCost = 1.5;
@@ -611,6 +629,11 @@ describe('trigger validation', () => {
           when: [{ targetHas: 'burn' }, { cooldownSec: 0.5 }],
           do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }, explode],
         },
+        {
+          on: 'chainJump',
+          when: [{ targetHas: 'shock' }, { cooldownSec: 0.5 }],
+          do: [{ kind: 'applyAilment', ailment: 'shock', stacks: 1 }, explode],
+        },
       ),
     ).toEqual([]);
   });
@@ -642,12 +665,15 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('rejects a chance condition on chainJump, whose triggers fire at a fixed chance (C9)', () => {
+    expect(triggerIssues({ on: 'chainJump', when: [{ chance: 0.5 }], do: [heal] })).toEqual([
+      `${at} when[0] chainJump triggers fire at 30% × the fusion coefficient; drop the chance condition`,
+    ]);
+  });
+
   it('rejects an event the simulation does not raise yet', () => {
     expect(triggerIssues({ on: 'droneImpact', do: [heal] })).toEqual([
       `${at} event 'droneImpact' is not raised by the simulation yet`,
-    ]);
-    expect(triggerIssues({ on: 'chainJump', do: [heal] })).toEqual([
-      `${at} event 'chainJump' is not raised by the simulation yet`,
     ]);
   });
 
@@ -1384,7 +1410,28 @@ describe('trigger validation', () => {
       ({ ...cut, toward: direction }) as unknown as SlashLineSpec;
     expect(triggerIssues({ on: 'hit', do: [toward('flight'), toward('sideways')] })).toEqual([
       `${at} do[0] toward 'flight' needs a drone direction, which the simulation adds in C5`,
-      `${at} do[1] toward must be 'outward', 'nearest' or 'eventTarget' (got sideways)`,
+      `${at} do[1] toward must be 'outward', 'nearest', 'eventTarget' or 'along' (got sideways)`,
+    ]);
+  });
+
+  it("takes toward 'along' on chainJump events alone, whose value is the jump's angle", () => {
+    const cut = { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5 } as const;
+    expect(triggerIssues({ on: 'chainJump', do: [{ ...cut, toward: 'along' }] })).toEqual([]);
+    expect(
+      triggerIssues(
+        {
+          on: 'hit',
+          do: [
+            { ...cut, toward: 'along' },
+            { ...cut, toward: 'along', from: 'target' },
+          ],
+        },
+        { on: 'explode', do: [{ ...cut, toward: 'along' }] },
+      ),
+    ).toEqual([
+      `${at} do[0] toward 'along' follows a chain jump, which only 'chainJump' events have`,
+      `${at} do[1] toward 'along' follows a chain jump, which only 'chainJump' events have`,
+      "talent 'vitality': triggers[1] do[0] toward 'along' follows a chain jump, which only 'chainJump' events have",
     ]);
   });
 

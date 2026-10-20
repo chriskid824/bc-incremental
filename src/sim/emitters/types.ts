@@ -4,10 +4,11 @@
  * a Payload, the compiled form of its damage: base damage, tags, credit sources, RNG stream,
  * flags and the ModTable rows of its hits and ailments, cached by slot. The signature attack is
  * the emitter at index 0 (CompiledBuild.emitters); M1's is the volley (volley.ts), 熔核's the lob
- * (lob.ts), 霜晶's the fan (fan.ts). The talent nodes' emitter grants (src/data/emitters.ts)
- * follow it, such as thorns, whose hits the contact stage deals (src/sim/systems/contact.ts),
- * segments, whose judgements the segment stage makes (src/sim/systems/segments.ts), and strikes,
- * which the emitter stage fires after the signature (strike.ts).
+ * (lob.ts), 霜晶's the fan (fan.ts), 雷塔's the arc (arc.ts). The talent nodes' emitter grants
+ * (src/data/emitters.ts) follow it, such as thorns, whose hits the contact stage deals
+ * (src/sim/systems/contact.ts), segments, whose judgements the segment stage makes
+ * (src/sim/systems/segments.ts), and strikes, which the emitter stage fires after the signature
+ * (strike.ts).
  */
 
 import type { Num } from '../../core/num';
@@ -18,7 +19,7 @@ import type { EmitterGrant } from '../../data/emitters';
 import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { TargetSelector } from '../../data/triggers';
-import type { CompiledBuild } from '../build/compile';
+import type { ArcParams, CompiledBuild } from '../build/compile';
 import { ailmentCredit, rowKey } from '../build/sources';
 import type { CompiledSelector } from '../effects/select';
 import type { Enemy, RunContext } from '../systems/context';
@@ -84,6 +85,17 @@ export interface FanSpec extends EmitterBase {
 }
 
 /**
+ * Discharges arcs (arc.ts): each strikes its target, the volley's pick at any range (a second,
+ * distinct one under 六線圈), and chains from it at once. They come ArcParams.coils a second at
+ * BASE_ATTACK_SPEED, each from the next of as many coils.
+ */
+export interface ArcSpec extends EmitterBase {
+  readonly kind: 'arc';
+  /** The base coil count, which the signature module copies to ArcParams.coils, its one read. */
+  readonly coils: number;
+}
+
+/**
  * A thorns grant: hits each enemy that touches the player before it deals its contact damage
  * (src/sim/systems/contact.ts). It never attacks on its own.
  */
@@ -125,7 +137,8 @@ export interface StrikeSpec extends EmitterBase {
 }
 
 /** What an emitter is; `kind` says how it deals its damage. */
-export type EmitterSpec = VolleySpec | LobSpec | FanSpec | ThornsSpec | SegmentSpec | StrikeSpec;
+export type EmitterSpec =
+  VolleySpec | LobSpec | FanSpec | ArcSpec | ThornsSpec | SegmentSpec | StrikeSpec;
 
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
@@ -267,7 +280,10 @@ export interface Payload {
    * (RunContext.sys.chain.noPolicy).
    */
   readonly policy: ChainPolicy | null;
-  /** Its chain jumps raise the chainJump center event (later in C4); false on every payload. */
+  /**
+   * Its chain jumps raise the chainJump center event (raiseChainJump, src/sim/combat/policy.ts):
+   * true only on the signature arc's own payload, not on its repeats'.
+   */
   readonly raisesChainJump: boolean;
   /**
    * Shock stacks each of its chain jump hits adds, with no roll, to an enemy the hit leaves
@@ -362,7 +378,8 @@ function sharedRows(spec: PayloadSpec): Int32Array {
  * The payload of an emitter: its share of the damage stat, its tags and source, on `rng`, with
  * the chain policy `policy` (the signature's, which createRunContext compiles; null for the
  * others); a lob's carries its fire zone's (lobZonePayload); a segment's is a pulse's, one tally
- * per judgement.
+ * per judgement. The signature arc's share is × ArcParams.damageMult (六線圈's), so its hits
+ * scale by 1, and its chain jumps raise chainJump.
  */
 export function emitterPayload(
   build: CompiledBuild,
@@ -370,8 +387,12 @@ export function emitterPayload(
   rng: Rng,
   policy: ChainPolicy | null,
 ): Payload {
+  const arc = spec.kind === 'arc' ? (build.signature.arc as ArcParams) : null;
   return createPayload({
-    baseDamage: mul(num(build.values.damage), spec.damagePct),
+    baseDamage: mul(
+      num(build.values.damage),
+      arc === null ? spec.damagePct : spec.damagePct * arc.damageMult,
+    ),
     tags: spec.tags,
     source: build.sources.index(spec.source),
     flags: spec.signature ? SIGNATURE : 0,
@@ -381,6 +402,7 @@ export function emitterPayload(
     canCrit: spec.canCrit,
     damageMode: ROWS,
     policy,
+    raisesChainJump: arc !== null && spec.signature,
     zoneVariant: spec.kind === 'lob' ? lobZonePayload(build, spec, rng) : null,
     aggregate: spec.kind === 'segment',
   });
@@ -435,6 +457,11 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
     }
     case 'fan':
       return periodTicks((spec.baseRate * build.values.attackSpeed) / BASE_ATTACK_SPEED);
+    case 'arc': {
+      // A discharge a second per coil: the run's coils, 六線圈's included, not the spec's.
+      const coils = (build.signature.arc as ArcParams).coils;
+      return periodTicks((coils * build.values.attackSpeed) / BASE_ATTACK_SPEED);
+    }
     case 'thorns':
       // Its hits come with the contacts, not on a period.
       return Infinity;
@@ -448,7 +475,7 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
 /**
  * Whether an emitter of `spec` sends its damage as shots that fly to their targets (volley, lob,
  * fan), so the damage in flight can be counted for targeting (RunContext.projectileEstimate).
- * Thorns, segments and strikes hit where they are.
+ * Arcs, thorns, segments and strikes hit where they are.
  */
 export function shotsInFlight(spec: EmitterSpec): boolean {
   switch (spec.kind) {
@@ -456,6 +483,7 @@ export function shotsInFlight(spec: EmitterSpec): boolean {
     case 'lob':
     case 'fan':
       return true;
+    case 'arc':
     case 'thorns':
     case 'segment':
     case 'strike':
@@ -506,9 +534,11 @@ export interface EmitterRuntime {
    * fan without icicle rounds and for the other kinds.
    */
   alt: Payload | null;
+  /** An arc's coil of its next discharge, 0 .. ArcParams.coils − 1, for drawing; 0 otherwise. */
+  coil: number;
   /**
-   * Shots fired (a volley's projectiles, a lob's bombs, a fan's cones), for steadyAim's every-Nth
-   * shot.
+   * Shots fired (a volley's projectiles, a lob's bombs, a fan's cones, an arc's discharges), for
+   * steadyAim's every-Nth shot.
    */
   shots: number;
   /** Attacks made, for steadyAim's every-Nth attack; nthAttack triggers count in TriggerState. */
@@ -545,6 +575,7 @@ export function createEmitterRuntime(
     selector,
     targets: spec.kind === 'strike' ? [] : null,
     alt,
+    coil: 0,
     shots: 0,
     attacks: 0,
     volley: 0,
@@ -616,13 +647,15 @@ export function nextShotSteady(ctx: RunContext, em: EmitterRuntime): boolean {
 /**
  * What one attack and its chain have used of their caps; one reused object per run, reset at
  * each attack (beginAttack, src/sim/combat/chain.ts). CHAIN_HIT_CAP reads hits, EXTRA_JUMP_CAP
- * extraJumps; the cap that reads centerEvents comes later in C4.
+ * extraJumps; no cap reads centerEvents, as the chainJump cap is each trigger's
+ * (CHAIN_JUMP_EVENT_CAP).
  */
 export interface ChainBudget {
   /** Hits of the attack so far, its primary hit included (CHAIN_HIT_CAP, src/sim/caps.ts). */
   hits: number;
   /** Extra jumps and bounces the build's rules added to it (EXTRA_JUMP_CAP, src/sim/caps.ts). */
   extraJumps: number;
+  /** Its chainJump events that a trigger or hook listened to (raiseChainJump, policy.ts). */
   centerEvents: number;
 }
 

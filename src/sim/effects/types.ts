@@ -40,6 +40,7 @@ import { DOT_STEP_TICKS } from '../ailments/rings';
 import { compileCondition } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import type { SourceTable } from '../build/sources';
+import { CHAIN_JUMP_EVENT_CAP } from '../caps';
 import { TICK_RATE } from '../types';
 import { compileSelector } from './select';
 import type { CompiledSelector } from './select';
@@ -59,6 +60,11 @@ const STEPS_PER_SECOND = TICK_RATE / DOT_STEP_TICKS;
 
 /** Events at this depth or deeper raise no triggers but a kill's transfers. */
 export const MAX_DEPTH = 3;
+/**
+ * The chance of a chainJump trigger, × its coefficient and at most 1: the event comes on every
+ * jump of the arc, so its triggers take no chance condition of their own (validation).
+ */
+export const CHAIN_JUMP_CHANCE = 0.3;
 /** Effects run per tick at most; the rest carry over. */
 export const EFFECTS_PER_TICK = 2000;
 /**
@@ -118,6 +124,11 @@ export interface CompiledTrigger {
    * its ailment, whose damage the victim had left its pending kills carry; −1 for every other.
    */
   readonly detonateAilment: number;
+  /**
+   * Times it fires in one attack at most, past which it draws nothing (TriggerState.capCount):
+   * CHAIN_JUMP_EVENT_CAP on chainJump, 0 (no cap) on every other event.
+   */
+  readonly perAttackCap: number;
 }
 
 /** The built-in shatter's effect (SHATTER_TRIGGER), which no data can name. */
@@ -172,7 +183,8 @@ export interface CompiledEffect {
 /**
  * Compiles a trigger at `index` whose effects start at `effectStart` in CompiledBuild.effects;
  * an inZone condition numbers its source in `sources`. Throws on an event the simulation does
- * not raise yet.
+ * not raise yet. A chainJump trigger fires at CHAIN_JUMP_CHANCE × coef, CHAIN_JUMP_EVENT_CAP
+ * times an attack at most.
  */
 export function compileTrigger(
   index: number,
@@ -193,7 +205,11 @@ export function compileTrigger(
   if (ailmentEvent && named !== 1) {
     throw new Error(`A trigger on '${spec.on}' needs exactly one ailment condition`);
   }
-  let chance = 1;
+  const chainJump = spec.on === 'chainJump';
+  if (chainJump && (spec.when ?? []).some((condition) => 'chance' in condition)) {
+    throw new Error('A chainJump trigger fires at CHAIN_JUMP_CHANCE: it takes no chance condition');
+  }
+  let chance = chainJump ? CHAIN_JUMP_CHANCE : 1;
   let cooldownSec = 0;
   let signatureOnly = false;
   const conds: CompiledCondition[] = [];
@@ -230,6 +246,7 @@ export function compileTrigger(
     selector: spec.target === undefined ? null : compileSelector(spec.target, spec.on),
     detonateAilment:
       dead && detonate !== undefined ? DETONATE_AILMENTS.indexOf(detonate.ailment) : -1,
+    perAttackCap: chainJump ? CHAIN_JUMP_EVENT_CAP : 0,
   };
 }
 
@@ -253,6 +270,7 @@ export function moduleTrigger(index: number, source: number): CompiledTrigger {
     takesDrop: false,
     selector: null,
     detonateAilment: -1,
+    perAttackCap: 0,
   };
 }
 

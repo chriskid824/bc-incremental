@@ -6,6 +6,7 @@
  * segments in their own).
  */
 
+import { runArc } from '../emitters/arc';
 import { runFan } from '../emitters/fan';
 import { runLob } from '../emitters/lob';
 import { runStrike } from '../emitters/strike';
@@ -24,6 +25,7 @@ export const EMITTER_STEPS: { readonly [K in EmitterSpec['kind']]: EmitterStep |
   volley: runVolley,
   lob: runLob,
   fan: runFan,
+  arc: runArc,
   // Its hits come with the contacts (src/sim/systems/contact.ts).
   thorns: null,
   // Its judgements come in the segment stage (src/sim/systems/segments.ts).
