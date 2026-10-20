@@ -49,6 +49,7 @@ describe('steadyAim', () => {
       lob: null,
       fan: null,
       arc: null,
+      swarm: null,
     });
     expect(build.values.critMultiplier).toBe(2 * (1.5 * 1.25));
     const plain = compileBuild(makeStats(), []);
@@ -60,6 +61,7 @@ describe('steadyAim', () => {
       lob: null,
       fan: null,
       arc: null,
+      swarm: null,
     });
   });
 

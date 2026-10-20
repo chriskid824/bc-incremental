@@ -109,10 +109,14 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  *   discharge's own hit nor a repeat's hits. Its value is the jump's angle from the enemy it
  *   jumped from; it has no list. Its triggers take no chance condition: each fires at 30% × its
  *   coefficient, at most 3 times an attack (CHAIN_JUMP_EVENT_CAP, src/sim/caps.ts).
+ * - droneImpact: a drone of the signature attack (swarm) impacted, after its hits and its chain,
+ *   at its target, which is the only enemy; it carries no list. Repeats and granted drones raise
+ *   none.
  */
 export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
   'explode',
   'chainJump',
+  'droneImpact',
   'hit',
   'crit',
   'kill',
@@ -223,6 +227,7 @@ export const conditionKey = (condition: Condition): ConditionKey =>
 const TARGETED: readonly TriggerEventId[] = [
   'explode',
   'chainJump',
+  'droneImpact',
   'hit',
   'crit',
   'nthAttack',

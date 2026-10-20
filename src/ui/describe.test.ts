@@ -19,6 +19,7 @@ function build(
 }
 
 const MAGMA_BOMB: SignatureSpec = { id: 'magmaBomb' };
+const SWARM: SignatureSpec = { id: 'swarm' };
 
 describe('describeBuild', () => {
   afterEach(() => setLocale('en'));
@@ -118,6 +119,36 @@ describe('describeBuild', () => {
       String(BASE_STATS.projectileCount - 1),
     );
     expect(BASE_STATS.projectileCount - 1).toBe(1);
+  });
+
+  it('shows 蜂巢’s swarm: minion area impacts, and one projectile, a turret’s firing, at base (F16, F18)', () => {
+    expect(build([], makeStats(), SWARM)).toEqual({
+      [t('stat.damage.hit')]: '10',
+      [t('stat.attackSpeed')]: `${BASE_STATS.attackSpeed}/s`,
+      [t('stat.projectileCount')]: '1',
+      [t('stat.critChance')]: '5%',
+      [t('stat.critMultiplier')]: '150%',
+      [t('build.critHit')]: '15',
+      [t('stat.igniteChance')]: '10%',
+      [t('build.burnPerStack')]: '15/s',
+      [t('stat.burnDuration')]: '1.2',
+      [t('stat.burnMaxStacks')]: '5',
+      [t('stat.chainCount')]: '0',
+      [t('build.chainJump')]: '7',
+      [t('stat.maxLife')]: '100',
+    });
+    // ×2 on minion hits, ×3 on area hits, ×5 on projectile hits: an impact is a minion area hit.
+    const stats = makeStats({ critChance: 0 }, [
+      { stat: 'damage', kind: 'more', value: 1, tags: ['minion'] },
+      { stat: 'damage', kind: 'more', value: 2, tags: ['area'] },
+      { stat: 'damage', kind: 'more', value: 4, tags: ['projectile'] },
+    ]);
+    const swarm = build([], stats, SWARM);
+    expect(swarm[t('stat.damage.hit')]).toBe('60');
+    expect(swarm[t('build.critHit')]).toBe('90');
+    // Its jumps keep the minion tag (jumpMask), not the area tag.
+    expect(swarm[t('build.chainJump')]).toBe('14');
+    expect(build([], stats)[t('stat.damage.hit')]).toBe('50');
   });
 
   it('applies glassCannon, Pandemic’s hit cost and overload', () => {

@@ -10,7 +10,7 @@
 
 import type { Rng } from '../../core/rng';
 import { DRONE_DEFAULTS } from '../../data/emitters';
-import type { CompiledBuild } from '../build/compile';
+import type { CompiledBuild, SwarmParams } from '../build/compile';
 import { sizeOf } from '../build/size';
 import { PICK_TICKS } from '../caps';
 import type { ChainPolicy, DroneLayout } from '../systems/systemState';
@@ -22,9 +22,11 @@ const CENTER_X = ARENA_WIDTH / 2;
 const CENTER_Y = ARENA_HEIGHT / 2;
 
 /**
- * The layout of `emitters`' drones in `build` under `summonCap`. Each drone emitter's numbers are
- * DRONE_DEFAULTS' but for its spec's drones. `rng` and `policy` are the combat stream and the
- * signature's compiled chain policy, which the turrets' payloads take from C5.4 on.
+ * The layout of `emitters`' drones in `build` under `summonCap`. A granted drone emitter's numbers
+ * are DRONE_DEFAULTS' but for its spec's drones; the signature's, the swarm's at index 0, are its
+ * SwarmParams (CompiledBuild.signature.swarm), its spec's counts unread. `rng` and `policy` are the
+ * combat stream and the signature's compiled chain policy, which the turrets' payloads take from
+ * C5.4 on.
  */
 export function droneLayout(
   build: CompiledBuild,
@@ -52,7 +54,10 @@ export function droneLayout(
     const spec = em.spec;
     if (spec.kind !== 'drone') continue;
     const i = em.index;
-    const drones = spec.drones;
+    // Emitter 0, a drone emitter, is the swarm: its rules change its SwarmParams in place.
+    const swarm = i === 0 ? (build.signature.swarm as SwarmParams) : null;
+    const params = swarm ?? DRONE_DEFAULTS;
+    const drones = swarm === null ? spec.drones : swarm.drones;
     for (let k = 0; k < drones; k++) {
       if (kind.length >= summonCap) {
         refused++;
@@ -66,11 +71,11 @@ export function droneLayout(
       y.push(CENTER_Y + DRONE_DEFAULTS.dockRadius * Math.sin(angle));
       firstPick.push(1 + ((10 * k) % PICK_TICKS));
     }
-    stepBase[i] = DRONE_DEFAULTS.speed / TICK_RATE;
-    dockTicks[i] = DRONE_DEFAULTS.dockSec * TICK_RATE;
-    coolTicks[i] = DRONE_DEFAULTS.cooldownSec * TICK_RATE;
-    impacts[i] = DRONE_DEFAULTS.impacts;
-    const splash = sizeOf(build, DRONE_DEFAULTS.splash);
+    stepBase[i] = params.speed / TICK_RATE;
+    dockTicks[i] = params.dockSec * TICK_RATE;
+    coolTicks[i] = params.cooldownSec * TICK_RATE;
+    impacts[i] = params.impacts;
+    const splash = sizeOf(build, params.splash);
     splashSq[i] = splash * splash;
   }
   return {

@@ -26,7 +26,13 @@ describe('RULE_MODULES', () => {
 
 describe('SIGNATURES', () => {
   it('has the module of every signature id, under its own id', () => {
-    expect(Object.keys(SIGNATURES)).toEqual(['m1Volley', 'magmaBomb', 'iceFan', 'triphaseArc']);
+    expect(Object.keys(SIGNATURES)).toEqual([
+      'm1Volley',
+      'magmaBomb',
+      'iceFan',
+      'triphaseArc',
+      'swarm',
+    ]);
     for (const [id, module] of Object.entries(SIGNATURES)) expect(module.id).toBe(id);
   });
 

@@ -20,6 +20,7 @@ import { fireVolleyRepeat, runVolley } from '../emitters/volley';
 import type { TestModule } from '../rules';
 import type { Projectile, RunContext } from '../systems/context';
 import { compact } from '../systems/death';
+import { swarmRepeat } from '../systems/drones';
 import { moveProjectiles } from '../systems/projectiles';
 import { centerTriggers, eventsOf, makeStats, placedEnemies, rngPositions } from '../testing';
 import type { PlacedEnemy } from '../testing';
@@ -622,6 +623,7 @@ describe('REPEAT_STEPS (§0.7, F5-27)', () => {
       magmaBomb: fireLobRepeat,
       iceFan: fireFanRepeat,
       triphaseArc: fireArcRepeat,
+      swarm: swarmRepeat,
     });
   });
 
@@ -630,6 +632,7 @@ describe('REPEAT_STEPS (§0.7, F5-27)', () => {
     '../emitters/lob',
     '../emitters/fan',
     '../emitters/arc',
+    '../systems/drones',
     './execute',
     '../systems/context',
   ])('defines every entry when %s is imported first', async (first) => {

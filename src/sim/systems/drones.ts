@@ -18,17 +18,26 @@
  * Its attack frequency m = attackSpeed / BASE_ATTACK_SPEED × its emitter's cadence, read every
  * tick, multiplies its speed and divides its dock time and cooldown; at m ≤ 0, or NaN, the drone
  * does nothing that tick. Movement, picks and the splash query draw nothing; the hits roll on
- * their payload's stream, the combat stream. A granted drone's impact is an attack of its own,
- * not the signature's: no PRIMARY, no counted attack, no center event, no repeat. Kills inside
- * the stage only mark their enemy dead, and enemy objects are never reused, so a target a slot
- * keeps from an earlier tick is alive or reads dead.
+ * their payload's stream, the combat stream. An impact of the signature's drones (the swarm's,
+ * emitter 0) is one attack and one shot of the signature: counted (steadyAim, nthAttack), its
+ * target its primary hit, whose chain follows, and the droneImpact center event, then the
+ * repeats waiting for it. A granted drone's impact is an attack of its own, not the signature's:
+ * no PRIMARY, no counted attack, no center event, no repeat. A repeat of the swarm is an impact
+ * of no drone at the enemy farthest from the player (swarmRepeat), on the repeat's payload and
+ * its stream, the effects stream. Kills inside the stage only mark their enemy dead, and enemy
+ * objects are never reused, so a target a slot keeps from an earlier tick is alive or reads dead.
  */
 
 import { DRONE_COOLDOWN_MAX, DRONE_MEMORY, PICK_TICKS } from '../caps';
-import { beginAttack, endAttack } from '../combat/chain';
+import { beginAttack, chainFrom, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
-import { BASE_ATTACK_SPEED, SIGNATURE } from '../emitters/types';
+import { emitCenterEvent } from '../effects/centerEvents';
+import { drainRepeatCharges } from '../effects/execute';
+import { PRIMARY } from '../effects/flags';
+import { EVENT } from '../effects/types';
+import { BASE_ATTACK_SPEED, nextShotSteady, SIGNATURE } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
+import { countAttack } from '../emitters/volley';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
@@ -39,6 +48,8 @@ import {
 } from '../types';
 import type { Enemy, RunContext } from './context';
 import type { DronePool } from './systemState';
+
+const DRONE_IMPACT = EVENT.droneImpact;
 
 /** Steps every slot of the drone pool once, in id order (step 6b). */
 export function stepDrones(ctx: RunContext): void {
@@ -295,13 +306,17 @@ export function pickOuter(ctx: RunContext, s: number): Enemy | null {
 }
 
 /**
- * Impact of drone slot `s` on `target` with payload `p` of emitter `em`, an attack of its own
- * (D8): every enemy alive within the emitter's splash of the target's center is listed before any
+ * Impact of drone slot `s` (−1 for a repeat's) on `target` with payload `p` of emitter `em`, an
+ * attack of its own (D8). A `counted` impact, a signature drone's, is first counted as an attack
+ * and a shot of `em` (countAttack, nextShotSteady), which makes its hits steady when that shot
+ * is. Every enemy alive within the emitter's splash of the target's center is listed before any
  * hit, so that the children its kills split into are not among them, and each one still alive at
  * its turn takes one hit of `p` at scale 1 in id order, the target the only one counted in the
- * attack's budget; then the impact event. `depth` and `origin` are the hits' trigger depth and origin (0 and −1 for a drone). A
- * granted drone's impact (flags 0, not `counted`) is no counted attack and carries no PRIMARY;
- * the signature's impacts come in C5.2.
+ * attack's budget and, when `p` is the signature's (a repeat's too), the primary hit. Then come
+ * the chain from the target when `p` chains, which passes over the enemies the impact hit; the
+ * impact event; and the droneImpact center event at the target, without a list, which rule 8
+ * raises for the signature's own impacts alone. The repeats waiting for a counted impact follow
+ * it. `depth` and `origin` are the hits' trigger depth and origin (0 and −1 for a drone).
  */
 export function impactAt(
   ctx: RunContext,
@@ -309,22 +324,31 @@ export function impactAt(
   target: Enemy,
   p: Payload,
   em: EmitterRuntime,
-  _counted: boolean,
+  counted: boolean,
   depth: number,
   origin: number,
 ): void {
+  let steady = false;
+  if (counted) {
+    countAttack(ctx, em, target);
+    steady = nextShotSteady(ctx, em);
+  }
   const ds = ctx.sys.drones;
   const r2 = ds.splashSq[em.index] as number;
   beginAttack(ctx);
   const splash = ds.splash;
   const n = ctx.grid.within(target.x, target.y, r2, splash);
   const budget = ctx.chainBudget;
+  const primary = (p.flags & SIGNATURE) !== 0 ? PRIMARY : 0;
   for (let i = 0; i < n; i++) {
     const e = splash[i] as Enemy;
     if (!e.alive) continue;
-    if (e === target) budget.hits++;
-    hitWithPayload(ctx, e, p, 0, 1, null, null, false, depth, origin, 0);
+    const isTarget = e === target;
+    if (isTarget) budget.hits++;
+    hitWithPayload(ctx, e, p, 0, 1, null, null, steady, depth, origin, isTarget ? primary : 0);
   }
+  // Its victims carry the attack's serial, so the chain passes over them.
+  if (p.chains) chainFrom(ctx, p, target, ctx.chainCount, steady, depth, origin);
   ctx.events.push({
     type: 'impact',
     droneId: s >= 0 ? (ds.id[s] as number) : -1,
@@ -334,5 +358,46 @@ export function impactAt(
     targetId: target.id,
     count: n,
   });
+  // No list, so a hook never reads an earlier event's; the radius goes only with a list.
+  ctx.centerScratch.listCount = 0;
+  emitCenterEvent(ctx, DRONE_IMPACT, depth, origin, target, target.x, target.y, p.flags);
   endAttack(ctx);
+  if (counted) drainRepeatCharges(ctx, em);
+}
+
+/**
+ * The enemy a repeat of the swarm impacts (swarmRepeat): the alive enemy farthest from the player
+ * (Enemy.dist) whose center is in the arena, the lowest id on ties; null for none. pickOuter's
+ * first scan without a slot's memory or chase. Draws and writes nothing.
+ */
+export function pickOuterFromCenter(ctx: RunContext): Enemy | null {
+  const enemies = ctx.enemies;
+  let best = -1;
+  let bestE: Enemy | null = null;
+  // Backwards with >=, so ties keep the lower id.
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i] as Enemy;
+    if (!e.alive) continue;
+    const d = e.dist;
+    if (d < best || outOfArena(e)) continue;
+    best = d;
+    bestE = e;
+  }
+  return bestE;
+}
+
+/**
+ * A repeat of the swarm (REPEAT_STEPS, src/sim/effects/execute.ts): an impact of no drone with
+ * payload `p` at the enemy farthest from the player (pickOuterFromCenter), as no attack of its
+ * own (impactAt, not counted), its hits at `depth` from trigger `origin`; nothing without one.
+ */
+export function swarmRepeat(
+  ctx: RunContext,
+  em: EmitterRuntime,
+  p: Payload,
+  depth: number,
+  origin: number,
+): void {
+  const target = pickOuterFromCenter(ctx);
+  if (target !== null) impactAt(ctx, -1, target, p, em, false, depth, origin);
 }

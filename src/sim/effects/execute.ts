@@ -81,6 +81,7 @@ import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '.
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { fireVolleyRepeat } from '../emitters/volley';
 import type { Enemy, RunContext } from '../systems/context';
+import { swarmRepeat } from '../systems/drones';
 import { rebuildGrid } from '../systems/grid';
 import { MOTION_HOMING, MOTION_STRAIGHT, spawnShot } from '../systems/shots';
 import { addZone, PULSES_PER_SECOND } from '../systems/zones';
@@ -395,20 +396,21 @@ type RepeatStep = (
 
 /**
  * Each signature's repeat, typed over the signature ids, so a new signature needs its entry
- * here. Read at this module's top level, inside the import cycle it shares with the emitters:
- * every entry must be a function declaration (docs/v3 C4 design §0.7).
+ * here. Read at this module's top level, inside the import cycle it shares with the emitters and
+ * the drone stage: every entry must be a function declaration (docs/v3 C4 design §0.7).
  */
 export const REPEAT_STEPS: { readonly [K in SignatureId]: RepeatStep } = {
   m1Volley: fireVolleyRepeat,
   magmaBomb: fireLobRepeat,
   iceFan: fireFanRepeat,
   triphaseArc: fireArcRepeat,
+  swarm: swarmRepeat,
 };
 
 /**
  * Fires the repeats waiting for the signature attack's next own firing, oldest first, each with
  * its own payload, depth and origin: right after each counted attack of `em`, the signature
- * (runVolley, runLob, runFan, runArc).
+ * (runVolley, runLob, runFan, runArc, and impactAt for the swarm's drones).
  */
 export function drainRepeatCharges(ctx: RunContext, em: EmitterRuntime): void {
   const charges = ctx.sys.repeat.charges;

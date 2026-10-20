@@ -100,6 +100,8 @@ export interface SignatureParams {
   fan: FanParams | null;
   /** The arc's (triphaseArc, src/sim/emitters/arc.ts); null for another signature. */
   arc: ArcParams | null;
+  /** The swarm's (swarm, src/sim/systems/drones.ts); null for another signature. */
+  swarm: SwarmParams | null;
 }
 
 /**
@@ -158,6 +160,28 @@ export interface ArcParams {
   targets: 1 | 2;
   /** The factor on the arc's damage, folded into its payload's base damage. */
   damageMult: number;
+}
+
+/**
+ * The swarm's parameters, which its signature module sets: its drones' and turrets' counts and
+ * numbers, at attack frequency 1. The run reads them here only, never from its emitter's spec
+ * (src/sim/emitters/drone.ts), so the rules that change them write them in place; drones +
+ * turrets must stay at least 1 (compileBuild throws otherwise). Its turrets are placed from C5.4.
+ */
+export interface SwarmParams {
+  drones: number;
+  turrets: number;
+  /** A drone's speed, arena units a second. */
+  speed: number;
+  /** A drone's dock time between sorties, and its same-enemy cooldown, in seconds. */
+  dockSec: number;
+  cooldownSec: number;
+  /** Impacts a sortie. */
+  impacts: number;
+  /** The radius around its target that an impact hits, before sizeOf (src/sim/build/size.ts). */
+  splash: number;
+  /** A turret shot's base damage as a fraction of the damage stat. */
+  turretDamagePct: number;
 }
 
 export interface CompiledBuild {
@@ -301,6 +325,7 @@ export function compileBuild(
     lob: null,
     fan: null,
     arc: null,
+    swarm: null,
   };
   const hooks: { [K in HookName]: Hooks[K][] } = {
     tick: [],
@@ -402,6 +427,12 @@ export function compileBuild(
     const source = module.source === undefined ? CENTER : sources.index(module.source);
     compileInstance(source, () => module(compiler, source));
   }
+  // The modules write the swarm's counts in place: a swarm with no drone or turret would attack
+  // never, though its repeats would still impact.
+  const swarm = params.swarm;
+  if (swarm !== null && !(swarm.drones + swarm.turrets >= 1)) {
+    throw new Error(`swarm: ${swarm.drones} drones and ${swarm.turrets} turrets; it needs one`);
+  }
   // Shatter listens to kills only when something can fill a chill meter: frost on hit, or an
   // addFrost effect or a groundZone with frost, a trigger's or one a module compiled.
   const scoped = [...stats.scoped, ...added];
@@ -459,7 +490,8 @@ export function compileBuild(
  * SLOT_JUMP_CRIT read in a run (src/sim/emitters/types.ts); the estimates outside a run read
  * them too (the talent screen's summary, typicalHit, the balance tools): M1's hits are hit and
  * projectile, 熔核's explosions hit, area and projectile, 霜晶's cones hit, projectile and cold,
- * and 雷塔's discharges hit, chain and lightning, so their jumps share their rows.
+ * 雷塔's discharges hit, chain and lightning, so their jumps share their rows, and 蜂巢's drone
+ * impacts hit, minion and area.
  */
 export interface SignatureRows {
   readonly hit: number;

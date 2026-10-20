@@ -1254,6 +1254,50 @@ const DRONE_CAP_STATS = makeStats(
   },
 );
 
+/**
+ * C5.2's swarm, 蜂巢's signature, over THORNS_STATS' base (crits, ignites and maskProbeMods())
+ * with a chain jump: three drones fly out at the farthest enemies, and each impact is a counted
+ * attack and shot whose target takes the primary hit, every other enemy in its splash a hit, and
+ * whose chain jumps once, all rolling on the combat stream; each impact raises droneImpact, whose
+ * trigger poisons the target with two stacks. A test module sets the swarm's turrets to 0 (IS23),
+ * so C5.4's turrets re-record neither entry. `swarmRepeat` adds C4.9's 回聲 (every fifth impact,
+ * one repeat at half damage, now) and 多重施法 (every twelfth, two full repeats with the next
+ * impact): impacts of no drone at the farthest enemy in the arena, on the effects stream, which
+ * raise no droneImpact.
+ */
+const SWARM_POISON: TriggerSpec = {
+  on: 'droneImpact',
+  do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }],
+};
+const SWARM_VALUES = {
+  damage: 5,
+  maxLife: 1e6,
+  critChance: 0.2,
+  critMultiplier: 2,
+  igniteChance: 0.3,
+  chainCount: 1,
+};
+const SWARM_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
+  triggers: [{ source: 'center', spec: SWARM_POISON }],
+  conversions: [],
+  emitters: [],
+});
+const SWARM_REPEAT_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
+  triggers: [
+    { source: 'center', spec: SWARM_POISON },
+    ...REPEAT_TRIGGERS.slice(0, 2).map(([source, spec]) => ({ source, spec })),
+  ],
+  conversions: [],
+  emitters: [],
+});
+/** The swarm without turrets (IS23). */
+const noTurrets = (): TestModule[] => [
+  (b) => {
+    const swarm = b.signature().swarm;
+    if (swarm !== null) swarm.turrets = 0;
+  },
+];
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1406,6 +1450,18 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'droneCap',
     config: { stats: DRONE_CAP_STATS, rules: [], startWave: 12 },
     expected: ['984d118c8a9be135', 'edf5fbf5bd1b0248'],
+  },
+  {
+    name: 'swarm',
+    config: { stats: SWARM_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    modules: noTurrets,
+    expected: ['813c09f02bcd8be2', 'f33d101e41a2c966'],
+  },
+  {
+    name: 'swarmRepeat',
+    config: { stats: SWARM_REPEAT_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    modules: noTurrets,
+    expected: ['05bb5708d3398499', '2970432e9f8b51b2'],
   },
 ];
 

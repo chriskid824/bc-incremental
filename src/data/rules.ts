@@ -119,7 +119,13 @@ export type SignatureSpec =
    * chain on from it at once, every hit a lightning chain hit that shocks, its three coils taking
    * turns (src/sim/emitters/arc.ts).
    */
-  | { readonly id: 'triphaseArc' };
+  | { readonly id: 'triphaseArc' }
+  /**
+   * 蜂巢's swarm: drones that fly out from their docks around the player at the enemies farthest
+   * from it and impact them, each impact hitting every enemy within its splash
+   * (src/sim/systems/drones.ts).
+   */
+  | { readonly id: 'swarm' };
 
 export type SignatureId = SignatureSpec['id'];
 

@@ -62,6 +62,7 @@ describe('compileBuild', () => {
       lob: null,
       fan: null,
       arc: null,
+      swarm: null,
     });
     expect(build.hooks).toEqual({
       tick: [],
@@ -240,6 +241,7 @@ describe('signatureRows', () => {
   const MAGMA_BOMB: SignatureSpec = { id: 'magmaBomb' };
   const ICE_FAN: SignatureSpec = { id: 'iceFan' };
   const TRIPHASE_ARC: SignatureSpec = { id: 'triphaseArc' };
+  const SWARM: SignatureSpec = { id: 'swarm' };
   const {
     hit: HIT,
     crit: CRIT,
@@ -323,6 +325,36 @@ describe('signatureRows', () => {
     const m1Rows = signatureRows(m1);
     expect(keyedStat(m1, m1Rows.hit, DAMAGE)).toBe(1);
     expect(keyedStat(m1, m1Rows.jump, DAMAGE, 1)).toBeCloseTo(4.5, 12);
+  });
+
+  it('keys swarm impacts hit, minion and area, its jumps hit, chain and minion (F18)', () => {
+    expect(signatureRows(compileBuild(makeStats(), [], SWARM))).toEqual({
+      hit: rowKey(HIT | TAG.minion | AREA, CENTER),
+      hitCrit: rowKey(HIT | TAG.minion | AREA | CRIT, CENTER),
+      jump: rowKey(HIT | CHAIN | TAG.minion, CENTER),
+      jumpCrit: rowKey(HIT | CHAIN | TAG.minion | CRIT, CENTER),
+    });
+  });
+
+  it('are the rows the swarm payload reads in a run, a drone grant after it or not', () => {
+    const granted = makeStats({}, [], {
+      triggers: [],
+      conversions: [],
+      emitters: [{ source: 'outer.summon', grant: { kind: 'drone', drones: 1 } }],
+    });
+    for (const stats of [makeStats(), granted]) {
+      const ctx = placedEnemies([], { stats, signature: SWARM });
+      const payload = (ctx.emitters[0] as EmitterRuntime).payload;
+      // The payload's rows first: a wrong key would then add a row of its own.
+      const slots = [SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP, SLOT_JUMP_CRIT].map((slot) =>
+        slotRow(ctx.build, payload, slot),
+      );
+      const rows = signatureRows(ctx.build);
+      const keys = [rows.hit, rows.hitCrit, rows.jump, rows.jumpCrit];
+      expect(keys.map((key) => ctx.build.table.row(key))).toEqual(slots);
+      expect(new Set(slots).size).toBe(4);
+      expect(signatureRows(ctx.build)).toEqual(signatureRows(compileBuild(makeStats(), [], SWARM)));
+    }
   });
 
   it('are the rows the signature payload reads in a run', () => {

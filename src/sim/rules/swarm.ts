@@ -1,0 +1,46 @@
+/**
+ * swarm: 蜂巢's attack as a signature emitter, a drone emitter (src/sim/systems/drones.ts). Its 3
+ * drones dock around the player and fly out at the enemies farthest from it, 3 impacts a sortie:
+ * each impact is a center hit of 80% of the damage stat, tagged hit, minion and area, on every
+ * enemy within 40 of its target, the target its primary hit, whose chain follows; it is one
+ * attack and one shot for steadyAim, and raises the droneImpact center event at its target. The
+ * run reads its drones' numbers from its SwarmParams (CompiledBuild.signature.swarm), which its
+ * rules change, never from its emitter's spec. Its turret, whose firing is projectileCount − 1
+ * shots, comes in C5.4.
+ */
+
+import type { SignatureSpec } from '../../data/rules';
+import { TAG } from '../../data/tags';
+import type { SignatureModule } from './module';
+
+export const swarm: SignatureModule<Extract<SignatureSpec, { id: 'swarm' }>> = {
+  id: 'swarm',
+  emitter: () => ({
+    kind: 'drone',
+    signature: true,
+    source: 'center',
+    damagePct: 0.8,
+    tags: TAG.hit | TAG.minion | TAG.area,
+    chains: true,
+    rollsAilments: true,
+    canCrit: true,
+    // DroneSpec's counts, which the run reads from SwarmParams instead (D17).
+    drones: 3,
+    turrets: 1,
+    turretDamagePct: 0.4,
+  }),
+  compile(b) {
+    // A turret's firing is projectileCount − 1 shots: one at the base projectileCount of 2 (F16).
+    b.offsetStat('projectileCount', -1);
+    b.signature().swarm = {
+      drones: 3,
+      turrets: 1,
+      speed: 600,
+      dockSec: 0.5,
+      cooldownSec: 0.5,
+      impacts: 3,
+      splash: 40,
+      turretDamagePct: 0.4,
+    };
+  },
+};

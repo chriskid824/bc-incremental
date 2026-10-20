@@ -5,8 +5,9 @@
  * one with REPEAT, a repeat of the signature attack. Freeze is the exception: a chill meter fills
  * from any frost, and its freeze is raised all the same. The producers: freeze (raiseFreeze,
  * once src/sim/ailments/frost.ts's addFrost fills a meter), explode (each signature bomb's
- * landing, src/sim/emitters/lob.ts) and chainJump (each jump hit of the signature arc,
- * raiseChainJump in src/sim/combat/policy.ts, with the jump's angle as its value). Each calls
+ * landing, src/sim/emitters/lob.ts), chainJump (each jump hit of the signature arc,
+ * raiseChainJump in src/sim/combat/policy.ts, with the jump's angle as its value) and
+ * droneImpact (each signature drone impact, impactAt in src/sim/systems/drones.ts). Each calls
  * emitCenterEvent, which returns at once when no trigger and no onCenterEvent hook listens to
  * the event (RunContext.centerEvents).
  *

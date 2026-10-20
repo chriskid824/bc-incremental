@@ -634,6 +634,11 @@ describe('trigger validation', () => {
           when: [{ targetHas: 'shock' }, { cooldownSec: 0.5 }],
           do: [{ kind: 'applyAilment', ailment: 'shock', stacks: 1 }, explode],
         },
+        {
+          on: 'droneImpact',
+          when: [{ targetHas: 'poison' }, { chance: 0.5 }],
+          do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }, explode],
+        },
       ),
     ).toEqual([]);
   });
@@ -672,8 +677,8 @@ describe('trigger validation', () => {
   });
 
   it('rejects an event the simulation does not raise yet', () => {
-    expect(triggerIssues({ on: 'droneImpact', do: [heal] })).toEqual([
-      `${at} event 'droneImpact' is not raised by the simulation yet`,
+    expect(triggerIssues({ on: 'droneExpire', do: [heal] })).toEqual([
+      `${at} event 'droneExpire' is not raised by the simulation yet`,
     ]);
   });
 

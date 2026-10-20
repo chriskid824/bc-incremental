@@ -16,6 +16,7 @@ import type { RuleModule, SignatureModule } from './module';
 import { overload } from './overload';
 import { sixCoils } from './sixCoils';
 import { steadyAim } from './steadyAim';
+import { swarm } from './swarm';
 import { triphaseArc } from './triphaseArc';
 
 export type {
@@ -55,4 +56,5 @@ export const SIGNATURES: {
   magmaBomb,
   iceFan,
   triphaseArc,
+  swarm,
 };
