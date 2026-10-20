@@ -27,7 +27,13 @@ import type { EmitterRuntime, Payload } from '../emitters/types';
 import type { TestModule } from '../rules';
 import { eventsOf, makeStats, placedEnemies, rngPositions } from '../testing';
 import type { PlacedEnemy } from '../testing';
-import { ARENA_HEIGHT, ARENA_WIDTH, DRONE_DASH } from '../types';
+import {
+  ARENA_HEIGHT,
+  ARENA_WIDTH,
+  DRONE_DASH,
+  DRONE_KIND_DRONE,
+  DRONE_KIND_TURRET,
+} from '../types';
 import type { SimEvent } from '../types';
 import type { Enemy, RunContext } from './context';
 import { impactAt, pickOuterFromCenter, stepDrones, swarmRepeat } from './drones';
@@ -317,12 +323,19 @@ describe('swarm (§4.6, D17)', () => {
   it('builds a run of 3 drones of emitter 0 from its SwarmParams, never from its spec’s counts or DRONE_DEFAULTS (§4.1)', () => {
     const ctx = swarms([]);
     const ds = ctx.sys.drones;
+    // Its turret's row follows its drones' (C5.4).
     expect([ds.count, Array.from(ds.owner), Array.from(ds.seat)]).toEqual([
-      3,
-      [0, 0, 0],
-      [0, 1, 2],
+      4,
+      [0, 0, 0, 0],
+      [0, 1, 2, 0],
     ]);
-    expect(Array.from(ds.id)).toEqual([1, 2, 3]);
+    expect(Array.from(ds.id)).toEqual([1, 2, 3, 4]);
+    expect(Array.from(ds.kind)).toEqual([
+      DRONE_KIND_DRONE,
+      DRONE_KIND_DRONE,
+      DRONE_KIND_DRONE,
+      DRONE_KIND_TURRET,
+    ]);
     expect([
       ds.stepBase[0],
       ds.dockTicks[0],
@@ -340,7 +353,7 @@ describe('swarm (§4.6, D17)', () => {
     const other = swarms([], { modules: [tuned], grants: [GRANT(2)] });
     const os = other.sys.drones;
     expect(other.build.emitters[0]).toMatchObject({ kind: 'drone', drones: 3 });
-    expect([os.count, Array.from(os.owner)]).toEqual([7, [0, 0, 0, 0, 0, 1, 1]]);
+    expect([os.count, Array.from(os.owner)]).toEqual([8, [0, 0, 0, 0, 0, 0, 1, 1]]);
     expect([
       os.stepBase[0],
       os.dockTicks[0],
@@ -410,23 +423,23 @@ describe('swarm (§4.6, D17)', () => {
     expect([
       (granted.emitters[1] as EmitterRuntime).payload.policy,
       granted.sys.drones.count,
-    ]).toEqual([null, 4]);
+    ]).toEqual([null, 5]);
   });
 });
 
 describe('swarm impacts (D8, D12)', () => {
   it('counts a signature drone’s impact as one attack and one shot of the signature, and a granted drone’s as none', () => {
     // The target 60 right of the player, 17 from slot 0's dock: the swarm's slot 0 and the
-    // granted slot 3 both pick on tick 1, and both impact it there.
+    // granted slot 4, after the swarm's turret, both pick on tick 1, and both impact it there.
     const ctx = swarms([at(60, 0)], { grants: [GRANT()] });
     const em = swarmOf(ctx);
     const granted = ctx.emitters[1] as EmitterRuntime;
-    expect(impacts(stage(ctx)).map((e) => e.droneId)).toEqual([1, 4]);
+    expect(impacts(stage(ctx)).map((e) => e.droneId)).toEqual([1, 5]);
     expect([em.attacks, em.shots, em.volley]).toEqual([1, 1, 1]);
     impactOn(ctx, enemy(ctx, 1));
     impactOn(ctx, enemy(ctx, 1));
     expect([em.attacks, em.shots, em.volley]).toEqual([3, 3, 3]);
-    impactAt(ctx, 3, enemy(ctx, 1), granted.payload, granted, false, 0, -1);
+    impactAt(ctx, 4, enemy(ctx, 1), granted.payload, granted, false, 0, -1);
     expect([em.attacks, em.shots, granted.attacks, granted.shots]).toEqual([3, 3, 0, 0]);
   });
 

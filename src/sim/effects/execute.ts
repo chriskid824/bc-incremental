@@ -410,7 +410,8 @@ export const REPEAT_STEPS: { readonly [K in SignatureId]: RepeatStep } = {
 /**
  * Fires the repeats waiting for the signature attack's next own firing, oldest first, each with
  * its own payload, depth and origin: right after each counted attack of `em`, the signature
- * (runVolley, runLob, runFan, runArc, and impactAt for the swarm's drones).
+ * (runVolley, runLob, runFan, runArc, and for the swarm impactAt for its drones and turretStep
+ * for its turrets).
  */
 export function drainRepeatCharges(ctx: RunContext, em: EmitterRuntime): void {
   const charges = ctx.sys.repeat.charges;

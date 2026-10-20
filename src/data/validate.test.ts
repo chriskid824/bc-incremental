@@ -1970,17 +1970,28 @@ describe('emitter grant validation', () => {
     ).toEqual([]);
   });
 
-  it('accepts drone grants of 1 to 24 drones, with or without a damage share and a name', () => {
+  it('accepts drone grants of 1 to 24 summons, drones, turrets or both, with or without their shares and a name', () => {
     for (const grant of [
       { kind: 'drone', drones: 1 },
       { kind: 'drone', drones: 3, damagePct: 0.8 },
       { kind: 'drone', drones: 24, damagePct: 2, name: 'b' },
+      // A turret-only grant (D16's D = 0), and both kinds with their shares.
+      { kind: 'drone', turrets: 2 },
+      { kind: 'drone', drones: 0, turrets: 1 },
+      { kind: 'drone', drones: 3, turrets: 1, turretDamagePct: 0.4 },
+      { kind: 'drone', drones: 20, turrets: 4, damagePct: 1, turretDamagePct: 2, name: 'c' },
     ] as const) {
       expect(grantIssues({ id: 'outer.summon.drones', emitters: [grant] })).toEqual([]);
     }
+    // The schema takes the turret fields, so the content loads a turret grant.
+    const turrets = withGrants({
+      id: 'outer.summon.drones',
+      emitters: [{ kind: 'drone', turrets: 2, turretDamagePct: 0.5 }],
+    });
+    expect(() => parseGameData(turrets)).not.toThrow();
   });
 
-  it('rejects a drone count outside 1..24 or not an integer, a share not above 0, and turrets', () => {
+  it('rejects counts that are not whole numbers, drones + turrets outside 1..24, and a share not above 0', () => {
     const drone = (name: string, fields: object): EmitterGrant =>
       ({ kind: 'drone', name, ...fields }) as EmitterGrant;
     expect(
@@ -1995,28 +2006,33 @@ describe('emitter grant validation', () => {
           drone('f', { drones: NaN }),
           drone('g', { drones: 3, damagePct: 0 }),
           drone('h', { drones: 3, damagePct: -1 }),
-          // A field of C5.4's grant, which the schema rejects as an unknown key until then.
-          drone('i', { drones: 3, turrets: 1 }),
+          drone('i', { drones: 20, turrets: 5 }),
+          drone('j', { drones: 0, turrets: 0 }),
+          drone('k', { drones: 3, turrets: -1 }),
+          drone('l', { turrets: 2.5 }),
+          drone('m', { turrets: 1, turretDamagePct: 0 }),
+          drone('n', { turrets: 1, turretDamagePct: -0.4 }),
+          drone('o', { drones: -1, turrets: 0.5 }),
         ],
       }),
     ).toEqual([
-      "talent 'outer.summon.drones': emitters[0] drones must be an integer in [1, 24] (got none)",
-      "talent 'outer.summon.drones': emitters[1] drones must be an integer in [1, 24] (got 0)",
-      "talent 'outer.summon.drones': emitters[2] drones must be an integer in [1, 24] (got -1)",
-      "talent 'outer.summon.drones': emitters[3] drones must be an integer in [1, 24] (got 1.5)",
-      "talent 'outer.summon.drones': emitters[4] drones must be an integer in [1, 24] (got 25)",
-      "talent 'outer.summon.drones': emitters[5] drones must be an integer in [1, 24] (got NaN)",
+      "talent 'outer.summon.drones': emitters[0] drones + turrets must be in [1, 24] (got 0)",
+      "talent 'outer.summon.drones': emitters[1] drones + turrets must be in [1, 24] (got 0)",
+      "talent 'outer.summon.drones': emitters[2] drones must be an integer >= 0 (got -1)",
+      "talent 'outer.summon.drones': emitters[3] drones must be an integer >= 0 (got 1.5)",
+      "talent 'outer.summon.drones': emitters[4] drones + turrets must be in [1, 24] (got 25)",
+      "talent 'outer.summon.drones': emitters[5] drones must be an integer >= 0 (got NaN)",
       "talent 'outer.summon.drones': emitters[6] damagePct must be > 0 (got 0)",
       "talent 'outer.summon.drones': emitters[7] damagePct must be > 0 (got -1)",
-      "talent 'outer.summon.drones': emitters[8] drone turrets come with the turrets, which the " +
-        'simulation adds in C5.4',
+      "talent 'outer.summon.drones': emitters[8] drones + turrets must be in [1, 24] (got 25)",
+      "talent 'outer.summon.drones': emitters[9] drones + turrets must be in [1, 24] (got 0)",
+      "talent 'outer.summon.drones': emitters[10] turrets must be an integer >= 0 (got -1)",
+      "talent 'outer.summon.drones': emitters[11] turrets must be an integer >= 0 (got 2.5)",
+      "talent 'outer.summon.drones': emitters[12] turretDamagePct must be > 0 (got 0)",
+      "talent 'outer.summon.drones': emitters[13] turretDamagePct must be > 0 (got -0.4)",
+      "talent 'outer.summon.drones': emitters[14] drones must be an integer >= 0 (got -1)",
+      "talent 'outer.summon.drones': emitters[14] turrets must be an integer >= 0 (got 0.5)",
     ]);
-    // The schema rejects the turrets too, so the content cannot load one.
-    const turrets = withGrants({
-      id: 'outer.summon.drones',
-      emitters: [drone('i', { drones: 3, turrets: 1 })],
-    });
-    expect(() => parseGameData(turrets)).toThrow();
   });
 
   it('keeps one drone emitter per source and name, and rejects two of one name that differ', () => {

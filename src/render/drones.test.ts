@@ -294,7 +294,7 @@ describe('DroneLayer', () => {
     }
   });
 
-  it('points docked kites outward, draws no turret, and drops the kite of a drone gone', () => {
+  it('points docked kites outward, draws no turret among the kites, and drops the kite of a drone gone', () => {
     const layer = new DroneLayer(renderer, Texture.WHITE);
     const { kites } = parts(layer);
     const docked = [0, 120, 240].map((degrees) => {

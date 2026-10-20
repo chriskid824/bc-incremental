@@ -74,23 +74,38 @@ export interface StrikeGrant {
 }
 
 /**
- * Drones (無人機): `drones` drones that dock around the player and fly out at the alive enemy
- * farthest from the player inside the arena that no other drone chases, each picking at most
- * once every 0.5 s, and impact it: a hit on every enemy within DRONE_DEFAULTS.splash of it, the
- * target among them. A drone stays on a living target, impacting it again once its same-enemy
- * cooldown ends, and flies home to dock after DRONE_DEFAULTS.impacts impacts
- * (src/sim/systems/drones.ts). The hits are tagged hit, minion and area, can crit and roll
- * ailments. Each drone is a summon: a run places at most SUMMON_CAP of them (src/sim/caps.ts).
+ * Drones (無人機) and turrets (砲台): `drones` drones that dock around the player and fly out at
+ * the alive enemy farthest from the player inside the arena that no other drone chases, each
+ * picking at most once every 0.5 s, and impact it: a hit on every enemy within
+ * DRONE_DEFAULTS.splash of it, the target among them. A drone stays on a living target, impacting
+ * it again once its same-enemy cooldown ends, and flies home to dock after DRONE_DEFAULTS.impacts
+ * impacts (src/sim/systems/drones.ts). Its `turrets` turrets sit in seats around the player
+ * between the drones and fire DRONE_DEFAULTS.turretRate times a second at the base attack speed:
+ * the character's projectileCount of homing shots, at the enemy nearest to the turret (elites and
+ * bosses near the player first) and the next nearest ones, each hitting its enemy on arrival. The
+ * impacts' hits are tagged hit, minion and area, the shots' hit, minion and projectile; both can
+ * crit and roll ailments. Each drone and turret is a summon: a run places at most SUMMON_CAP of
+ * them (src/sim/caps.ts).
  */
 export interface DroneGrant {
   readonly kind: 'drone';
-  /** Drones it places, an integer in [1, 24]; 0 when omitted, which validation rejects. */
+  /**
+   * Drones it places, a whole number; 0 when omitted. Validation holds drones + turrets to
+   * [1, 24].
+   */
   readonly drones?: number;
+  /** Turrets it places, a whole number; 0 when omitted. */
+  readonly turrets?: number;
   /**
    * Base damage of its impacts' hits as a fraction of the damage stat;
    * DRONE_DEFAULTS.damagePct when omitted.
    */
   readonly damagePct?: number;
+  /**
+   * Base damage of its turrets' shots as a fraction of the damage stat;
+   * DRONE_DEFAULTS.turretDamagePct when omitted.
+   */
+  readonly turretDamagePct?: number;
   /** What tells two drone grants of one source apart (grantKey); '' when omitted. */
   readonly name?: string;
 }
@@ -118,10 +133,11 @@ export const STRIKE_DEFAULTS = {
 } as const;
 
 /**
- * A drone grant's numbers (初始值): its impacts' share of the damage stat when it names none; a
- * drone's speed (units a second), dock time and same-enemy cooldown (seconds) at the base attack
- * frequency, its impacts a sortie, its impacts' splash radius and its dock's radius around the
- * player; and the turrets' share, radius and firings a second, which come with the turret.
+ * A drone grant's numbers (初始值): its impacts' share of the damage stat when it names none, and
+ * its turrets' shots' share when it names none; a drone's speed (units a second), dock time and
+ * same-enemy cooldown (seconds) at the base attack frequency, its impacts a sortie, its impacts'
+ * splash radius and its dock's radius around the player; a turret's seat's radius around the
+ * player and its firings a second at the base attack speed.
  */
 export const DRONE_DEFAULTS = {
   damagePct: 0.8,

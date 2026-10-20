@@ -1,15 +1,18 @@
 /**
- * The run's drones (docs/v3 C5 design D25, §13.2): kite sprites from one texture baked from the
- * hive's kite (src/render/constructs/hive.ts), drawn between the last two ticks' positions, nose
- * along the move and outward while docked; a short trail behind each, from the positions of its
- * last TRAIL_TICKS sim ticks, as fading streak particles in one ParticleContainer; and a small
- * hive-green corner bracket on every enemy a drone dashes at. Turret slots (C5.4) are not drawn
- * here. Reads the simulation state and never writes it.
+ * The run's drones and turrets (docs/v3 C5 design D25, §13.2): kite sprites from one texture
+ * baked from the hive's kite (src/render/constructs/hive.ts), drawn between the last two ticks'
+ * positions, nose along the move and outward while docked; a short trail behind each, from the
+ * positions of its last TRAIL_TICKS sim ticks, as fading streak particles in one
+ * ParticleContainer; a small hive-green corner bracket on every enemy a drone dashes at; and each
+ * turret as a square base in its seat with a barrel that turns toward the enemy its last firing
+ * aimed at (the turretFire event, through EnemyLayer.positionOf) and recoils when it fires. Its
+ * shots are drawn by the shot pool's layer (src/render/poolShots.ts). Reads the simulation state
+ * and never writes it.
  */
 
 import { Container, Graphics, Particle, ParticleContainer } from 'pixi.js';
 import type { Renderer, Texture } from 'pixi.js';
-import { DRONE_DASH, DRONE_DOCKED, DRONE_KIND_DRONE } from '../sim';
+import { DRONE_DASH, DRONE_DOCKED, DRONE_KIND_DRONE, DRONE_KIND_TURRET } from '../sim';
 import type { DroneViewState, SimState } from '../sim';
 import { KITE } from './constructs/hive';
 import { packColor } from './fx';
@@ -41,6 +44,18 @@ const BRACKET_ARM = 0.4;
 const BRACKET_MIN_ARM = 4;
 /** The bracket's four corners, as (x, y) signs. */
 const CORNERS = [-1, -1, 1, -1, 1, 1, -1, 1];
+/** A turret's base: a square of this side, in arena units, with a hollow of HOLLOW_SIDE. */
+const TURRET_SIDE = 18;
+const HOLLOW_SIDE = 8;
+/** Its barrel, from the pivot at the base's center out: length and width; the pivot's hub. */
+const BARREL_LENGTH = 18;
+const BARREL_WIDTH = 6;
+const HUB_RADIUS = 4;
+/** A barrel slides back this far when its turret fires, and is home again RECOIL_MS later. */
+export const RECOIL_PX = 5;
+export const RECOIL_MS = 140;
+/** A barrel turns toward its target at most this fast, in radians a second. */
+export const BARREL_TURN = 16;
 
 /** An enemy as drawn this frame (EnemyLayer.positionOf). */
 export interface EnemySpot {
@@ -73,6 +88,23 @@ export function moveHeading(
 /** A docked drone at (x, y) points its nose away from the core at (cx, cy) (F20). */
 export function dockedHeading(x: number, y: number, cx: number, cy: number): number {
   return Math.atan2(y - cy, x - cx);
+}
+
+/**
+ * How far a barrel sits back `sinceFireMs` after its turret fired: RECOIL_PX at the shot,
+ * easing out to 0 at RECOIL_MS; 0 for a turret that has not fired.
+ */
+export function recoilOffset(sinceFireMs: number): number {
+  if (!(sinceFireMs >= 0 && sinceFireMs < RECOIL_MS)) return 0;
+  const left = 1 - sinceFireMs / RECOIL_MS;
+  return RECOIL_PX * left * left;
+}
+
+/** `angle` turned toward `goal` by at most `maxStep` radians, the short way round. */
+export function turnToward(angle: number, goal: number, maxStep: number): number {
+  const delta = Math.atan2(Math.sin(goal - angle), Math.cos(goal - angle));
+  if (Math.abs(delta) <= maxStep) return goal;
+  return angle + (delta > 0 ? maxStep : -maxStep);
 }
 
 /** Share of the drones (kind DRONE) of the first `count` slots docked; 1 when there are none. */
@@ -240,6 +272,98 @@ export class DroneTracks {
   }
 }
 
+/** One turret's render state, kept across frames. */
+export interface TurretTrack {
+  /** The barrel's rotation; NaN until follow() has seen the turret. */
+  angle: number;
+  /** The enemy its last firing aimed at (turretFire.targetId); −1 before its first. */
+  targetId: number;
+  /** Ms since its last firing; Infinity before its first. */
+  sinceFireMs: number;
+  /** It fired since the last follow(): the barrel snaps to its target instead of turning. */
+  snap: boolean;
+  /** The follow() call that last saw it; a track left behind is dropped. */
+  seen: number;
+}
+
+/**
+ * The turrets' render state by id: each barrel's rotation and recoil. A barrel points away from
+ * the core until its turret first fires; from then on it follows the enemy that firing aimed at,
+ * where the enemy layer drew it, snapping to it on each firing and turning toward it at
+ * BARREL_TURN as it moves; while that enemy is not drawn it holds still. No Pixi, so the tests
+ * reach it.
+ */
+export class TurretTracks {
+  private readonly byId = new Map<number, TurretTrack>();
+  private calls = 0;
+  /** Map visitor for follow(): drops the tracks of turrets gone from the state. */
+  private readonly dropUnseen = (track: TurretTrack, id: number): void => {
+    if (track.seen !== this.calls) this.byId.delete(id);
+  };
+
+  /** Tracks held, one per turret the last follow() saw (or that fired since). */
+  get size(): number {
+    return this.byId.size;
+  }
+
+  /** The track of turret `id` (DroneViewState.id). */
+  get(id: number): TurretTrack | undefined {
+    return this.byId.get(id);
+  }
+
+  /** Turret `id` fired at enemy `targetId` (the turretFire event). */
+  fired(id: number, targetId: number): void {
+    let track = this.byId.get(id);
+    if (track === undefined) {
+      track = { angle: Number.NaN, targetId, sinceFireMs: 0, snap: true, seen: this.calls };
+      this.byId.set(id, track);
+    }
+    track.targetId = targetId;
+    track.sinceFireMs = 0;
+    track.snap = true;
+  }
+
+  /**
+   * Brings the track of every turret (kind TURRET) in `state` up to date, `dtMs` on: its recoil
+   * clock, and its barrel toward where `enemies` drew its target this frame.
+   */
+  follow(state: Readonly<DroneFrame>, dtMs: number, enemies: EnemyLocator): void {
+    const calls = ++this.calls;
+    const ds = state.drones;
+    const cx = state.player.x;
+    const cy = state.player.y;
+    const maxTurn = (BARREL_TURN * dtMs) / 1000;
+    let seen = 0;
+    for (let s = 0; s < state.droneCount; s++) {
+      if (ds.kind[s] !== DRONE_KIND_TURRET) continue;
+      const id = ds.id[s] as number;
+      const x = ds.x[s] as number;
+      const y = ds.y[s] as number;
+      let track = this.byId.get(id);
+      if (track === undefined) {
+        track = { angle: Number.NaN, targetId: -1, sinceFireMs: Infinity, snap: false, seen: 0 };
+        this.byId.set(id, track);
+      }
+      track.seen = calls;
+      seen++;
+      if (Number.isNaN(track.angle)) track.angle = dockedHeading(x, y, cx, cy);
+      track.sinceFireMs += dtMs;
+      const spot = track.targetId >= 0 ? enemies.positionOf(track.targetId) : null;
+      if (spot !== null) {
+        const goal = Math.atan2(spot.y - y, spot.x - x);
+        track.angle = track.snap ? goal : turnToward(track.angle, goal, maxTurn);
+      }
+      track.snap = false;
+    }
+    if (this.byId.size > seen) this.byId.forEach(this.dropUnseen);
+  }
+
+  /** Forgets every turret, as at the start of a run. */
+  clear(): void {
+    this.byId.clear();
+  }
+}
+
 export class DroneLayer {
   readonly view = new Container({ label: 'drones' });
   /** Share of the run's drones docked at the last update (HiveCoreView's setDocked). */
@@ -254,6 +378,15 @@ export class DroneLayer {
   private readonly kiteSprites: Particle[] = [];
   private readonly tracks = new DroneTracks();
   private chased = new Int32Array(8);
+  private readonly bases: ParticleContainer;
+  private readonly barrels: ParticleContainer;
+  private readonly baseTexture: Texture;
+  private readonly barrelTexture: Texture;
+  private readonly barrelAnchorX: number;
+  private readonly barrelAnchorY: number;
+  private readonly baseSprites: Particle[] = [];
+  private readonly barrelSprites: Particle[] = [];
+  private readonly turrets = new TurretTracks();
 
   /** `streak` is the effect sheet's spark streak (src/render/fxTextures.ts). */
   constructor(
@@ -289,36 +422,97 @@ export class DroneLayer {
       texture: this.kiteTexture,
       dynamicProperties: { position: true, rotation: true, color: false, vertex: false },
     });
-    this.view.addChild(this.trails, this.brackets, this.kites);
+    const half = TURRET_SIDE / 2;
+    const hollow = HOLLOW_SIDE / 2;
+    const base = new Graphics()
+      .roundRect(-half, -half, TURRET_SIDE, TURRET_SIDE, 3)
+      .stroke({ width: 3.6, color: C.main, alpha: 0.35, join: 'round' })
+      .roundRect(-half, -half, TURRET_SIDE, TURRET_SIDE, 3)
+      .fill({ color: C.cell, alpha: 0.95 })
+      .stroke({ width: 1.3, color: C.cellEdge, alpha: 1, join: 'round' })
+      .roundRect(-hollow, -hollow, HOLLOW_SIDE, HOLLOW_SIDE, 1.5)
+      .fill({ color: C.cellHollow, alpha: 1 });
+    this.baseTexture = renderer.generateTexture({
+      target: base,
+      resolution: KITE_RESOLUTION,
+      antialias: true,
+    });
+    base.destroy();
+    const barrel = new Graphics()
+      .roundRect(0, -BARREL_WIDTH / 2, BARREL_LENGTH, BARREL_WIDTH, 2)
+      .fill({ color: C.main, alpha: 1 })
+      .stroke({ width: 1.2, color: C.droneEdge, alpha: 1, join: 'round' })
+      .circle(0, 0, HUB_RADIUS)
+      .fill({ color: C.cellCenter, alpha: 1 })
+      .stroke({ width: 1.2, color: C.droneMark, alpha: 1 });
+    const barrelBounds = barrel.getLocalBounds();
+    this.barrelAnchorX = -barrelBounds.minX / barrelBounds.width;
+    this.barrelAnchorY = -barrelBounds.minY / barrelBounds.height;
+    this.barrelTexture = renderer.generateTexture({
+      target: barrel,
+      resolution: KITE_RESOLUTION,
+      antialias: true,
+    });
+    barrel.destroy();
+    this.bases = new ParticleContainer({
+      label: 'turret-bases',
+      texture: this.baseTexture,
+      dynamicProperties: { position: true, rotation: true, color: false, vertex: false },
+    });
+    this.barrels = new ParticleContainer({
+      label: 'turret-barrels',
+      texture: this.barrelTexture,
+      dynamicProperties: { position: true, rotation: true, color: false, vertex: false },
+    });
+    this.view.addChild(this.trails, this.brackets, this.kites, this.bases, this.barrels);
   }
 
-  /** Forgets every drone, as at the start of a run. */
+  /** Forgets every drone and turret, as at the start of a run. */
   reset(): void {
     this.tracks.clear();
+    this.turrets.clear();
     this.dockedShare = 1;
     this.trails.particleChildren.length = 0;
     this.trails.update();
     this.kites.particleChildren.length = 0;
     this.kites.update();
+    this.bases.particleChildren.length = 0;
+    this.bases.update();
+    this.barrels.particleChildren.length = 0;
+    this.barrels.update();
     this.brackets.clear();
   }
 
+  /** Turret `droneId` fired at enemy `targetId` (the turretFire event): aim and recoil. */
+  turretFired(droneId: number, targetId: number): void {
+    this.turrets.fired(droneId, targetId);
+  }
+
   /**
-   * Draws the drones of `state`, interpolated by `alpha` between the last two ticks. Call after
-   * EnemyLayer.update: the brackets go where `enemies` drew their targets this frame.
+   * Draws the drones and turrets of `state`, interpolated by `alpha` between the last two ticks,
+   * `dtMs` after the last frame (0: a redraw, which moves no recoil or barrel clock). Call after
+   * EnemyLayer.update: the brackets and the barrels go by where `enemies` drew their targets this
+   * frame.
    */
-  update(state: Readonly<SimState>, alpha: number, enemies: EnemyLocator): void {
+  update(state: Readonly<SimState>, alpha: number, enemies: EnemyLocator, dtMs = 0): void {
     const ds = state.drones;
     const count = state.droneCount;
     this.tracks.follow(state);
+    this.turrets.follow(state, dtMs, enemies);
     this.dockedShare = dockedFraction(ds, count);
     const streaks = this.trails.particleChildren;
     const kites = this.kites.particleChildren;
     const previousStreaks = streaks.length;
     const previousKites = kites.length;
+    const previousTurrets = this.bases.particleChildren.length;
     let streakCount = 0;
     let kiteCount = 0;
+    let turretCount = 0;
     for (let s = 0; s < count; s++) {
+      if (ds.kind[s] === DRONE_KIND_TURRET) {
+        this.drawTurret(state, s, turretCount++);
+        continue;
+      }
       if (ds.kind[s] !== DRONE_KIND_DRONE) continue;
       const track = this.tracks.get(ds.id[s] as number) as DroneTrack;
       const px = ds.prevX[s] as number;
@@ -335,7 +529,37 @@ export class DroneLayer {
     if (streakCount !== previousStreaks) this.trails.update();
     kites.length = kiteCount;
     if (kiteCount !== previousKites) this.kites.update();
+    this.bases.particleChildren.length = turretCount;
+    this.barrels.particleChildren.length = turretCount;
+    if (turretCount !== previousTurrets) {
+      this.bases.update();
+      this.barrels.update();
+    }
     this.drawBrackets(ds, count, enemies);
+  }
+
+  /** Turret slot s as the nth turret drawn: its base in its seat, facing out, and its barrel. */
+  private drawTurret(state: Readonly<SimState>, s: number, n: number): void {
+    const ds = state.drones;
+    const track = this.turrets.get(ds.id[s] as number) as TurretTrack;
+    const x = ds.x[s] as number;
+    const y = ds.y[s] as number;
+    const base = this.turretSprite(this.bases, this.baseSprites, this.baseTexture, n, 0.5, 0.5);
+    base.x = x;
+    base.y = y;
+    base.rotation = dockedHeading(x, y, state.player.x, state.player.y);
+    const back = recoilOffset(track.sinceFireMs);
+    const barrel = this.turretSprite(
+      this.barrels,
+      this.barrelSprites,
+      this.barrelTexture,
+      n,
+      this.barrelAnchorX,
+      this.barrelAnchorY,
+    );
+    barrel.x = x - back * Math.cos(track.angle);
+    barrel.y = y - back * Math.sin(track.angle);
+    barrel.rotation = track.angle;
   }
 
   /** Streaks from the drawn position back through the trail, fading with age. */
@@ -398,6 +622,24 @@ export class DroneLayer {
       this.streakSprites.push(sprite);
     }
     this.trails.particleChildren[n] = sprite;
+    return sprite;
+  }
+
+  /** The nth sprite of a turret layer, its `sprites` pool, made from `texture` when new. */
+  private turretSprite(
+    layer: ParticleContainer,
+    sprites: Particle[],
+    texture: Texture,
+    n: number,
+    anchorX: number,
+    anchorY: number,
+  ): Particle {
+    let sprite = sprites[n];
+    if (sprite === undefined) {
+      sprite = new Particle({ texture, anchorX, anchorY });
+      sprites.push(sprite);
+    }
+    layer.particleChildren[n] = sprite;
     return sprite;
   }
 

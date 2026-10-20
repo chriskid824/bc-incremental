@@ -35,8 +35,13 @@ export const CHAIN_JUMP = 1 << 3;
 /** The hit killed its target: a lethal hit's hit and crit events and onHit hooks. */
 export const KILLED = 1 << 4;
 /**
- * The hit is a signature attack's primary hit (primaryHit, src/sim/combat/chain.ts); effect
- * hits and chain jumps never are.
+ * The hit is the primary hit of an attack of the signature, or of a repeat of one; effect hits,
+ * chain jumps and the hits of granted emitters never are. It comes from primaryHit
+ * (src/sim/combat/chain.ts), which a volley projectile's arrival (src/sim/systems/projectiles.ts)
+ * and a signature turret shot's (src/sim/systems/shots.ts) reach through chainAttack, as do a
+ * discharge's targets (src/sim/emitters/arc.ts) and a fan round's first cone hit (shots.ts);
+ * from a bomb's landing (land, src/sim/emitters/lob.ts); and from a signature drone's impact
+ * (impactAt, src/sim/systems/drones.ts).
  */
 export const PRIMARY = 1 << 18;
 /** The hit belongs to a repeat of the signature attack, which never repeats in turn. */

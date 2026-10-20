@@ -32,6 +32,7 @@ import { hudSafeArea } from './numberLayout';
 import { COLORS } from './palette';
 import { ShardParticles } from './particles';
 import { PlayerView } from './player';
+import { PoolShotLayer } from './poolShots';
 import { ProjectileLayer } from './projectiles';
 import { RingLayer } from './rings';
 import { ScreenShake } from './shake';
@@ -43,7 +44,8 @@ export interface RendererOptions {
   readonly hitStop?: (ms: number) => void;
   /**
    * The construct at the center. 'hive' (the `?hive` prototype, docs/v3 C5 design §13.2) draws
-   * 蜂巢's comb and the run's drones; without it the center is M1's hexagon and no drone is drawn.
+   * 蜂巢's comb, the run's drones and turrets and the shot pool's homing shots; without it the
+   * center is M1's hexagon and none of them is drawn.
    */
   readonly construct?: 'hive';
 }
@@ -85,8 +87,10 @@ export class Renderer {
   private readonly bursts: Bursts;
   /** The view at the arena center: M1's hexagon or a construct (RendererOptions.construct). */
   private readonly core: CoreView;
-  /** The run's drones; only with the hive construct. */
+  /** The run's drones and turrets; only with the hive construct. */
   private readonly drones: DroneLayer | null;
+  /** The shot pool's homing shots, the turrets'; only with the hive construct. */
+  private readonly poolShots: PoolShotLayer | null;
   private readonly shards: ShardParticles;
   private readonly numbers = new DamageNumbers();
   private readonly burnTally = new BurnTally();
@@ -121,6 +125,7 @@ export class Renderer {
     this.shards = new ShardParticles(app.renderer);
     this.drones =
       options.construct === 'hive' ? new DroneLayer(app.renderer, textures.streak) : null;
+    this.poolShots = this.drones === null ? null : new PoolShotLayer(textures);
     this.core = this.drones === null ? new PlayerView() : new HiveCoreView(this.drones);
     this.shake = new ScreenShake(options.reducedMotion);
     this.hitStop = options.hitStop ?? ((): void => undefined);
@@ -137,6 +142,7 @@ export class Renderer {
       // The drones fly over the core and under the shots (docs/v3 C5 design §13.2).
       ...(this.drones === null ? [] : [this.drones.view]),
       this.projectiles.view,
+      ...(this.poolShots === null ? [] : [this.poolShots.view]),
       this.arcs.view,
       this.fx.view,
       this.shards.view,
@@ -159,6 +165,7 @@ export class Renderer {
     this.burnTally.clear();
     this.core.reset();
     this.drones?.reset();
+    this.poolShots?.reset();
     this.shake.reset();
     this.critStop.reset();
     this.critShakeCooldownMs = 0;
@@ -195,6 +202,9 @@ export class Renderer {
         case 'impact':
           this.rings.impact(event.x, event.y, event.radius);
           break;
+        case 'turretFire':
+          this.drones?.turretFired(event.droneId, event.targetId);
+          break;
         case 'playerHit':
           this.core.hit();
           break;
@@ -216,9 +226,10 @@ export class Renderer {
     );
     this.aimEmbers(state);
     this.enemies.update(state.enemies, alpha, dt, this.bursts);
-    // After the enemies: the chase brackets go where they were just drawn.
-    this.drones?.update(state, alpha, this.enemies);
+    // After the enemies: the chase brackets and the barrels go by where they were just drawn.
+    this.drones?.update(state, alpha, this.enemies, dt);
     this.projectiles.update(state.projectiles, alpha);
+    this.poolShots?.update(state.shots, state.shotCount, state.tick, alpha);
     this.arcs.update(dt);
     this.rings.update(dt);
     this.flames.update(dt);

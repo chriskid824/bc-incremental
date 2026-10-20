@@ -1,5 +1,5 @@
 /**
- * The drone stage (docs/v3 C5 design D3–D10, §4.2–§4.4; step 6b in src/sim/simulation.ts): the
+ * The drone stage (docs/v3 C5 design D3–D13, §4.2–§4.5; step 6b in src/sim/simulation.ts): the
  * drone pool's slots (RunContext.sys.drones, placed once by src/sim/emitters/drone.ts) step in
  * id order once a tick, after the emitters' attacks and the tick hooks, before the projectiles.
  *
@@ -18,17 +18,32 @@
  * Its attack frequency m = attackSpeed / BASE_ATTACK_SPEED × its emitter's cadence, read every
  * tick, multiplies its speed and divides its dock time and cooldown; at m ≤ 0, or NaN, the drone
  * does nothing that tick. Movement, picks and the splash query draw nothing; the hits roll on
- * their payload's stream, the combat stream. An impact of the signature's drones (the swarm's,
- * emitter 0) is one attack and one shot of the signature: counted (steadyAim, nthAttack), its
- * target its primary hit, whose chain follows, and the droneImpact center event, then the
- * repeats waiting for it. A granted drone's impact is an attack of its own, not the signature's:
- * no PRIMARY, no counted attack, no center event, no repeat. A repeat of the swarm is an impact
- * of no drone at the enemy farthest from the player (swarmRepeat), on the repeat's payload and
- * its stream, the effects stream. Kills inside the stage only mark their enemy dead, and enemy
- * objects are never reused, so a target a slot keeps from an earlier tick is alive or reads dead.
+ * their payload's stream: combat for impacts, effects for repeats. An impact of the signature's
+ * drones (the swarm's, emitter 0) is one attack and one shot of the signature: counted
+ * (steadyAim, nthAttack), its target its primary hit, whose chain follows, and the droneImpact
+ * center event, then the repeats waiting for it. A granted drone's impact is an attack of its
+ * own, not the signature's: no PRIMARY, no counted attack, no center event, no repeat. A repeat
+ * of the swarm is an impact of no drone at the enemy farthest from the player (swarmRepeat), on
+ * the repeat's payload.
+ *
+ * A turret stays in its seat and fires as the volley does, from the seat instead of the player
+ * (turretStep): on its emitter's accumulator and interval, projectileCount homing shots of the
+ * pool (src/sim/systems/shots.ts) at the nearest enemies worth a shot, focus targets first, each
+ * at an enemy of its own while there are enough. The shots move in the projectile stage and hit
+ * on arrival: a signature turret's through the attack's primary hit and chain, a granted one's
+ * as a plain hit. A signature turret's firing is one attack of the signature and each shot one
+ * of its shots; the repeats waiting for it follow it as impacts of no drone (swarmRepeat), never
+ * as a second firing. A granted turret's firing counts nothing. Unlike the volley's later
+ * projectiles, a firing's later shots never go to an enemy it already picked, focus target or
+ * not, while another one is worth a shot: they mark no enemy (Enemy.volleyMark, inbound). Focus
+ * targets are the elites and bosses near the player (focused), not near the turret: one up to
+ * FOCUS_RANGE + the turret radius from the turret can be one.
+ *
+ * Kills inside the stage only mark their enemy dead, and enemy objects are never reused, so a
+ * target a slot keeps from an earlier tick is alive or reads dead.
  */
 
-import { DRONE_COOLDOWN_MAX, DRONE_MEMORY, PICK_TICKS } from '../caps';
+import { DRONE_COOLDOWN_MAX, DRONE_MEMORY, PICK_TICKS, SMALL_PROJECTILE_TICKS } from '../caps';
 import { beginAttack, chainFrom, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { emitCenterEvent } from '../effects/centerEvents';
@@ -38,15 +53,19 @@ import { EVENT } from '../effects/types';
 import { BASE_ATTACK_SPEED, nextShotSteady, SIGNATURE } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { countAttack } from '../emitters/volley';
+import { pickTargetInGrid } from '../targeting';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
   DRONE_DASH,
   DRONE_DOCKED,
   DRONE_HOVER,
+  DRONE_KIND_TURRET,
   DRONE_RETURN,
 } from '../types';
+import { focused } from './context';
 import type { Enemy, RunContext } from './context';
+import { MOTION_HOMING, spawnShot } from './shots';
 import type { DronePool } from './systemState';
 
 const DRONE_IMPACT = EVENT.droneImpact;
@@ -57,11 +76,15 @@ export function stepDrones(ctx: RunContext): void {
   const emitters = ctx.emitters;
   const now = ctx.now;
   const asMult = ctx.build.values.attackSpeed / BASE_ATTACK_SPEED;
-  const { x, y, prevX, prevY, mode, owner } = ds;
+  const { x, y, prevX, prevY, kind, mode, owner } = ds;
   for (let s = 0; s < ds.count; s++) {
     prevX[s] = x[s] as number;
     prevY[s] = y[s] as number;
     const em = emitters[owner[s] as number] as EmitterRuntime;
+    if (kind[s] === DRONE_KIND_TURRET) {
+      turretStep(ctx, ds, s, em);
+      continue;
+    }
     const m = asMult * em.cadence;
     // Nothing at all at m ≤ 0; a NaN m fails the test too.
     if (!(m > 0)) continue;
@@ -363,6 +386,67 @@ export function impactAt(
   emitCenterEvent(ctx, DRONE_IMPACT, depth, origin, target, target.x, target.y, p.flags);
   endAttack(ctx);
   if (counted) drainRepeatCharges(ctx, em);
+}
+
+/**
+ * Turret slot s of emitter `em` (D11, §4.5): its accumulator gains the emitter's cadence, and a
+ * firing is due each time it reaches the emitter's interval (the turret period). A firing's first
+ * target is the one pickTargetInGrid picks from the turret's seat with the volley's predicates:
+ * the nearest enemy worth a shot, a focus target first, else the nearest alive one. With none
+ * the turret stays ready without banking firings, so it fires on the tick an enemy appears. A
+ * signature turret's firing is counted as an attack at that target first (countAttack); then it
+ * rolls projectileCount as rollCount does (its fraction the chance of one more, on the payload's
+ * stream; nothing drawn for a whole count), and fires that many homing shots of the emitter's
+ * turret payload, the later ones each at the nearest enemy worth a shot that the firing has not
+ * picked yet, focus targets first (DronePool.turretAccept), else at the nearest alive one. Each
+ * shot of a signature turret counts as a shot of the attack (nextShotSteady), a refused one too.
+ * The turretFire event carries the shots the firing tried, PROJECTILE_CAP's refusals included,
+ * and the repeats waiting for a counted firing follow it. Allocates nothing but the event once
+ * DronePool.picked has grown to the largest count a firing has rolled.
+ */
+function turretStep(ctx: RunContext, ds: DronePool, s: number, em: EmitterRuntime): void {
+  const acc = ds.acc;
+  const interval = em.interval;
+  acc[s] = (acc[s] as number) + em.cadence;
+  while ((acc[s] as number) >= interval) {
+    const x = ds.x[s] as number;
+    const y = ds.y[s] as number;
+    const first = pickTargetInGrid(ctx.grid, x, y, ctx.shootable, focused);
+    if (first === null) {
+      acc[s] = interval - em.cadence;
+      return;
+    }
+    acc[s] = (acc[s] as number) - interval;
+    const p = ds.turretPayload[em.index] as Payload;
+    const counted = (p.flags & SIGNATURE) !== 0;
+    if (counted) countAttack(ctx, em, first);
+    // rollCount's roll, inline: no closure a firing, no draw for a whole count.
+    const pc = ctx.projectileCount;
+    let n = Math.floor(pc);
+    if (pc > n && p.rng.chance(pc - n)) n++;
+    const picked = ds.picked;
+    const until = ctx.now + SMALL_PROJECTILE_TICKS;
+    ds.pickedCount = 0;
+    let t: Enemy | null = first;
+    let fired = 0;
+    for (let k = 0; k < n && t !== null; k++) {
+      picked[ds.pickedCount++] = t;
+      const steady = counted ? nextShotSteady(ctx, em) : false;
+      spawnShot(ctx, MOTION_HOMING, x, y, 0, 0, until, p, 1, 1, 0, 0, -1, steady, -1, em.index, t);
+      fired++;
+      if (k + 1 < n) t = pickTargetInGrid(ctx.grid, x, y, ds.turretAccept, focused);
+    }
+    ds.targetId[s] = first.id;
+    ctx.events.push({
+      type: 'turretFire',
+      droneId: ds.id[s] as number,
+      x,
+      y,
+      targetId: first.id,
+      count: fired,
+    });
+    if (counted) drainRepeatCharges(ctx, em);
+  }
 }
 
 /**

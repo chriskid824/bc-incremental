@@ -190,7 +190,10 @@ export function applyDots(
  * the chain retention so far, (fromX, fromY) the previous hit's position (null for the primary
  * hit), `forced` a steady shot's sure crit, `depth` and `origin` the trigger depth of the hit
  * and the trigger its damage comes from (0 and −1 for emitter hits), `bits` flags the caller
- * adds to the hit's (PRIMARY on an attack's primary hit, src/sim/combat/chain.ts). A primary
+ * adds to the hit's: PRIMARY on a signature attack's primary hit, which primaryHit passes
+ * (src/sim/combat/chain.ts: chainAttack at a volley projectile's or a signature turret shot's
+ * arrival, a discharge's targets, a fan round's first cone hit), and land
+ * (src/sim/emitters/lob.ts) and impactAt (src/sim/systems/drones.ts) pass themselves. A primary
  * hit has the payload's tags and source, a jump jumpMask of the tags and the payload's
  * jumpSource; the ailments either applies are credited from the payload's source.
  */

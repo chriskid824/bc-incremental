@@ -16,17 +16,20 @@
  * projectile counter, so the projectile stage steps both lists in one id order
  * (src/sim/systems/projectiles.ts). A shot that ends keeps its slot until the end of that stage,
  * which compacts the pool in order; nothing spawns during it. A shot's hits are not an attack:
- * they carry no chain, no attack serial and no PRIMARY; a bomb's landing is one, which lob.ts
- * runs, and so is a fan's round: the first hit of its cones is the round's primary hit, which
- * begins the attack and runs its chain, and its other cone hits are plain hits
- * (src/sim/emitters/fan.ts). The volley's projectiles and the pool share PROJECTILE_CAP
- * (src/sim/caps.ts).
+ * they carry no chain, no attack serial and no PRIMARY, but for three. A bomb's landing is one,
+ * which lob.ts runs; so is a fan's round: the first hit of its cones is the round's primary hit,
+ * which begins the attack and runs its chain, and its other cone hits are plain hits
+ * (src/sim/emitters/fan.ts); and so is the arrival of a signature emitter's homing shot, a
+ * turret's (src/sim/systems/drones.ts): its hit is the attack's primary hit and its chain
+ * follows, as at a volley projectile's arrival (chainAttack, src/sim/combat/chain.ts). The
+ * volley's projectiles and the pool share PROJECTILE_CAP (src/sim/caps.ts).
  */
 
 import { PROJECTILE_CAP, SHOT_MEMORY } from '../caps';
-import { beginAttack, chainFrom, endAttack, primaryHit } from '../combat/chain';
+import { beginAttack, chainAttack, chainFrom, endAttack, primaryHit } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { land } from '../emitters/lob';
+import { SIGNATURE } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import type { ShotPoolState } from '../types';
@@ -283,8 +286,11 @@ function moveSlot(shots: ShotPool, from: number, to: number): void {
 /**
  * A homing shot: it expires at `until`; a dead target gives way to the alive enemy nearest to
  * the shot, any enemy, or the shot fizzles; then it flies projectileStep towards the target and
- * hits it on arrival, by the volley's arrival rule. Its targets are not the volley's: they
- * count nothing in Enemy.inbound.
+ * arrives by the volley's arrival rule. A signature emitter's shot (owner ≥ 0 and SIGNATURE: a
+ * turret's of the swarm) arrives as a volley projectile does, as one attack: its primary hit,
+ * with PRIMARY, and its chain (chainAttack). Any other, an effect's or a granted turret's, hits
+ * its target at its scale as a plain hit. Its targets are not the volley's: they count nothing
+ * in Enemy.inbound.
  */
 function stepHoming(ctx: RunContext, s: number): void {
   const shots = ctx.shots;
@@ -315,8 +321,13 @@ function stepHoming(ctx: RunContext, s: number): void {
     const steady = shots.steady[s] === 1;
     const depth = shots.depth[s] as number;
     const origin = shots.origin[s] as number;
+    const owner = shots.owner[s] as number;
     endShot(shots, s);
-    hitWithPayload(ctx, target, p, 0, scale, null, null, steady, depth, origin);
+    if (owner >= 0 && (p.flags & SIGNATURE) !== 0) {
+      chainAttack(ctx, p, target, ctx.chainCount, steady, depth, origin);
+    } else {
+      hitWithPayload(ctx, target, p, 0, scale, null, null, steady, depth, origin);
+    }
   } else {
     const k = step / dist;
     shots.x[s] = x + dx * k;

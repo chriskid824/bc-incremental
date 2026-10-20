@@ -166,15 +166,16 @@ export interface ArcParams {
  * The swarm's parameters, which its signature module sets: its drones' and turrets' counts and
  * numbers, at attack frequency 1. The run reads them here only, never from its emitter's spec
  * (src/sim/emitters/drone.ts), so the rules that change them write them in place; drones +
- * turrets must stay at least 1 (compileBuild throws otherwise). Its turrets are placed from C5.4.
+ * turrets must stay at least 1 (compileBuild throws otherwise).
  */
 export interface SwarmParams {
   drones: number;
   turrets: number;
   /** A drone's speed, arena units a second. */
   speed: number;
-  /** A drone's dock time between sorties, and its same-enemy cooldown, in seconds. */
+  /** A drone's dock time between sorties, in seconds. */
   dockSec: number;
+  /** A drone's same-enemy cooldown, in seconds: how long it waits to impact one enemy again. */
   cooldownSec: number;
   /** Impacts a sortie. */
   impacts: number;
@@ -491,7 +492,7 @@ export function compileBuild(
  * them too (the talent screen's summary, typicalHit, the balance tools): M1's hits are hit and
  * projectile, 熔核's explosions hit, area and projectile, 霜晶's cones hit, projectile and cold,
  * 雷塔's discharges hit, chain and lightning, so their jumps share their rows, and 蜂巢's drone
- * impacts hit, minion and area.
+ * impacts hit, minion and area, whose jumps (hit, chain and minion) have rows of their own.
  */
 export interface SignatureRows {
   readonly hit: number;

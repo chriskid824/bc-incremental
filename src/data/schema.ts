@@ -496,13 +496,15 @@ export const GRANT_SCHEMAS = {
       shockStacks: finite.exactOptional(),
     })
     .readonly(),
-  // Drones only: turrets come in C5.4, so a turrets field is an unknown key until then.
-  // validate.ts holds the count to [1, 24] and the share above 0.
+  // validate.ts holds each count to a whole number, drones + turrets to [1, 24] and both
+  // shares above 0.
   drone: z
     .strictObject({
       kind: z.literal('drone'),
       drones: finite.exactOptional(),
+      turrets: finite.exactOptional(),
       damagePct: finite.exactOptional(),
+      turretDamagePct: finite.exactOptional(),
       name: z.string().exactOptional(),
     })
     .readonly(),

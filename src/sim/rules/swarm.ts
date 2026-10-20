@@ -3,10 +3,13 @@
  * drones dock around the player and fly out at the enemies farthest from it, 3 impacts a sortie:
  * each impact is a center hit of 80% of the damage stat, tagged hit, minion and area, on every
  * enemy within 40 of its target, the target its primary hit, whose chain follows; it is one
- * attack and one shot for steadyAim, and raises the droneImpact center event at its target. The
- * run reads its drones' numbers from its SwarmParams (CompiledBuild.signature.swarm), which its
- * rules change, never from its emitter's spec. Its turret, whose firing is projectileCount − 1
- * shots, comes in C5.4.
+ * attack and one shot for steadyAim, and raises the droneImpact center event at its target. Its
+ * turret sits between two drones and fires 2 times a second at the base attack speed, each firing
+ * projectileCount − 1 homing shots of 40% of the damage stat, tagged hit, minion and projectile,
+ * at the nearest enemies: a firing is one attack and each of its shots one shot for steadyAim,
+ * and each shot's arrival is a primary hit, whose chain follows. The run reads its drones' and
+ * turret's numbers from its SwarmParams (CompiledBuild.signature.swarm), which its rules change,
+ * never from its emitter's spec.
  */
 
 import type { SignatureSpec } from '../../data/rules';

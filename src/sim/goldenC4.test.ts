@@ -1298,6 +1298,31 @@ const noTurrets = (): TestModule[] => [
   },
 ];
 
+/**
+ * C5.4's turrets. `swarmTurret` is the swarm entry with its turret, at attackSpeed 8 and
+ * projectileCount 3: four firings a second from its seat between the drones, each a counted
+ * attack of two homing shots of the pool (projectileCount − 1) at the enemies nearest to the
+ * seat, whose arrivals are the attack's primary hits, each chaining once; its drones fly at twice
+ * the base frequency. `turretGrant` is M1's volley with a granted {turrets: 2} on outer.summon
+ * over the drones entry's base: two turrets and no drone, seated at angles 0 and π, each firing
+ * M1's projectileCount of 2 shots twice a second, which land as plain hits. Both crit and ignite
+ * on the combat stream.
+ */
+const SWARM_TURRET_STATS = makeStats(
+  { ...SWARM_VALUES, attackSpeed: 8, projectileCount: 3 },
+  maskProbeMods(),
+  { triggers: [{ source: 'center', spec: SWARM_POISON }], conversions: [], emitters: [] },
+);
+const TURRET_GRANT_STATS = makeStats(
+  { damage: 5, maxLife: 1e6, critChance: 0.2, critMultiplier: 2, igniteChance: 0.3 },
+  maskProbeMods(),
+  {
+    triggers: [],
+    conversions: [],
+    emitters: [{ source: 'outer.summon', grant: { kind: 'drone', turrets: 2 } }],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1462,6 +1487,16 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: SWARM_REPEAT_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
     modules: noTurrets,
     expected: ['05bb5708d3398499', '2970432e9f8b51b2'],
+  },
+  {
+    name: 'swarmTurret',
+    config: { stats: SWARM_TURRET_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    expected: ['ce9e6701612084a1', '0f8312a9138e1a62'],
+  },
+  {
+    name: 'turretGrant',
+    config: { stats: TURRET_GRANT_STATS, rules: [], startWave: 12 },
+    expected: ['8a777f4c0552d30e', 'fb814938ecce6f51'],
   },
 ];
 

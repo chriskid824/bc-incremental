@@ -309,7 +309,9 @@ describe('the drone pool', () => {
         [0, 3],
         [0, SPLASH * SPLASH],
       ]);
-      expect(ds.turretPayload).toEqual([null, null]);
+      // Every drone emitter's turret payload is built, its turrets placed or not (C5.4).
+      expect(ds.turretPayload[0]).toBeNull();
+      expect(ds.turretPayload[1]).toMatchObject({ tags: TAG.hit | TAG.minion | TAG.projectile });
     },
   );
 

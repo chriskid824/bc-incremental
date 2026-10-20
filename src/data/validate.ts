@@ -389,22 +389,21 @@ function grantIssues(grant: EmitterGrant): string[] {
       break;
     }
     case 'drone': {
-      // The schema has no turrets until C5.4; data checked without it can still name them.
-      if ('turrets' in grant) {
-        issues.push('drone turrets come with the turrets, which the simulation adds in C5.4');
-      }
-      // Optional for the turrets (C5.4); until then a drone grant places at least one drone.
-      const drones = grant.drones;
-      if (
-        drones === undefined ||
-        !(Number.isInteger(drones) && drones >= 1 && drones <= SUMMON_SLOTS_MAX)
-      ) {
-        issues.push(
-          `drones must be an integer in [1, ${SUMMON_SLOTS_MAX}] (got ${drones ?? 'none'})`,
-        );
+      // Either count may be left out (0); together they place 1 to 24 summons. The sum is
+      // checked once both counts are whole numbers.
+      const { drones = 0, turrets = 0 } = grant;
+      const whole = (count: number): boolean => Number.isInteger(count) && count >= 0;
+      if (!whole(drones)) issues.push(`drones must be an integer >= 0 (got ${drones})`);
+      if (!whole(turrets)) issues.push(`turrets must be an integer >= 0 (got ${turrets})`);
+      const slots = drones + turrets;
+      if (whole(drones) && whole(turrets) && !(slots >= 1 && slots <= SUMMON_SLOTS_MAX)) {
+        issues.push(`drones + turrets must be in [1, ${SUMMON_SLOTS_MAX}] (got ${slots})`);
       }
       if (grant.damagePct !== undefined && !(grant.damagePct > 0)) {
         issues.push(`damagePct must be > 0 (got ${grant.damagePct})`);
+      }
+      if (grant.turretDamagePct !== undefined && !(grant.turretDamagePct > 0)) {
+        issues.push(`turretDamagePct must be > 0 (got ${grant.turretDamagePct})`);
       }
       break;
     }

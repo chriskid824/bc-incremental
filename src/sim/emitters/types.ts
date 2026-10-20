@@ -142,9 +142,9 @@ export interface StrikeSpec extends EmitterBase {
 }
 
 /**
- * A drone grant: `drones` drones in the drone pool, which the drone stage flies at the enemies
- * and impacts on them (src/sim/systems/drones.ts); its payload is their impacts'. Its turrets
- * and their share come in C5.4: none until then.
+ * A drone grant: `drones` drones and `turrets` turrets in the drone pool, which the drone stage
+ * steps (src/sim/systems/drones.ts): the drones fly at the enemies and impact on them, and its
+ * payload is their impacts'; the turrets fire homing shots of turretPayload's.
  */
 export interface DroneSpec extends EmitterBase {
   readonly kind: 'drone';
@@ -212,7 +212,6 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
         shockStacks: grant.shockStacks ?? STRIKE_DEFAULTS.shockStacks,
       };
     case 'drone':
-      // No turrets until C5.4, which reads them from the grant.
       return {
         kind: 'drone',
         signature: false,
@@ -223,8 +222,8 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
         rollsAilments: true,
         canCrit: true,
         drones: grant.drones ?? 0,
-        turrets: 0,
-        turretDamagePct: DRONE_DEFAULTS.turretDamagePct,
+        turrets: grant.turrets ?? 0,
+        turretDamagePct: grant.turretDamagePct ?? DRONE_DEFAULTS.turretDamagePct,
       };
   }
 }
@@ -442,6 +441,36 @@ export function emitterPayload(
 }
 
 /**
+ * The payload of a drone emitter's turret shots (turretStep, src/sim/systems/drones.ts): `pct` of
+ * the damage stat, the share src/sim/emitters/drone.ts reads (SwarmParams.turretDamagePct for
+ * the swarm, the spec's for a grant), tagged hit, minion and projectile, with the emitter's
+ * source, SIGNATURE when it is the signature's, and its chains, ailment rolls and crits, on
+ * `rng`, with the chain policy `policy` by emitterPayload's rule (the signature's; null for the
+ * others). Its burns need no credit of their own: its source and ailment rolls are those of its
+ * emitter's payload, which createRunContext credits already.
+ */
+export function turretPayload(
+  build: CompiledBuild,
+  spec: DroneSpec,
+  pct: number,
+  rng: Rng,
+  policy: ChainPolicy | null,
+): Payload {
+  return createPayload({
+    baseDamage: mul(num(build.values.damage), pct),
+    tags: TAG.hit | TAG.minion | TAG.projectile,
+    source: build.sources.index(spec.source),
+    flags: spec.signature ? SIGNATURE : 0,
+    rng,
+    chains: spec.chains,
+    rollsAilments: spec.rollsAilments,
+    canCrit: spec.canCrit,
+    damageMode: ROWS,
+    policy,
+  });
+}
+
+/**
  * The payload of a lob's fire zones (火地): the damage stat, which each zone scales by its
  * damagePctPerSec, tagged hit and zone with the lob's element, credited to the lob's source, on
  * `rng`. Its pulse hits crit and roll ailments as other hits do (Hoshi's Q4 (B)), and every one
@@ -505,7 +534,7 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
       // Its judgements or strikes keep their period whatever the attack speed.
       return periodTicks(1 / spec.periodSec);
     case 'drone':
-      // Its turrets' period (C5.4); its drones keep their own clocks (src/sim/systems/drones.ts).
+      // Its turrets' period; its drones keep their own clocks (src/sim/systems/drones.ts).
       return periodTicks((TURRET_RATE * build.values.attackSpeed) / BASE_ATTACK_SPEED);
   }
 }

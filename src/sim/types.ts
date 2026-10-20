@@ -144,7 +144,7 @@ export interface SegmentViewState {
   readonly lines: readonly SegmentLinesState[];
 }
 
-/** DroneViewState.kind: a drone, or a turret (a slot that stays in its seat; C5.4). */
+/** DroneViewState.kind: a drone, or a turret (a slot that stays in its seat and fires). */
 export const DRONE_KIND_DRONE = 0;
 export const DRONE_KIND_TURRET = 1;
 /**
@@ -174,11 +174,14 @@ export interface DroneViewState {
   /** Its position at the previous tick, for render interpolation and heading. */
   readonly prevX: Float64Array;
   readonly prevY: Float64Array;
-  /** The id of the enemy it dashes at, or that its sortie ended on while it flies home; −1 none. */
+  /**
+   * The id of the enemy a drone dashes at, or that its sortie ended on while it flies home, or
+   * of a turret's last firing's first target; −1 none.
+   */
   readonly targetId: Int32Array;
   /** Its emitter's index in CompiledBuild.emitters. */
   readonly owner: Int16Array;
-  /** Its dock index k of its emitter's drones. */
+  /** A drone's dock index k of its emitter's drones, or a turret's index j of its turrets. */
   readonly seat: Int16Array;
 }
 
@@ -401,6 +404,19 @@ export type SimEvent =
       readonly x: number;
       readonly y: number;
       readonly radius: number;
+      readonly targetId: number;
+      readonly count: number;
+    }
+  /**
+   * Turret `droneId` (DroneViewState.id) at (x, y) fired homing shots of the shot pool
+   * (src/sim/systems/drones.ts), the first at enemy `targetId`: `count` is the shots the firing
+   * tried, those PROJECTILE_CAP refused included (the projectilesCapped counter).
+   */
+  | {
+      readonly type: 'turretFire';
+      readonly droneId: number;
+      readonly x: number;
+      readonly y: number;
       readonly targetId: number;
       readonly count: number;
     }

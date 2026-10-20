@@ -104,7 +104,8 @@ export function createSimulation(
    *    nthAttack triggers, and fire projectiles; then the rule modules' tick hooks run
    *    (emitters.ts, src/sim/emitters/).
    * 6b. drones: the drone pool's slots step in id order (src/sim/systems/drones.ts): drones
-   *    move, pick and impact, with their hits, chains and kills resolved inline as in step 7.
+   *    move, pick and impact, with their hits, chains and kills resolved inline as in step 7,
+   *    and turrets fire homing shots, which move in step 7.
    * 7. projectiles: the volley's projectiles move, retarget, and hit on arrival, and the shot
    *    pool's shots move and hit, all in id order (projectiles.ts, shots.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
