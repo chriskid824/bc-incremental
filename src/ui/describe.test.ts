@@ -5,7 +5,7 @@ import { DAMAGE_TAGS } from '../data/tags';
 import { TALENTS } from '../data/talents';
 import { setLocale, t } from '../i18n';
 import { makeStats, PANDEMIC_MODS, SEARING_CRITS_MODS } from '../sim/testing';
-import { describeBuild, describeModifier } from './describe';
+import { describeBuild, describeModifier, describeView } from './describe';
 
 /** describeBuild as a label → value record. */
 function build(
@@ -168,6 +168,17 @@ describe('describeBuild', () => {
     expect(lines[t('stat.damage.hit')]).toBe('5');
     expect(lines[t('build.critHit')]).toBe('15');
     expect(lines[t('build.chainJump')]).toBe('3.5');
+  });
+});
+
+describe('describeView', () => {
+  it("describes the talent web's build with the signature its runs play (?hive: the swarm)", () => {
+    const stats = makeStats({}, SEARING_CRITS_MODS);
+    const rules: RuleSpec[] = [{ id: 'glassCannon', damageMore: 1 }];
+    const hive = describeView({ stats, rules, signature: SWARM });
+    expect(hive).toEqual(describeBuild(stats, rules, SWARM));
+    expect(hive).not.toEqual(describeBuild(stats, rules));
+    expect(describeView({ stats, rules })).toEqual(describeBuild(stats, rules));
   });
 });
 

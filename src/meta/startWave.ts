@@ -5,7 +5,7 @@
  * Pure and deterministic: fixed seeds, no clock.
  */
 
-import type { RuleSpec } from '../data/rules';
+import type { RuleSpec, SignatureSpec } from '../data/rules';
 import type { StatBlock } from '../data/stats';
 import type { GameData } from '../data/types';
 import { createSimulation } from '../sim/simulation';
@@ -23,12 +23,15 @@ export const PROBE_SECONDS = 30;
 export interface StartWaveProbeOptions {
   /** The game's last wave (the session's waveCap); probes never run past it. */
   readonly waveCap?: number;
+  /** The signature attack the session's runs play (`?hive`: the swarm); M1's when omitted. */
+  readonly signature?: SignatureSpec;
 }
 
 /**
  * Probe run config for start wave `wave`: built like the browser session's runs (stats and
- * rules of the current talents, auto mode), plus the next wave as the cap, so a start wave
- * that takes longer than the wave timer meets the pressure it would meet in a real run.
+ * rules of the current talents, their signature attack, auto mode), plus the next wave as the
+ * cap, so a start wave that takes longer than the wave timer meets the pressure it would meet
+ * in a real run. With no signature it has no `signature` key, like the session's M1 runs.
  */
 export function probeConfig(
   stats: StatBlock,
@@ -41,6 +44,7 @@ export function probeConfig(
     seed,
     stats,
     rules,
+    ...(options.signature === undefined ? {} : { signature: options.signature }),
     startWave: wave,
     mode: 'auto',
     waveCap: Math.max(wave, Math.min(wave + 1, options.waveCap ?? Infinity)),

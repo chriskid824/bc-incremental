@@ -22,6 +22,7 @@
   "result.skipNotCleared": "無（起始波次未清除）",
   "result.next": "{seconds} 秒後開始下一局 · 點擊繼續",
   "error.init": "遊戲無法啟動：{message}",
+  "app.prototype.hive": "蜂巢原型",
   "talent.start.name": "起點",
   "talent.might.name": "力量",
   "talent.glassCannon.name": "玻璃大砲",

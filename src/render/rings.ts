@@ -1,23 +1,26 @@
 /**
  * Expanding rings, redrawn into one additive Graphics each frame: kill shockwaves (a bright
- * ring that thins as it grows) and pandemic fire novas (a translucent disc with a hot edge).
- * Pooled and capped per style: past the cap new shockwaves are dropped, and once a few full
- * novas burn at once further ones draw only their rim, so a cascade of spreading burns reads
- * as a ripple of fire rings instead of flooding the screen orange.
+ * ring that thins as it grows), pandemic fire novas (a translucent disc with a hot edge) and
+ * drone impacts (a hive-green ring over the splash, docs/v3 C5 design §13.2). Pooled and capped
+ * per style: past the cap new shockwaves are dropped, once a few full novas burn at once further
+ * ones draw only their rim, so a cascade of spreading burns reads as a ripple of fire rings
+ * instead of flooding the screen orange, and a new impact replaces the oldest one.
  */
 
 import { Graphics } from 'pixi.js';
-import { COLORS } from './palette';
+import { COLORS, CONSTRUCT_COLORS } from './palette';
 import { ageStep } from './timing';
 
 const STYLE_SHOCK = 0;
 const STYLE_NOVA = 1;
 /** A nova drawn as its rim only. */
 const STYLE_RIM = 2;
+const STYLE_IMPACT = 3;
 
 /** Live rings allowed per style. */
-const CAPS = [40, 3, 10];
+const CAPS = [40, 3, 10, 24];
 const NOVA_MS = 520;
+const IMPACT_MS = 300;
 
 interface Ring {
   style: number;
@@ -36,7 +39,7 @@ export class RingLayer {
   readonly view = new Graphics({ label: 'rings' });
   private readonly rings: Ring[] = [];
   private readonly pool: Ring[] = [];
-  private readonly counts = [0, 0, 0];
+  private readonly counts = [0, 0, 0, 0];
 
   constructor() {
     this.view.blendMode = 'add';
@@ -71,6 +74,15 @@ export class RingLayer {
     return full;
   }
 
+  /**
+   * A drone's impact over its splash `radius`. Impacts have a cap of their own, and a new one
+   * past it replaces the oldest impact, so they never take a shockwave's or a nova's place.
+   */
+  impact(x: number, y: number, radius: number): void {
+    if (this.isFull(STYLE_IMPACT)) this.evictOldest(STYLE_IMPACT);
+    this.push(STYLE_IMPACT, x, y, radius, CONSTRUCT_COLORS.hive.main, 0, IMPACT_MS);
+  }
+
   clear(): void {
     for (const ring of this.rings) this.pool.push(ring);
     this.rings.length = 0;
@@ -93,6 +105,7 @@ export class RingLayer {
       this.rings[kept++] = ring;
       const t = ring.ageMs / ring.lifeMs;
       if (ring.style === STYLE_SHOCK) drawShock(g, ring, t);
+      else if (ring.style === STYLE_IMPACT) drawImpact(g, ring, t);
       else drawNova(g, ring, t, ring.style === STYLE_NOVA);
     }
     this.rings.length = kept;
@@ -193,4 +206,17 @@ function drawNova(g: Graphics, ring: Ring, t: number, full: boolean): void {
     alpha: (full ? 1 : 0.7) * fade,
   });
   g.circle(ring.x, ring.y, r).stroke({ width: 2.5, color: 0xffffff, alpha: 0.55 * fade * fade });
+}
+
+function drawImpact(g: Graphics, ring: Ring, t: number): void {
+  // Snaps out to the splash radius in the first third of its life, then fades in place.
+  const grow = Math.min(1, t / 0.35);
+  const r = ring.radius * easeOut(grow);
+  const fade = 1 - t;
+  g.circle(ring.x, ring.y, r).fill({ color: ring.color, alpha: 0.12 * fade });
+  g.circle(ring.x, ring.y, r).stroke({
+    width: 1.5 + 3 * (1 - grow),
+    color: ring.color,
+    alpha: 0.9 * fade,
+  });
 }

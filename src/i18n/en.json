@@ -22,6 +22,7 @@
   "result.skipNotCleared": "None (start wave not cleared)",
   "result.next": "Next run in {seconds}s · click to continue",
   "error.init": "The game could not start: {message}",
+  "app.prototype.hive": "Hive prototype",
   "talent.start.name": "Start",
   "talent.might.name": "Might",
   "talent.glassCannon.name": "Glass Cannon",

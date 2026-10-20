@@ -28,6 +28,11 @@ describe('messages', () => {
     expect(isMessageKey('toString')).toBe(false);
   });
 
+  it('labels the ?hive prototype in both locales', () => {
+    expect(MESSAGES.en['app.prototype.hive']).toBe('Hive prototype');
+    expect(MESSAGES['zh-TW']['app.prototype.hive']).toBe('蜂巢原型');
+  });
+
   it.each(LOCALES)('%s names every stat', (id) => {
     for (const stat of STAT_IDS) {
       const key = `stat.${stat}`;

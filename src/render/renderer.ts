@@ -20,8 +20,11 @@ import { ArcLayer } from './arcs';
 import { createBackdrop } from './backdrop';
 import { BurnTally } from './burnTally';
 import { Bursts, TIER_BOSS, TIER_ELITE, TIER_NORMAL } from './bursts';
+import { HiveCoreView } from './core';
+import type { CoreView } from './core';
 import { CritStopGate } from './critStop';
 import { DamageNumbers } from './damageNumbers';
+import { DroneLayer } from './drones';
 import { EnemyLayer, HIT_PUNCH } from './enemies';
 import { FxParticles } from './fx';
 import { createFxTextures } from './fxTextures';
@@ -38,6 +41,11 @@ export interface RendererOptions {
   readonly reducedMotion: boolean;
   /** Asks the game loop for a hit-stop of `ms` wall-clock ms (src/app/loop.ts). */
   readonly hitStop?: (ms: number) => void;
+  /**
+   * The construct at the center. 'hive' (the `?hive` prototype, docs/v3 C5 design §13.2) draws
+   * 蜂巢's comb and the run's drones; without it the center is M1's hexagon and no drone is drawn.
+   */
+  readonly construct?: 'hive';
 }
 
 /** Crits at least this many decades above the typical hit shake the screen (2× ≈ 0.3). */
@@ -75,7 +83,10 @@ export class Renderer {
   /** Flames of burning enemies, drawn under the crowd. */
   private readonly flames: FxParticles;
   private readonly bursts: Bursts;
-  private readonly player = new PlayerView();
+  /** The view at the arena center: M1's hexagon or a construct (RendererOptions.construct). */
+  private readonly core: CoreView;
+  /** The run's drones; only with the hive construct. */
+  private readonly drones: DroneLayer | null;
   private readonly shards: ShardParticles;
   private readonly numbers = new DamageNumbers();
   private readonly burnTally = new BurnTally();
@@ -108,6 +119,9 @@ export class Renderer {
     this.flames = new FxParticles(textures);
     this.bursts = new Bursts(this.fx, this.flames, textures, this.rings);
     this.shards = new ShardParticles(app.renderer);
+    this.drones =
+      options.construct === 'hive' ? new DroneLayer(app.renderer, textures.streak) : null;
+    this.core = this.drones === null ? new PlayerView() : new HiveCoreView(this.drones);
     this.shake = new ScreenShake(options.reducedMotion);
     this.hitStop = options.hitStop ?? ((): void => undefined);
     // Static: one cached quad instead of grid lines, light pool and vignette every frame.
@@ -119,7 +133,9 @@ export class Renderer {
       this.flames.view,
       this.enemies.view,
       this.rings.view,
-      this.player.view,
+      this.core.view,
+      // The drones fly over the core and under the shots (docs/v3 C5 design §13.2).
+      ...(this.drones === null ? [] : [this.drones.view]),
       this.projectiles.view,
       this.arcs.view,
       this.fx.view,
@@ -141,7 +157,8 @@ export class Renderer {
     this.shards.clear();
     this.numbers.clear();
     this.burnTally.clear();
-    this.player.reset();
+    this.core.reset();
+    this.drones?.reset();
     this.shake.reset();
     this.critStop.reset();
     this.critShakeCooldownMs = 0;
@@ -175,8 +192,11 @@ export class Renderer {
             }
           }
           break;
+        case 'impact':
+          this.rings.impact(event.x, event.y, event.radius);
+          break;
         case 'playerHit':
-          this.player.hit();
+          this.core.hit();
           break;
         default:
           break;
@@ -196,15 +216,17 @@ export class Renderer {
     );
     this.aimEmbers(state);
     this.enemies.update(state.enemies, alpha, dt, this.bursts);
+    // After the enemies: the chase brackets go where they were just drawn.
+    this.drones?.update(state, alpha, this.enemies);
     this.projectiles.update(state.projectiles, alpha);
     this.arcs.update(dt);
     this.rings.update(dt);
     this.flames.update(dt);
     this.fx.update(dt);
     this.fx.drainFollowUps(this.flamePuff);
-    this.player.update(state.player, dt);
+    this.core.update(state.player, dt);
     const absorbed = this.shards.update(dt, state.player.x, state.player.y, PLAYER_RADIUS * 1.5);
-    if (absorbed > 0) this.player.pulse();
+    if (absorbed > 0) this.core.pulse();
     this.burnTally.update(dt, this.showBurn);
     this.numbers.update(dt);
     this.killsThisFrame = 0;

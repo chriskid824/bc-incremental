@@ -138,6 +138,18 @@ const CSS = `
     transform 200ms ease-out;
 }
 .bc-toast.bc-visible { opacity: 1; transform: translate(-50%, 0); }
+.bc-badge {
+  /* The ?hive prototype's corner label (src/app/main.ts), over every screen. */
+  inset: auto auto 14px 16px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(14, 17, 26, 0.85);
+  border: 1px solid rgba(155, 242, 92, 0.55);
+  color: #9bf25c;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
 .bc-intro {
   display: flex;
   align-items: center;

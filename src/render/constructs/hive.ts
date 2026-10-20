@@ -3,7 +3,8 @@
  * a docking ring of kite-shaped drones, nose out. Idle: the drones circle slowly on the ring.
  * Attack: the docked drone nearest the target leaves the nest toward it, its dock shows a dashed
  * outline and its comb cell empties, so the middle hollows out as drones go; it docks again
- * after a sortie.
+ * after a sortie. With `simDrones` the run's drones (src/render/drones.ts) replace these: the
+ * view draws the comb only, and its cells follow the share of them docked (setDocked).
  */
 
 import { Container, Graphics } from 'pixi.js';
@@ -32,8 +33,11 @@ export const DRONE_RADIUS = 43;
 export const CELL_RADIUS = 9;
 const CELL_GAP = 0.6;
 
-/** Kite pointing +x around its center: nose, wing, tail, wing (§11.7: never a triangle). */
-const KITE = [10, 0, -2.6, -5.8, -10, 0, -2.6, 5.8];
+/**
+ * Kite pointing +x around its center: nose, wing, tail, wing (§11.7: never a triangle). The drone
+ * layer bakes its kites from it (src/render/drones.ts).
+ */
+export const KITE = [10, 0, -2.6, -5.8, -10, 0, -2.6, 5.8];
 /** Dark chevron near the tail, pointing at the nose so the drone reads head-out (§11.7). */
 const KITE_MARK = [-7.6, -3.2, -3.4, 0, -7.6, 3.2];
 /** Half the angle each dock cradle spans. */
@@ -52,7 +56,9 @@ export const RETURN_AT_MS = 1600;
 const RETURN_MS = 250;
 export const SORTIE_MS = RETURN_AT_MS + RETURN_MS;
 /** A launched drone's cell and dock empty over this long. */
-const EMPTY_MS = 300;
+export const EMPTY_MS = 300;
+/** Under simDrones the cells empty in opposite pairs, by slot: a pair for each third gone. */
+const EMPTY_ORDER = [0, 3, 1, 4, 2, 5];
 
 /** Direction of dock slot `i` when the ring has turned by `orbit`. */
 export function slotAngle(i: number, orbit: number): number {
@@ -148,6 +154,15 @@ function drawKite(g: Graphics): Graphics {
     .fill({ color: C.droneMark, alpha: 1 });
 }
 
+export interface HiveViewOptions {
+  /**
+   * The run's drones are drawn by the drone layer: the view draws the comb only (no docking
+   * ring, no drones of its own, attack() does nothing), and its cells follow setDocked instead
+   * of its own sorties (docs/v3 C5 design §13.2). Off for the construct sheet.
+   */
+  readonly simDrones?: boolean;
+}
+
 interface Drone {
   readonly root: Graphics;
   /** Dashed outline left in the dock while the drone is out. */
@@ -170,9 +185,15 @@ export class HiveView implements ConstructView {
   private readonly drones: Drone[] = [];
   private readonly docked: boolean[] = [];
   private readonly hitFlash = new HitFlash();
+  private readonly simDrones: boolean;
+  /** setDocked's share of the run's drones docked, 0 to 1. */
+  private dockedShare = 1;
+  /** How empty the nest is drawn, easing toward 1 − dockedShare. */
+  private emptied = 0;
   private timeMs = 0;
 
-  constructor() {
+  constructor(options: HiveViewOptions = {}) {
+    this.simDrones = options.simDrones ?? false;
     this.view.addChild(this.body);
     drawHalo(this.halo, 40, C.main, 0.18);
     const track = new Graphics()
@@ -221,11 +242,21 @@ export class HiveView implements ConstructView {
       this.docked.push(true);
     }
     comb.addChild(outline);
-    this.body.addChild(this.halo, this.ring, comb, ...this.drones.map((d) => d.root));
+    if (this.simDrones) this.body.addChild(this.halo, comb);
+    else this.body.addChild(this.halo, this.ring, comb, ...this.drones.map((d) => d.root));
     this.update(0);
   }
 
+  /**
+   * Under simDrones: the share of the run's drones docked, 0 (all out) to 1, which the comb's
+   * cells ease toward over EMPTY_MS.
+   */
+  setDocked(share: number): void {
+    this.dockedShare = clamp01(share);
+  }
+
   attack(angle: number): void {
+    if (this.simDrones) return;
     const slot = nearestDockedSlot(this.docked, this.orbit(), angle);
     if (slot < 0) return;
     const drone = this.drones[slot] as Drone;
@@ -241,6 +272,8 @@ export class HiveView implements ConstructView {
   reset(): void {
     for (const drone of this.drones) drone.sortieMs = -1;
     this.docked.fill(true);
+    this.dockedShare = 1;
+    this.emptied = 0;
     this.hitFlash.reset();
     this.update(0);
   }
@@ -290,6 +323,7 @@ export class HiveView implements ConstructView {
       drone.ghost.alpha = empty;
       drone.cell.alpha = 1 - 0.88 * empty;
     }
+    if (this.simDrones) emptiness = this.followDocked(dtMs);
     // The middle dims as the nest empties (§11.4: with every drone out, the center is empty).
     const pulse = 0.06 * Math.sin(this.timeMs * 0.0025);
     this.centerCell.alpha = 1 - 0.65 * (emptiness / DOCK_SLOTS) + pulse;
@@ -299,5 +333,17 @@ export class HiveView implements ConstructView {
 
   private orbit(): number {
     return wrapAngle(this.timeMs * ORBIT_PER_MS);
+  }
+
+  /** Eases the drawn emptiness toward setDocked's and empties the cells; returns it in cells. */
+  private followDocked(dtMs: number): number {
+    const step = dtMs / EMPTY_MS;
+    this.emptied += Math.max(-step, Math.min(step, 1 - this.dockedShare - this.emptied));
+    const cells = this.emptied * DOCK_SLOTS;
+    for (let k = 0; k < DOCK_SLOTS; k++) {
+      const drone = this.drones[EMPTY_ORDER[k] as number] as Drone;
+      drone.cell.alpha = 1 - 0.88 * clamp01(cells - k);
+    }
+    return cells;
   }
 }

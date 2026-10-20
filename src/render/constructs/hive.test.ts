@@ -1,7 +1,12 @@
+import type { Container } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
+import { COLORS } from '../palette';
 import {
   CELL_RADIUS,
   DOCK_SLOTS,
+  DRONE_RADIUS,
+  EMPTY_MS,
+  HiveView,
   RETURN_AT_MS,
   SORTIE_MS,
   cellCenters,
@@ -70,5 +75,78 @@ describe('hive drones', () => {
     expect(dockEmptiness(RETURN_AT_MS - 1)).toBe(1);
     expect(dockEmptiness(RETURN_AT_MS + 100)).toBeGreaterThan(0);
     expect(dockEmptiness(SORTIE_MS)).toBe(0);
+  });
+});
+
+/** The drawn alpha of the six outer comb cells, by dock slot. */
+function cellAlphas(hive: HiveView): number[] {
+  const comb = hive.view.getChildByLabel('comb', true) as Container;
+  return comb.children.slice(1, 1 + DOCK_SLOTS).map((cell) => cell.alpha);
+}
+
+function expectCells(hive: HiveView, empty: readonly number[]): void {
+  const alphas = cellAlphas(hive);
+  expect(alphas).toHaveLength(DOCK_SLOTS);
+  alphas.forEach((alpha, slot) =>
+    expect(alpha, `cell ${slot}`).toBeCloseTo(empty.includes(slot) ? 0.12 : 1, 9),
+  );
+}
+
+function reach(view: Container): number {
+  const b = view.getLocalBounds();
+  return Math.max(-b.minX, b.maxX, -b.minY, b.maxY);
+}
+
+describe('hive with the run’s drones (simDrones)', () => {
+  it('draws the comb only: no docking ring and no drones of its own', () => {
+    const sheet = new HiveView();
+    expect(reach(sheet.view)).toBeGreaterThan(DRONE_RADIUS);
+    const hive = new HiveView({ simDrones: true });
+    expect(reach(hive.view)).toBeLessThan(DRONE_RADIUS);
+    // attack() launches nothing: the drone layer draws the sorties.
+    hive.attack(0);
+    for (let t = 0; t < 1000; t += 16) hive.update(16);
+    expect(reach(hive.view)).toBeLessThan(DRONE_RADIUS);
+    expectCells(hive, []);
+  });
+
+  it('empties a pair of cells for each third of the drones out (setDocked)', () => {
+    const hive = new HiveView({ simDrones: true });
+    expectCells(hive, []);
+    hive.setDocked(2 / 3);
+    hive.update(EMPTY_MS);
+    expectCells(hive, [0, 3]);
+    hive.setDocked(1 / 3);
+    hive.update(EMPTY_MS);
+    expectCells(hive, [0, 3, 1, 4]);
+    hive.setDocked(0);
+    hive.update(EMPTY_MS);
+    expectCells(hive, [0, 1, 2, 3, 4, 5]);
+    hive.setDocked(1);
+    hive.update(EMPTY_MS);
+    expectCells(hive, []);
+  });
+
+  it('eases the cells toward setDocked over EMPTY_MS, and reset fills them at once', () => {
+    const hive = new HiveView({ simDrones: true });
+    hive.setDocked(0);
+    hive.update(EMPTY_MS / 2);
+    expectCells(hive, [0, 3, 1]);
+    hive.update(EMPTY_MS / 2);
+    expectCells(hive, [0, 1, 2, 3, 4, 5]);
+    hive.reset();
+    expectCells(hive, []);
+    // Out of range shares are clamped.
+    hive.setDocked(-1);
+    hive.update(EMPTY_MS * 3);
+    expectCells(hive, [0, 1, 2, 3, 4, 5]);
+  });
+
+  it('keeps the red hit flash', () => {
+    const hive = new HiveView({ simDrones: true });
+    const body = hive.view.children[0] as Container;
+    hive.hit();
+    hive.update(0);
+    expect(body.tint).toBe(COLORS.playerHit);
   });
 });

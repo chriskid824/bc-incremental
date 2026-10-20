@@ -9,6 +9,7 @@
  */
 
 import type { Num } from '../core/num';
+import type { SignatureSpec } from '../data/rules';
 import type { GameData } from '../data/types';
 import {
   DEFAULT_ECONOMY,
@@ -23,7 +24,7 @@ import {
   settleUnfinishedRun,
   statBlockFor,
 } from '../meta';
-import type { EconomyConfig, MetaState, Settlement } from '../meta';
+import type { EconomyConfig, MetaState, Settlement, StartWaveProbeOptions } from '../meta';
 import { NO_INPUT, compileBuild, createSimulation, signatureRows } from '../sim';
 import type { RunConfig, RunResult, SimEvent, Simulation } from '../sim';
 
@@ -100,9 +101,19 @@ export interface SessionOptions {
   readonly waveCap?: number;
   /**
    * Highest start wave up to `maxStartWave` that the talents in `meta` clear. Defaults to the
-   * simulation (highestClearedStartWave); tests may pass a stand-in.
+   * simulation (highestClearedStartWave), probing with `signature`; tests may pass a stand-in.
    */
   readonly reach?: (meta: Readonly<MetaState>, maxStartWave: number) => number;
+  /**
+   * The signature attack of every run and of the default reach probe; M1's when omitted, and
+   * the runs' configs then have no `signature` key (`?hive`: the swarm, src/app/devFlags.ts).
+   */
+  readonly signature?: SignatureSpec;
+  /**
+   * A floor under the highest start wave the player may pick, still capped by `waveCap`
+   * (`?hive&wave=N`, src/app/devFlags.ts).
+   */
+  readonly minStartWave?: number;
 }
 
 export type SessionPhase = 'idle' | 'running' | 'results' | 'talents';
@@ -138,6 +149,8 @@ export class Session {
   private talentsQueuedValue = false;
   private readonly economy: EconomyConfig;
   private readonly waveCap: number | undefined;
+  private readonly signature: SignatureSpec | undefined;
+  private readonly minStartWave: number;
   private readonly reachFor: (meta: Readonly<MetaState>, maxStartWave: number) => number;
 
   constructor(
@@ -147,17 +160,17 @@ export class Session {
     options: SessionOptions = {},
   ) {
     this.economy = options.economy ?? DEFAULT_ECONOMY;
-    const waveCap = options.waveCap;
+    const { waveCap, signature } = options;
     this.waveCap = waveCap;
+    this.signature = signature;
+    this.minStartWave = options.minStartWave ?? 1;
+    const probe: StartWaveProbeOptions = {
+      ...(waveCap === undefined ? {} : { waveCap }),
+      ...(signature === undefined ? {} : { signature }),
+    };
     this.reachFor =
       options.reach ??
-      ((meta, maxStartWave) =>
-        highestClearedStartWave(
-          meta,
-          data,
-          maxStartWave,
-          waveCap === undefined ? {} : { waveCap },
-        ));
+      ((meta, maxStartWave) => highestClearedStartWave(meta, data, maxStartWave, probe));
   }
 
   get phase(): SessionPhase {
@@ -192,9 +205,9 @@ export class Session {
       : 0;
   }
 
-  /** Highest start wave the player may pick now. */
+  /** Highest start wave the player may pick now: raised to minStartWave, capped by waveCap. */
   get maxStartWave(): number {
-    const allowed = allowedStartWave(this.meta, this.economy);
+    const allowed = Math.max(allowedStartWave(this.meta, this.economy), this.minStartWave);
     return this.waveCap === undefined ? allowed : Math.min(allowed, this.waveCap);
   }
 
@@ -496,6 +509,7 @@ export class Session {
       seed: SEED_BASE + this.meta.runs,
       stats,
       rules: collectRules(this.meta, this.data),
+      ...(this.signature === undefined ? {} : { signature: this.signature }),
       startWave: this.startWave,
       mode: 'auto',
       ...(this.waveCap === undefined ? {} : { waveCap: Math.max(this.waveCap, this.startWave) }),

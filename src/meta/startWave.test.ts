@@ -58,6 +58,35 @@ describe('probeConfig', () => {
     expect(config(meta, 9, 42, 9).waveCap).toBe(9);
     expect(config(meta, 8, 42, 9).waveCap).toBe(9);
   });
+
+  it("plays the session's signature, after the rules; M1's probes have no signature key", () => {
+    const meta = build(3, ['a', 'b']);
+    const stats = statBlockFor(meta, data);
+    const rules = collectRules(meta, data);
+    const swarm = probeConfig(stats, rules, 9, 42, { waveCap: 40, signature: { id: 'swarm' } });
+    expect(Object.keys(swarm)).toEqual([
+      'seed',
+      'stats',
+      'rules',
+      'signature',
+      'startWave',
+      'mode',
+      'waveCap',
+      'maxTicks',
+    ]);
+    expect(swarm.signature).toEqual({ id: 'swarm' });
+    const m1 = probeConfig(stats, rules, 9, 42, { waveCap: 40 });
+    expect(Object.keys(m1)).toEqual([
+      'seed',
+      'stats',
+      'rules',
+      'startWave',
+      'mode',
+      'waveCap',
+      'maxTicks',
+    ]);
+    expect(swarm).toEqual({ ...m1, signature: { id: 'swarm' } });
+  });
 });
 
 describe('clearsStartWave', () => {

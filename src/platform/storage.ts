@@ -12,13 +12,20 @@ export interface SaveStorage {
 
 const KEY_PREFIX = 'bc-incremental.save.';
 
-/** localStorage-backed slots. Reads and writes swallow quota and privacy-mode errors. */
+/**
+ * localStorage-backed slots, kept under `prefix` + the slot name. Reads and writes swallow quota
+ * and privacy-mode errors. The `?hive` prototype passes its own prefix (src/app/devFlags.ts), so
+ * its profile never touches the player's save.
+ */
 export class LocalSaveStorage implements SaveStorage {
-  constructor(private readonly storage: Storage) {}
+  constructor(
+    private readonly storage: Storage,
+    private readonly prefix: string = KEY_PREFIX,
+  ) {}
 
   read(slot: SaveSlot): string | null {
     try {
-      return this.storage.getItem(KEY_PREFIX + slot);
+      return this.storage.getItem(this.prefix + slot);
     } catch {
       return null;
     }
@@ -26,7 +33,7 @@ export class LocalSaveStorage implements SaveStorage {
 
   write(slot: SaveSlot, text: string): void {
     try {
-      this.storage.setItem(KEY_PREFIX + slot, text);
+      this.storage.setItem(this.prefix + slot, text);
     } catch (error) {
       console.warn('Save failed', error);
     }

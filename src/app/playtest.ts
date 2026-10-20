@@ -35,6 +35,19 @@ type Archetype = TalentNode['archetype'];
 
 const ARCHETYPES: readonly Archetype[] = ['crit', 'dot', 'chain', 'hybrid', 'none'];
 
+/**
+ * The Firestore project playtest events go to, or null to keep them in the local log only: none
+ * from the dev server, whose sessions would pollute the playtest data, and none under `?hive`,
+ * a dev prototype whose runs are not M1's (docs/v3 C5 design D21).
+ */
+export function playtestFirestore(
+  config: FirestoreConfig | null,
+  dev: boolean,
+  hive: boolean,
+): FirestoreConfig | null {
+  return dev || hive ? null : config;
+}
+
 /** The survey link for this install, or null when there is no survey. */
 export function feedbackLink(installId: string, url: string = FEEDBACK_URL): string | null {
   if (url === '') return null;

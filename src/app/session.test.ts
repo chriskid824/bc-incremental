@@ -15,7 +15,8 @@ import {
   statBlockFor,
 } from '../meta';
 import type { MetaState } from '../meta';
-import { MAX_RUN_SECONDS, TICK_RATE } from '../sim';
+import type { SignatureSpec } from '../data/rules';
+import { MAX_RUN_SECONDS, TICK_RATE, compileBuild, signatureRows } from '../sim';
 import { damageRow } from '../sim/testing';
 import {
   FAILED_START_RATIO,
@@ -627,5 +628,108 @@ describe('Session start wave', () => {
     const frontier = Math.floor(report.result.highestWaveReached * DEFAULT_ECONOMY.startWaveRatio);
     expect(frontier).toBeGreaterThan(10);
     expect(session.startWave).toBe(10);
+  });
+});
+
+/** The `?hive` prototype's runs (src/app/devFlags.ts). */
+const SWARM: SignatureSpec = { id: 'swarm' };
+
+describe('Session with a signature and a minimum start wave (?hive)', () => {
+  it('passes the signature to every run after the rules; without one the configs are as before', () => {
+    const hive = createSession({ waveCap: WAVE_CAP, signature: SWARM });
+    hive.session.start();
+    const config = hive.session.run.config;
+    expect(Object.keys(config)).toEqual([
+      'seed',
+      'stats',
+      'rules',
+      'signature',
+      'startWave',
+      'mode',
+      'waveCap',
+    ]);
+    expect(config.signature).toEqual(SWARM);
+    const typical = compileBuild(config.stats, config.rules, SWARM);
+    expect(hive.session.run.typicalHit).toBe(
+      typical.values.damage * typical.table.damage(signatureRows(typical).hit),
+    );
+
+    const m1 = createSession({ waveCap: WAVE_CAP });
+    m1.session.start();
+    const plain = m1.session.run.config;
+    expect(Object.keys(plain)).toEqual(['seed', 'stats', 'rules', 'startWave', 'mode', 'waveCap']);
+    expect(plain).toEqual({
+      seed: 1000,
+      stats: statBlockFor(m1.meta, data),
+      rules: collectRules(m1.meta, data),
+      startWave: 1,
+      mode: 'auto',
+      waveCap: WAVE_CAP,
+    });
+  });
+
+  it('probes the reach with the signature its runs play', () => {
+    const { session, meta } = createSession({ waveCap: WAVE_CAP, signature: SWARM });
+    meta.runs = 20;
+    meta.maxWave = 80;
+    session.resume();
+    const swarm = highestClearedStartWave(meta, data, WAVE_CAP, {
+      waveCap: WAVE_CAP,
+      signature: SWARM,
+    });
+    expect(session.reach).toBe(swarm);
+    expect(session.startWave).toBe(swarm);
+    // M1's volley reaches another wave with the same talents.
+    expect(reachOf(meta, WAVE_CAP)).not.toBe(swarm);
+  });
+
+  it('raises the highest start wave to minStartWave, but never above the wave cap', () => {
+    const floor = createSession({ waveCap: WAVE_CAP, minStartWave: 30 });
+    expect(allowedStartWave(floor.meta, DEFAULT_ECONOMY)).toBe(1);
+    expect(floor.session.maxStartWave).toBe(30);
+    // An allowed wave above the floor wins.
+    floor.meta.maxWave = 70;
+    expect(floor.session.maxStartWave).toBe(35);
+    floor.meta.maxWave = 200;
+    expect(floor.session.maxStartWave).toBe(WAVE_CAP);
+    expect(createSession({ waveCap: WAVE_CAP, minStartWave: 50 }).session.maxStartWave).toBe(
+      WAVE_CAP,
+    );
+    expect(createSession({ minStartWave: 50 }).session.maxStartWave).toBe(50);
+    expect(createSession({ waveCap: WAVE_CAP }).session.maxStartWave).toBe(1);
+  });
+
+  it('starts at wave 30 with resume() then setStartWave(30) (&wave=30), as M1 lowers a failed start', () => {
+    const hive = (): ReturnType<typeof createSession> => {
+      const created = createSession({ waveCap: WAVE_CAP, minStartWave: 30, reach: () => 18 });
+      created.meta.runs = 20;
+      created.meta.maxWave = 24;
+      return created;
+    };
+    const resumed = hive();
+    resumed.session.resume();
+    resumed.session.startNextRun();
+    expect(resumed.session.run.config.startWave).toBe(18);
+
+    const { session } = hive();
+    session.resume();
+    session.setStartWave(30);
+    expect(session.startWave).toBe(30);
+    expect(session.startWaveLowering).toBeNull();
+    session.startNextRun();
+    expect(session.run.config.startWave).toBe(30);
+    // A fresh build does not clear wave 30: the next start steps down, as in M1.
+    playRun(session);
+    const failed = session.report as RunReport;
+    expect(failed.result.clearedStartWave).toBe(false);
+    const lowered = Math.min(29, Math.floor(failed.result.highestWaveReached * FAILED_START_RATIO));
+    expect(session.startWave).toBe(lowered);
+    expect(session.startWaveLowering).toBe('failedRun');
+    // Picking 30 again (or reloading the page) restores it.
+    session.setStartWave(30);
+    expect(session.startWave).toBe(30);
+    session.openTalents();
+    session.startNextRun();
+    expect(session.run.config.startWave).toBe(30);
   });
 });

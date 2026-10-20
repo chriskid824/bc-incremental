@@ -90,6 +90,16 @@ export interface SessionConfig {
   readonly waveCap: number | null;
   /** Record every elite and boss in SessionResult.toughTargets (tools/balance/probe.ts). */
   readonly trackToughTargets?: boolean;
+  /**
+   * The signature attack of every run and of the rows' estimates (the hive's swarm, for its
+   * frontier report); M1's when omitted, and the runs' configs then have no `signature` key.
+   */
+  readonly signature?: SignatureSpec;
+  /**
+   * The profile the session starts from in place of a fresh one, such as the `?hive` preset
+   * (src/app/hivePreset.json). The session plays on a copy and leaves the given state as it is.
+   */
+  readonly initialMeta?: Readonly<MetaState>;
 }
 
 /** Seed of one run: the same for every strategy, so strategies face the same spawns. */
@@ -225,14 +235,18 @@ export interface BuildMultipliers {
   readonly sectorMultCrowd: number;
 }
 
-export function buildMultipliers(meta: Readonly<MetaState>, data: GameData): BuildMultipliers {
+export function buildMultipliers(
+  meta: Readonly<MetaState>,
+  data: GameData,
+  signature: SignatureSpec = M1_SIGNATURE,
+): BuildMultipliers {
   const measure = (build: Readonly<MetaState>): { d: number; attack: number; crowd: number } => {
     const stats = statBlockFor(build, data);
     const rules = collectRules(build, data);
     return {
-      d: effectiveHit(stats, rules),
-      attack: attackDamage(stats, rules),
-      crowd: crowdDps(stats, rules),
+      d: effectiveHit(stats, rules, signature),
+      attack: attackDamage(stats, rules, signature),
+      crowd: crowdDps(stats, rules, signature),
     };
   };
   const full = measure(meta);
@@ -360,10 +374,46 @@ export interface SessionResult {
 /** Safety net against a zero-length loop; a 60 minute session has a few hundred runs at most. */
 const MAX_RUNS = 100_000;
 
-export function runSession(config: SessionConfig, data: GameData = loadGameData()): SessionResult {
+/**
+ * The RunConfig of run `run` (1-based) of a session: its `signature` key only when the session
+ * sets one and its `waveCap` key only under a cap, so a session without them plays exactly the
+ * runs it always did.
+ */
+export function sessionRunConfig(
+  config: SessionConfig,
+  run: number,
+  stats: StatBlock,
+  rules: readonly RuleSpec[],
+  startWave: number,
+): RunConfig {
+  return {
+    seed: runSeed(config.seed, config.session, run),
+    stats,
+    rules,
+    ...(config.signature === undefined ? {} : { signature: config.signature }),
+    startWave,
+    mode: 'auto',
+    ...(config.waveCap === null ? {} : { waveCap: config.waveCap }),
+  };
+}
+
+/** A copy of `meta` that shares no Set or Map with it. */
+function copyMeta(meta: Readonly<MetaState>): MetaState {
+  return { ...meta, allocated: new Set(meta.allocated), ranks: new Map(meta.ranks) };
+}
+
+/**
+ * Plays the session. It starts from a copy of `config.initialMeta`, or from a fresh profile,
+ * and hands its final profile to `onEnd` when given (tools/balance/hivePreset.ts saves it).
+ */
+export function runSession(
+  config: SessionConfig,
+  data: GameData = loadGameData(),
+  onEnd?: (meta: Readonly<MetaState>) => void,
+): SessionResult {
   const { strategy, economy } = config;
   const kindById = new Map(data.talents.map((node) => [node.id, node.kind]));
-  const meta = createMetaState();
+  const meta = config.initialMeta === undefined ? createMetaState() : copyMeta(config.initialMeta);
   const rows: RunRow[] = [];
   const budgetSeconds = config.minutes * 60;
   let clockSeconds = 0;
@@ -376,14 +426,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
     let startWave = chooseStartWave(config.startWave, meta, economy);
     if (config.waveCap !== null) startWave = Math.min(startWave, config.waveCap);
     const stats = statBlockFor(meta, data);
-    const runConfig: RunConfig = {
-      seed: runSeed(config.seed, config.session, run),
-      stats,
-      rules: collectRules(meta, data),
-      startWave,
-      mode: 'auto',
-      ...(config.waveCap === null ? {} : { waveCap: config.waveCap }),
-    };
+    const runConfig = sessionRunConfig(config, run, stats, collectRules(meta, data), startWave);
 
     let row: RunRow;
     try {
@@ -409,7 +452,9 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
         if (kind === 'keystone') firstKeystoneMinutes ??= minutes;
       }
 
-      const d = toNumber(assertFinite(num(effectiveHit(stats, runConfig.rules)), 'effective hit'));
+      const d = toNumber(
+        assertFinite(num(effectiveHit(stats, runConfig.rules, config.signature)), 'effective hit'),
+      );
       const frontierHp = stdHp(result.highestWaveReached);
       let repeatableRanks = 0;
       for (const rank of meta.ranks.values()) repeatableRanks += rank;
@@ -440,7 +485,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
         skipCores: settlement.skipCores,
         nodesAllocated: meta.allocated.size - meta.ranks.size,
         repeatableRanks,
-        ...buildMultipliers(meta, data),
+        ...buildMultipliers(meta, data, config.signature),
         shardsBank: toNumber(meta.shards),
         coresBank: meta.cores,
         bought: compressIds(bought),
@@ -455,6 +500,7 @@ export function runSession(config: SessionConfig, data: GameData = loadGameData(
     rows.push(row);
   }
 
+  onEnd?.(meta);
   return {
     strategy,
     session: config.session,

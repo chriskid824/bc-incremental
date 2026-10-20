@@ -136,3 +136,16 @@ export function describeBuild(
     { label: t('stat.maxLife'), value: trim(flags.maxLife ?? values.maxLife) },
   ];
 }
+
+/** What the talent web's build summary reads: the talents' stats and rules, the runs' signature. */
+export interface BuildView {
+  readonly stats: StatBlock;
+  readonly rules: readonly RuleSpec[];
+  /** The signature attack the session's runs play (`?hive`: the swarm); M1's when omitted. */
+  readonly signature?: SignatureSpec;
+}
+
+/** describeBuild of the build the talent web shows, with the signature its runs play. */
+export function describeView(view: BuildView): BuildLine[] {
+  return describeBuild(view.stats, view.rules, view.signature);
+}

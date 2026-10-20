@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { num, toNumber } from '../../src/core/num';
 import { loadGameData, TAG } from '../../src/data';
 import type { SignatureSpec } from '../../src/data';
-import { createMetaState, DEFAULT_ECONOMY, statBlockFor } from '../../src/meta';
+import { collectRules, createMetaState, DEFAULT_ECONOMY, statBlockFor } from '../../src/meta';
+import type { MetaState } from '../../src/meta';
 import { damageRow, makeStats } from '../../src/sim/testing';
 import {
   attackDamage,
@@ -13,6 +15,7 @@ import {
   parseStartWavePolicy,
   runSeed,
   runSession,
+  sessionRunConfig,
 } from './session';
 import type { SessionConfig } from './session';
 
@@ -356,5 +359,157 @@ describe('runSession', () => {
     }
     const fromOne = runSession(config({ startWave: { kind: 'first' }, minutes: 4 }));
     expect(fromOne.rows.every((row) => row.startWave === 1 && row.skipShards === 0)).toBe(true);
+  });
+});
+
+describe('runSession hooks (the ?hive preset and frontier report)', () => {
+  const data = loadGameData();
+  const SWARM: SignatureSpec = { id: 'swarm' };
+
+  /** A profile some way into the game: two crit nodes, a frontier, a little to spend. */
+  function profile(): MetaState {
+    const meta = createMetaState();
+    meta.allocated.add('keenEye');
+    meta.allocated.add('sharpen');
+    meta.maxWave = 12;
+    meta.runs = 5;
+    meta.shards = num(500);
+    meta.cores = 3;
+    return meta;
+  }
+
+  /** A copy that shares no Set or Map with `meta`. */
+  const snapshot = (meta: Readonly<MetaState>): MetaState => ({
+    ...meta,
+    allocated: new Set(meta.allocated),
+    ranks: new Map(meta.ranks),
+  });
+
+  it('plays on a copy of initialMeta and leaves the given profile as it was', () => {
+    const initial = profile();
+    const before = snapshot(initial);
+    const result = runSession(config({ initialMeta: initial }), data);
+    expect(result.rows.length).toBeGreaterThan(1);
+    expect(initial).toEqual(before);
+  });
+
+  it("leaves the given profile's ranks as they were: the session's copy has a Map of its own", () => {
+    const initial = createMetaState();
+    initial.allocated.add('might');
+    initial.ranks.set('might', 1);
+    initial.shards = num(1e6);
+    initial.maxWave = 6;
+    initial.runs = 3;
+    const before = snapshot(initial);
+    const ends: Readonly<MetaState>[] = [];
+    const cfg = config({ strategy: 'might-only', minutes: 1, initialMeta: initial });
+    runSession(cfg, data, (meta) => ends.push(meta));
+    // The session bought ranks of Might on its copy, never on the given profile.
+    expect(ends[0]?.ranks.get('might')).toBeGreaterThan(1);
+    expect(initial.ranks.get('might')).toBe(1);
+    expect(initial).toEqual(before);
+  });
+
+  it("plays its first run with the given profile's stats, rules and start wave", () => {
+    const initial = profile();
+    const allowed = chooseStartWave({ kind: 'max' }, initial, DEFAULT_ECONOMY);
+    expect(allowed).toBe(6);
+    const hit = effectiveHit(statBlockFor(initial, data), collectRules(initial, data));
+    expect(hit).toBeGreaterThan(effectiveHit(statBlockFor(createMetaState(), data)));
+    const open = runSession(config({ initialMeta: initial }), data).rows[0];
+    expect(open?.startWave).toBe(allowed);
+    expect(open?.effectiveHit).toBe(hit);
+    // Lowered to the wave cap when there is one.
+    const capped = runSession(config({ initialMeta: initial, waveCap: 4 }), data).rows[0];
+    expect(capped?.startWave).toBe(4);
+    expect(capped?.effectiveHit).toBe(hit);
+  });
+
+  it('hands the final profile to onEnd, the same for two sessions of one config', () => {
+    const ends: Readonly<MetaState>[] = [];
+    const cfg = config({ initialMeta: profile() });
+    const first = runSession(cfg, data, (meta) => ends.push(meta));
+    const second = runSession(cfg, data, (meta) => ends.push(meta));
+    expect(ends).toHaveLength(2);
+    expect(ends[0]).not.toBe(ends[1]);
+    expect(ends[0]).toEqual(ends[1]);
+    expect(second).toEqual(first);
+    const end = ends[0] as Readonly<MetaState>;
+    const last = first.rows.at(-1);
+    expect(end.runs).toBe(5 + first.rows.length);
+    expect(end.maxWave).toBe(last?.maxWave);
+    expect(toNumber(end.shards)).toBe(last?.shardsBank);
+    expect(end.cores).toBe(last?.coresBank);
+  });
+
+  it('changes nothing without the hooks: the same result with the same keys', () => {
+    const plain = runSession(config(), data);
+    expect(Object.keys(plain)).toEqual([
+      'strategy',
+      'session',
+      'rows',
+      'endMinutes',
+      'firstNotableMinutes',
+      'firstKeystoneMinutes',
+    ]);
+    expect(runSession(config(), data, () => undefined)).toEqual(plain);
+    // A fresh profile is what the session starts from without one.
+    expect(runSession(config({ initialMeta: createMetaState() }), data)).toEqual(plain);
+  });
+
+  it('builds run configs with a signature key only when given, after the rules', () => {
+    const stats = makeStats();
+    expect(sessionRunConfig(config(), 2, stats, [], 3)).toEqual({
+      seed: runSeed(1, 0, 2),
+      stats,
+      rules: [],
+      startWave: 3,
+      mode: 'auto',
+    });
+    expect(Object.keys(sessionRunConfig(config(), 2, stats, [], 3))).toEqual([
+      'seed',
+      'stats',
+      'rules',
+      'startWave',
+      'mode',
+    ]);
+    expect(Object.keys(sessionRunConfig(config({ waveCap: 40 }), 2, stats, [], 3))).toEqual([
+      'seed',
+      'stats',
+      'rules',
+      'startWave',
+      'mode',
+      'waveCap',
+    ]);
+    const swarm = sessionRunConfig(config({ waveCap: 40, signature: SWARM }), 2, stats, [], 3);
+    expect(Object.keys(swarm)).toEqual([
+      'seed',
+      'stats',
+      'rules',
+      'signature',
+      'startWave',
+      'mode',
+      'waveCap',
+    ]);
+    expect(swarm.signature).toEqual(SWARM);
+  });
+
+  it("reads the rows' multipliers with the session's signature", () => {
+    // splitShot's projectile is one of two for M1's volley and one of one for the swarm (F16).
+    const initial = profile();
+    for (const id of ['quickDraw', 'precision', 'splitShot']) initial.allocated.add(id);
+    const ends: Readonly<MetaState>[] = [];
+    const cfg = config({ initialMeta: initial, signature: SWARM });
+    const { rows } = runSession(cfg, data, (meta) => ends.push(meta));
+    const final = ends[0] as Readonly<MetaState>;
+    const swarm = buildMultipliers(final, data, SWARM);
+    expect(swarm.sectorMultCrowd).not.toBe(buildMultipliers(final, data).sectorMultCrowd);
+    expect(rows.at(-1)).toMatchObject({ ...swarm });
+  });
+
+  it('plays every run with the given signature', () => {
+    const m1 = runSession(config({ minutes: 1 }), data).rows[0];
+    const swarm = runSession(config({ minutes: 1, signature: SWARM }), data).rows[0];
+    expect(swarm?.kills).not.toBe(m1?.kills);
   });
 });

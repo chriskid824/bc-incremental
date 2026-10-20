@@ -31,10 +31,21 @@ import type { HudInfo } from '../ui/hud';
 import { IntroPanel } from '../ui/intro';
 import { ResultPanel } from '../ui/result';
 import type { ResultInfo } from '../ui/result';
-import { injectStyle } from '../ui/style';
+import { el, injectStyle } from '../ui/style';
 import { TalentWebPanel } from '../ui/talentWeb';
 import type { TalentWebView } from '../ui/talentWeb';
 import { Toast } from '../ui/toast';
+import {
+  HIVE_SAVE_PREFIX,
+  HIVE_SIGNATURE,
+  raiseShards,
+  readDevFlags,
+  resumeAtWave,
+  seedEmptySlots,
+  startAtWave,
+} from './devFlags';
+import type { DevFlags } from './devFlags';
+import HIVE_PRESET from './hivePreset.json';
 import { bindMenuKeys, bindSpeedKeys } from './input';
 import { GameLoop, SPEEDS } from './loop';
 import type { Speed } from './loop';
@@ -43,6 +54,7 @@ import {
   FIREBASE,
   buildFields,
   feedbackLink,
+  playtestFirestore,
   runEndFields,
   sessionEndFields,
   sessionStartFields,
@@ -72,9 +84,10 @@ const ANALYTICS_FLUSH_MS = 5 * 60_000;
 /** The web playtest sends anonymous events unless the player turns it off (§9). */
 const SEND_BY_DEFAULT = true;
 
-function openStorage(): SaveStorage {
+/** Save slots under `prefix` (src/platform/storage.ts), or the player's own when omitted. */
+function openStorage(prefix?: string): SaveStorage {
   try {
-    return new LocalSaveStorage(window.localStorage);
+    return new LocalSaveStorage(window.localStorage, prefix);
   } catch {
     return new MemorySaveStorage();
   }
@@ -97,14 +110,13 @@ function openKeyValueStore(): KeyValueStore {
 }
 
 /**
- * Playtest analytics. The dev server never sends (its sessions would pollute the playtest
- * data); every build keeps the local log for the export fallback.
+ * Playtest analytics. The dev server and `?hive` never send (playtestFirestore); every build
+ * keeps the local log for the export fallback.
  */
-function openAnalytics(locale: Locale): Analytics {
+function openAnalytics(locale: Locale, hive: boolean): Analytics {
+  const firestore = playtestFirestore(FIREBASE, import.meta.env.DEV, hive);
   const sink =
-    FIREBASE !== null && !import.meta.env.DEV
-      ? new FirestoreSink(FIREBASE, (url, init) => fetch(url, init))
-      : null;
+    firestore !== null ? new FirestoreSink(firestore, (url, init) => fetch(url, init)) : null;
   return new PlaytestAnalytics({
     store: openKeyValueStore(),
     sink,
@@ -139,7 +151,7 @@ function loadProfile(storage: SaveStorage, data: GameData): Profile {
   return { meta: createMetaState(), playSeconds: 0, speed: 1 };
 }
 
-async function main(root: HTMLElement, locale: Locale): Promise<void> {
+async function main(root: HTMLElement, locale: Locale, flags: DevFlags): Promise<void> {
   injectStyle(document);
 
   const app = new Application();
@@ -153,10 +165,13 @@ async function main(root: HTMLElement, locale: Locale): Promise<void> {
   root.appendChild(app.canvas);
 
   const data = loadGameData();
-  const storage = openStorage();
+  const storage = openStorage(flags.hive ? HIVE_SAVE_PREFIX : undefined);
+  // `?hive` opens on the committed preset until its own slots hold a save (src/app/devFlags.ts).
+  if (flags.hive) seedEmptySlots(storage, JSON.stringify(HIVE_PRESET));
   const profile = loadProfile(storage, data);
   const meta = profile.meta;
-  const analytics = openAnalytics(locale);
+  raiseShards(meta, flags.shards);
+  const analytics = openAnalytics(locale, flags.hive);
   analytics.track(
     'session_start',
     sessionStartFields(meta, data, profile.playSeconds, {
@@ -170,6 +185,7 @@ async function main(root: HTMLElement, locale: Locale): Promise<void> {
   const renderer = new Renderer(app, data, {
     reducedMotion: REDUCED_MOTION,
     hitStop: (ms) => loop.hitStop(ms),
+    ...(flags.hive ? { construct: 'hive' as const } : {}),
   });
   // The arena has nothing to draw before the first run of this page.
   app.stage.visible = false;
@@ -198,6 +214,11 @@ async function main(root: HTMLElement, locale: Locale): Promise<void> {
   const cancelReaim = (): void => {
     if (reaimTimer !== null) clearTimeout(reaimTimer);
     reaimTimer = null;
+  };
+  /** The start-wave selector's pick, also how `&wave=N` picks N. */
+  const pickStartWave = (wave: number): void => {
+    session.setStartWave(wave);
+    talentWeb.update(webView());
   };
   const scheduleReaim = (): void => {
     cancelReaim();
@@ -230,10 +251,7 @@ async function main(root: HTMLElement, locale: Locale): Promise<void> {
       session.refund();
       talentWeb.update(webView());
     },
-    setStartWave: (wave) => {
-      session.setStartWave(wave);
-      talentWeb.update(webView());
-    },
+    setStartWave: pickStartWave,
     start: () => session.startNextRun(),
     setSending: (on) => {
       analytics.sending = on;
@@ -249,11 +267,13 @@ async function main(root: HTMLElement, locale: Locale): Promise<void> {
   const startFirstRun = (): void => {
     if (!intro.visible || session.phase !== 'idle') return;
     intro.hide();
-    session.start();
+    startAtWave(session, flags.wave);
   };
   const intro = new IntroPanel(document, startFirstRun, { dataNotice: analytics.sending });
   const toast = new Toast(document);
   root.append(hud.root, results.root, talentWeb.root, intro.root, toast.root);
+  // The prototype says so in a corner of every screen.
+  if (flags.hive) root.append(el(document, 'div', 'bc-ui bc-badge', t('app.prototype.hive')));
 
   const webView = (): TalentWebView => ({
     talents: data.talents,
@@ -264,6 +284,7 @@ async function main(root: HTMLElement, locale: Locale): Promise<void> {
     price: (node) => nodePrice(meta, node, DEFAULT_ECONOMY),
     stats: statBlockFor(meta, data),
     rules: collectRules(meta, data),
+    ...(flags.hive ? { signature: HIVE_SIGNATURE } : {}),
     startWave: session.startWave,
     maxStartWave: session.maxStartWave,
     reach: session.reach,
@@ -310,7 +331,11 @@ async function main(root: HTMLElement, locale: Locale): Promise<void> {
       },
       profileChanged: save,
     },
-    { waveCap: WAVE_CAP },
+    {
+      waveCap: WAVE_CAP,
+      ...(flags.hive ? { signature: HIVE_SIGNATURE } : {}),
+      ...(flags.wave === null ? {} : { minStartWave: flags.wave }),
+    },
   );
 
   const loop = new GameLoop(
@@ -373,7 +398,7 @@ async function main(root: HTMLElement, locale: Locale): Promise<void> {
   setSpeed(profile.speed);
   // A fresh profile learns the rules first; a returning one lands on the talent web.
   if (meta.runs === 0) intro.show();
-  else session.resume();
+  else resumeAtWave(session, flags.wave, pickStartWave);
   app.ticker.add((ticker) => loop.tick(ticker.elapsedMS));
 }
 
@@ -452,4 +477,6 @@ document.documentElement.lang = locale;
 
 const root = document.getElementById('app');
 if (root === null) throw new Error('Missing #app element');
-main(root, locale).catch((error: unknown) => showFatal(root, error));
+main(root, locale, readDevFlags(window.location.search, WAVE_CAP)).catch((error: unknown) =>
+  showFatal(root, error),
+);

@@ -6,6 +6,7 @@ import {
   allocatedKeystones,
   archetypePoints,
   feedbackLink,
+  playtestFirestore,
   runEndFields,
   sessionEndFields,
   sessionStartFields,
@@ -76,5 +77,14 @@ describe('playtest events', () => {
       'https://forms.example/viewform?entry.1=a%20b',
     );
     expect(feedbackLink('x', '')).toBeNull();
+  });
+
+  it('sends events from a release build only: none from the dev server, none under ?hive', () => {
+    const firestore = { projectId: 'playtest', apiKey: 'web-key' };
+    expect(playtestFirestore(firestore, false, false)).toBe(firestore);
+    expect(playtestFirestore(firestore, false, true)).toBeNull();
+    expect(playtestFirestore(firestore, true, false)).toBeNull();
+    expect(playtestFirestore(firestore, true, true)).toBeNull();
+    expect(playtestFirestore(null, false, false)).toBeNull();
   });
 });

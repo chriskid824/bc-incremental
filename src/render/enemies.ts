@@ -13,6 +13,7 @@ import { div, toNumber } from '../core/num';
 import type { EnemyDef, EnemyId, EnemyShape, GameData } from '../data/types';
 import type { EnemyState } from '../sim';
 import type { Bursts } from './bursts';
+import type { EnemySpot } from './drones';
 import { packColor } from './fx';
 import { COLORS, mixColor } from './palette';
 
@@ -149,6 +150,16 @@ export class EnemyLayer {
     // Overlapping flashes keep the bigger punch.
     view.punch = view.flashMs > 0 ? Math.max(punch, view.punch) : punch;
     view.flashMs = FLASH_MS;
+  }
+
+  /**
+   * Where enemy `id` was drawn by the last update and its radius, or null when it has no view
+   * (gone, or not drawn yet). Read-only: the drone layer places its chase brackets with it.
+   */
+  positionOf(id: number): EnemySpot | null {
+    const view = this.active.get(id);
+    if (view === undefined) return null;
+    return { x: view.root.position.x, y: view.root.position.y, radius: view.def.radius };
   }
 
   /** Releases every view; enemy ids restart with each run. */

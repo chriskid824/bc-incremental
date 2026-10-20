@@ -7,13 +7,13 @@
 
 import { formatNum } from '../core/format';
 import type { Num } from '../core/num';
-import type { RuleSpec } from '../data/rules';
+import type { RuleSpec, SignatureSpec } from '../data/rules';
 import type { StatBlock } from '../data/stats';
 import type { TalentNode } from '../data/types';
 import { isMessageKey, t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import type { AllocateCheck } from '../meta';
-import { describeBuild, describeModifier } from './describe';
+import { describeModifier, describeView } from './describe';
 import { startWaveNote } from './startWaveNote';
 import type { StartWaveFacts } from './startWaveNote';
 import { talentName } from './strings';
@@ -32,6 +32,8 @@ export interface TalentWebView extends StartWaveFacts {
   readonly price: (node: TalentNode) => { readonly shards: Num; readonly cores: number };
   readonly stats: StatBlock;
   readonly rules: readonly RuleSpec[];
+  /** The signature attack the runs play (`?hive`: the swarm); M1's when omitted. */
+  readonly signature?: SignatureSpec;
   readonly maxStartWave: number;
   /** Shard price multiplier per allocated node (EconomyConfig.talentGrowth). */
   readonly priceGrowth: number;
@@ -279,7 +281,7 @@ export class TalentWebPanel {
     this.feedbackLink.hidden = playtest.feedbackUrl === null;
     if (playtest.feedbackUrl !== null) this.feedbackLink.href = playtest.feedbackUrl;
 
-    const lines = describeBuild(view.stats, view.rules);
+    const lines = describeView(view);
     this.build.replaceChildren(
       ...lines.flatMap((line) => [
         el(this.doc, 'dt', '', line.label),
