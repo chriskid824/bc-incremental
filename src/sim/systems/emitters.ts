@@ -3,7 +3,7 @@
  * attacks in this stage does, in emitter order, the signature attack first (src/sim/emitters/),
  * then the grants' strikes; then the rule modules' tick hooks run. runEmitters skips the kinds
  * whose EMITTER_STEPS entry is null, which another stage runs (thorns in the contact stage,
- * segments in their own).
+ * segments and drones in their own).
  */
 
 import { runArc } from '../emitters/arc';
@@ -31,6 +31,8 @@ export const EMITTER_STEPS: { readonly [K in EmitterSpec['kind']]: EmitterStep |
   // Its judgements come in the segment stage (src/sim/systems/segments.ts).
   segment: null,
   strike: runStrike,
+  // Its drones fly in the drone stage, after the tick hooks (src/sim/systems/drones.ts).
+  drone: null,
 };
 
 /**

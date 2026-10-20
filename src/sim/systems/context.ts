@@ -22,6 +22,7 @@ import type { ModTable } from '../build/modTable';
 import { SCOPED_INDEX } from '../build/modTable';
 import { ailmentCredit, MAX_SOURCES, SOURCE_CLASS_ORDINAL } from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
+import { SUMMON_CAP } from '../caps';
 import { createCenterEventState, FREEZE_PAYLOADS } from '../effects/centerEvents';
 import type { CenterEventState } from '../effects/centerEvents';
 import { REPEAT } from '../effects/flags';
@@ -31,6 +32,7 @@ import { compileSelector, createSelectionScratch, selectable } from '../effects/
 import type { SelectionScratch } from '../effects/select';
 import { EVENT } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
+import { droneLayout } from '../emitters/drone';
 import {
   ALWAYS_IGNITES,
   createEmitterRuntime,
@@ -76,6 +78,7 @@ import { isToughType } from './spawn';
 import {
   compilePolicy,
   createChainState,
+  createDronePool,
   createLobState,
   createPulseAcc,
   createRepeatState,
@@ -425,7 +428,8 @@ export interface RunContext {
   // ---- Systems with state of their own (src/sim/systems/systemState.ts) ----
   /**
    * One member per system: the pulse tally, the zone pool, the lob, the repeats, a kill's
-   * transfers to its split children, the segments and the general chain path's levels.
+   * transfers to its split children, the segments, the general chain path's levels and the
+   * drones.
    */
   readonly sys: SystemState;
 
@@ -714,9 +718,9 @@ export function createRunContext(
     build.chainPolicy === null ? null : compilePolicy(build.chainPolicy, chainRetention);
 
   // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
-  // contact stage the thorns and the segment stage the segments. A strike picks its target as a
-  // periodic trigger does, from the player; a fan's icicle cones (冰柱) take a payload of their
-  // own.
+  // contact stage the thorns, the segment stage the segments and the drone stage the drones. A
+  // strike picks its target as a periodic trigger does, from the player; a fan's icicle cones
+  // (冰柱) take a payload of their own.
   const emitters = build.emitters.map((spec, index) => {
     const payload = emitterPayload(build, spec, combatRng, index === 0 ? policy : null);
     return createEmitterRuntime(
@@ -728,6 +732,11 @@ export function createRunContext(
       spec.kind === 'fan' ? iciclePayload(build, payload) : null,
     );
   });
+  // The drone emitters' summons, placed once in emitter order up to the summon cap, which only a
+  // test module raises; the drone stage flies them (src/sim/systems/drones.ts).
+  let summonCap = SUMMON_CAP;
+  for (const module of testModules) summonCap = Math.max(summonCap, module.summonCap ?? 0);
+  const layout = droneLayout(build, emitters, summonCap, combatRng, policy);
   const thornsEmitters = emitters.filter((em) => em.spec.kind === 'thorns');
   const signatureEmitter = emitters[0] as EmitterRuntime;
   const signaturePayload = signatureEmitter.payload;
@@ -755,6 +764,8 @@ export function createRunContext(
   const shots = createShotPool();
   const zones = createZonePool(build);
   const segments = createSegmentState(emitters.filter((em) => em.spec.kind === 'segment'));
+  // Its turrets' targets go through ctx.shootable, read once ctx exists.
+  const drones = createDronePool(layout, (enemy) => ctx.shootable(enemy));
   let shotPad = 0;
   for (const id of ENEMY_IDS) {
     if (!isToughType(id)) shotPad = Math.max(shotPad, data.enemies[id].radius);
@@ -779,6 +790,8 @@ export function createRunContext(
     zones,
     zoneCount: 0,
     segments,
+    drones,
+    droneCount: drones.count,
     shards: ZERO,
     cores: 0,
     finished: false,
@@ -850,6 +863,7 @@ export function createRunContext(
   for (const id of ENEMY_IDS) taken[id] = { hits: 0, damage: 0 };
   const counters = {} as Record<CounterId, number>;
   for (const id of COUNTER_IDS) counters[id] = 0;
+  counters.summonCapped = layout.refused;
 
   const ctx: RunContext = {
     data,
@@ -953,6 +967,7 @@ export function createRunContext(
       split: createSplitState(build),
       segments,
       chain: createChainState(chainRetention),
+      drones,
     },
 
     enemies,

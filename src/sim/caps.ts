@@ -61,3 +61,19 @@ export const REPEAT_CHARGE_CAP = 8;
  * burns live in DoT rings and no cap refuses one (burnCapOf, src/sim/ailments/records.ts).
  */
 export const BURN_RINGS_MAX_STACKS = 5;
+/**
+ * Summons a run places: every drone emitter's drones, in emitter order (the drone pool,
+ * src/sim/emitters/drone.ts). The rows past it are refused, counted in summonCapped; only a
+ * test module raises it (TestModule.summonCap).
+ */
+export const SUMMON_CAP = 24;
+/**
+ * Enemies a drone remembers impacting, each until its same-enemy cooldown ends
+ * (src/sim/systems/drones.ts): enough at any attack frequency, as the cooldown is at most
+ * DRONE_COOLDOWN_MAX and a drone picks at most once every PICK_TICKS.
+ */
+export const DRONE_MEMORY = 4;
+/** Ticks between two picks of one drone at the least: 0.5 s, whatever the attack frequency. */
+export const PICK_TICKS = 30;
+/** The longest same-enemy cooldown of a drone, in ticks, which keeps DRONE_MEMORY enough. */
+export const DRONE_COOLDOWN_MAX = 90;

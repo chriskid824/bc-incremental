@@ -7,14 +7,19 @@
  * (lob.ts), 霜晶's the fan (fan.ts), 雷塔's the arc (arc.ts). The talent nodes' emitter grants
  * (src/data/emitters.ts) follow it, such as thorns, whose hits the contact stage deals
  * (src/sim/systems/contact.ts), segments, whose judgements the segment stage makes
- * (src/sim/systems/segments.ts), and strikes, which the emitter stage fires after the signature
- * (strike.ts).
+ * (src/sim/systems/segments.ts), strikes, which the emitter stage fires after the signature
+ * (strike.ts), and drones, which the drone stage flies (src/sim/systems/drones.ts).
  */
 
 import type { Num } from '../../core/num';
 import { mul, num } from '../../core/num';
 import type { Rng } from '../../core/rng';
-import { SEGMENT_DEFAULTS, STRIKE_DEFAULTS, THORNS_DAMAGE_PCT } from '../../data/emitters';
+import {
+  DRONE_DEFAULTS,
+  SEGMENT_DEFAULTS,
+  STRIKE_DEFAULTS,
+  THORNS_DAMAGE_PCT,
+} from '../../data/emitters';
 import type { EmitterGrant } from '../../data/emitters';
 import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
@@ -136,9 +141,22 @@ export interface StrikeSpec extends EmitterBase {
   readonly shockStacks: number;
 }
 
+/**
+ * A drone grant: `drones` drones in the drone pool, which the drone stage flies at the enemies
+ * and impacts on them (src/sim/systems/drones.ts); its payload is their impacts'. Its turrets
+ * and their share come in C5.4: none until then.
+ */
+export interface DroneSpec extends EmitterBase {
+  readonly kind: 'drone';
+  readonly drones: number;
+  readonly turrets: number;
+  /** A turret shot's base damage as a fraction of the damage stat. */
+  readonly turretDamagePct: number;
+}
+
 /** What an emitter is; `kind` says how it deals its damage. */
 export type EmitterSpec =
-  VolleySpec | LobSpec | FanSpec | ArcSpec | ThornsSpec | SegmentSpec | StrikeSpec;
+  VolleySpec | LobSpec | FanSpec | ArcSpec | ThornsSpec | SegmentSpec | StrikeSpec | DroneSpec;
 
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
@@ -192,6 +210,21 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
         radius: grant.radius ?? STRIKE_DEFAULTS.radius,
         chainJumps: grant.chainJumps ?? STRIKE_DEFAULTS.chainJumps,
         shockStacks: grant.shockStacks ?? STRIKE_DEFAULTS.shockStacks,
+      };
+    case 'drone':
+      // No turrets until C5.4, which reads them from the grant.
+      return {
+        kind: 'drone',
+        signature: false,
+        source,
+        damagePct: grant.damagePct ?? DRONE_DEFAULTS.damagePct,
+        tags: TAG.hit | TAG.minion | TAG.area,
+        chains: false,
+        rollsAilments: true,
+        canCrit: true,
+        drones: grant.drones ?? 0,
+        turrets: 0,
+        turretDamagePct: DRONE_DEFAULTS.turretDamagePct,
       };
   }
 }
@@ -442,6 +475,8 @@ export function periodTicks(rate: number): number {
 export const BASE_ATTACK_SPEED = 4;
 /** The volley's attacks per second at BASE_ATTACK_SPEED: M1 attacks attackSpeed times a second. */
 export const VOLLEY_RATE = 4;
+/** A drone emitter's turret firings a second at BASE_ATTACK_SPEED (DRONE_DEFAULTS.turretRate). */
+export const TURRET_RATE = DRONE_DEFAULTS.turretRate;
 
 /** Ticks between the attacks of an emitter of `spec` in `build` (EmitterRuntime.interval). */
 export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number {
@@ -469,13 +504,16 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
     case 'strike':
       // Its judgements or strikes keep their period whatever the attack speed.
       return periodTicks(1 / spec.periodSec);
+    case 'drone':
+      // Its turrets' period (C5.4); its drones keep their own clocks (src/sim/systems/drones.ts).
+      return periodTicks((TURRET_RATE * build.values.attackSpeed) / BASE_ATTACK_SPEED);
   }
 }
 
 /**
  * Whether an emitter of `spec` sends its damage as shots that fly to their targets (volley, lob,
  * fan), so the damage in flight can be counted for targeting (RunContext.projectileEstimate).
- * Arcs, thorns, segments and strikes hit where they are.
+ * Arcs, thorns, segments, strikes and drones hit where they are, a drone where it impacts.
  */
 export function shotsInFlight(spec: EmitterSpec): boolean {
   switch (spec.kind) {
@@ -487,6 +525,7 @@ export function shotsInFlight(spec: EmitterSpec): boolean {
     case 'thorns':
     case 'segment':
     case 'strike':
+    case 'drone':
       return false;
   }
 }

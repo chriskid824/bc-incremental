@@ -1219,6 +1219,41 @@ const arcModules = (): TestModule[] => [
     ),
 ];
 
+/**
+ * C5.1's drones: M1's volley and three granted drones on outer.summon, over THORNS_STATS' base
+ * (crits, ignites and maskProbeMods()). They dock around the player, dash at the farthest enemy
+ * inside the arena that no other drone chases, impact it (every enemy within 40 of it takes a
+ * hit, tagged hit, minion and area), three impacts a sortie with a same-enemy cooldown, and fly
+ * home to dock; their hits crit and ignite on the combat stream, and their kills split.
+ */
+const DRONES_STATS = makeStats(
+  { damage: 5, maxLife: 1e6, critChance: 0.2, critMultiplier: 2, igniteChance: 0.3 },
+  maskProbeMods(),
+  {
+    triggers: [],
+    conversions: [],
+    emitters: [{ source: 'outer.summon', grant: { kind: 'drone', drones: 3 } }],
+  },
+);
+
+/**
+ * C5.1's summon cap (CD11): 20 drones on outer.summon and 10 more, named 'b', on the hub, over
+ * the same base. The pool takes the first 24 in emitter order, 20 and 4, ids in that order, and
+ * counts the 6 it refuses (summonCapped).
+ */
+const DRONE_CAP_STATS = makeStats(
+  { damage: 5, maxLife: 1e6, critChance: 0.2, critMultiplier: 2, igniteChance: 0.3 },
+  maskProbeMods(),
+  {
+    triggers: [],
+    conversions: [],
+    emitters: [
+      { source: 'outer.summon', grant: { kind: 'drone', drones: 20 } },
+      { source: 'hub', grant: { kind: 'drone', drones: 10, name: 'b' } },
+    ],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1361,6 +1396,16 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     },
     modules: arcModules,
     expected: ['ed41b60b5b8bfa02', 'cfb324913970c72d'],
+  },
+  {
+    name: 'drones',
+    config: { stats: DRONES_STATS, rules: [], startWave: 12 },
+    expected: ['0b2acdc6eba99e20', '973d883bbf10c1f5'],
+  },
+  {
+    name: 'droneCap',
+    config: { stats: DRONE_CAP_STATS, rules: [], startWave: 12 },
+    expected: ['984d118c8a9be135', 'edf5fbf5bd1b0248'],
   },
 ];
 

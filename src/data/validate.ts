@@ -388,6 +388,26 @@ function grantIssues(grant: EmitterGrant): string[] {
       issues.push(...selectorIssues('periodic', false, grant.target));
       break;
     }
+    case 'drone': {
+      // The schema has no turrets until C5.4; data checked without it can still name them.
+      if ('turrets' in grant) {
+        issues.push('drone turrets come with the turrets, which the simulation adds in C5.4');
+      }
+      // Optional for the turrets (C5.4); until then a drone grant places at least one drone.
+      const drones = grant.drones;
+      if (
+        drones === undefined ||
+        !(Number.isInteger(drones) && drones >= 1 && drones <= SUMMON_SLOTS_MAX)
+      ) {
+        issues.push(
+          `drones must be an integer in [1, ${SUMMON_SLOTS_MAX}] (got ${drones ?? 'none'})`,
+        );
+      }
+      if (grant.damagePct !== undefined && !(grant.damagePct > 0)) {
+        issues.push(`damagePct must be > 0 (got ${grant.damagePct})`);
+      }
+      break;
+    }
   }
   return issues;
 }
@@ -397,6 +417,12 @@ const STRIKE_PERIOD_MIN = 1 / 60;
 
 /** The most jumps a strike's chain makes. */
 const STRIKE_CHAIN_JUMPS_MAX = 8;
+
+/**
+ * The most summons one grant places: SUMMON_CAP (src/sim/caps.ts), the summons of a whole run,
+ * so a grant past it could never be placed whole.
+ */
+const SUMMON_SLOTS_MAX = 24;
 
 /** Parameter ranges of one rule; the simulation relies on them (src/sim/rules/). */
 function ruleIssues(rule: RuleSpec): string[] {

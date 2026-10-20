@@ -1965,6 +1965,100 @@ describe('emitter grant validation', () => {
     ).toEqual([]);
   });
 
+  it('accepts drone grants of 1 to 24 drones, with or without a damage share and a name', () => {
+    for (const grant of [
+      { kind: 'drone', drones: 1 },
+      { kind: 'drone', drones: 3, damagePct: 0.8 },
+      { kind: 'drone', drones: 24, damagePct: 2, name: 'b' },
+    ] as const) {
+      expect(grantIssues({ id: 'outer.summon.drones', emitters: [grant] })).toEqual([]);
+    }
+  });
+
+  it('rejects a drone count outside 1..24 or not an integer, a share not above 0, and turrets', () => {
+    const drone = (name: string, fields: object): EmitterGrant =>
+      ({ kind: 'drone', name, ...fields }) as EmitterGrant;
+    expect(
+      grantIssues({
+        id: 'outer.summon.drones',
+        emitters: [
+          drone('a', {}),
+          drone('b', { drones: 0 }),
+          drone('c', { drones: -1 }),
+          drone('d', { drones: 1.5 }),
+          drone('e', { drones: 25 }),
+          drone('f', { drones: NaN }),
+          drone('g', { drones: 3, damagePct: 0 }),
+          drone('h', { drones: 3, damagePct: -1 }),
+          // A field of C5.4's grant, which the schema rejects as an unknown key until then.
+          drone('i', { drones: 3, turrets: 1 }),
+        ],
+      }),
+    ).toEqual([
+      "talent 'outer.summon.drones': emitters[0] drones must be an integer in [1, 24] (got none)",
+      "talent 'outer.summon.drones': emitters[1] drones must be an integer in [1, 24] (got 0)",
+      "talent 'outer.summon.drones': emitters[2] drones must be an integer in [1, 24] (got -1)",
+      "talent 'outer.summon.drones': emitters[3] drones must be an integer in [1, 24] (got 1.5)",
+      "talent 'outer.summon.drones': emitters[4] drones must be an integer in [1, 24] (got 25)",
+      "talent 'outer.summon.drones': emitters[5] drones must be an integer in [1, 24] (got NaN)",
+      "talent 'outer.summon.drones': emitters[6] damagePct must be > 0 (got 0)",
+      "talent 'outer.summon.drones': emitters[7] damagePct must be > 0 (got -1)",
+      "talent 'outer.summon.drones': emitters[8] drone turrets come with the turrets, which the " +
+        'simulation adds in C5.4',
+    ]);
+    // The schema rejects the turrets too, so the content cannot load one.
+    const turrets = withGrants({
+      id: 'outer.summon.drones',
+      emitters: [drone('i', { drones: 3, turrets: 1 })],
+    });
+    expect(() => parseGameData(turrets)).toThrow();
+  });
+
+  it('keeps one drone emitter per source and name, and rejects two of one name that differ', () => {
+    const drones = (id: string, fields: object): Leaf => ({
+      id,
+      emitters: [{ kind: 'drone', ...fields } as EmitterGrant],
+    });
+    // No name is the name ''.
+    expect(
+      grantIssues(
+        drones('outer.summon.drones', { drones: 3 }),
+        drones('outer.summon.swarm', { drones: 4 }),
+      ),
+    ).toEqual([
+      "talents: emitter drone '' is granted twice by source 'outer.summon' with different " +
+        'fields; keep it on one node',
+    ]);
+    expect(
+      grantIssues(
+        drones('outer.summon.drones', { drones: 3, name: 'a' }),
+        drones('outer.summon.swarm', { drones: 3, name: 'a', damagePct: 1 }),
+      ),
+    ).toEqual([
+      "talents: emitter drone 'a' is granted twice by source 'outer.summon' with different " +
+        'fields; keep it on one node',
+    ]);
+    // Two names are two emitters; equal grants are one; another source has its own.
+    expect(
+      grantIssues(
+        drones('outer.summon.drones', { drones: 3 }),
+        drones('outer.summon.swarm', { drones: 4, name: 'b' }),
+      ),
+    ).toEqual([]);
+    expect(
+      grantIssues(
+        drones('outer.summon.drones', { drones: 3 }),
+        drones('outer.summon.swarm', { drones: 3 }),
+      ),
+    ).toEqual([]);
+    expect(
+      grantIssues(
+        drones('outer.summon.drones', { drones: 3 }),
+        drones('hub.drones', { drones: 4 }),
+      ),
+    ).toEqual([]);
+  });
+
   it('accepts a keystone whose behaviour is a grant, and needs a descKey for one', () => {
     expect(
       issuesAfter((d) => {

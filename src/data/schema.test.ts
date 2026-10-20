@@ -666,6 +666,7 @@ const SAMPLE_GRANTS: { readonly [K in GrantKind]: Extract<EmitterGrant, { kind: 
     chainJumps: 3,
     shockStacks: 1,
   },
+  drone: { kind: 'drone', drones: 3, damagePct: 0.8, name: 'sample' },
 };
 
 describe('EmitterGrantSchema', () => {
@@ -713,6 +714,36 @@ describe('EmitterGrantSchema', () => {
     ['a strike with an unknown key', { ...SAMPLE_GRANTS.strike, links: 2 }],
   ])('rejects %s', (_label, grant) => {
     expect(EmitterGrantSchema.safeParse(grant).success).toBe(false);
+  });
+
+  it('accepts a drone grant with any of its fields left out', () => {
+    for (const grant of [
+      { kind: 'drone' },
+      { kind: 'drone', drones: 2 },
+      { kind: 'drone', damagePct: 1.5, name: 'b' },
+      // validate.ts rejects a drone count outside 1..24 or not an integer, not the schema.
+      { kind: 'drone', drones: 0.5 },
+      { kind: 'drone', drones: 99 },
+    ]) {
+      expect(EmitterGrantSchema.parse(grant)).toEqual(grant);
+      expect(GRANT_SCHEMAS.drone.parse(grant)).toEqual(grant);
+    }
+  });
+
+  it.each([
+    ['a drone grant with turrets, which C5.4 adds', { kind: 'drone', drones: 3, turrets: 1 }],
+    [
+      'a drone grant with a turret damage share, which C5.4 adds',
+      { kind: 'drone', drones: 3, turretDamagePct: 0.4 },
+    ],
+    ['a drone count that is not finite', { kind: 'drone', drones: Infinity }],
+    ['a drone count that is not a number', { kind: 'drone', drones: '3' }],
+    ['a drone damage share that is not finite', { kind: 'drone', damagePct: NaN }],
+    ['a drone grant name that is not a string', { kind: 'drone', drones: 3, name: 7 }],
+    ['a drone grant with an unknown key', { kind: 'drone', drones: 3, radius: 40 }],
+  ])('rejects %s', (_label, grant) => {
+    expect(EmitterGrantSchema.safeParse(grant).success).toBe(false);
+    expect(GRANT_SCHEMAS.drone.safeParse(grant).success).toBe(false);
   });
 });
 

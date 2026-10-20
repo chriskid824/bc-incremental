@@ -496,10 +496,25 @@ export const GRANT_SCHEMAS = {
       shockStacks: finite.exactOptional(),
     })
     .readonly(),
+  // Drones only: turrets come in C5.4, so a turrets field is an unknown key until then.
+  // validate.ts holds the count to [1, 24] and the share above 0.
+  drone: z
+    .strictObject({
+      kind: z.literal('drone'),
+      drones: finite.exactOptional(),
+      damagePct: finite.exactOptional(),
+      name: z.string().exactOptional(),
+    })
+    .readonly(),
 } as const satisfies { readonly [K in GrantKind]: z.ZodType<Extract<EmitterGrant, { kind: K }>> };
 
 export const EmitterGrantSchema = exact<EmitterGrant>()(
-  z.discriminatedUnion('kind', [GRANT_SCHEMAS.thorns, GRANT_SCHEMAS.segment, GRANT_SCHEMAS.strike]),
+  z.discriminatedUnion('kind', [
+    GRANT_SCHEMAS.thorns,
+    GRANT_SCHEMAS.segment,
+    GRANT_SCHEMAS.strike,
+    GRANT_SCHEMAS.drone,
+  ]),
 );
 
 export const EnemyDefSchema = exact<EnemyDef>()(

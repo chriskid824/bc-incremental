@@ -73,7 +73,29 @@ export interface StrikeGrant {
   readonly shockStacks?: number;
 }
 
-export type EmitterGrant = ThornsGrant | SegmentGrant | StrikeGrant;
+/**
+ * Drones (無人機): `drones` drones that dock around the player and fly out at the alive enemy
+ * farthest from the player inside the arena that no other drone chases, each picking at most
+ * once every 0.5 s, and impact it: a hit on every enemy within DRONE_DEFAULTS.splash of it, the
+ * target among them. A drone stays on a living target, impacting it again once its same-enemy
+ * cooldown ends, and flies home to dock after DRONE_DEFAULTS.impacts impacts
+ * (src/sim/systems/drones.ts). The hits are tagged hit, minion and area, can crit and roll
+ * ailments. Each drone is a summon: a run places at most SUMMON_CAP of them (src/sim/caps.ts).
+ */
+export interface DroneGrant {
+  readonly kind: 'drone';
+  /** Drones it places, an integer in [1, 24]; 0 when omitted, which validation rejects. */
+  readonly drones?: number;
+  /**
+   * Base damage of its impacts' hits as a fraction of the damage stat;
+   * DRONE_DEFAULTS.damagePct when omitted.
+   */
+  readonly damagePct?: number;
+  /** What tells two drone grants of one source apart (grantKey); '' when omitted. */
+  readonly name?: string;
+}
+
+export type EmitterGrant = ThornsGrant | SegmentGrant | StrikeGrant | DroneGrant;
 export type GrantKind = EmitterGrant['kind'];
 
 /** A thorns hit's base damage when its grant names none: 300% of the damage stat. */
@@ -95,6 +117,25 @@ export const STRIKE_DEFAULTS = {
   shockStacks: 0,
 } as const;
 
+/**
+ * A drone grant's numbers (初始值): its impacts' share of the damage stat when it names none; a
+ * drone's speed (units a second), dock time and same-enemy cooldown (seconds) at the base attack
+ * frequency, its impacts a sortie, its impacts' splash radius and its dock's radius around the
+ * player; and the turrets' share, radius and firings a second, which come with the turret.
+ */
+export const DRONE_DEFAULTS = {
+  damagePct: 0.8,
+  turretDamagePct: 0.4,
+  speed: 600,
+  dockSec: 0.5,
+  cooldownSec: 0.5,
+  impacts: 3,
+  splash: 40,
+  dockRadius: 43,
+  turretRadius: 90,
+  turretRate: 2,
+} as const;
+
 /** An emitter grant of an allocated node, with the source of its node (sourceOfNode). */
 export interface SourcedEmitter {
   /** Source id (src/data/sources.ts) its damage is credited to. */
@@ -105,7 +146,8 @@ export interface SourcedEmitter {
 /**
  * What tells two grants of one kind and source apart: grants that share it are one emitter, and
  * the build keeps the first. A source has one thorns emitter, so thorns has no key; it has one
- * segment emitter per kind of endpoint, and one strike per name.
+ * segment emitter per kind of endpoint, one strike per name, and one drone emitter per name (''
+ * for a grant without one).
  */
 export function grantKey(grant: EmitterGrant): string {
   switch (grant.kind) {
@@ -115,5 +157,7 @@ export function grantKey(grant: EmitterGrant): string {
       return grant.endpoints;
     case 'strike':
       return grant.name;
+    case 'drone':
+      return grant.name ?? '';
   }
 }

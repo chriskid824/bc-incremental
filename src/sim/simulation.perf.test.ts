@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSimulation } from './simulation';
 import { createRunContext } from './systems/context';
 import { makeConfig, makeStats, makeTestData } from './testing';
-import { MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from './types';
+import { COUNTER_IDS, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from './types';
 
 describe('simulation speed', () => {
   it('keeps the run context below 128 properties, so every run shares its hidden class', () => {
@@ -15,6 +15,17 @@ describe('simulation speed', () => {
     // ctx.centerEvents group theirs (docs/v3 C4 design §0.7).
     const ctx = createRunContext(makeConfig(), makeTestData());
     expect(Object.keys(ctx).length).toBeLessThan(128);
+  });
+
+  it('keeps COUNTER_IDS below 20 entries, while createRunContext builds counters in a loop', () => {
+    // createRunContext fills RunContext.counters key by key from COUNTER_IDS (16 at C5.1), which
+    // gives the object a hidden class only while it is small; past about 20 keys V8 may turn it
+    // into a dictionary, and every counter write in the systems slows down (docs/v3 C5 design
+    // §0.4, CD12).
+    expect(
+      COUNTER_IDS.length,
+      'build RunContext.counters as one object literal before adding a 20th counter',
+    ).toBeLessThan(20);
   });
 
   it('runs a full 180 s run with a crowded arena quickly', () => {

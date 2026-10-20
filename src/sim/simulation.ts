@@ -30,6 +30,7 @@ import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
 import type { TestModule } from './rules';
 import { compact } from './systems/death';
+import { stepDrones } from './systems/drones';
 import { runEmitters, runTickHooks } from './systems/emitters';
 import { rebuildGrid } from './systems/grid';
 import { moveEnemies } from './systems/movement';
@@ -102,6 +103,8 @@ export function createSimulation(
    * 6. emitters: each emitter's due attacks are counted, with the onAttack hooks and the
    *    nthAttack triggers, and fire projectiles; then the rule modules' tick hooks run
    *    (emitters.ts, src/sim/emitters/).
+   * 6b. drones: the drone pool's slots step in id order (src/sim/systems/drones.ts): drones
+   *    move, pick and impact, with their hits, chains and kills resolved inline as in step 7.
    * 7. projectiles: the volley's projectiles move, retarget, and hit on arrival, and the shot
    *    pool's shots move and hit, all in id order (projectiles.ts, shots.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
@@ -135,6 +138,7 @@ export function createSimulation(
     if (ctx.player.life > 0) {
       runEmitters(ctx);
       runTickHooks(ctx);
+      if (ctx.sys.drones.count !== 0) stepDrones(ctx);
       moveProjectiles(ctx);
       stepSegments(ctx);
       stepZones(ctx);

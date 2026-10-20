@@ -144,6 +144,44 @@ export interface SegmentViewState {
   readonly lines: readonly SegmentLinesState[];
 }
 
+/** DroneViewState.kind: a drone, or a turret (a slot that stays in its seat; C5.4). */
+export const DRONE_KIND_DRONE = 0;
+export const DRONE_KIND_TURRET = 1;
+/**
+ * DroneViewState.mode: a drone docked at its dock, dashing at its target, hovering where it lost
+ * its target until it may pick again, or flying home to dock; a turret fixed in its seat.
+ */
+export const DRONE_DOCKED = 0;
+export const DRONE_DASH = 1;
+export const DRONE_HOVER = 2;
+export const DRONE_RETURN = 3;
+export const DRONE_FIXED = 4;
+
+/**
+ * The drone pool (src/sim/systems/drones.ts) as render and tools read it: the summons of every
+ * drone emitter, placed once for the run, in typed arrays. Slots 0 .. SimState.droneCount − 1
+ * hold them in id order.
+ */
+export interface DroneViewState {
+  /** Its entity id, 1 up in slot order: the order the stage steps them in. */
+  readonly id: Int32Array;
+  /** DRONE_KIND_*. */
+  readonly kind: Uint8Array;
+  /** DRONE_DOCKED and the other modes. */
+  readonly mode: Uint8Array;
+  readonly x: Float64Array;
+  readonly y: Float64Array;
+  /** Its position at the previous tick, for render interpolation and heading. */
+  readonly prevX: Float64Array;
+  readonly prevY: Float64Array;
+  /** The id of the enemy it dashes at, or that its sortie ended on while it flies home; −1 none. */
+  readonly targetId: Int32Array;
+  /** Its emitter's index in CompiledBuild.emitters. */
+  readonly owner: Int16Array;
+  /** Its dock index k of its emitter's drones. */
+  readonly seat: Int16Array;
+}
+
 export interface PlayerState {
   readonly x: number;
   readonly y: number;
@@ -174,6 +212,9 @@ export interface SimState {
   zoneCount: number;
   /** The segments' links of their last judgements. */
   readonly segments: SegmentViewState;
+  /** The drones; the first droneCount slots hold them, docked from tick 0. */
+  readonly drones: DroneViewState;
+  droneCount: number;
   /** Currencies collected so far this run (before skip compensation, which meta adds). */
   shards: Num;
   cores: number;
@@ -349,6 +390,20 @@ export type SimEvent =
    * coil.
    */
   | { readonly type: 'discharge'; readonly coil: number; readonly targetId: number }
+  /**
+   * Drone `droneId` (DroneViewState.id) impacted enemy `targetId` at (x, y), its center, after
+   * its hits: `count` enemies were alive within `radius` of the point as it struck, the target
+   * among them, and each that was still alive took one hit.
+   */
+  | {
+      readonly type: 'impact';
+      readonly droneId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly radius: number;
+      readonly targetId: number;
+      readonly count: number;
+    }
   | {
       readonly type: 'enemyKilled';
       readonly enemyId: number;
@@ -421,6 +476,8 @@ export const COUNTER_IDS = [
    * CHAIN_JUMP_EVENT_CAP times in the attack.
    */
   'centerEventsCapped',
+  /** Drones not placed because the run had placed its summon cap of them (SUMMON_CAP). */
+  'summonCapped',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

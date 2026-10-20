@@ -12,6 +12,7 @@ import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
 import {
   CHAIN_HIT_CAP,
+  DRONE_MEMORY,
   EXTRA_JUMP_CAP,
   REPEAT_CHARGE_CAP,
   SIGNATURE_ZONE_CAP,
@@ -24,7 +25,8 @@ import { MAX_SOURCES } from '../build/sources';
 import type { CompiledEffect } from '../effects/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import type { GridPoint, SpatialGrid } from '../grid';
-import type { SegmentLinesState, SegmentViewState, ZonePoolState } from '../types';
+import { DRONE_DOCKED, DRONE_FIXED, DRONE_KIND_TURRET } from '../types';
+import type { DroneViewState, SegmentLinesState, SegmentViewState, ZonePoolState } from '../types';
 import type { Enemy } from './context';
 import { createEnemyGrid } from './grid';
 
@@ -44,6 +46,8 @@ export interface SystemState {
   readonly segments: SegmentState;
   /** The general chain path's levels and the run's table without a policy (combat/policy.ts). */
   readonly chain: ChainState;
+  /** The drones and their stage's scratch (src/sim/systems/drones.ts), also SimState.drones. */
+  readonly drones: DronePool;
 }
 
 /**
@@ -485,4 +489,144 @@ export function createChainState(chainRetention: number): ChainState {
     noPolicy: compilePolicy(NO_POLICY_SPEC, chainRetention),
     far: [],
   };
+}
+
+/**
+ * The drone pool of a run as droneLayout (src/sim/emitters/drone.ts) places it, once: plain
+ * arrays, which createDronePool copies. Rows come in emitter order, each emitter's drones before
+ * its turrets (C5.4), and stop at summonCap.
+ */
+export interface DroneLayout {
+  /** Rows placed: at most summonCap. */
+  readonly rows: number;
+  /** Rows refused past summonCap (the summonCapped counter). */
+  readonly refused: number;
+  /** The cap the rows were placed under: SUMMON_CAP, or a test module's larger summonCap. */
+  readonly summonCap: number;
+  /** Per row: its kind (DRONE_KIND_*), its emitter's index and its seat (DroneViewState). */
+  readonly kind: readonly number[];
+  readonly owner: readonly number[];
+  readonly seat: readonly number[];
+  /** Per row: its dock, where it starts. */
+  readonly x: readonly number[];
+  readonly y: readonly number[];
+  /** Per row: the tick of its first pick, 1 + (10 × seat) mod PICK_TICKS, so launches stagger. */
+  readonly firstPick: readonly number[];
+  /**
+   * Per emitter index, one entry for each emitter once any of them is a drone emitter, whether
+   * or not it placed a row, and none otherwise (0 for the other kinds): a drone's step a tick
+   * (its speed over TICK_RATE), its dock time and same-enemy cooldown in ticks, all at m = 1, its
+   * impacts a sortie, its splash radius squared, and its turrets' payload (null until C5.4).
+   */
+  readonly stepBase: readonly number[];
+  readonly dockTicks: readonly number[];
+  readonly coolTicks: readonly number[];
+  readonly impacts: readonly number[];
+  readonly splashSq: readonly number[];
+  readonly turretPayload: readonly (Payload | null)[];
+}
+
+/**
+ * The drone pool (RunContext.sys.drones), also SimState.drones: DroneLayout's rows in typed
+ * arrays, the slots 0 .. count − 1 in id order, and its per-emitter numbers. Slot s's cooldown
+ * memory is the DRONE_MEMORY entries from s × DRONE_MEMORY of memId and memUntil: an entry is
+ * live while its memUntil is above the current tick, and expired from then on.
+ */
+export interface DronePool extends DroneViewState {
+  /** Live slots, 0 .. count − 1, in id order. */
+  count: number;
+  /** The slots its arrays hold: DroneLayout.rows (0 in a run without drones). */
+  readonly rows: number;
+  /** The id the next slot would take. */
+  nextId: number;
+  /** Each slot's dock, or a turret's seat. */
+  readonly dockX: Float64Array;
+  readonly dockY: Float64Array;
+  /**
+   * The enemy each slot dashes at (every DRONE_DASH slot has one), or that its sortie ended on
+   * while it flies home; null for none.
+   */
+  readonly target: (Enemy | null)[];
+  /** The first tick each slot may pick again. */
+  readonly nextPick: Int32Array;
+  /** Impacts each slot has left on its sortie. */
+  readonly impactsLeft: Int16Array;
+  /** Dock time each slot has left, counted down by m a tick; it stays docked while above 0. */
+  readonly dockLeft: Float64Array;
+  /** A turret's ticks towards its next firing (C5.4). */
+  readonly acc: Float64Array;
+  /** The cooldown memory: the enemy ids (−1 at first) and the ticks their entries end (0). */
+  readonly memId: Int32Array;
+  readonly memUntil: Int32Array;
+  /** Per emitter index: DroneLayout's numbers. */
+  readonly stepBase: Float64Array;
+  readonly dockTicks: Float64Array;
+  readonly coolTicks: Float64Array;
+  readonly impacts: Int16Array;
+  readonly splashSq: Float64Array;
+  readonly turretPayload: (Payload | null)[];
+  /** An impact's within() output (impactAt, src/sim/systems/drones.ts). */
+  readonly splash: Enemy[];
+  /** One turret firing's targets, picked[0 .. pickedCount) (C5.4). */
+  readonly picked: Enemy[];
+  pickedCount: number;
+  /** A turret firing's later picks: shootable, and not one of the firing's targets yet (C5.4). */
+  readonly turretAccept: (enemy: Enemy) => boolean;
+}
+
+/**
+ * The pool of `layout`: every row placed, ids 1 .. rows in row order, each at its dock; drones
+ * docked with no dock time left and a full sortie, turrets fixed. `shootable` stands for
+ * RunContext.shootable, which the context is still being built for: the pool keeps it for its
+ * turrets and does not call it here.
+ */
+export function createDronePool(
+  layout: DroneLayout,
+  shootable: (enemy: Enemy) => boolean,
+): DronePool {
+  const n = layout.rows;
+  const pool: DronePool = {
+    id: Int32Array.from({ length: n }, (_, s) => s + 1),
+    kind: Uint8Array.from(layout.kind),
+    mode: Uint8Array.from(layout.kind, (k) =>
+      k === DRONE_KIND_TURRET ? DRONE_FIXED : DRONE_DOCKED,
+    ),
+    x: Float64Array.from(layout.x),
+    y: Float64Array.from(layout.y),
+    prevX: Float64Array.from(layout.x),
+    prevY: Float64Array.from(layout.y),
+    targetId: new Int32Array(n).fill(-1),
+    owner: Int16Array.from(layout.owner),
+    seat: Int16Array.from(layout.seat),
+    count: n,
+    rows: n,
+    nextId: n + 1,
+    dockX: Float64Array.from(layout.x),
+    dockY: Float64Array.from(layout.y),
+    target: new Array<Enemy | null>(n).fill(null),
+    nextPick: Int32Array.from(layout.firstPick),
+    impactsLeft: Int16Array.from(layout.owner, (i) => layout.impacts[i] as number),
+    dockLeft: new Float64Array(n),
+    acc: new Float64Array(n),
+    memId: new Int32Array(n * DRONE_MEMORY).fill(-1),
+    memUntil: new Int32Array(n * DRONE_MEMORY),
+    stepBase: Float64Array.from(layout.stepBase),
+    dockTicks: Float64Array.from(layout.dockTicks),
+    coolTicks: Float64Array.from(layout.coolTicks),
+    impacts: Int16Array.from(layout.impacts),
+    splashSq: Float64Array.from(layout.splashSq),
+    turretPayload: layout.turretPayload.slice(),
+    splash: [],
+    picked: [],
+    pickedCount: 0,
+    turretAccept: (enemy) => shootable(enemy) && !isPicked(pool, enemy),
+  };
+  return pool;
+}
+
+/** `enemy` is one of the current turret firing's targets (DronePool.picked). */
+function isPicked(pool: DronePool, enemy: Enemy): boolean {
+  const picked = pool.picked;
+  for (let k = 0; k < pool.pickedCount; k++) if (picked[k] === enemy) return true;
+  return false;
 }
