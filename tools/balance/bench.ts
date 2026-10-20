@@ -45,8 +45,11 @@
  *   M1's attack. Its report's peak shots counts them (the shot pool's), and its local report
  *   (not --check) adds the cap probe: a ring of 64 bouncing shots every 2 ticks on top, which
  *   fills the pool, and the µs per tick at its PROJECTILE_CAP shots against the scenario's own.
+ * - fan: a stress-family scenario (C4.19), 霜晶's iceFan at 7.5 rounds a second of 9 cones
+ *   (attackSpeed 12, projectileCount 6 and the fan's 3), each through two enemies, with a sixth
+ *   of the damage of the stress start wave's target (src/sim/emitters/fan.ts).
  *
- *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots]
+ *   npm run bench -- [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>]
@@ -111,6 +114,7 @@ const SCENARIO_IDS = [
   'stressM1',
   'stress',
   'shots',
+  'fan',
 ] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
@@ -523,6 +527,16 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     undefined,
     () => ({ stats: shotsStats([...SHOTS_TRIGGERS, CAP_PROBE_TRIGGER]), rules: [] }),
   ),
+  // C4.19: 霜晶's fan, 7.5 rounds a second of 9 cones.
+  fan: stressScenario(() => ({
+    stats: stressStats({
+      attackSpeed: 12,
+      projectileCount: 6,
+      damage: targetDamage(STRESS_START_WAVE) / 6,
+    }),
+    rules: [],
+    signature: { id: 'iceFan' },
+  })),
 };
 
 function positiveInt(name: string, text: string, min = 1): number {

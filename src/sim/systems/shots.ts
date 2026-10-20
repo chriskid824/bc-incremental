@@ -17,10 +17,14 @@
  * (src/sim/systems/projectiles.ts). A shot that ends keeps its slot until the end of that stage,
  * which compacts the pool in order; nothing spawns during it. A shot's hits are not an attack:
  * they carry no chain, no attack serial and no PRIMARY; a bomb's landing is one, which lob.ts
- * runs. The volley's projectiles and the pool share PROJECTILE_CAP (src/sim/caps.ts).
+ * runs, and so is a fan's round: the first hit of its cones is the round's primary hit, which
+ * begins the attack and runs its chain, and its other cone hits are plain hits
+ * (src/sim/emitters/fan.ts). The volley's projectiles and the pool share PROJECTILE_CAP
+ * (src/sim/caps.ts).
  */
 
 import { PROJECTILE_CAP, SHOT_MEMORY } from '../caps';
+import { beginAttack, chainFrom, endAttack, primaryHit } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { land } from '../emitters/lob';
 import type { EmitterRuntime, Payload } from '../emitters/types';
@@ -32,6 +36,14 @@ import type { Enemy, RunContext } from './context';
 export const MOTION_STRAIGHT = 0;
 export const MOTION_HOMING = 1;
 export const MOTION_LOB = 2;
+
+/**
+ * Fan rounds ShotPool.roundTaken tells apart: a cone's round takes slot round & ROUND_MASK, whose
+ * serial says whether that round's primary hit is taken. A power of 2, far above the rounds in
+ * flight at once.
+ */
+const ROUND_SLOTS = 256;
+const ROUND_MASK = ROUND_SLOTS - 1;
 
 /** The shot pool of a run (RunContext.shots), also SimState.shots. */
 export interface ShotPool extends ShotPoolState {
@@ -75,6 +87,14 @@ export interface ShotPool extends ShotPoolState {
    * enemies it fires at, nearest first. Only its spawn loop reads it.
    */
   readonly distinct: Enemy[];
+  /** Serial of the last fan round fired (fireRound, src/sim/emitters/fan.ts); 0 before any. */
+  roundSerial: number;
+  /**
+   * The fan rounds whose primary hit is taken: slot round & ROUND_MASK holds the serial of the
+   * last round of that slot whose cones hit, so a round whose slot holds another serial has its
+   * primary hit still to come.
+   */
+  readonly roundTaken: Int32Array;
 }
 
 /**
@@ -118,6 +138,8 @@ export function createShotPool(): ShotPool {
     payload: new Array<Payload | null>(n).fill(null),
     target: new Array<Enemy | null>(n).fill(null),
     distinct: [],
+    roundSerial: 0,
+    roundTaken: new Int32Array(ROUND_SLOTS),
   };
 }
 
@@ -306,8 +328,10 @@ function stepHoming(ctx: RunContext, s: number): void {
  * A straight shot: it expires at `until`; otherwise it sweeps the segment of this tick's move,
  * hits the enemies the segment brings within reach in the order it reaches them (pathHits),
  * moves, and ends once its pierce is spent or when it leaves the arena without a bounce left.
- * An enemy that died earlier in the step (a kill's split, say) is passed over without using
- * pierce.
+ * An enemy that died earlier in the step (a kill's split, a primary hit's chain) is passed over
+ * without using pierce. A fan's cone (round ≥ 0) whose round has no primary hit yet makes this
+ * hit the round's primary, an attack of its own with the round's chain; under 稜鏡
+ * (FanParams.prism) a cone's hits grow with the enemies it passed before.
  */
 function stepStraight(ctx: RunContext, s: number): void {
   const shots = ctx.shots;
@@ -328,15 +352,33 @@ function stepStraight(ctx: RunContext, s: number): void {
     const steady = shots.steady[s] === 1;
     const depth = shots.depth[s] as number;
     const origin = shots.origin[s] as number;
+    const round = shots.round[s] as number;
+    const fan = round >= 0 ? ctx.build.signature.fan : null;
+    const prism = fan === null ? null : fan.prism;
+    const taken = shots.roundTaken;
     const enemies = ctx.shotHits.enemies;
     for (let i = 0; i < count; i++) {
       const pierce = shots.pierce[s] as number;
       if (pierce === 0) break;
       const enemy = enemies[i] as Enemy;
       if (!enemy.alive) continue;
-      hitWithPayload(ctx, enemy, p, 0, scale, null, null, steady, depth, origin);
+      const pierced = shots.pierced[s] as number;
+      const hitScale =
+        prism === null
+          ? scale
+          : scale * Math.min(1 + prism.maxBonus, 1 + prism.perPierce * pierced);
+      if (round >= 0 && taken[round & ROUND_MASK] !== round) {
+        // The round's first cone hit: its primary, an attack of its own with the round's chain.
+        taken[round & ROUND_MASK] = round;
+        beginAttack(ctx);
+        primaryHit(ctx, p, enemy, hitScale, steady, depth, origin);
+        if (p.chains) chainFrom(ctx, p, enemy, ctx.chainCount, steady, depth, origin);
+        endAttack(ctx);
+      } else {
+        hitWithPayload(ctx, enemy, p, 0, hitScale, null, null, steady, depth, origin);
+      }
       remember(shots, s, enemy.id);
-      shots.pierced[s] = (shots.pierced[s] as number) + 1;
+      shots.pierced[s] = pierced + 1;
       if (pierce > 0) shots.pierce[s] = pierce - 1;
     }
   }

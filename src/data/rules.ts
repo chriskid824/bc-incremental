@@ -57,7 +57,19 @@ export type RuleSpec =
       readonly radius: number;
       readonly damagePct: number;
       readonly perBomb: number;
-    };
+    }
+  /**
+   * 冰柱 (iceFan): every `every`th round fires one cone of damagePct of the damage stat at its
+   * target instead of the fan. Of several instances, the smallest `every`; the first instance's
+   * damagePct.
+   */
+  | { readonly id: 'icicle'; readonly every: number; readonly damagePct: number }
+  /**
+   * 稜鏡 (iceFan): every round fires one cone at its target that passes through every enemy on
+   * its line; each enemy it passed adds perPierce to the factor of its later hits, at most
+   * maxBonus. The first instance's.
+   */
+  | { readonly id: 'prism'; readonly perPierce: number; readonly maxBonus: number };
 
 export type RuleId = RuleSpec['id'];
 
@@ -69,6 +81,8 @@ export const RULE_IDS: readonly RuleId[] = [
   'farThrow',
   'volcano',
   'chainBlast',
+  'icicle',
+  'prism',
 ];
 
 /**
@@ -82,7 +96,12 @@ export type SignatureSpec =
    * 熔核's magma bombs: lobbed at the most crowded spots, they explode where they land and each
    * leaves a fire zone (src/sim/emitters/lob.ts).
    */
-  | { readonly id: 'magmaBomb' };
+  | { readonly id: 'magmaBomb' }
+  /**
+   * 霜晶's ice-cone fan: rounds of straight cones spread over 30° about the target, each through
+   * two enemies, that chill what they hit (src/sim/emitters/fan.ts).
+   */
+  | { readonly id: 'iceFan' };
 
 export type SignatureId = SignatureSpec['id'];
 

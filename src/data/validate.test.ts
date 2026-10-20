@@ -350,6 +350,37 @@ describe('validateGameData: talents', () => {
     ).toEqual([]);
   });
 
+  it('rejects fan form parameters out of range, and takes them at their edges', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'steadyAim').rules = [
+        { id: 'icicle', every: 1, damagePct: 0 },
+        { id: 'prism', perPierce: -0.2, maxBonus: -1 },
+      ];
+    });
+    expect(issues).toEqual([
+      "talent 'steadyAim': rule 'icicle' icicle.every must be an integer >= 2 (got 1)",
+      "talent 'steadyAim': rule 'icicle' icicle.damagePct must be > 0 (got 0)",
+      "talent 'steadyAim': rule 'prism' prism.perPierce must be >= 0 (got -0.2)",
+      "talent 'steadyAim': rule 'prism' prism.maxBonus must be >= 0 (got -1)",
+    ]);
+    expect(
+      issuesAfter((d) => {
+        talent(d, 'steadyAim').rules = [{ id: 'icicle', every: 4.5, damagePct: -1 }];
+      }),
+    ).toEqual([
+      "talent 'steadyAim': rule 'icicle' icicle.every must be an integer >= 2 (got 4.5)",
+      "talent 'steadyAim': rule 'icicle' icicle.damagePct must be > 0 (got -1)",
+    ]);
+    expect(
+      issuesAfter((d) => {
+        talent(d, 'steadyAim').rules = [
+          { id: 'icicle', every: 2, damagePct: 0.01 },
+          { id: 'prism', perPierce: 0, maxBonus: 0 },
+        ];
+      }),
+    ).toEqual([]);
+  });
+
   it('rejects invalid costs', () => {
     const issues = issuesAfter((d) => {
       talent(d, 'precision').coreCost = 1.5;

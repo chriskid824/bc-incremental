@@ -213,6 +213,7 @@ describe('bench.baseline.json', () => {
       'stressM1',
       'stress',
       'shots',
+      'fan',
     ]);
   });
 });

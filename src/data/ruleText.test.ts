@@ -35,6 +35,10 @@ function quotedNumbers(rule: RuleSpec): string[][] {
       return [[String(rule.periodSec)], [`×${rule.radiusMult}`], [`×${rule.damageMult}`]];
     case 'chainBlast':
       return [[percent(rule.damagePct)], [String(rule.perBomb)]];
+    case 'icicle':
+      return [[String(rule.every)], [percent(rule.damagePct)]];
+    case 'prism':
+      return [[signedPercent(rule.perPierce)], [signedPercent(rule.maxBonus)]];
   }
 }
 

@@ -6,7 +6,9 @@
 
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { eternalFlame } from './eternalFlame';
+import { icicle, prism } from './fanForms';
 import { glassCannon } from './glassCannon';
+import { iceFan } from './iceFan';
 import { chainBlast, farThrow, volcano } from './lobForms';
 import { m1Volley } from './m1Volley';
 import { magmaBomb } from './magmaBomb';
@@ -39,6 +41,8 @@ export const RULE_MODULES: {
   farThrow,
   volcano,
   chainBlast,
+  icicle,
+  prism,
 };
 
 export const SIGNATURES: {
@@ -46,4 +50,5 @@ export const SIGNATURES: {
 } = {
   m1Volley,
   magmaBomb,
+  iceFan,
 };

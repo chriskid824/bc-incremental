@@ -446,6 +446,8 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         perBomb: finite,
       })
       .readonly(),
+    z.strictObject({ id: z.literal('icicle'), every: finite, damagePct: finite }).readonly(),
+    z.strictObject({ id: z.literal('prism'), perPierce: finite, maxBonus: finite }).readonly(),
   ]),
 );
 

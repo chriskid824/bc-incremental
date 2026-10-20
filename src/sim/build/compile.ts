@@ -90,12 +90,14 @@ export interface BuildFlags {
 export interface SignatureParams {
   /** Every Nth shot, or every shot of every Nth attack (counts), crits (steadyAim); 0 when off. */
   forceCritEvery: number;
-  /** What forceCritEvery counts: shots fired (projectiles, bombs), or attacks. */
+  /** What forceCritEvery counts: shots fired (projectiles, bombs, cones), or attacks. */
   counts: 'shot' | 'attack';
   /** The run's signature attack, which the forms' compile errors name. */
   id: SignatureSpec['id'];
   /** The lob's (magmaBomb, src/sim/emitters/lob.ts); null for another signature. */
   lob: LobParams | null;
+  /** The fan's (iceFan, src/sim/emitters/fan.ts); null for another signature. */
+  fan: FanParams | null;
 }
 
 /**
@@ -121,6 +123,22 @@ export interface LobParams {
   } | null;
   /** The bombs' fire zones (火地): their slow on the enemies in them, 0 to 1. */
   zone: { slow: number };
+}
+
+/**
+ * The fan's parameters, which its signature module sets to these neutral values: no icicle
+ * rounds, no prism. The fan's forms change them (src/sim/rules/fanForms.ts).
+ */
+export interface FanParams {
+  /** Every Nth round counted fires one icicle cone instead (EmitterRuntime.alt); 0 for none. */
+  icicleEvery: number;
+  /** The icicle cone's share of the damage stat. */
+  icicleDamagePct: number;
+  /**
+   * Every round fires one cone at its target that passes through every enemy on its line, its
+   * hits scaled by min(1 + maxBonus, 1 + perPierce × the enemies it passed before); or null.
+   */
+  prism: { perPierce: number; maxBonus: number } | null;
 }
 
 export interface CompiledBuild {
@@ -262,6 +280,7 @@ export function compileBuild(
     counts: 'shot',
     id: signature.id,
     lob: null,
+    fan: null,
   };
   const hooks: { [K in HookName]: Hooks[K][] } = {
     tick: [],
@@ -419,7 +438,7 @@ export function compileBuild(
  * and with crit. They are the rows its payload's SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP and
  * SLOT_JUMP_CRIT read in a run (src/sim/emitters/types.ts); the estimates outside a run read
  * them too (the talent screen's summary, typicalHit, the balance tools): M1's hits are hit and
- * projectile, 熔核's explosions hit, area and projectile.
+ * projectile, 熔核's explosions hit, area and projectile, 霜晶's cones hit, projectile and cold.
  */
 export interface SignatureRows {
   readonly hit: number;

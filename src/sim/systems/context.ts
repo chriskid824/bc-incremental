@@ -37,6 +37,7 @@ import {
   createPayload,
   emitterInterval,
   emitterPayload,
+  iciclePayload,
   IGNORE_ARMOUR,
   IGNORE_SHIELD,
   PRESCALED,
@@ -344,9 +345,9 @@ export interface RunContext {
   readonly expectedHit: number;
   /**
    * Damage a projectile in flight is expected to deal, for targeting: the signature attack's
-   * non-crit primary hit when the signature sends shots in flight (volley, lob; shotsInFlight),
-   * ZERO otherwise. Only a volley counts its shots in Enemy.inbound, so only a volley's targeting
-   * reads it today.
+   * non-crit primary hit when the signature sends shots in flight (volley, lob, fan;
+   * shotsInFlight), ZERO otherwise. Only a volley counts its shots in Enemy.inbound, so only a
+   * volley's targeting reads it today.
    */
   readonly projectileEstimate: Num;
 
@@ -714,16 +715,19 @@ export function createRunContext(
 
   // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
   // contact stage the thorns and the segment stage the segments. A strike picks its target as a
-  // periodic trigger does, from the player.
-  const emitters = build.emitters.map((spec, index) =>
-    createEmitterRuntime(
+  // periodic trigger does, from the player; a fan's icicle cones (冰柱) take a payload of their
+  // own.
+  const emitters = build.emitters.map((spec, index) => {
+    const payload = emitterPayload(build, spec, combatRng, index === 0 ? policy : null);
+    return createEmitterRuntime(
       spec,
-      emitterPayload(build, spec, combatRng, index === 0 ? policy : null),
+      payload,
       index,
       emitterInterval(build, spec),
       spec.kind === 'strike' ? compileSelector(spec.target, 'periodic') : null,
-    ),
-  );
+      spec.kind === 'fan' ? iciclePayload(build, payload) : null,
+    );
+  });
   const thornsEmitters = emitters.filter((em) => em.spec.kind === 'thorns');
   const signatureEmitter = emitters[0] as EmitterRuntime;
   const signaturePayload = signatureEmitter.payload;

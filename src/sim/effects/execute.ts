@@ -73,6 +73,7 @@ import { REPEAT_CHARGE_CAP, SMALL_PROJECTILE_TICKS } from '../caps';
 import { beginAttack, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { chainGeneral } from '../combat/policy';
+import { fireFanRepeat } from '../emitters/fan';
 import { fireLobRepeat } from '../emitters/lob';
 import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
@@ -398,12 +399,13 @@ type RepeatStep = (
 export const REPEAT_STEPS: { readonly [K in SignatureId]: RepeatStep } = {
   m1Volley: fireVolleyRepeat,
   magmaBomb: fireLobRepeat,
+  iceFan: fireFanRepeat,
 };
 
 /**
  * Fires the repeats waiting for the signature attack's next own firing, oldest first, each with
  * its own payload, depth and origin: right after each counted attack of `em`, the signature
- * (runVolley, runLob).
+ * (runVolley, runLob, runFan).
  */
 export function drainRepeatCharges(ctx: RunContext, em: EmitterRuntime): void {
   const charges = ctx.sys.repeat.charges;

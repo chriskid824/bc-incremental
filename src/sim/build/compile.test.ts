@@ -60,6 +60,7 @@ describe('compileBuild', () => {
       counts: 'shot',
       id: 'm1Volley',
       lob: null,
+      fan: null,
     });
     expect(build.hooks).toEqual({
       tick: [],
@@ -236,7 +237,15 @@ describe('compileBuild', () => {
 
 describe('signatureRows', () => {
   const MAGMA_BOMB: SignatureSpec = { id: 'magmaBomb' };
-  const { hit: HIT, crit: CRIT, chain: CHAIN, area: AREA, projectile: PROJECTILE } = TAG;
+  const ICE_FAN: SignatureSpec = { id: 'iceFan' };
+  const {
+    hit: HIT,
+    crit: CRIT,
+    chain: CHAIN,
+    area: AREA,
+    projectile: PROJECTILE,
+    cold: COLD,
+  } = TAG;
 
   it('keys m1Volley hits hit and projectile, its jumps hit and chain, at the center', () => {
     expect(signatureRows(compileBuild(makeStats(), []))).toEqual({
@@ -256,8 +265,17 @@ describe('signatureRows', () => {
     });
   });
 
+  it('keys iceFan hits hit, projectile and cold, its jumps hit, chain and cold (F15)', () => {
+    expect(signatureRows(compileBuild(makeStats(), [], ICE_FAN))).toEqual({
+      hit: rowKey(HIT | PROJECTILE | COLD, CENTER),
+      hitCrit: rowKey(HIT | PROJECTILE | COLD | CRIT, CENTER),
+      jump: rowKey(HIT | CHAIN | COLD, CENTER),
+      jumpCrit: rowKey(HIT | CHAIN | COLD | CRIT, CENTER),
+    });
+  });
+
   it('are the rows the signature payload reads in a run', () => {
-    for (const signature of [M1_SIGNATURE, MAGMA_BOMB]) {
+    for (const signature of [M1_SIGNATURE, MAGMA_BOMB, ICE_FAN]) {
       const ctx = placedEnemies([], { signature });
       const payload = (ctx.emitters[0] as EmitterRuntime).payload;
       // The payload's rows first: a wrong key would then add a row of its own.
@@ -297,7 +315,7 @@ describe('signatureRows', () => {
           { source: 'outer.lightning', grant: { kind: 'segment', endpoints: 'shocked' } },
         ],
       });
-    for (const signature of [M1_SIGNATURE, MAGMA_BOMB]) {
+    for (const signature of [M1_SIGNATURE, MAGMA_BOMB, ICE_FAN]) {
       const alone = signatureRows(compileBuild(makeStats(), [], signature));
       for (const source of ['center', 'outer.thorns']) {
         const build = compileBuild(grants(source), [], signature);

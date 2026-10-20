@@ -454,6 +454,21 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`chainBlast.perBomb must be a positive integer (got ${rule.perBomb})`);
       }
       break;
+    case 'icicle':
+      if (!(Number.isInteger(rule.every) && rule.every >= 2)) {
+        issues.push(`icicle.every must be an integer >= 2 (got ${rule.every})`);
+      }
+      if (!(rule.damagePct > 0)) {
+        issues.push(`icicle.damagePct must be > 0 (got ${rule.damagePct})`);
+      }
+      break;
+    case 'prism':
+      // Its factor, 1 + perPierce × the enemies passed and at most 1 + maxBonus, never shrinks.
+      if (!(rule.perPierce >= 0)) {
+        issues.push(`prism.perPierce must be >= 0 (got ${rule.perPierce})`);
+      }
+      if (!(rule.maxBonus >= 0)) issues.push(`prism.maxBonus must be >= 0 (got ${rule.maxBonus})`);
+      break;
   }
   return issues;
 }
@@ -1046,6 +1061,8 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'farThrow':
     case 'volcano':
     case 'chainBlast':
+    case 'icicle':
+    case 'prism':
       return [];
   }
 }

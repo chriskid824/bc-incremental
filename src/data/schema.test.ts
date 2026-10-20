@@ -43,6 +43,8 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   farThrow: { id: 'farThrow', every: 4 },
   volcano: { id: 'volcano', periodSec: 3, radiusMult: 3, damageMult: 5 },
   chainBlast: { id: 'chainBlast', radius: 40, damagePct: 0.5, perBomb: 2 },
+  icicle: { id: 'icicle', every: 4, damagePct: 4 },
+  prism: { id: 'prism', perPierce: 0.2, maxBonus: 2 },
 };
 
 describe('ModifierSchema', () => {
@@ -742,6 +744,14 @@ describe('RuleSpecSchema', () => {
       'a lob form with its compiled fields',
       { id: 'chainBlast', radius: 40, damagePct: 0.5, perBomb: 2, trigger: 1, effect: 0 },
     ],
+    ['a fan form missing a parameter', { id: 'icicle', every: 4 }],
+    ['a fan form with the params names', { id: 'icicle', icicleEvery: 4, icicleDamagePct: 4 }],
+    [
+      'a fan form with a parameter of another',
+      { id: 'prism', perPierce: 0.2, maxBonus: 2, every: 4 },
+    ],
+    ['a fan form parameter that is not a number', { id: 'prism', perPierce: '0.2', maxBonus: 2 }],
+    ['a fan form with an unknown key', { id: 'icicle', every: 4, damagePct: 4, perPierce: 0.2 }],
     ['a non-numeric parameter', { id: 'eternalFlame', durationMore: '-0.5' }],
     [
       'an undefined optional parameter',

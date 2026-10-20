@@ -4,10 +4,10 @@
  * a Payload, the compiled form of its damage: base damage, tags, credit sources, RNG stream,
  * flags and the ModTable rows of its hits and ailments, cached by slot. The signature attack is
  * the emitter at index 0 (CompiledBuild.emitters); M1's is the volley (volley.ts), 熔核's the lob
- * (lob.ts). The talent nodes' emitter grants (src/data/emitters.ts) follow it, such as thorns,
- * whose hits the contact stage deals (src/sim/systems/contact.ts), segments, whose judgements
- * the segment stage makes (src/sim/systems/segments.ts), and strikes, which the emitter stage
- * fires after the signature (strike.ts).
+ * (lob.ts), 霜晶's the fan (fan.ts). The talent nodes' emitter grants (src/data/emitters.ts)
+ * follow it, such as thorns, whose hits the contact stage deals (src/sim/systems/contact.ts),
+ * segments, whose judgements the segment stage makes (src/sim/systems/segments.ts), and strikes,
+ * which the emitter stage fires after the signature (strike.ts).
  */
 
 import type { Num } from '../../core/num';
@@ -67,6 +67,23 @@ export interface LobSpec extends EmitterBase {
 }
 
 /**
+ * Fires rounds of ice cones (fan.ts): projectileCount cones a round, straight shots spread evenly
+ * over spreadDeg about the round's target that fly at projectileSpeed for lifeTicks, each hitting
+ * the first pierce + 1 enemies on its line.
+ */
+export interface FanSpec extends EmitterBase {
+  readonly kind: 'fan';
+  /** Rounds a second at BASE_ATTACK_SPEED. */
+  readonly baseRate: number;
+  /** The angle a round's cones spread over, in degrees. */
+  readonly spreadDeg: number;
+  /** Enemies a cone passes through: it hits pierce + 1 of them. */
+  readonly pierce: number;
+  /** Ticks a cone flies before it ends. */
+  readonly lifeTicks: number;
+}
+
+/**
  * A thorns grant: hits each enemy that touches the player before it deals its contact damage
  * (src/sim/systems/contact.ts). It never attacks on its own.
  */
@@ -108,7 +125,7 @@ export interface StrikeSpec extends EmitterBase {
 }
 
 /** What an emitter is; `kind` says how it deals its damage. */
-export type EmitterSpec = VolleySpec | LobSpec | ThornsSpec | SegmentSpec | StrikeSpec;
+export type EmitterSpec = VolleySpec | LobSpec | FanSpec | ThornsSpec | SegmentSpec | StrikeSpec;
 
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
@@ -416,6 +433,8 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
         ? periodTicks((spec.baseRate * build.values.attackSpeed) / BASE_ATTACK_SPEED)
         : periodTicks(build.values.attackSpeed / BASE_ATTACK_SPEED / volcano.periodSec);
     }
+    case 'fan':
+      return periodTicks((spec.baseRate * build.values.attackSpeed) / BASE_ATTACK_SPEED);
     case 'thorns':
       // Its hits come with the contacts, not on a period.
       return Infinity;
@@ -427,14 +446,15 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
 }
 
 /**
- * Whether an emitter of `spec` sends its damage as shots that fly to their targets (volley, lob),
- * so the damage in flight can be counted for targeting (RunContext.projectileEstimate). Thorns,
- * segments and strikes hit where they are.
+ * Whether an emitter of `spec` sends its damage as shots that fly to their targets (volley, lob,
+ * fan), so the damage in flight can be counted for targeting (RunContext.projectileEstimate).
+ * Thorns, segments and strikes hit where they are.
  */
 export function shotsInFlight(spec: EmitterSpec): boolean {
   switch (spec.kind) {
     case 'volley':
     case 'lob':
+    case 'fan':
       return true;
     case 'thorns':
     case 'segment':
@@ -481,7 +501,15 @@ export interface EmitterRuntime {
   selector: CompiledSelector | null;
   /** A strike's area hits, its within() output, allocated once; null for the other kinds. */
   readonly targets: Enemy[] | null;
-  /** Shots fired (a volley's projectiles, a lob's bombs), for steadyAim's every-Nth shot. */
+  /**
+   * A fan's icicle payload (冰柱, FanParams.icicleEvery), which createRunContext makes; null for a
+   * fan without icicle rounds and for the other kinds.
+   */
+  alt: Payload | null;
+  /**
+   * Shots fired (a volley's projectiles, a lob's bombs, a fan's cones), for steadyAim's every-Nth
+   * shot.
+   */
   shots: number;
   /** Attacks made, for steadyAim's every-Nth attack; nthAttack triggers count in TriggerState. */
   attacks: number;
@@ -494,9 +522,9 @@ export interface EmitterRuntime {
 }
 
 /**
- * The runtime of the emitter of `spec` at `index`, with its payload, its interval and, for a
- * strike, its compiled target selector (null for the other kinds): a strike's chain payload and
- * area buffer are made here, once.
+ * The runtime of the emitter of `spec` at `index`, with its payload, its interval, for a strike
+ * its compiled target selector and for a fan its icicle payload (`alt`; both null for the other
+ * kinds): a strike's chain payload and area buffer are made here, once.
  */
 export function createEmitterRuntime(
   spec: EmitterSpec,
@@ -504,6 +532,7 @@ export function createEmitterRuntime(
   index: number,
   interval: number,
   selector: CompiledSelector | null,
+  alt: Payload | null,
 ): EmitterRuntime {
   return {
     spec,
@@ -515,6 +544,7 @@ export function createEmitterRuntime(
     chainPayload: spec.kind === 'strike' ? strikeChainPayload(payload, spec.shockStacks) : null,
     selector,
     targets: spec.kind === 'strike' ? [] : null,
+    alt,
     shots: 0,
     attacks: 0,
     volley: 0,
@@ -545,8 +575,31 @@ function strikeChainPayload(p: Payload, shockStacks: number): Payload {
 }
 
 /**
- * Counts one shot of a counted attack of `em` (a bomb; the volley counts its projectiles in
- * fireAttack itself, by the same rule) and tells whether it is steady: steadyAim's every-Nth
+ * The icicle payload of a fan of payload `p` (冰柱, FanParams.icicleEvery): p's at icicleDamagePct
+ * of the damage stat, sharing its rows and chain policy; null without icicle rounds.
+ */
+export function iciclePayload(build: CompiledBuild, p: Payload): Payload | null {
+  const fan = build.signature.fan;
+  if (fan === null || fan.icicleEvery === 0) return null;
+  return createPayload({
+    baseDamage: mul(num(build.values.damage), fan.icicleDamagePct),
+    tags: p.tags,
+    source: p.source,
+    jumpSource: p.jumpSource,
+    flags: p.flags,
+    rng: p.rng,
+    chains: p.chains,
+    rollsAilments: p.rollsAilments,
+    canCrit: p.canCrit,
+    damageMode: p.damageMode,
+    policy: p.policy,
+    rowsOf: p,
+  });
+}
+
+/**
+ * Counts one shot of a counted attack of `em` (a bomb, a cone; the volley counts its projectiles
+ * in fireAttack itself, by the same rule) and tells whether it is steady: steadyAim's every-Nth
  * shot, or every shot of a steady attack (EmitterRuntime.steadyAttack, or an onAttack hook's
  * ShotScratch.forceCrit). A shot that PROJECTILE_CAP refuses still counts.
  */

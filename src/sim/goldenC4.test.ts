@@ -1139,6 +1139,34 @@ const STRIKE_STATS = makeStats(
   },
 );
 
+/**
+ * C4.19's ice fan: 3.125 rounds a second (attack speed 5) of 5.5 cones (five, and a sixth on a
+ * drawn chance), every fourth round counted one 冰柱 cone of 400% instead, with steadyAim on
+ * every fourth cone, crits, ignites, each round's chain jump and enough frost that its hits
+ * freeze; maskProbeMods() and the projectile probe tell the cone hits (hit, projectile and cold)
+ * from their chain jumps (hit, chain and cold). C4.9's repeat triggers fire the fan's repeat
+ * rounds, now and with the next round.
+ */
+const ICE_FAN_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1,
+    frostOnHit: 0.15,
+    attackSpeed: 5,
+    projectileCount: 2.5,
+  },
+  [...maskProbeMods(), PROJECTILE_PROBE],
+  {
+    triggers: REPEAT_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1254,6 +1282,19 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'strike',
     config: { stats: STRIKE_STATS, rules: [], startWave: 12 },
     expected: ['2164cf2e374eae13', '9eee8e2dc745d1d0'],
+  },
+  {
+    name: 'iceFan',
+    config: {
+      stats: ICE_FAN_STATS,
+      rules: [
+        { id: 'icicle', every: 4, damagePct: 4 },
+        { id: 'steadyAim', everyNth: 4, critMultiplierMore: 0.5, counts: 'shot' },
+      ],
+      signature: { id: 'iceFan' },
+      startWave: 12,
+    },
+    expected: ['527efef683bfb207', '992e37c19000ccfb'],
   },
 ];
 

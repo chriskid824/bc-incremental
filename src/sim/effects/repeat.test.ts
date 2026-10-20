@@ -12,6 +12,7 @@ import type { RuleSpec } from '../../data/rules';
 import type { StatId } from '../../data/stats';
 import type { EffectSpec, TriggerSpec } from '../../data/triggers';
 import { REPEAT_CHARGE_CAP } from '../caps';
+import { fireFanRepeat } from '../emitters/fan';
 import { fireLobRepeat } from '../emitters/lob';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { fireVolleyRepeat, runVolley } from '../emitters/volley';
@@ -615,19 +616,26 @@ describe('rule 7: a repeat never repeats (K26)', () => {
 
 describe('REPEAT_STEPS (§0.7, F5-27)', () => {
   it('holds each signature’s repeat step', () => {
-    expect(REPEAT_STEPS).toEqual({ m1Volley: fireVolleyRepeat, magmaBomb: fireLobRepeat });
+    expect(REPEAT_STEPS).toEqual({
+      m1Volley: fireVolleyRepeat,
+      magmaBomb: fireLobRepeat,
+      iceFan: fireFanRepeat,
+    });
   });
 
-  it.each(['../emitters/volley', '../emitters/lob', './execute', '../systems/context'])(
-    'defines every entry when %s is imported first',
-    async (first) => {
-      vi.resetModules();
-      // A computed path: @vite-ignore keeps Vite from rewriting it into a glob.
-      await import(/* @vite-ignore */ first);
-      const { REPEAT_STEPS: steps } = await import('./execute');
-      for (const [id, step] of Object.entries(steps)) expect(step, id).toBeTypeOf('function');
-    },
-  );
+  it.each([
+    '../emitters/volley',
+    '../emitters/lob',
+    '../emitters/fan',
+    './execute',
+    '../systems/context',
+  ])('defines every entry when %s is imported first', async (first) => {
+    vi.resetModules();
+    // A computed path: @vite-ignore keeps Vite from rewriting it into a glob.
+    await import(/* @vite-ignore */ first);
+    const { REPEAT_STEPS: steps } = await import('./execute');
+    for (const [id, step] of Object.entries(steps)) expect(step, id).toBeTypeOf('function');
+  });
 
   it('runs the build’s signature step: m1Volley’s fires projectiles and throws no bomb', () => {
     const ctx = volley(THREE, {
