@@ -1,0 +1,177 @@
+{
+  "seed": 1,
+  "stats": {
+    "base": {
+      "damage": 450.22067097931824,
+      "attackSpeed": 16,
+      "projectileCount": 3,
+      "critChance": 0.25,
+      "critMultiplier": 2,
+      "igniteChance": 0.4,
+      "burnDamage": 1.5,
+      "burnDuration": 1.2,
+      "burnMaxStacks": 5,
+      "chainCount": 2,
+      "chainRetention": 0.7,
+      "chainRange": 260,
+      "maxLife": 1000000000000,
+      "projectileSpeed": 1400,
+      "shardGain": 1,
+      "coreGain": 1,
+      "critAlways": 0,
+      "igniteAlways": 0,
+      "poisonChance": 0.3,
+      "poisonDamage": 0.2,
+      "poisonDuration": 4,
+      "bleedChance": 0,
+      "bleedDamage": 0.4,
+      "bleedDuration": 4,
+      "shockChance": 0.3,
+      "shockEffect": 0.1,
+      "shockMaxStacks": 3,
+      "shockDuration": 2,
+      "poisonAlways": 0,
+      "bleedAlways": 0,
+      "shockAlways": 0,
+      "bleedStationaryMult": 1,
+      "frostOnHit": 0,
+      "frostSlowCap": 0.3,
+      "freezeDuration": 1.2,
+      "shatterDamage": 0.15,
+      "shatterRadius": 90,
+      "frozenDamageTaken": 0.3
+    },
+    "values": {
+      "damage": 450.22067097931824,
+      "attackSpeed": 16,
+      "projectileCount": 3,
+      "critChance": 0.25,
+      "critMultiplier": 2,
+      "igniteChance": 0.4,
+      "burnDamage": 1.5,
+      "burnDuration": 1.2,
+      "burnMaxStacks": 5,
+      "chainCount": 2,
+      "chainRetention": 0.7,
+      "chainRange": 260,
+      "maxLife": 1000000000000,
+      "projectileSpeed": 1400,
+      "shardGain": 1,
+      "coreGain": 1,
+      "critAlways": 0,
+      "igniteAlways": 0,
+      "poisonChance": 0.3,
+      "poisonDamage": 0.2,
+      "poisonDuration": 4,
+      "bleedChance": 0,
+      "bleedDamage": 0.4,
+      "bleedDuration": 4,
+      "shockChance": 0.3,
+      "shockEffect": 0.1,
+      "shockMaxStacks": 3,
+      "shockDuration": 2,
+      "poisonAlways": 0,
+      "bleedAlways": 0,
+      "shockAlways": 0,
+      "bleedStationaryMult": 1,
+      "frostOnHit": 0,
+      "frostSlowCap": 0.3,
+      "freezeDuration": 1.2,
+      "shatterDamage": 0.15,
+      "shatterRadius": 90,
+      "frozenDamageTaken": 0.3
+    },
+    "scoped": [
+      {
+        "stat": "frostOnHit",
+        "kind": "flat",
+        "value": 0.3,
+        "scope": "center",
+        "tags": ["area"],
+        "notTags": ["trigger"]
+      },
+      {
+        "stat": "damage",
+        "kind": "increased",
+        "value": 0.2,
+        "scope": "center",
+        "when": [
+          {
+            "inZone": "fusion.fire.aura"
+          }
+        ]
+      }
+    ],
+    "triggers": [
+      {
+        "source": "fusion.fire.aura",
+        "spec": {
+          "on": "explode",
+          "do": [
+            {
+              "kind": "groundZone",
+              "radius": 80,
+              "durationSec": 2,
+              "damagePctPerSec": 0.25
+            }
+          ]
+        }
+      },
+      {
+        "source": "fusion.fire.poison",
+        "spec": {
+          "on": "explode",
+          "do": [
+            {
+              "kind": "applyAilment",
+              "ailment": "poison",
+              "stacks": 2
+            }
+          ]
+        }
+      },
+      {
+        "source": "outer.poison",
+        "spec": {
+          "on": "kill",
+          "when": [
+            {
+              "victimHas": "poison"
+            }
+          ],
+          "do": [
+            {
+              "kind": "groundZone",
+              "radius": 60,
+              "durationSec": 2,
+              "damagePctPerSec": 0,
+              "ailment": "poison",
+              "ailmentStacks": 1
+            }
+          ]
+        }
+      }
+    ],
+    "conversions": [],
+    "emitters": [
+      {
+        "source": "outer.lightning",
+        "grant": {
+          "kind": "segment",
+          "endpoints": "shocked",
+          "links": 2,
+          "range": 200,
+          "damagePct": 0.1,
+          "shockStacks": 1
+        }
+      }
+    ]
+  },
+  "rules": [],
+  "signature": {
+    "id": "magmaBomb"
+  },
+  "startWave": 30,
+  "mode": "auto",
+  "maxTicks": 1800
+}

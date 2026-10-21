@@ -6,10 +6,11 @@
     "poisonBoss (500 stacks)": 0.086,
     "poisonBoss (5 stacks)": 0.086,
     "stressM1": 0.494,
-    "stress": 3.254,
+    "stress": 4.26,
     "shots": 1.215,
     "fan": 1.405,
     "arc": 0.77,
-    "hive": 2.121
+    "hive": 2.121,
+    "stressBase": 3.174
   }
 }

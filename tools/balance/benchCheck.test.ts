@@ -216,6 +216,7 @@ describe('bench.baseline.json', () => {
       'fan',
       'arc',
       'hive',
+      'stressBase',
     ]);
   });
 });

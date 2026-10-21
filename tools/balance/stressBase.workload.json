@@ -1,0 +1,39 @@
+{
+  "averageAlive": 280.894,
+  "peakAlive": 359,
+  "peakShots": 6,
+  "kills": 449,
+  "zonesBySource": [
+    ["signature", 354],
+    ["fusion.fire.aura", 354],
+    ["outer.poison", 432]
+  ],
+  "zones": 1140,
+  "pulses": 3379,
+  "zoneHits": 27579,
+  "peakPulseHits": 40,
+  "averageEffectZones": 30.958,
+  "averageSignatureZones": 16,
+  "bombs": 360,
+  "firings": 180,
+  "explosions": 354,
+  "explosionHits": 2641,
+  "freezes": 231,
+  "ignites": 10637,
+  "seconds": 30,
+  "counters": [
+    ["effectsRun", 2175],
+    ["effectQueuePeak", 13],
+    ["chainHitsPeak", 3],
+    ["zonesEvicted", 1075]
+  ],
+  "segments": {
+    "averageShocked": 66.21466666666667,
+    "judgements": 119,
+    "linked": 118,
+    "endpoints": 6757,
+    "links": 8567,
+    "hits": 6925,
+    "peakEndpoints": 99
+  }
+}
