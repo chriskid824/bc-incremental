@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { BATCH_COUNTS, DEMO_SCOPE_A, DEMO_SCOPE_B, FULL_SCOPE } from './scope';
+import { CHARACTER_IDS, OUTER_IDS } from '../sources';
+import {
+  BATCH_COUNTS,
+  BATCH_PLANS,
+  batchOf,
+  DEMO_SCOPE_A,
+  DEMO_SCOPE_B,
+  FULL_SCOPE,
+  SCOPES,
+} from './scope';
+import type { Batch, BatchBlocks } from './scope';
 import { WebScopeSchema } from './schema';
+import { fixtureContent } from './testing';
 import type { WebScope } from './types';
+
+const BATCHES: readonly Batch[] = ['B1', 'B2', 'B3', 'B4', 'B5'];
 
 /**
  * gd §2.1's counts for a scope of whole blocks: each character sees its center, the hub, the
@@ -76,5 +89,88 @@ describe('BATCH_COUNTS (impl:281, impl:600-604)', () => {
     expect(BATCH_COUNTS.B3 - BATCH_COUNTS.B2).toBe(159);
     expect(BATCH_COUNTS.B4 - BATCH_COUNTS.B3).toBe(227);
     expect(BATCH_COUNTS.B5 - BATCH_COUNTS.B4).toBe(12);
+  });
+});
+
+describe('SCOPES and the batch plans (C6.5)', () => {
+  it('lists every scope a web is assembled in', () => {
+    expect(SCOPES).toEqual([FULL_SCOPE, DEMO_SCOPE_A, DEMO_SCOPE_B]);
+  });
+
+  it("finds each fixture variant's batch from its registered blocks", () => {
+    for (const variant of BATCHES) {
+      const content = fixtureContent(variant);
+      const registered: BatchBlocks = {
+        centers: CHARACTER_IDS.filter((c) => content.characters[c].center !== null),
+        hub: content.hub !== null,
+        outers: OUTER_IDS.filter((o) => content.outers[o] !== undefined),
+        ascendancies: CHARACTER_IDS.filter((c) => content.characters[c].ascendancies !== null),
+      };
+      expect(batchOf(registered), variant).toBe(variant);
+    }
+  });
+
+  it('finds a batch of the 10/28 fallback, in any order, and none for another set', () => {
+    expect(
+      batchOf({
+        centers: ['ice', 'fire'],
+        hub: true,
+        outers: ['fire', 'lightning', 'crit', 'poison', 'ice'],
+        ascendancies: ['ice', 'fire'],
+      }),
+    ).toBe('B2');
+    expect(
+      batchOf({
+        centers: ['fire'],
+        hub: true,
+        outers: ['summon', 'crit', 'poison', 'ice'],
+        ascendancies: [],
+      }),
+    ).toBe('B1');
+    // A batch half landed, the hub left out, or nothing registered.
+    expect(
+      batchOf({
+        centers: ['fire'],
+        hub: true,
+        outers: ['ice', 'poison', 'crit'],
+        ascendancies: [],
+      }),
+    ).toBeNull();
+    expect(
+      batchOf({
+        centers: ['fire'],
+        hub: false,
+        outers: ['ice', 'poison', 'crit', 'summon'],
+        ascendancies: [],
+      }),
+    ).toBeNull();
+    expect(batchOf({ centers: [], hub: false, outers: [], ascendancies: [] })).toBeNull();
+  });
+
+  it("counts each plan's blocks to BATCH_COUNTS by gd §2.1's formula", () => {
+    expect(BATCH_PLANS).toHaveLength(2);
+    for (const plan of BATCH_PLANS) {
+      const centers: string[] = [];
+      const outers: string[] = [];
+      let hub = false;
+      let ascendancies = 0;
+      for (const batch of BATCHES) {
+        centers.push(...plan[batch].centers);
+        outers.push(...plan[batch].outers);
+        hub ||= plan[batch].hub;
+        ascendancies += plan[batch].ascendancies.length;
+        const fusions = centers.reduce((sum, c) => sum + outers.filter((o) => o !== c).length, 0);
+        const total =
+          centers.length * 40 +
+          (hub ? 24 : 0) +
+          outers.length * 18 +
+          fusions * 5 +
+          ascendancies * 6;
+        expect(total, batch).toBe(BATCH_COUNTS[batch]);
+      }
+      expect([...centers].sort()).toEqual([...CHARACTER_IDS].sort());
+      expect([...outers].sort()).toEqual([...OUTER_IDS].sort());
+      expect(ascendancies).toBe(4);
+    }
   });
 });

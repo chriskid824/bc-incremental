@@ -1688,6 +1688,57 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('accepts a zone that does nothing else on a node whose inZone condition reads it (docs/v3 C6 F24)', () => {
+    const zone = { kind: 'groundZone', radius: 80, durationSec: 2, damagePctPerSec: 0 } as const;
+    const nothing = `${at} do[0] groundZone does nothing: give it damagePctPerSec > 0, ailment, addFrostPerSec or slow`;
+    const inZone: Modifier = {
+      stat: 'damage',
+      kind: 'increased',
+      value: 0.2,
+      when: [{ inZone: 'center' }],
+    };
+    /** The zone on 'vitality' and `mod` on talent `id`, each then with its descKey. */
+    const zoneWith = (id: string, mod: Modifier): string[] =>
+      issuesAfter((d) => {
+        const node = talent(d, 'vitality');
+        node.triggers.push({ on: 'hit', do: [zone] });
+        node.descKey = 'talent.vitality.desc';
+        talent(d, id).modifiers.push(mod as Mutable<Modifier>);
+        talent(d, id).descKey = `talent.${id}.desc`;
+      });
+    expect(triggerIssues({ on: 'hit', do: [zone] })).toEqual([nothing]);
+    // An inZone condition of the node: a modifier's, the zone's trigger's or another trigger's.
+    expect(zoneWith('vitality', inZone)).toEqual([]);
+    expect(triggerIssues({ on: 'hit', when: [{ inZone: 'center' }], do: [zone] })).toEqual([]);
+    expect(
+      triggerIssues(
+        { on: 'hit', do: [zone] },
+        { on: 'crit', when: [{ inZone: 'outer.fire' }], do: [explode] },
+      ),
+    ).toEqual([]);
+    // Another condition does not read zones, and the rule is per node.
+    expect(zoneWith('vitality', { ...inZone, when: [{ targetHas: 'burn' }] })).toEqual([nothing]);
+    expect(zoneWith('vitality2', inZone)).toEqual([nothing]);
+  });
+
+  it('still checks the ranges and terms of a zone an inZone condition on its node reads (docs/v3 C6 F24)', () => {
+    expect(
+      triggerIssues({
+        on: 'hit',
+        when: [{ inZone: 'center' }],
+        do: [
+          { kind: 'groundZone', radius: 0, durationSec: 0.2, damagePctPerSec: -1 },
+          { kind: 'groundZone', radius: 60, durationSec: 1, damagePctPerSec: 0, slow: 0.95 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] radius must be in [1, 400] (got 0)`,
+      `${at} do[0] durationSec must be >= 0.25, one pulse (got 0.2)`,
+      `${at} do[0] damagePctPerSec must be >= 0 (got -1)`,
+      `${at} do[1] slow must be in (0, 0.9] (got 0.95)`,
+    ]);
+  });
+
   it('requires damagePctPerSec on a groundZone, through the schema and without it (L1)', () => {
     const l1 = 'damagePctPerSec is required; use 0 for a zone that only applies its status terms';
     const zone = { kind: 'groundZone', radius: 60, durationSec: 1, ailment: 'poison' };
@@ -2339,5 +2390,76 @@ describe('parseGameData', () => {
 
   it('returns typed data for valid input', () => {
     expect(parseGameData(content())).toEqual(content());
+  });
+});
+
+describe('validateTalents, whole output (docs/v3 C6 design D2: the extraction moves no message)', () => {
+  it('words a planted fault set as before nodeEffectIssues was extracted', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'vitality').links.push('keenEye', 'vitality', 'nowhere', 'start');
+      delete talent(d, 'might').repeat;
+      talent(d, 'keenEye').repeat = { baseShards: 0, growth: 0.5 };
+      const glass = talent(d, 'glassCannon');
+      glass.rules.push({ id: 'glassCannon', damageMore: -2 });
+      glass.modifiers.push({
+        stat: 'damage',
+        kind: 'increased',
+        value: 0.5,
+        scaling: { per: 'lifeLostPct', every: 0 },
+      });
+      talent(d, 'sharpen').rules.push({
+        id: 'overload',
+        chainCountMultiplier: 2,
+        retentionPenalty: 0.2,
+      });
+      const aim = talent(d, 'steadyAim');
+      aim.rules = [{ id: 'steadyAim', everyNth: 0, critMultiplierMore: -2, counts: 'shot' }];
+      aim.triggers.push(
+        { on: 'kill', do: [] },
+        { on: 'hit', when: [{ killedBy: 'burn' }], do: [{ kind: 'heal', lifePct: 0.05 }] },
+      );
+      aim.conversions.push(
+        { to: 'poison', fraction: 0.6 },
+        { to: 'bleed', fraction: 0.5 },
+        { to: 'cold', fraction: 0 },
+      );
+      aim.emitters.push({ kind: 'thorns', damagePct: 0 }, { kind: 'thorns', damagePct: 2 });
+      talent(d, 'swiftness').emitters.push({ kind: 'thorns', damagePct: 1 });
+      talent(d, 'inferno').shardCostFactor = -1;
+      talent(d, 'precision').coreCost = 1.5;
+      talent(d, 'stoke').nameKey = '';
+      talent(d, 'scorch').descKey = '';
+      d.talents.push(smallNode('island', []));
+    });
+    expect(issues).toEqual([
+      "talent 'might': repeatable node needs 'repeat'",
+      "talent 'glassCannon': duplicate rule 'glassCannon'",
+      "talent 'glassCannon': rule 'glassCannon' damageMore must be > -1 (got -2)",
+      "talent 'glassCannon': modifiers[0] scaling.every must be > 0 (got 0)",
+      "talent 'swiftness': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
+      "talent 'vitality': links to 'keenEye' but 'keenEye' does not link back",
+      "talent 'vitality': links to itself",
+      "talent 'vitality': links to unknown node 'nowhere'",
+      "talent 'vitality': duplicate link to 'start'",
+      "talent 'keenEye': only repeatable nodes may have 'repeat'",
+      "talent 'keenEye': repeat.baseShards must be > 0 (got 0)",
+      "talent 'keenEye': repeat.growth must be >= 1 (got 0.5)",
+      "talent 'sharpen': only keystones and notables may have rules",
+      "talent 'sharpen': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
+      "talent 'precision': coreCost must be a non-negative integer (got 1.5)",
+      "talent 'steadyAim': rule 'steadyAim' everyNth must be a positive integer (got 0)",
+      "talent 'steadyAim': rule 'steadyAim' critMultiplierMore must be > -1 (got -2)",
+      "talent 'steadyAim': triggers[0] needs at least one effect",
+      "talent 'steadyAim': triggers[1] when[0] killedBy does not apply to 'hit' events",
+      "talent 'steadyAim': conversions[2] fraction must be > 0 (got 0)",
+      "talent 'steadyAim': conversions add up to 1.1, more than 1",
+      "talent 'steadyAim': emitters[0] damagePct must be > 0 (got 0)",
+      "talent 'inferno': shardCostFactor must be >= 0 (got -1)",
+      "talent 'stoke': empty nameKey",
+      "talent 'scorch': empty descKey",
+      "talent 'scorch': descKey describes rules, triggers, conversions, emitters and behaviour modifiers; this node has none",
+      "talents: emitter thorns '' is granted twice by source 'center' with different fields; keep it on one node",
+      "talent 'island': not reachable from the start node",
+    ]);
   });
 });

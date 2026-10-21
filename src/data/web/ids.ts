@@ -210,26 +210,37 @@ export function nodeId(board: BoardId, ...names: readonly string[]): string {
   return [board, ...names].join('.');
 }
 
-/** Levenshtein distance: the fewest insertions, deletions and substitutions from a to b. */
+/**
+ * Optimal string alignment distance: the fewest insertions, deletions, substitutions and swaps of
+ * two adjacent letters from a to b, no letter edited twice ('cirt' is 1 from 'crit').
+ */
 function editDistance(a: string, b: string): number {
+  let beforePrevious: number[] = [];
   let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i++) {
     const current = [i];
     for (let j = 1; j <= b.length; j++) {
       const substitution = (previous[j - 1] as number) + (a[i - 1] === b[j - 1] ? 0 : 1);
-      current.push(
-        Math.min((previous[j] as number) + 1, (current[j - 1] as number) + 1, substitution),
+      let distance = Math.min(
+        (previous[j] as number) + 1,
+        (current[j - 1] as number) + 1,
+        substitution,
       );
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        distance = Math.min(distance, (beforePrevious[j - 2] as number) + 1);
+      }
+      current.push(distance);
     }
+    beforePrevious = previous;
     previous = current;
   }
   return previous[b.length] as number;
 }
 
 /**
- * The candidate nearest to `name` by edit distance, when it is within `maxDistance` (the
- * messages' 「did you mean」, docs/v3 C6 design D23); the first in order on a tie; null when
- * none is that near.
+ * The candidate nearest to `name` by edit distance (a swap of two adjacent letters is one edit),
+ * when it is within `maxDistance` (the messages' 「did you mean」, docs/v3 C6 design D23); the
+ * first in order on a tie; null when none is that near.
  */
 export function nearestName(
   name: string,

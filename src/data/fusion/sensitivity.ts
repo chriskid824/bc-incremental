@@ -34,7 +34,7 @@ function chanceOf(trigger: TriggerSpec): number {
  * ailmentDamagePct counts only with its ailment: without one it scales nothing (a 0-damage zone
  * is insensitive, §4.2).
  */
-function scalesDamage(effect: EffectSpec): boolean {
+export function scalesDamage(effect: EffectSpec): boolean {
   const values = effect as unknown as Readonly<Record<string, number | undefined>>;
   const idle = (field: string): boolean =>
     effect.kind === 'groundZone' && field === 'ailmentDamagePct' && effect.ailment === undefined;

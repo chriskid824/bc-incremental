@@ -264,7 +264,7 @@ describe('nearestName', () => {
   it('finds none farther than 2, or than the bound it is given', () => {
     expect(nearestName('bxrnxx', STATS)).toBeNull();
     expect(nearestName('poison', STATS)).toBeNull();
-    expect(nearestName('cirt', STATS, 1)).toBeNull();
+    expect(nearestName('crisp', STATS, 1)).toBeNull();
     expect(nearestName('crt', STATS, 1)).toBe('crit');
     expect(nearestName('anything', [])).toBeNull();
   });
@@ -273,5 +273,16 @@ describe('nearestName', () => {
     expect(nearestName('critChancee', ['critChanc', 'critChance'])).toBe('critChance');
     expect(nearestName('cat', ['bat', 'cot', 'cut'])).toBe('bat');
     expect(nearestName('cat', ['cut', 'bat'])).toBe('cut');
+  });
+
+  it('counts a swap of two adjacent letters as one edit, and a swap of letters further apart as two', () => {
+    expect(nearestName('cirt', STATS, 1)).toBe('crit');
+    expect(nearestName('kirt', STATS)).toBe('crit');
+    // V24's example (docs/v3 C6 design §4.8): without swaps 'cirt' is 2 from 'fire', listed first.
+    expect(nearestName('cirt', OUTER_IDS)).toBe('crit');
+    expect(nearestName('ctir', STATS, 1)).toBeNull();
+    expect(nearestName('ctir', STATS)).toBe('crit');
+    expect(nearestName('cirt', ['cirk', 'crit'])).toBe('cirk');
+    expect(nearestName('cirt', ['crit', 'cirk'])).toBe('crit');
   });
 });

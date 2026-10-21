@@ -1,11 +1,13 @@
 /**
  * The M1 web and the v3 webs stay apart (docs/v3 C6 design D1). The M1 web is
  * loadGameData().talents; v3 content loads through src/data/web, which src/data/index.ts does
- * not re-export. The M1 web's consumers (its prices and stat block, the session, every balance
- * tool) import nothing under src/data/web, so they keep running on the M1 web, and nothing under
- * src/data/web imports the M1 web or its loader. The guard reads each listed module's own import
- * specifiers (direct imports, type-only and dynamic ones included), not what they load in turn:
- * tools/content, which loads v3 content for the fuzz and calibration, is not listed.
+ * not re-export. The v3 web's modules are src/data/web and the content it assembles:
+ * src/data/templates.ts, src/data/hub.ts, src/data/characters/, src/data/outer/ and
+ * src/data/fusion/. The M1 web's consumers (its prices and stat block, the session, every balance
+ * tool) import none of them, so they keep running on the M1 web, and none of them imports the M1
+ * web or its loader. The guard reads each listed module's own import specifiers (direct imports,
+ * type-only and dynamic ones included), not what they load in turn: tools/content, which loads v3
+ * content for the snapshots, the fuzz and calibration, is not listed.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -17,6 +19,10 @@ import { TALENTS } from '../talents';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const WEB = 'src/data/web';
+
+/** The v3 web's directories and files, src/data/web's content blocks among them (C6.5). */
+const V3_DIRS = [WEB, 'src/data/characters', 'src/data/outer', 'src/data/fusion'];
+const V3_FILES = ['src/data/templates', 'src/data/hub'];
 
 /** The M1 web's consumers D1 names, and src/data/index.ts, which loads the M1 web. */
 const M1_MODULES = [
@@ -82,7 +88,8 @@ function importsOf(file: string, matches: (path: string) => boolean): string[] {
   });
 }
 
-const inWeb = (path: string): boolean => path === WEB || path.startsWith(`${WEB}/`);
+const inWeb = (path: string): boolean =>
+  V3_FILES.includes(path) || V3_DIRS.some((dir) => path === dir || path.startsWith(`${dir}/`));
 const isM1Web = (path: string): boolean => M1_WEB.includes(path);
 
 /**
@@ -95,7 +102,10 @@ const READS_TALENTS =
 
 describe('web isolation (D1)', () => {
   const balanceTools = filesUnder('tools/balance', /\.(ts|mjs)$/);
-  const webModules = filesUnder(WEB, /\.ts$/).filter((path) => !path.endsWith('.test.ts'));
+  const webModules = [
+    ...V3_DIRS.flatMap((dir) => filesUnder(dir, /\.ts$/)),
+    ...V3_FILES.map((file) => `${file}.ts`),
+  ].filter((path) => !path.endsWith('.test.ts'));
   const simModules = filesUnder('src/sim', /\.ts$/).filter((path) => !path.endsWith('.test.ts'));
 
   it('keeps the M1 web in loadGameData().talents', () => {
@@ -117,17 +127,27 @@ describe('web isolation (D1)', () => {
     expect(M1_MODULES).toEqual(
       expect.arrayContaining(['src/meta/talents.ts', 'src/meta/stats.ts', 'src/app/session.ts']),
     );
-    expect(webModules).toEqual(expect.arrayContaining(['src/data/web/ids.ts']));
+    expect(webModules).toEqual(
+      expect.arrayContaining([
+        'src/data/web/ids.ts',
+        'src/data/web/index.ts',
+        'src/data/templates.ts',
+        'src/data/hub.ts',
+        'src/data/characters/fire.ts',
+        'src/data/outer/index.ts',
+        'src/data/fusion/generate.ts',
+      ]),
+    );
     expect(simModules).toEqual(
       expect.arrayContaining(['src/sim/simulation.ts', 'src/sim/build/compile.ts']),
     );
   });
 
-  it.each([...M1_MODULES, ...balanceTools])('%s imports nothing under src/data/web', (file) => {
+  it.each([...M1_MODULES, ...balanceTools])('%s imports no module of the v3 web', (file) => {
     expect(importsOf(file, inWeb)).toEqual([]);
   });
 
-  it('src/data/web imports neither the M1 web nor src/data/index.ts', () => {
+  it('the v3 web imports neither the M1 web nor src/data/index.ts', () => {
     for (const file of webModules) expect(importsOf(file, isM1Web), file).toEqual([]);
   });
 
@@ -156,6 +176,14 @@ describe('web isolation (D1)', () => {
       "import k from '/src/data/web/k';",
       "import l from '../data/web/snapshots/ids.txt?raw';",
       "import { m } from '../data/webby';",
+      "import { CHARACTERS } from '../data/characters';",
+      "import { FIRE } from '../data/characters/fire';",
+      "import type { OuterDef } from '../data/outer/index.ts';",
+      "import { HUB } from '../data/hub';",
+      "import { generateFusion } from '../data/fusion/generate';",
+      "import { center } from '../data/templates.ts';",
+      "import { s } from '../data/hubby';",
+      "import { t } from '../data/templates-old';",
       "import { z } from 'zod';",
       "// import { n } from '../data/web/n';",
       "/* import { o } from '../data/web/o'; */",
@@ -184,6 +212,12 @@ describe('web isolation (D1)', () => {
         '/src/data/web/k',
         '../data/web/snapshots/ids.txt?raw',
         '../data/web/p',
+        '../data/characters',
+        '../data/characters/fire',
+        '../data/outer/index.ts',
+        '../data/hub',
+        '../data/fusion/generate',
+        '../data/templates.ts',
       ].sort(),
     );
     expect(

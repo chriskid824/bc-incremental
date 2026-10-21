@@ -232,31 +232,7 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
     if (node.kind !== 'keystone' && node.kind !== 'notable' && node.rules.length > 0) {
       issues.push(`${at}: only keystones and notables may have rules`);
     }
-    const ruleIds = new Set<string>();
-    for (const rule of node.rules) {
-      if (ruleIds.has(rule.id)) issues.push(`${at}: duplicate rule '${rule.id}'`);
-      ruleIds.add(rule.id);
-      for (const problem of ruleIssues(rule)) issues.push(`${at}: rule '${rule.id}' ${problem}`);
-    }
-    node.modifiers.forEach((mod, i) => {
-      for (const problem of modifierIssues(mod)) issues.push(`${at}: modifiers[${i}] ${problem}`);
-    });
-    node.triggers.forEach((trigger, i) => {
-      for (const problem of triggerIssues(trigger)) issues.push(`${at}: triggers[${i}] ${problem}`);
-    });
-    node.conversions.forEach((conversion, i) => {
-      for (const problem of conversionIssues(conversion)) {
-        issues.push(`${at}: conversions[${i}] ${problem}`);
-      }
-    });
-    // More than the whole hit cannot convert; the simulation scales a sum over 1 from several
-    // nodes down, but one node's sum is its own mistake. The slack lets shares that add up to
-    // 1 in decimal (0.34 + 0.56 + 0.1) pass.
-    const converted = node.conversions.reduce((sum, conversion) => sum + conversion.fraction, 0);
-    if (converted > 1 + 1e-9) issues.push(`${at}: conversions add up to ${converted}, more than 1`);
-    node.emitters.forEach((grant, i) => {
-      for (const problem of grantIssues(grant)) issues.push(`${at}: emitters[${i}] ${problem}`);
-    });
+    issues.push(...nodeEffectIssues(at, node));
 
     if (node.shardCostFactor !== undefined && !(node.shardCostFactor >= 0)) {
       issues.push(`${at}: shardCostFactor must be >= 0 (got ${node.shardCostFactor})`);
@@ -304,16 +280,84 @@ function validateTalents(talents: readonly TalentNode[]): string[] {
   return issues;
 }
 
+/** The five effect lists of a node, M1's (TalentNode) or the web's (NodeEffects). */
+export type NodeEffectLists = Pick<
+  TalentNode,
+  'modifiers' | 'triggers' | 'conversions' | 'emitters' | 'rules'
+>;
+
+/**
+ * The legality of one node's effects: its rules, modifiers, triggers, conversions and emitter
+ * grants, each issue behind `at` (validateTalents' `talent '<id>'`; the v3 web's
+ * `node '<id>' (<file>)`, docs/v3 C6 design D2). One definition of a legal trigger serves both
+ * webs.
+ */
+export function nodeEffectIssues(at: string, effects: NodeEffectLists): string[] {
+  const issues: string[] = [];
+  const ruleIds = new Set<string>();
+  for (const rule of effects.rules) {
+    if (ruleIds.has(rule.id)) issues.push(`${at}: duplicate rule '${rule.id}'`);
+    ruleIds.add(rule.id);
+    for (const problem of ruleIssues(rule)) issues.push(`${at}: rule '${rule.id}' ${problem}`);
+  }
+  effects.modifiers.forEach((mod, i) => {
+    for (const problem of modifierIssues(mod)) issues.push(`${at}: modifiers[${i}] ${problem}`);
+  });
+  const zonesRead = readsZones(effects);
+  effects.triggers.forEach((trigger, i) => {
+    for (const problem of triggerIssues(trigger, zonesRead)) {
+      issues.push(`${at}: triggers[${i}] ${problem}`);
+    }
+  });
+  effects.conversions.forEach((conversion, i) => {
+    for (const problem of conversionIssues(conversion)) {
+      issues.push(`${at}: conversions[${i}] ${problem}`);
+    }
+  });
+  // More than the whole hit cannot convert; the simulation scales a sum over 1 from several
+  // nodes down, but one node's sum is its own mistake. The slack lets shares that add up to
+  // 1 in decimal (0.34 + 0.56 + 0.1) pass.
+  const converted = effects.conversions.reduce((sum, conversion) => sum + conversion.fraction, 0);
+  if (converted > 1 + 1e-9) issues.push(`${at}: conversions add up to ${converted}, more than 1`);
+  effects.emitters.forEach((grant, i) => {
+    for (const problem of grantIssues(grant)) issues.push(`${at}: emitters[${i}] ${problem}`);
+  });
+  return issues;
+}
+
+/**
+ * Whether a node's modifiers or triggers carry an inZone condition. Each pulse of a zone whose
+ * source such a condition names marks the enemies in it, at 0 damage too
+ * (src/sim/systems/zones.ts), so a node that carries one may hold a zone with no damage and no
+ * term: the aura fusion's core, whose bonus reads its own zones (docs/v3 C6 design F24). The rule
+ * is per node, whichever source the condition names.
+ */
+function readsZones(effects: NodeEffectLists): boolean {
+  const inZone = (conditions: readonly Condition[] | undefined): boolean =>
+    conditions?.some((condition) => 'inZone' in condition) === true;
+  return (
+    effects.modifiers.some((mod) => inZone(mod.when)) ||
+    effects.triggers.some((trigger) => inZone(trigger.when))
+  );
+}
+
+/** What grantConflicts reads of a node: its id (for its source) and its emitter grants. */
+export interface GrantingNode {
+  readonly id: string;
+  readonly emitters: readonly EmitterGrant[];
+}
+
 /**
  * A build has one emitter per grant kind, source and key (grantKey): compileBuild keeps the
  * first grant. Grants of a source that share them must therefore agree field for field, or the
- * emitter a build gets would depend on which of its nodes comes first.
+ * emitter a build gets would depend on which of its nodes comes first. Each issue starts with
+ * `subject`: M1's 'talents', or the v3 web's board.
  */
-function grantConflicts(talents: readonly TalentNode[]): string[] {
+export function grantConflicts(nodes: readonly GrantingNode[], subject = 'talents'): string[] {
   const issues: string[] = [];
   const first = new Map<string, EmitterGrant>();
   const reported = new Set<string>();
-  for (const node of talents) {
+  for (const node of nodes) {
     const source = sourceOfNode(node.id);
     for (const grant of node.emitters) {
       const key = grantKey(grant);
@@ -323,7 +367,7 @@ function grantConflicts(talents: readonly TalentNode[]): string[] {
       else if (canonical(kept) !== canonical(grant) && !reported.has(id)) {
         reported.add(id);
         issues.push(
-          `talents: emitter ${grant.kind} '${key}' is granted twice by source '${source}' ` +
+          `${subject}: emitter ${grant.kind} '${key}' is granted twice by source '${source}' ` +
             'with different fields; keep it on one node',
         );
       }
@@ -706,9 +750,10 @@ function ailmentIssues(trigger: TriggerSpec): string[] {
 
 /**
  * Event, conditions and effects of one trigger: the simulation raises the event, each condition
- * fits it (CONDITION_CONTEXTS), and each effect can run there.
+ * fits it (CONDITION_CONTEXTS), and each effect can run there. `zonesRead`: its node carries an
+ * inZone condition (readsZones).
  */
-function triggerIssues(trigger: TriggerSpec): string[] {
+function triggerIssues(trigger: TriggerSpec, zonesRead: boolean): string[] {
   const issues: string[] = [];
   const on = trigger.on;
   if (!WIRED_EVENTS.has(on)) issues.push(`event '${on}' is not raised by the simulation yet`);
@@ -744,7 +789,7 @@ function triggerIssues(trigger: TriggerSpec): string[] {
   issues.push(...detonateIssues(trigger));
   const atKill = runsAtKill(trigger);
   trigger.do.forEach((effect, i) => {
-    for (const problem of effectIssues(effect, on, target, atKill)) {
+    for (const problem of effectIssues(effect, on, target, atKill, zonesRead)) {
       issues.push(`do[${i}] ${problem}`);
     }
   });
@@ -842,13 +887,15 @@ function conversionIssues(conversion: ConversionSpec): string[] {
 
 /**
  * Parameter ranges of one effect, and whether it can run on events `on` for a trigger with the
- * target selector `target`, if any, which runs at the kill when `atKill` (runsAtKill).
+ * target selector `target`, if any, which runs at the kill when `atKill` (runsAtKill), on a node
+ * that carries an inZone condition when `zonesRead` (readsZones).
  */
 function effectIssues(
   effect: EffectSpec,
   on: TriggerEventId,
   target: TargetSelector | undefined,
   atKill: boolean,
+  zonesRead: boolean,
 ): string[] {
   const issues: string[] = [];
   const positive = (name: string, value: number | undefined): void => {
@@ -973,7 +1020,7 @@ function effectIssues(
       if (!KILL_EVENTS.includes(on)) issues.push(`gainShards only runs on kill events (on ${on})`);
       break;
     case 'groundZone':
-      issues.push(...groundZoneIssues(effect));
+      issues.push(...groundZoneIssues(effect, zonesRead));
       delivery(effect.tags);
       break;
     case 'detonate':
@@ -1113,9 +1160,13 @@ const ZONE_SLOW_MAX = 0.9;
 
 /**
  * Ranges of a groundZone: a radius in [1, 400], at least one pulse (0.25 s), a hit of 0 or more,
- * ailment terms only with an ailment, a slow in (0, 0.9], and something to do.
+ * ailment terms only with an ailment, a slow in (0, 0.9], and something to do: a hit, a term, or,
+ * when `zonesRead`, the inZone mark its node's condition reads (readsZones).
  */
-function groundZoneIssues(effect: Extract<EffectSpec, { kind: 'groundZone' }>): string[] {
+function groundZoneIssues(
+  effect: Extract<EffectSpec, { kind: 'groundZone' }>,
+  zonesRead: boolean,
+): string[] {
   const issues: string[] = [];
   const { radius, durationSec, damagePctPerSec, slow } = effect;
   if (!(radius >= ZONE_RADIUS_MIN && radius <= ZONE_RADIUS_MAX)) {
@@ -1152,7 +1203,8 @@ function groundZoneIssues(effect: Extract<EffectSpec, { kind: 'groundZone' }>): 
     damagePctPerSec === 0 &&
     effect.ailment === undefined &&
     effect.addFrostPerSec === undefined &&
-    slow === undefined
+    slow === undefined &&
+    !zonesRead
   ) {
     issues.push(
       'groundZone does nothing: give it damagePctPerSec > 0, ailment, addFrostPerSec or slow',
@@ -1182,14 +1234,22 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
   }
 }
 
+/** What starArchetypeIssues reads of a node, M1's (TalentNode) or the web's (WebNode). */
+export interface StarNode {
+  readonly id: string;
+  readonly kind: string;
+  readonly modifiers: readonly Modifier[];
+  readonly rules: readonly RuleSpec[];
+}
+
 /**
  * The archetype rule of an outer board's ★ (docs/v3/game-design-v3.md §2.2): on a keystone of
  * board 'outer.<o>', every damage modifier that adds damage (value > 0), those its rules add
  * included, carries one of the board's archetype tags (ARCHETYPE_TAGS) or is scoped to
- * 'outer.<o>'. Costs (value < 0) and every other node are exempt. Content validation runs it
- * from the fusion generator step on; until then it is checked on fixtures only.
+ * 'outer.<o>'. Costs (value < 0) and every other node are exempt. Each issue starts with `at`;
+ * content validation (src/data/web/validate.ts, V7) gives its own subject and file.
  */
-export function starArchetypeIssues(node: TalentNode): string[] {
+export function starArchetypeIssues(node: StarNode, at = `talent '${node.id}'`): string[] {
   const source = sourceOfNode(node.id);
   if (node.kind !== 'keystone' || !source.startsWith('outer.')) return [];
   const board = source.slice('outer.'.length) as keyof typeof ARCHETYPE_TAGS;
@@ -1200,7 +1260,7 @@ export function starArchetypeIssues(node: TalentNode): string[] {
     .filter((mod) => mod.scope !== source && !tags.some((tag) => mod.tags?.includes(tag)))
     .map(
       (mod) =>
-        `talent '${node.id}': ★ damage modifier ${JSON.stringify(mod)} needs a tag of ` +
+        `${at}: ★ damage modifier ${JSON.stringify(mod)} needs a tag of ` +
         `${source} (${tags.join(', ') || 'none'}) or scope '${source}'`,
     );
 }
