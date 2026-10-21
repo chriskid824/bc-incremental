@@ -25,7 +25,9 @@
 src/
   core/        Num、數字格式化、seeded RNG、數學工具（純 TS）
   data/        天賦、敵人、波次、昇華的資料檔與 zod schema（純 TS）
-    web/       v3 天賦網的內容型別、zod schema 與節點 ID 文法，和 M1 天賦網分開
+    web/       v3 天賦網的內容型別、zod schema、節點 ID 文法、範圍與測試 fixture，和 M1 天賦網分開
+    characters/  v3 的四個角色，一個角色一個檔
+    outer/     v3 的外盤，一塊外盤一個檔
   sim/         一局的模擬：狀態、系統、固定 timestep（純 TS）
   meta/        局外進度：資源、天賦配點、轉生、昇華（純 TS）
   save/        存檔序列化、版本遷移（純 TS）
@@ -576,6 +578,10 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - `src/data/web/schema.ts` 的 zod schema 由 M1 的 schema 組成，全部是 strict（多一個欄位就報錯），輸出型別用 `exact` 檢查和介面相同。酬載效果（`PayloadEffectSchema`）不能寫中心事件決定的落點欄位：slashLine 的 `from`、`toward`，projectiles 的 `from`，nova 的 `at`。
 - 節點 ID（`src/data/web/ids.ts`）：中心盤 `<角色>.center.<分支>.<名稱>`、樞紐環 `hub.<群組>.<名稱>`、外盤 `outer.<外盤>.<分支>.<名稱>`、融合 `fusion.<角色>.<外盤>.<槽>`、昇華 `<角色>.asc.<slug>.<槽>`。分支外的節點放在假分支 `main`；◆ 與 ★ 用 slug（kebab-case 英文，不能是 `main`、`signature`、`threshold`、`entry`、`mastery`、`core`、`final`、`might` 或 `r<n>`、`c<n>`、`n<n>`），其他節點用固定的槽名（中心盤分支上 `r1`–`r6`、`mastery`，`main` 上 `signature`、`threshold`、`c1`–`c6`；外盤分支上 `r1`–`r4`、`mastery`，`main` 上 `entry`、`threshold`；樞紐環 `r1`–`r5`，強化∞ 是 `hub.might.might`；融合 `core`、`r1`–`r3`、`mastery`；昇華 `n1`、`n2`、`final`）。`parseNodeId` 不收的 ID 就是寫錯了；收下的 ID，`sourceOfNode` 一定等於它所在盤的來源，打錯字不會再默默算成 `center`。`nearestName` 找編輯距離 2 以內最近的名稱，給驗證訊息的「是不是要寫…」用。
 - 招牌攻擊與規則的表在 `src/data/rules.ts`：`CHARACTER_SIGNATURE`（角色 → 招牌攻擊）、`SIGNATURE_EVENT`（招牌攻擊 → 中心事件）、`SIGNATURE_FORMS`（每種招牌攻擊能接的形態規則）；`RULE_COEF_FIELDS` 列出融合係數要縮放的規則欄位，`scaleRuleSpec` 照這張表縮放一個 spec（`pct`、`mult` 乘上係數，`chance` 乘完夾到 1）；`POLICY_RULES` 是 ◆ 可以帶的連鎖政策規則。這兩張表都從空的開始，每個規則模組上線時加上自己那一筆。
+- v3 的內容檔：每個角色一個檔，放在 `src/data/characters/`，四個角色從 C6.3 起都登記在 `CHARACTERS`（`src/data/characters/index.ts`，選角畫面的「第一次玩推薦」是 `FIRST_PICK = 'fire'`），各帶 `docs/v3/game-design-v3.md` 的選角卡資料（主色、難度、構造體、推薦外盤、第 15 波揭露的外盤、敵人對照列）；`center` 與 `ascendancies` 在該批內容寫好前是 `null`，選角畫面顯示「製作中」。外盤一塊一個檔，登記在 `OUTERS`（`src/data/outer/index.ts`）；樞紐環是 `src/data/hub.ts` 的 `HUB`。兩者在 B1 前都是空的。內容檔只 import `src/data/templates.ts` 與型別。
+- `src/data/templates.ts` 是寫內容用的函式：修正（`flat`、`inc`、`more`）、節點模板（`ranked`、`rankedMods`、`notable`、`keystone`、`threshold`、`entry`、`mastery`、`might`、`signatureNode`、`ascNode`、`ascFinal`、`answers`、`fusionRank`）與建盤函式（`centerBranch`、`outerBranch`、`ascendancy`、`defineCharacter`、`defineOuter`、`defineHub`）。作者只填槽，替 ◆、★ 與分支取 slug；建盤函式照 ID 文法替每個節點命名、放進它的槽，再加上盤的固定連線：中心盤 40 個節點、45 條邊，接口 c1–c6 在 1、3、5、7、9、11 點鐘；外盤 18 個節點、20 條邊；樞紐環 24 個節點照固定表放：12 個連成一圈，每個再向內接出一個；昇華 3 個節點。作者不寫 ID、連線或座標。`defineCharacter` 從角色 ID 推出 `archetype`、`arena`、名稱與介紹的 i18n key、招牌攻擊和它的中心事件。沒寫目標的精通由建盤函式依盤補上：中心盤是 `scope 'center'`，外盤是該流派的標籤（連擊、彈幕、貪婪沒有標籤，改成 `scope 'outer.<外盤>'`），融合是 `scope 'fusion.<角色>.<外盤>'`。`rankedMods` 的發射器只在第 1 級給一次，不會每級重複。建盤函式不丟例外：槽裡放錯模板就照寫的記下來，漏寫的槽就少那個節點，都留給驗證回報。
+- 範圍（`src/data/web/scope.ts`）決定一張網顯示哪些角色與外盤：`FULL_SCOPE` 是全部已登記的內容；`DEMO_SCOPE_A` 是 Demo（熔核＋蜂巢，外盤火、冰、毒、暴擊、召喚，第 40 波上限）；`DEMO_SCOPE_B` 是 10/28 的備案（熔核＋霜晶，外盤火、冰、毒、暴擊、雷，第 40 波上限）。範圍外的外盤是鎖住的「完整版」。`BATCH_COUNTS` 是每一批做完後組起來的節點總數，含生成的融合節點：156、246、405、632、644。
+- 測試用的內容 `fixtureContent(variant?)`（`src/data/web/testing.ts`，只有測試與工具 import）用真的角色與外盤 ID 寫滿整張網的每個槽：4 × 40 個中心盤、24 個樞紐環、12 × 18 個外盤與 8 × 3 個昇華節點，共 424 個；組網時再生成 220 個融合節點，合計 644 個。它也有 12 條手工融合的覆寫與冰光、雷光 2 條規則覆寫，借用 M1 的四個規則模組（冷靜狙擊、無盡烈焰、過載、玻璃大砲），每張網的每個規則只在一塊盤上；火毒另有瘟疫爆彈的覆寫（`addTriggers` 加一個擊殺觸發），所以 32 條模板融合裡有 3 條帶覆寫。`variant` 是批次 B1–B5，只登記那一批與之前各批的內容。fixture 的數值是設計給的預設值，不是平衡過的數值。
 
 ## 7. 平台抽象層
 

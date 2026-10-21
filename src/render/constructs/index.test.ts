@@ -1,6 +1,7 @@
 import type { Container } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
-import { COLORS } from '../palette';
+import { CHARACTERS } from '../../data/characters';
+import { COLORS, CONSTRUCT_COLORS } from '../palette';
 import { CONSTRUCT_IDS, MAX_PART_OFFSET, createConstructView } from '.';
 
 /** Farthest any construct's resting silhouette (halo included) reaches from its center. */
@@ -48,5 +49,11 @@ describe.each(CONSTRUCT_IDS)('%s view', (id) => {
     construct.update(50);
     expect(construct.view.position.x).toBe(960);
     expect(construct.view.scale.x).toBe(3);
+  });
+});
+
+describe('character colours', () => {
+  it.each(Object.values(CHARACTERS))("$id's colour is its construct's main colour", (def) => {
+    expect(def.color).toBe(CONSTRUCT_COLORS[def.construct].main);
   });
 });
