@@ -307,7 +307,7 @@ C5 設計 D11。砲台是 `DRONE_KIND_TURRET`、模式 FIXED 的格，坐在砲�
 - **目標與數量**：第一個目標用 `pickTargetInGrid`（從砲座找最近值得打的，`focused` 的菁英與 Boss 優先，都沒有就最近的活敵人）。招牌砲台在擲數量之前 `countAttack`。數量照 `rollCount` 擲，但寫在迴圈裡（小數部分是多一發的機率、整數不擲，同一條 stream）：swarm 的 `offsetStat('projectileCount', -1)` 讓招牌砲台基礎是 1 發，授予的砲台在 M1 上是 2 發。
 - **之後幾發**用 `turretAccept`（`shootable` 且這次開火還沒選過），**沒有** M1 齊射讓 `focused` 敵人多吃幾發的例外：砲台的子彈不設 `volleyMark`、不加 `inbound`，所以聚焦的菁英每次開火只吃一發，除非沒有別的目標、走最近活敵人的後備。`focused` 量的是敵人到角色的距離，所以離砲台最遠約 890 的菁英也可能算聚焦。
 - **子彈**是投射物池的追蹤子彈（`spawnShot`，`MOTION_HOMING`，`owner` = 發射器編號），和 M1 齊射的投射物、其他池子彈一起受 `PROJECTILE_CAP`（512）限制。`turretFire` 事件的 `count` 是這次開火嘗試的發數，被上限拒絕的也算（`projectilesCapped` 另外記）。
-- **`turretPayload`**（`src/sim/emitters/types.ts`，在 `emitterPayload` 旁邊）：標籤 `hit|minion|projectile`；傷害比例在第 0 個發射器讀 `SwarmParams.turretDamagePct`（0.4），授予讀它自己的；連鎖策略和 `emitterPayload` 一樣只給第 0 個發射器。來源與 `rollsAilments` 跟著發射器，所以燃燒的歸屬不用另外登記。
+- **`turretPayload`**（`src/sim/emitters/types.ts`，在 `emitterPayload` 旁邊）：標籤 `hit|minion|projectile`；傷害比例在第 0 個發射器讀 `SwarmParams.turretDamagePct`（0.8），授予讀它自己的；連鎖策略和 `emitterPayload` 一樣只給第 0 個發射器。來源與 `rollsAilments` 跟著發射器，所以燃燒的歸屬不用另外登記。
 - **抵達**（`stepHoming`，`src/sim/systems/shots.ts`）：`owner ≥ 0` 且酬載帶 `SIGNATURE` 時走 `chainAttack`（主要命中加連鎖，和 M1 投射物抵達一樣）；授予的砲台與 `owner` −1 的效果子彈照舊是一般擊中。目標死了就改找子彈附近最近的敵人。
 
 #### 4.6.4 規則與 stream
@@ -345,7 +345,7 @@ C4 設計 §4.0 的規則不變，C5 加了這幾列（C5 設計 §4.0）。效�
 - **模糊測試**（`src/sim/summonFuzz.test.ts`，在 `npm run check` 裡，約 2 秒）：用專案自己的 seeded RNG 從固定 seed 抽 20 個 build（產生器 `summonFuzzBuilds` 在 `src/sim/testing.ts`，測試與工具共用）：swarm 的數量由 TestModule 設定（只有無人機、只有砲台、兩者都有）；M1 加上無人機授予（含只有砲台與 0 格的授予）；超過上限的總數；TestModule 調高或調低的 `summonCap`；塞滿 `PROJECTILE_CAP` 與 `CHAIN_HIT_CAP` 的 build；以及會走到召喚物路徑的屬性（暴擊、連鎖、投射物數、攻速 0 到 64、異常狀態機率、`droneImpact` 觸發、重複攻擊、變動的 `cadence`、連鎖策略）。每個 build 從第 1 與第 30 波各跑 600 tick、跑兩次，每個 tick 檢查：敵人的血量與位置、每一格（含砲台）的位置沒有 NaN 或 Infinity；`droneCount` 不超過這局的上限；池子彈數、以及池子彈加 M1 齊射投射物的總數都不超過 `PROJECTILE_CAP`（512）；`chainHitsPeak` 不超過 32；開局排了 min(要求的格數, 上限) 格、`summonCapped` 等於被拒絕的格數；兩次的事件與結果雜湊相同。自我測試種下 NaN、Infinity、超過上限、拋出例外與跨局殘留的狀態，同一套檢查一定要抓到，乾淨的一局一定要通過。
 - **`npx tsx tools/balance/fuzzSummons.ts --builds 100`**：同一個產生器，100 個 build × 60 秒，兩個起始波次、各跑兩次。報告印出局數、tick、實際耗時、各類失敗的次數、最大的 `droneCount` 與它的上限、`summonCapped` 總數、最多的池子彈與 `projectilesCapped`、最大的 `chainHitsPeak`，以及撞擊、砲台開火與擊殺數（證明 build 沒有閒著）；任何失敗都以非 0 結束，並寫出 build、seed 與起始波次（`summonFuzzBuilds(i + 1)[i]` 重建第 i 個 build）。
 - **bench 的 `hive` 場景**：`normal` 的 3 分鐘一局，招牌攻擊換成 swarm，由 TestModule 塞滿 24 格（20 架無人機＋4 座砲台），再加一個計算 `droneImpact` 的 `onCenterEvent` hook，讓監聽的路徑也跑。它不是壓力家族（真實遊戲資料、`normal` 的 build 與起始波次，沒有存活數區間）。`--check` 和其他場景一樣比它對 `normal` 的比值（`tools/balance/bench.baseline.json`），另外印出它的中位數對 impl §6 一局 3 分鐘模擬 50 ms 的預算與這局的召喚物工作量；超過 50 ms 只印出，不算失敗。
-- **`npx tsx tools/balance/hiveFrontier.ts`**：從 `?hive` 的預設存檔，swarm 與 M1 各跑 2 個 `balanced` 策略、10 分鐘的平衡 session，印出前線波次、到第 20／30 波的分鐘與兩邊平均前線的差距。Q5（A）的規則：swarm 的前線比 M1 低超過 5 波，就做只調 swarm 數字（撞擊比例、速度、停靠）的調整 commit（C5.R）。
+- **`npx tsx tools/balance/hiveFrontier.ts`**：從 `?hive` 的預設存檔，swarm 與 M1 各跑 2 個 `balanced` 策略、10 分鐘的平衡 session，印出前線波次、到第 20／30 波的分鐘與兩邊平均前線的差距。Q5（A）的規則：swarm 的前線比 M1 低超過 5 波，就做只調 swarm 數字（撞擊與砲台的傷害比例、速度、停靠）的調整 commit（C5.R）。
 
 ## 5. 大數字
 

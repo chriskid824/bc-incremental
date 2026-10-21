@@ -1259,7 +1259,8 @@ const DRONE_CAP_STATS = makeStats(
  * with a chain jump: three drones fly out at the farthest enemies, and each impact is a counted
  * attack and shot whose target takes the primary hit, every other enemy in its splash a hit, and
  * whose chain jumps once, all rolling on the combat stream; each impact raises droneImpact, whose
- * trigger poisons the target with two stacks. A test module sets the swarm's turrets to 0 (IS23),
+ * trigger poisons the target with two stacks. The impacts deal the swarm's share of the damage
+ * stat (re-recorded by C5.R, which tuned it). A test module sets the swarm's turrets to 0 (IS23),
  * so C5.4's turrets re-record neither entry. `swarmRepeat` adds C4.9's 回聲 (every fifth impact,
  * one repeat at half damage, now) and 多重施法 (every twelfth, two full repeats with the next
  * impact): impacts of no drone at the farthest enemy in the arena, on the effects stream, which
@@ -1306,7 +1307,8 @@ const noTurrets = (): TestModule[] => [
  * the base frequency. `turretGrant` is M1's volley with a granted {turrets: 2} on outer.summon
  * over the drones entry's base: two turrets and no drone, seated at angles 0 and π, each firing
  * M1's projectileCount of 2 shots twice a second, which land as plain hits. Both crit and ignite
- * on the combat stream.
+ * on the combat stream. `swarmTurret` was re-recorded with the swarm entry by C5.R, which tuned
+ * the turret's share as well as the impacts'.
  */
 const SWARM_TURRET_STATS = makeStats(
   { ...SWARM_VALUES, attackSpeed: 8, projectileCount: 3 },
@@ -1480,18 +1482,18 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'swarm',
     config: { stats: SWARM_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
     modules: noTurrets,
-    expected: ['813c09f02bcd8be2', 'f33d101e41a2c966'],
+    expected: ['29669ce548d99228', 'a6cee7abf0236a2a'],
   },
   {
     name: 'swarmRepeat',
     config: { stats: SWARM_REPEAT_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
     modules: noTurrets,
-    expected: ['05bb5708d3398499', '2970432e9f8b51b2'],
+    expected: ['10fc1903c337cc7d', '2b40eafc3cef9da4'],
   },
   {
     name: 'swarmTurret',
     config: { stats: SWARM_TURRET_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
-    expected: ['ce9e6701612084a1', '0f8312a9138e1a62'],
+    expected: ['0692f944079bbf18', '4a718924bc436d83'],
   },
   {
     name: 'turretGrant',
@@ -1588,6 +1590,25 @@ describe('golden C4 runs', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('fires no turret in swarm and swarmRepeat, so only the impact share moves them, and fires swarmTurret’s (IS23, C5.R)', () => {
+    const turretFires = (name: string): number => {
+      const entry = ENTRIES.find((e) => e.name === name) as GoldenC4Entry;
+      const config = makeConfig({ ...entry.config, seed: 1, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(
+        config,
+        entry.data?.() ?? makeTestData(),
+        entry.modules?.() ?? [],
+      );
+      let fires = 0;
+      while (!sim.state.finished) {
+        for (const event of sim.step(NO_INPUT)) if (event.type === 'turretFire') fires++;
+      }
+      return fires;
+    };
+    expect([turretFires('swarm'), turretFires('swarmRepeat')]).toEqual([0, 0]);
+    expect(turretFires('swarmTurret')).toBeGreaterThan(0);
   });
 
   it.each(cases)('$id', ({ entry, seed, expected }) => {

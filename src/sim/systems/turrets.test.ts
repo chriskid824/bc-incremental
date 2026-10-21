@@ -343,9 +343,9 @@ describe('turret rows and payloads (§4.1, D16)', () => {
       modules: [share],
       grants: [turretGrant(1, { turretDamagePct: 0.25 }), turretGrant(1, { name: 'b' })],
     });
-    expect(tuned.build.emitters[0]).toMatchObject({ kind: 'drone', turretDamagePct: 0.4 });
+    expect(tuned.build.emitters[0]).toMatchObject({ kind: 'drone', turretDamagePct: 0.8 });
     expect([baseOf(tuned, 0), baseOf(tuned, 1), baseOf(tuned, 2)]).toEqual([6, 2.5, 4]);
-    expect(baseOf(hive([]), 0)).toBe(4);
+    expect(baseOf(hive([]), 0)).toBe(8);
   });
 
   it('refuses the rows past the summon cap, turret rows after drone rows too, and counts them in summonCapped (D15)', () => {
@@ -1033,7 +1033,7 @@ describe('turret shots’ arrival (§4.5, stepHoming)', () => {
       hits.map((hit) => [hit.id, hit.k, hit.flags, hit.depth, hit.origin, hit.amount]),
     ).toEqual([
       [1, 0, 0, 2, 7, 4],
-      [1, 0, SIGNATURE, 2, 7, 2],
+      [1, 0, SIGNATURE, 2, 7, 4],
     ]);
     expect([ctx.attackSerial, ctx.counters.chainHitsPeak]).toEqual([serial, 0]);
   });
@@ -1147,5 +1147,28 @@ describe('turrets in a run (§5)', () => {
     // 45 firings, 42 of whose shots are seen in flight (the others arrived at once).
     expect(firings).toBeGreaterThan(40);
     expect(moved).toBeGreaterThan(35);
+  });
+});
+
+describe('the tuned turret share in hits (C5.R option (A); review 2)', () => {
+  it('lands the swarm’s turret shot at its tuned 80% of the damage stat, its crit and its chain jump on that share once', () => {
+    const round9 = (x: number): number => Math.round(x * 1e9) / 1e9;
+    const ctx = hive([fromSeat(30, 0), fromSeat(130, 0)], {
+      values: { chainCount: 1, critChance: 1, critMultiplier: 5 },
+    });
+    fire(ctx);
+    const events = fly(ctx);
+    const retention = ctx.build.values.chainRetention;
+    expect(
+      eventsOf([events], 'hit').map((hit) => [
+        hit.targetId,
+        hit.chainIndex,
+        hit.crit,
+        round9(toNumber(hit.amount)),
+      ]),
+    ).toEqual([
+      [1, 0, true, 40],
+      [2, 1, true, round9(40 * retention)],
+    ]);
   });
 });

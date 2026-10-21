@@ -25,7 +25,15 @@ import { createEffectEntry } from '../effects/queue';
 import { EVENT, SHATTER_TRIGGER } from '../effects/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import type { TestModule } from '../rules';
-import { eventsOf, makeStats, placedEnemies, rngPositions } from '../testing';
+import { createSimulation } from '../simulation';
+import {
+  eventsOf,
+  makeConfig,
+  makeStats,
+  makeTestData,
+  placedEnemies,
+  rngPositions,
+} from '../testing';
 import type { PlacedEnemy } from '../testing';
 import {
   ARENA_HEIGHT,
@@ -33,6 +41,7 @@ import {
   DRONE_DASH,
   DRONE_KIND_DRONE,
   DRONE_KIND_TURRET,
+  NO_INPUT,
 } from '../types';
 import type { SimEvent } from '../types';
 import type { Enemy, RunContext } from './context';
@@ -280,20 +289,20 @@ const F = false;
 const R = true;
 
 describe('swarm (§4.6, D17)', () => {
-  it('compiles to a drone emitter of 80% impacts, hit, minion and area, its SwarmParams the module’s, at projectileCount − 1 (F16)', () => {
+  it('compiles to a drone emitter of 200% impacts, hit, minion and area, its SwarmParams the module’s, at projectileCount − 1 (F16)', () => {
     const build = compileBuild(makeStats(), [], SWARM);
     expect(build.emitters[0]).toEqual({
       kind: 'drone',
       signature: true,
       source: 'center',
-      damagePct: 0.8,
+      damagePct: 2,
       tags: IMPACT_TAGS,
       chains: true,
       rollsAilments: true,
       canCrit: true,
       drones: 3,
       turrets: 1,
-      turretDamagePct: 0.4,
+      turretDamagePct: 0.8,
     });
     expect(build.signature.swarm).toEqual({
       drones: 3,
@@ -303,7 +312,7 @@ describe('swarm (§4.6, D17)', () => {
       cooldownSec: 0.5,
       impacts: 3,
       splash: 40,
-      turretDamagePct: 0.4,
+      turretDamagePct: 0.8,
     });
     expect([build.signature.lob, build.signature.fan, build.signature.arc]).toEqual([
       null,
@@ -400,7 +409,7 @@ describe('swarm (§4.6, D17)', () => {
     const ctx = repeating([]);
     const p = swarmOf(ctx).payload;
     expect([toNumber(p.baseDamage), p.tags, p.flags, p.rng, p.chains]).toEqual([
-      8,
+      20,
       IMPACT_TAGS,
       SIGNATURE,
       ctx.combatRng,
@@ -409,7 +418,7 @@ describe('swarm (§4.6, D17)', () => {
     expect([p.policy, p.general, p.raisesChainJump]).toEqual([null, false, false]);
     const repeat = repeatPayloadOf(ctx);
     expect([toNumber(repeat.baseDamage), repeat.flags, repeat.rng]).toEqual([
-      4,
+      10,
       SIGNATURE | REPEAT,
       ctx.effectsRng,
     ]);
@@ -424,6 +433,45 @@ describe('swarm (§4.6, D17)', () => {
       (granted.emitters[1] as EmitterRuntime).payload.policy,
       granted.sys.drones.count,
     ]).toEqual([null, 5]);
+  });
+
+  it('impacts at its tuned 200% of the damage stat and fires its turret’s shots at its tuned 80%, where a granted drone emitter keeps DRONE_DEFAULTS’ 80% and 40% (C5.R, Q5)', () => {
+    const ctx = swarms([], { grants: [GRANT()] });
+    const granted = ctx.emitters[1] as EmitterRuntime;
+    expect([swarmOf(ctx).spec.damagePct, granted.spec.damagePct]).toEqual([2, 0.8]);
+    expect([
+      toNumber(swarmOf(ctx).payload.baseDamage),
+      toNumber(granted.payload.baseDamage),
+    ]).toEqual([20, 8]);
+    // The swarm's turret share is its SwarmParams'; a grant's, DRONE_DEFAULTS' through its spec.
+    expect(ctx.build.signature.swarm).toMatchObject({ turretDamagePct: 0.8 });
+    expect(granted.spec).toMatchObject({ kind: 'drone', turretDamagePct: 0.4 });
+    const turrets = ctx.sys.drones.turretPayload;
+    expect([
+      toNumber((turrets[0] as Payload).baseDamage),
+      toNumber((turrets[1] as Payload).baseDamage),
+    ]).toEqual([8, 4]);
+  });
+
+  it('lands an impact at its tuned 200% of the damage stat on its target and every enemy in its splash, and 回聲’s repeat at half of that (C5.R, Q5)', () => {
+    const ctx = repeating(CROWD);
+    const amounts = (): number[][] =>
+      eventsOf([ctx.events], 'hit').map((hit) => [
+        hit.targetId,
+        hit.chainIndex,
+        toNumber(hit.amount),
+      ]);
+    ctx.events.length = 0;
+    impactOn(ctx, enemy(ctx, 1));
+    expect(amounts()).toEqual([
+      [1, 0, 20],
+      [2, 0, 20],
+      [3, 0, 20],
+    ]);
+    // 回聲 (50%): an impact of no drone at the outermost enemy, 4, whose splash holds no other.
+    ctx.events.length = 0;
+    runRepeatEffect(ctx);
+    expect(amounts()).toEqual([[4, 0, 10]]);
   });
 });
 
@@ -948,5 +996,75 @@ describe('swarm repeats (swarmRepeat; D13, C4D §4.15)', () => {
       swarmRepeat(ctx, swarmOf(ctx), repeatPayloadOf(ctx), 1, 9);
       expect(impacts(ctx.events).map((e) => e.targetId)).toEqual([1]);
     }
+  });
+});
+
+/** `x` rounded to 9 decimals, so products of shares and multipliers compare exactly. */
+const round9 = (x: number): number => Math.round(x * 1e9) / 1e9;
+
+describe('the tuned shares in hits (C5.R option (A); review 2)', () => {
+  it('applies the impact’s 200% once: a crit on its target, its splash victims and its chain jump at damage 10 and critMultiplier 5', () => {
+    const ctx = swarms(CROWD, { values: { critChance: 1, critMultiplier: 5, chainCount: 1 } });
+    ctx.events.length = 0;
+    impactOn(ctx, enemy(ctx, 1));
+    const retention = ctx.build.values.chainRetention;
+    expect(
+      eventsOf([ctx.events], 'hit').map((hit) => [
+        hit.targetId,
+        hit.chainIndex,
+        hit.crit,
+        round9(toNumber(hit.amount)),
+      ]),
+    ).toEqual([
+      [1, 0, true, 100],
+      [2, 0, true, 100],
+      [3, 0, true, 100],
+      [4, 1, true, round9(100 * retention)],
+    ]);
+  });
+
+  it('deals the swarm’s 200% impacts and 80% turret shots beside a granted drone emitter’s 80% and 40% in a whole run, splash victims at their impact’s amount', () => {
+    const grant: SourcedEmitter = {
+      source: 'outer.summon',
+      grant: { kind: 'drone', drones: 1, turrets: 1 },
+    };
+    const sim = createSimulation(
+      makeConfig({
+        seed: 3,
+        startWave: 5,
+        maxTicks: 1200,
+        signature: SWARM,
+        stats: makeStats({ damage: 10, critChance: 0, igniteChance: 0, maxLife: 1e12 }, [], {
+          triggers: [],
+          conversions: [],
+          emitters: [grant],
+        }),
+      }),
+      makeTestData(),
+    );
+    const seen = new Map<string, Set<number>>();
+    while (!sim.state.finished) {
+      for (const hit of eventsOf([sim.step(NO_INPUT)], 'hit')) {
+        const kind =
+          (hit.tags & TAG.area) !== 0
+            ? 'impact'
+            : (hit.tags & TAG.projectile) !== 0
+              ? 'shot'
+              : 'other';
+        const key = `${sim.state.sources[hit.source]} ${kind}`;
+        const amounts = seen.get(key) ?? new Set<number>();
+        amounts.add(toNumber(hit.amount));
+        seen.set(key, amounts);
+      }
+    }
+    const byKind = Object.fromEntries(
+      [...seen].map(([key, amounts]) => [key, [...amounts].sort((a, b) => a - b)]),
+    );
+    expect(byKind).toEqual({
+      'center impact': [20],
+      'center shot': [8],
+      'outer.summon impact': [8],
+      'outer.summon shot': [4],
+    });
   });
 });
