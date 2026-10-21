@@ -1,6 +1,6 @@
 # 架構文件
 
-> 狀態：草稿 v0.4（2026-10-20）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）。
+> 狀態：草稿 v0.5（2026-10-21）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）；v0.5 加上 C4 的引擎（§4.7），改寫 §4.3 的 tick 順序與 §12 的效能閘門。
 
 ## 1. 技術選型
 
@@ -77,9 +77,15 @@ flowchart LR
 
 ### 4.3 狀態與系統
 
-- 不用 ECS 框架。實體是物件陣列＋物件池（避免 GC 抖動）。附近目標查詢走均勻空間格（`src/sim/grid.ts`，`docs/v3/implementation-plan-v3.md` §2.3）：格子 128，場地 15 × 9 格外多一圈，更遠的夾到最外圈；每 tick 敵人移動後重建（計數排序寫進 typed array，實際排序延到當 tick 第一次查詢，沒有查詢的 tick 不花成本；敵人少於 128 隻時不排序，查詢直接線性掃描，實測比較快）。投射物選目標、連鎖、瘟疫擴散都查格子，結果和原本的線性掃描完全一樣：同距離取陣列裡較前面（ID 較小）的；同一 tick 後來才加入的敵人（分裂子怪）每次查詢另外線性掃；死掉的留在格子裡、查詢時跳過。`push` 效果推動了敵人時當場再重建一次（`src/sim/effects/execute.ts`），同一 tick 之後的查詢就在新的格子找到它們；排序一樣延到下一次查詢，所以推動之後只有第一個查詢排序，後面的查詢共用那次排序；沒有推動任何敵人的 `push` 不重建。
-- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變）：`input → spawn（含 waveStart 觸發）→ movement（冰冷減速、凍結、流血的移動計數）→ grid（重建空間格）→ contact（heroHit、contact 觸發）→ emitters（攻擊，之後是規則模組的 tick hook）→ drones（無人機與砲台，§4.6）→ projectiles（命中、連鎖、擊殺當下結算）→ segments（線段）→ zones（地面區域）→ ailments（持續傷害、ailmentTick 觸發）→ effects（到期的 periodic 觸發，再跑佇列裡的效果）→ death（派發待處理的擊殺觸發、壓縮陣列）→ waveControl → runEnd`。emitters 到 effects 只在角色活著時跑。各步驟在傷害引擎裡做什麼見 §4.4，無人機見 §4.6；之後才做的其他系統（敵人 AI）見 `docs/v3/implementation-plan-v3.md` §2.15。
-- 傷害引擎在 `src/sim/` 的子資料夾：`build/`（`compileBuild`、ModTable、來源、條件與縮放）、`rules/`（規則模組）、`emitters/`（發射器與酬載）、`combat/`（命中、連鎖、轉換）、`ailments/`（燃燒記錄、分桶環、流血、感電、冰冷）、`effects/`（觸發派發、效果佇列、中心事件）。熱路徑不配置記憶體：每筆傷害只新增一個 `SimEvent`；分桶環與效果佇列是 typed array 物件池，命中、擊殺、中心事件與條件的輸入各用一個重複使用的暫存物件。
+- 不用 ECS 框架。實體是物件陣列＋物件池（避免 GC 抖動）。附近目標查詢走均勻空間格（`src/sim/grid.ts`，`docs/v3/implementation-plan-v3.md` §2.3）：格子 128，場地 15 × 9 格外多一圈，更遠的夾到最外圈；每 tick 敵人移動後重建（計數排序寫進 typed array，實際排序延到當 tick 第一次查詢，沒有查詢的 tick 不花成本；敵人少於 128 隻時不排序，查詢直接線性掃描，實測比較快）。投射物選目標、連鎖、瘟疫擴散都查格子，結果和原本的線性掃描完全一樣：同距離取陣列裡較前面（ID 較小）的；同一 tick 後來才加入的敵人（分裂子怪）每次查詢另外線性掃；死掉的留在格子裡、查詢時跳過。`push` 效果推動了敵人時當場再重建一次（`src/sim/effects/execute.ts`），同一 tick 之後的查詢就在新的格子找到它們；排序一樣延到下一次查詢，所以推動之後只有第一個查詢排序，後面的查詢共用那次排序；沒有推動任何敵人的 `push` 不重建。這刻意和 impl §2.15 的「同一 tick 裡被熱浪推開的敵人，下一 tick 才更新格子」不同（C4 設計 D27）：格子的每個查詢都要和線性掃描的結果相同，而從 rebuild 之後的第一個查詢到下一次 rebuild，來源裡的實體不能移動（`src/sim/grid.ts` 開頭的約定）；等到下一 tick 才更新，推動之後的查詢就會在舊的格子找被推過的敵人。重建是延後的，推動之後真的有查詢才多花一次排序。
+- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變；順序在 `simulation.ts` 的 `step()`）：`input → spawn（含 waveStart 觸發）→ movement（冰冷減速、凍結、流血的移動計數、地面區域的減速）→ grid（重建空間格）→ contact（荊棘、heroHit、contact 觸發）→ emitters（招牌攻擊與授予的攻擊，之後是規則模組的 tick hook）→ drones（無人機與砲台，§4.6）→ projectiles（命中、連鎖、熔岩彈落地、擊殺當下結算）→ segments（線段）→ zones（地面區域）→ ailments（持續傷害、ailmentTick 觸發）→ effects（到期的 periodic 觸發，再跑佇列裡的效果）→ death（派發待處理的擊殺觸發、壓縮陣列）→ waveControl → runEnd`。emitters 到 effects 只在角色活著時跑。C4 加的細節：
+  - contact：處理的敵人數在進入時固定（荊棘殺死的敵人分裂出的子怪下一 tick 才碰到）。每隻依 ID 先吃每個荊棘發射器的一擊；被荊棘殺死的只派發 contact，活著的才扣生命、漏怪、發 heroHit 與 contact。最後寫這個 tick 的 `playerLifeFrac`（§4.7.8）。
+  - emitters：依 `ctx.emitters` 的編譯順序，第 0 個是招牌攻擊（volley、lob、fan 或 arc；蜂巢的 swarm 是 `drone` 種類，在 drones 階段跑），之後是授予的 strike、aura、orbit，依 `compileBuild` 去重後的順序，不依種類分組；`EMITTER_STEPS` 是 `null` 的種類（thorns、segment、drone）由自己的階段跑。招牌攻擊每次計數的攻擊之後，接著跑等它的重複攻擊（§4.7.10）。
+  - projectiles：M1 齊射的追蹤投射物與投射物池的子彈依 ID 合併成一個順序：直線子彈的碰撞（含冰錐扇一輪的主要命中與連鎖）、追蹤子彈的抵達、熔岩彈落地（擊中 → 主要命中的連鎖 → `explosion` 事件 → explode → 火地）。最後壓縮投射物池；齊射的投射物照舊到 death 才壓縮。
+  - segments 與 zones 在 projectiles 之後、ailments 之前，命中都當下結算。`src/sim/systems/segments.test.ts` 用同一個 tick 的熔岩彈落地、線段判定與區域脈衝確認事件順序是 explosion → 線段的 pulse → 區域的 pulse。
+  - 擊殺照舊當下結算（§4.4.8），步驟 2 之後多了 2b（toSplitChildren，§4.7.12）；待處理擊殺帶著 detonate 要的剩餘值（§4.7.11）。
+  - 各步驟在傷害引擎裡做什麼見 §4.4 與 §4.7，無人機見 §4.6；之後才做的其他系統（敵人 AI）見 `docs/v3/implementation-plan-v3.md` §2.15。
+- 傷害引擎在 `src/sim/` 的子資料夾：`build/`（`compileBuild`、ModTable、來源、條件與縮放、`sizeOf`／`countOf`：攻擊、子彈與區域建立的每個半徑與數量都經過它們讀，現在是恆等，倍率跟 B1 一起做，C4 設計 D29）、`rules/`（招牌攻擊與它們的形態、規則模組）、`emitters/`（發射器：`volley`、`lob`、`fan`、`arc`、`strike`、`aura`、`orbit`、`drone`；酬載與共用型別在 `types.ts`）、`combat/`（命中、線性連鎖 `chain.ts`、一般連鎖 `policy.ts`、轉換）、`ailments/`（燃燒記錄、分桶環、流血、感電、冰冷、剩餘值 `remaining.ts`）、`effects/`（觸發派發、目標選擇器 `select.ts`、效果佇列與執行、中心事件、事件旗標 `flags.ts`）、`systems/`（tick 的各階段，加上 `context.ts` 的 `RunContext`、`systemState.ts` 的 `ctx.sys`、投射物池 `shots.ts`）。直接放在 `src/sim/` 的：`caps.ts`（所有規格上限，§4.7.1）、`grid.ts`（空間格）、`targeting.ts`（投射物選目標）、`types.ts`（事件、計數器、`SimState`）、`simulation.ts`、`testing.ts`（測試與工具共用的 fixture）。熱路徑不配置記憶體：每筆傷害最多新增一個 `SimEvent`（區域、線段與光環的擊中每次脈衝合成一個 `pulse` 事件）；分桶環、效果佇列、投射物池、區域池與無人機池是 typed array 物件池，命中、擊殺、中心事件、條件與選擇器的輸入各用一個重複使用的暫存物件。
 
 ### 4.4 屬性、修正與傷害引擎
 
@@ -209,19 +215,19 @@ type Modifier = {
 `src/data/triggers.ts`（詞彙）、`src/sim/effects/`。這裡說明 impl §2.6 的安全規則 1–8 落在哪裡，以及三個刻意的例外。
 
 - `TriggerSpec = { on, every?, when?, do }`。
-  - 已接上的事件（`WIRED_EVENTS`，驗證擋掉其他的）：hit、crit、kill、diedWithAilment、nthAttack、waveStart、periodic、heroHit、contact、ailmentApplied、ailmentTick、freeze、shatter。explode 與 chainJump 在 C4，無人機的事件在 C5。
-  - 效果：`applyAilment`、`spreadAilment`、`explode`、`nova`、`push`、`addFrost`、`heal`、`gainShards`；C4 起陸續加。
+  - 已接上的事件（`WIRED_EVENTS`，驗證擋掉其他的）：hit、crit、kill、diedWithAilment、nthAttack、waveStart、periodic、heroHit、contact、ailmentApplied、ailmentTick、freeze、shatter，C4 的 explode 與 chainJump（§4.7.5），C5 的 droneImpact（§4.6）。
+  - 效果：`applyAilment`、`spreadAilment`、`explode`、`nova`、`push`、`addFrost`、`heal`、`gainShards`；C4 加了 `groundZone`、`repeatAttack`、`detonate`、`projectiles`、`slashLine`、`coinHit`、`chainBolt`（§4.7）。
   - 條件：目標帶著的狀態、種類、血量、層數、機率、冷卻、`hitIs`、`victimHas`、`killedBy`、`ailment`；每個條件能用在哪些事件由 `CONDITION_CONTEXTS` 規定。
   - 每種效果、條件值與縮放變數都和執行它的程式在同一個 commit 加入，並用 mapped type 的登錄表強制，所以資料寫不出模擬還不會跑的東西。
 - 觸發依編譯順序編號：0 是碎裂，接著是 build 的資料觸發，再來是規則模組（一個實例一個編號）。
-- **派發**（`fire`／`fireOne`）依序檢查：深度、自己的傷害（第 3 條）、招牌攻擊（第 8 條）、nthAttack 計數、冷卻、條件，最後在 `trigger` stream 擲機率。通過就把效果排進佇列，深度 +1、origin = 這個觸發。
+- **派發**（`fire`／`fireOne`）依序檢查：深度、自己的傷害（第 3 條）、招牌攻擊（第 8 條）、nthAttack 計數、冷卻、條件、chainJump 每次攻擊的上限與目標選擇器（C4，§4.7.5、§4.7.9），最後在 `trigger` stream 擲機率。通過就把效果排進佇列，深度 +1、origin = 這個觸發。
 - **第 1、4 條**（佇列與預算）：先進先出的 typed array 環。效果在 tick 的 effects 階段執行，每 tick 最多 2,000 個，剩下的照順序留到下一 tick，記在 `effectBudgetTicks`、`effectsDeferred` 與 `effectBudgetStreakMax`；執行中新排的接在尾端。
 - **第 2 條**（深度）：發射器的命中是深度 0；深度 3 以上的事件不派發觸發（記在 `triggerDepthCapped`），深度 3 的效果照樣執行。
 - **第 3 條**：觸發造成的直接傷害帶它的編號（origin），不會再觸發它自己；A→B→A 可以，到深度 3 為止。
 - **第 5 條**：觸發的機率只從 `trigger` stream 擲，效果裡的擲骰只從 `effects` 擲；同一個 tick 的待處理擊殺依（死者 ID、觸發編號）排序。
 - **第 6 條**：效果造成的傷害帶效果的深度與 origin。持續傷害的規則：每隻敵人記住施加在牠身上的所有狀態裡最小的深度（`ailDepth`，只降不升），持續傷害的事件與擊殺帶這個深度、**不帶 origin**。所以持續傷害造成的擊殺不受第 3 條限制，但受第 2 條限制。後果（設計 §12 Q2，決定保留）：焚屍爆炸點燃（助燃）的燃燒之後燒死目標，會再觸發焚屍，到深度 3 為止；爆炸本身的直接擊殺仍被第 3 條擋住（直到連環焚燒）。因此**助燃一定要掛在焚屍爆炸的同一個酬載上（同一個觸發編號）**，不能寫成另一個觸發。
-- **第 7 條**（重複攻擊不計數）：C4 的重複攻擊才用到；計數與發射已經分開（`countAttack`、`fireAttack`）。
-- **第 8 條**：中心事件（`emitCenterEvent`）只有帶 `SIGNATURE` 的才派發；凍結例外，任何冰冷都算，但深度照算。`hitIs: 'signature'` 的觸發也只吃招牌攻擊。
+- **第 7 條**（重複攻擊不計數）：計數與發射分開（`countAttack`、`fireAttack`）；重複攻擊不計數，也不會再觸發重複攻擊（§4.7.10）。
+- **第 8 條**：中心事件（`emitCenterEvent`）只有帶 `SIGNATURE`、不帶 `REPEAT` 的才派發（§4.7.5）；凍結例外，任何冰冷都算，但深度照算。`hitIs: 'signature'` 的觸發也只吃招牌攻擊。
 - **擊殺的順序**（`killEnemy`，`src/sim/systems/death.ts`）：
   1. 轉移觸發（效果全是 `spreadAilment` 的 kill／diedWithAilment 觸發，例：瘟疫）**當場**執行，然後是 `onKill` hook；死者這時還帶著所有狀態。
   2. 移除、掉落、擊殺事件、分裂子怪。
@@ -347,6 +353,205 @@ C4 設計 §4.0 的規則不變，C5 加了這幾列（C5 設計 §4.0）。效�
 - **bench 的 `hive` 場景**：`normal` 的 3 分鐘一局，招牌攻擊換成 swarm，由 TestModule 塞滿 24 格（20 架無人機＋4 座砲台），再加一個計算 `droneImpact` 的 `onCenterEvent` hook，讓監聽的路徑也跑。它不是壓力家族（真實遊戲資料、`normal` 的 build 與起始波次，沒有存活數區間）。`--check` 和其他場景一樣比它對 `normal` 的比值（`tools/balance/bench.baseline.json`），另外印出它的中位數對 impl §6 一局 3 分鐘模擬 50 ms 的預算與這局的召喚物工作量；超過 50 ms 只印出，不算失敗。
 - **bench 的 `stress` v4、`stressBase` 與 `--share`**（C5.6）：`stress` 是 v4＝v3 加上 `outer.summon` 的無人機授予，24 架無人機＋8 座砲台，由只帶 `summonCap` 的 TestModule 把上限調到 32；授予刻意不經資料驗證（驗證限每個授予 24 格，有測試確認它會被拒絕）。m = 2（Q3（A））由第 1 tick 設定 `cadence` 的 tick hook 給出；撞擊與砲台的傷害比例 d、t 調到 seed 1 的平均存活數和 v3 差在 ±3 以內。`stressBase` 是原封不動的 v3，放在自己的鍵，由 `tools/balance/` 裡兩個 JSON 快照（seed 1 的設定與工作量）釘住；`--check` 同時計時兩者時印出 `stress − stressBase`。`npm run bench -- --share` 是 STRESS 的閘門：3 個子程序依序各跑 2 輪暖身與 7 輪量測（共 21 輪），每輪 v4、`stressBase`、`normal` 各一次、順序輪換；閘門是每輪 v4 ÷ `normal` 的中位數對 Q4 的上限（`STRESS_TOTAL_LIMIT`），占比（v4 − `stressBase`）÷ `normal` 對 0.5、`stressBase` 對 C4 的 3.5 都只印出；各輪 `normal` 的中位數要 ≤ 25 ms（超過最多重跑 3 次），總和在上限 3 % 以內就再跑兩次、取三次的中位數；少於 3 個程序或 20 輪不算閘門，不會以 0 結束。它也計時只印出的 `hiveStress`（壓力場地上的 swarm 塞滿 24 格、連鎖 2、m = 2，每次撞擊留下螢火那樣 2 秒、半徑 80 的脈衝區；不在 `SCENARIO_IDS` 與 `CHECK_ENTRIES` 裡）。C5.6 之後的 C4 commit 不跑 `--share`，改用 `--check --scenario stress` 與 `--scenario stressBase` 的中位數比值設閘。
 - **`npx tsx tools/balance/hiveFrontier.ts`**：從 `?hive` 的預設存檔，swarm 與 M1 各跑 2 個 `balanced` 策略、10 分鐘的平衡 session，印出前線波次、到第 20／30 波的分鐘與兩邊平均前線的差距。Q5（A）的規則：swarm 的前線比 M1 低超過 5 波，就做只調 swarm 數字（撞擊與砲台的傷害比例、速度、停靠）的調整 commit（C5.R）。
+
+### 4.7 C4 的引擎：攻擊、投射物、區域與授予
+
+v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6、§2.8、§2.10、§2.11、§2.15 的引擎部分，C4 設計 rev 7.15 的 D1–D30）：熔核的熔岩彈、霜晶的冰錐扇、雷塔的三相雷與它們的形態，投射物池、地面區域、線段，授予的荊棘、落雷、光環與環繞，連鎖的上限與一般連鎖，中心事件的清單與 chainJump，觸發的目標選擇器，重複攻擊與引爆。C4 沒有任何 commit 改變 M1 的行為：指紋與 24 個 golden 雜湊從沒重寫，每個新機制有自己的 GOLDEN-C4 案例（§12）。無人機與砲台（C5）見 §4.6。
+
+#### 4.7.1 上限與計數器
+
+所有規格上限都在 `src/sim/caps.ts`（它不 import 任何模組，誰都能讀）。每個上限拒絕的工作記在 `RunResult.counters` 的一個計數器（`COUNTER_IDS`，`src/sim/types.ts`）：新的接在最後、索引不變。計數器不在 `projectResult` 裡，所以指紋看不到；GOLDEN-C4 只雜湊不為 0 的，所以後加的計數器不會動到之前記錄的雜湊。
+
+| 上限 | 值 | 拒絕的記在 |
+| --- | --- | --- |
+| `CHAIN_HIT_CAP` | 一次攻擊 32 下，主要命中與每一跳都算 | `chainHitCapped`（`chainHitsPeak` 記一次攻擊最多幾下） |
+| `EXTRA_JUMP_CAP` | 規則加的跳（跳電與回彈合計）一次攻擊 2 | `extraJumpsCapped`（沒擲的跳電、被拒的回彈） |
+| `CHAIN_JUMP_EVENT_CAP` | 一個 chainJump 觸發一次攻擊最多觸發 3 次 | `centerEventsCapped` |
+| `PROJECTILE_CAP` | 同時飛行 512：齊射的追蹤投射物加投射物池 | `projectilesCapped` |
+| `ZONE_CAP`、`ZONE_SOURCE_CAP`、`SIGNATURE_ZONE_CAP` | 效果區域 64（每個來源 16），另外招牌攻擊的區域 16 | `zonesEvicted` |
+| `REPEAT_CHARGE_CAP` | 等下一次攻擊的重複攻擊 8 個 | `repeatChargesDropped` |
+| `ORB_MEMORY` | 每顆環繞球記得 64 隻敵人（2 的次方，用遮罩繞回） | `orbMemoryFull` |
+| `SUMMON_CAP` | 召喚物 24（§4.6.1） | `summonCapped` |
+
+- 不拒絕任何東西的：`SHOT_MEMORY`（一發子彈記得最近打過的 16 隻）、`SMALL_PROJECTILE_TICKS`（小投射物活 120 tick）、`LIST_MAX`（中心事件的清單最多 5 隻）、`FREEZE_LIST_RADIUS`（90）、`PULSE_TICKS`（15）、`BURN_RINGS_MAX_STACKS`（5：無盡烈焰下 `stacksAtLeast 'max'` 的燃燒層數），以及 C5 的 `DRONE_MEMORY`、`PICK_TICKS`、`DRONE_COOLDOWN_MAX`。
+- 計數器現在 17 個：C4 之前的 8 個，C4 加了表裡前 7 列的計數器與 `chainHitsPeak`；其中 `orbMemoryFull`（C4.21）接在 C5 的 `summonCapped`（第 16 個）之後，是第 17 個。32 下的上限在 M1 擋不到：指紋裡一次攻擊最多 8 下，`hits` 場景與平衡探針最多 9 下。
+
+#### 4.7.2 攻擊序號與連鎖
+
+`src/sim/combat/chain.ts`、`combat/policy.ts`。
+
+- **一次攻擊**在 `beginAttack` 與 `endAttack` 之間：`beginAttack` 把 `ctx.attackSerial` 加 1，清空這次攻擊的預算 `ctx.chainBudget`（`hits`、`extraJumps`、`centerEvents`）；`endAttack` 更新 `chainHitsPeak`。被打中的敵人記下 `hitMark = attackSerial`，連鎖跳過這次攻擊打過的。一次攻擊是：齊射一發投射物的抵達、一顆熔岩彈落地、冰錐扇的一輪、三相雷的一次放電、一次落雷、一次 chainBolt、一次無人機撞擊、招牌砲台一顆子彈的抵達（§4.6.3），以及重複攻擊的每一次抵達、落地、一輪、放電或撞擊。這和 `countAttack` 計數的攻擊（onAttack hook、nthAttack、等它的重複攻擊，§4.6.4 的「一次攻擊」）不同：齊射、熔岩彈或砲台的一次發射只計數一次，每一發的抵達或落地各是一次攻擊。效果在攻擊結束後才從佇列執行，所以效果的連鎖各有自己的預算。
+- 不屬於任何攻擊的擊中（區域、光環、環繞、荊棘、線段、其他效果）也記下當下的序號。這無害：連鎖只在自己的 `beginAttack` 之後讀 `hitMark`，中間只跑它自己的擊中（觸發只排佇列）。
+- **主要命中**（`PRIMARY`，事件旗標的位元 18，`1 << 18`）只來自 `primaryHit` 或 `hitWithPayload` 的 `bits` 參數，只在招牌攻擊與它的重複攻擊上：齊射抵達的目標、熔岩彈爆炸裡離落點最近的、冰錐扇一輪的第一下、三相雷的每個目標、招牌無人機撞擊的目標、招牌砲台子彈抵達的目標（`chainAttack`）。效果、連鎖跳與授予發射器的擊中都不帶；條件 `hitIs: 'primary'` 讀它。預算裡每個主要命中算 1（六線圈的兩個目標各 1），不帶 `PRIMARY` 的落雷目標、chainBolt 的第一下與授予無人機撞擊的目標也各算 1，每一跳算 1；爆炸、冰錐、落雷與撞擊範圍的其他擊中算 0。
+- **線性路徑**（`chainFrom`）是 M1 的迴圈加上上限：跳數在酬載的 stream 擲（`rollCount`），每跳找最近、這次攻擊還沒打過的敵人；預算到 `CHAIN_HIT_CAP` 時，剩下的跳數一次記進 `chainHitCapped`。M1 的酬載都走這條。
+- **一般路徑**（`chainGeneral`）：建立酬載時就固定 `Payload.general`（有連鎖策略、`raisesChainJump` 或 `shockOnHit`）。它逐層廣度優先：每一層的敵人各跳到 `branch` 個最近的（渦流、分岔），最後一層在遠雷下改找最遠的（`farthestChainTarget`），每層乘 `ChainPolicy.scale` 那一層的比例；第一跳就找不到目標的敵人，在還有回彈時再打自己一次。每一跳在酬載的 stream 擲一次跳電，跳電在最後一層之後從最後打到的敵人接下去。跳電與回彈用 `p.extraJumpPayload`，同時算進兩個上限。沒有策略的酬載用 `ctx.sys.chain.noPolicy`，結果和線性路徑逐下相同（有差異測試）。
+- **連鎖策略**（`ChainPolicy`，`systemState.ts`）由 `createRunContext` 每局用 `compilePolicy` 編一次，只給招牌攻擊與它的重複攻擊的酬載；效果的連鎖（chainBolt、落雷）沒有策略。
+- **chainJump**：三相雷自己的酬載（`raisesChainJump`；重複攻擊的酬載沒有）的每一跳（分岔、跳電、回彈都算，主要命中不算）在 `raiseChainJump` 發出 chainJump 中心事件，值是這一跳的角度（`slashLine` 的 `toward: 'along'` 讀它），不帶清單。沒有觸發或 hook 在聽時什麼都不寫。
+
+#### 4.7.3 投射物池
+
+`src/sim/systems/shots.ts`。齊射的追蹤投射物照舊是 `ctx.projectiles` 的物件；其他投射物都在投射物池（`ctx.shots`，`ShotPool`，每局配置一次的 typed array，`SimState.shots` 共用同一份）。
+
+- 三種移動：直線（冰錐，`radial` 與 `fan` 的小投射物）、追蹤（`target` 與 `distinct` 的小投射物、砲台的子彈）、拋物（熔岩彈，在 `until` tick 落在固定點，由 `lob.ts` 的 `land` 處理）。
+- ID 和齊射的投射物共用一個計數器，projectiles 階段依 ID 把兩個清單合成一個順序（`moveProjectiles`）；池是空的時候就是 C3 的迴圈。結束的子彈留到階段結束才壓縮（`compactShots`），階段中不會產生子彈。`spawnShot` 在 `PROJECTILE_CAP` 時拒絕並記 `projectilesCapped`。
+- **直線碰撞**：每 tick 用 `grid.boxIndices` 取掃過範圍的框（加 `ctx.shotPad` 與子彈半徑）裡的敵人，再加框外的大型敵人（`grid.marked`），精確測試後依（路徑參數、ID）排序，依序打到穿透用完；最近 `SHOT_MEMORY` 個打過的直接穿過。碰到場地邊緣時還有反彈次數就反射，否則結束。`shotPad` 是資料裡非大型敵人的最大半徑，所以非大型敵人一定在框內；加一種半徑更大的非大型敵人就會打破這個保證。
+- 池子彈的擊中不是攻擊（沒有序號、連鎖與 `PRIMARY`），只有三個例外：熔岩彈落地、冰錐扇一輪的主要命中（`ShotPool.roundTaken`）、招牌砲台子彈的抵達（§4.6.3）。
+- 效果的小投射物（`projectiles`）的 `owner` 與 `round` 是 −1，不加 `Enemy.inbound`，所以 M1 分散目標的選法不受影響；追蹤的目標死了就改找最近的敵人，沒有就消失。
+
+#### 4.7.4 熔岩彈、冰錐扇、三相雷
+
+`src/sim/emitters/lob.ts`、`fan.ts`、`arc.ts`。招牌攻擊的模組（`magmaBomb`、`iceFan`、`triphaseArc`）在編譯時調屬性並填 `SignatureParams` 的 `lob`、`fan` 或 `arc`；形態（遠投、火山、連環爆、冰柱、稜鏡、六線圈；`lobForms.ts`、`fanForms.ts`、`sixCoils.ts`）是 RuleSpec，只寫它那一份參數，用在別的招牌攻擊上時丟錯。執行時讀 `ctx.build.signature.lob` 等。三種都和齊射一樣：累加器到 `em.interval` 就發射，沒有目標時停在「準備好」、不累積；每次發射（一輪、一次放電）`countAttack` 一次（onAttack hook、nthAttack），每一發過 `nextShotSteady`（steadyAim），之後立刻跑等它的重複攻擊（`drainRepeatCharges`）。
+
+- **編譯順序與射速**（C4 設計 D4、D5）：招牌攻擊模組的 `compile` 在資料的修正與觸發之後、規則模組之前跑（`compileBuild`），所以規則模組的 `scaleStat` 也會縮放它的偏移（例如熔岩彈的 `projectileCount` −1）；`m1Volley` 沒有 `compile`，M1 的屬性與觸發編號都不動。`em.interval` 由 `emitterInterval`（`emitters/types.ts`）設，是 `periodTicks(每秒次數 × attackSpeed / 4)`：基礎攻速 4 時齊射每秒 4 次（15 tick）、熔岩彈 1.5 次（40 tick）、冰錐扇 2.5 次（24 tick）、三相雷每個線圈 1 次（3 個線圈 20 tick，六線圈的 6 個 10 tick）；火山改成基礎攻速時每 `periodSec` 秒一次，攻速照比例加快。
+- **熔岩彈**（`magmaBomb` 的 `offsetStat projectileCount −1`：基礎每次 1 顆，每多 1 投射物多 1 顆）：
+  - 瞄準（`aimDense`）：第一顆瞄最密的 3 × 3 格裡、爆炸半徑內敵人最多的那隻（`grid.densest`、`blockItems`、`countWithin`；同數取來源順序在前的）；之後每顆瞄同一塊裡、離這次發射已瞄過的每隻至少 `SALVO_SEPARATION`（2）個半徑的最佳候選，沒有就取還沒被瞄過的最佳候選，都沒有就不丟。每顆都預判敵人落地時的位置。遠投每第 4 顆（`em.shots`）瞄全場最遠的（`aimFar`）；它不算「已瞄」，所以沒有夠遠的候選時密集彈可以再瞄它（Hoshi 的 Q3/F15）。瞄準不擲骰。
+  - 落地（`land`，在 projectiles 階段）是一次攻擊：爆炸半徑內的活敵人依 ID 各吃一下，離落點最近的是主要命中；然後是主要命中的連鎖（跳過爆炸打過的）、`explosion` 事件、explode 中心事件、招牌攻擊的火地（`addZone`）。火山的巨彈半徑 × `radiusMult`（瞄準、間隔與火地一起），傷害 × `damageMult` 只乘爆炸的擊中。連環爆：爆炸自己殺死的敵人（每顆最多 `perBomb` 隻）在死亡位置排一個 explode 效果（`enqueueModuleEffect`）；重複攻擊的彈不排。
+- **冰錐扇**（`iceFan`）：每輪朝齊射的選目標器找到的目標，在 `spreadDeg`（30°）內平均射出 `rollCount(projectileCount)` 道直線冰錐（基礎 2 + 3 = 5），每道穿透 1。一輪是一次攻擊：冰錐帶同一個輪序號（`ShotPool.round`），處理順序（tick、子彈 ID、路徑參數、敵人 ID）裡的第一下是主要命中，開始這次攻擊並跑這輪唯一的連鎖；其他冰錐的擊中不算預算。冰柱每第 4 輪改射一道 `em.alt` 酬載的冰錐；稜鏡每輪射一道無限穿透、每穿過一隻就加成的冰錐；兩者都不擲數量。
+- **三相雷**（`triphaseArc`）：每次放電立刻打選目標器找到的目標（不限距離），主要命中之後走一般連鎖，它的跳發出 chainJump；`discharge` 事件在每個目標的擊中之前。六線圈打兩個不同的目標（兩個都先選好再打，第二個用齊射分散投射物的選法）：兩個主要命中各算 1，然後從兩者出發的一條連鎖（跳數只擲一次），共用 `CHAIN_HIT_CAP`。
+- **和 impl §2.2／§2.10 的不同**（C4 設計 D11、F26）：impl 把扇形寫成 volley 的 `fan` 參數，這裡是自己的發射器種類 `'fan'`。它和齊射共用累加器與選目標器，但射的是投射物池的直線冰錐、有自己一輪的主要命中、帶 `em.alt`。分成另一種，`runVolley` 才能一行不改地保持 M1 的程式。
+
+#### 4.7.5 中心事件、清單與分送
+
+`src/sim/effects/centerEvents.ts`、`dispatch.ts`。四個中心事件（`CENTER_EVENTS`）：explode（每顆招牌熔岩彈落地）、freeze（任何冰冷填滿量表，§4.4.7）、chainJump（三相雷的每一跳）、droneImpact（招牌無人機的撞擊，§4.6.2）。
+
+- **第 8 條**在 `emitCenterEvent` 的第一行：除了 freeze，事件要帶 `SIGNATURE` 且不帶 `REPEAT` 才派發，所以效果的爆炸、連環爆、授予的發射器與重複攻擊都不發中心事件。沒有觸發在聽、也沒有 `onCenterEvent` hook 時立刻返回（`ctx.centerEvents` 的 `listeners`、`hooks`）。
+- **清單**（`ctx.centerScratch.list`、`listCount`，最多 `LIST_MAX`）由發出事件的程式在 `emitCenterEvent` 之前自己寫，`emitCenterEvent` 從不清它：explode 是爆炸的前 5 隻（依 ID，死的也留），每顆都寫，不管有沒有人在聽；freeze 是被凍結的敵人加上 `FREEZE_LIST_RADIUS` 內最多 4 隻（依 ID），只在有人讀時才建（`listNeeded`）；chainJump 與 droneImpact 設 `listCount = 0`，hook 才不會把上一次 explode 的清單當成自己的。新的中心事件也要自己寫 `listCount`。
+- **分送**（`fireOne`）：explode 與 freeze 上沒有選擇器的觸發，只作用在目標本身的狀態效果（`CompiledEffect.fanout`：沒有半徑的 `applyAilment`、`addFrost` 與 `detonate`）對清單裡每隻活著的敵人各排一次（效果在外層迴圈），其他效果排一次；一次觸發還是只擲一次機率、只重設一次冷卻。
+- **chainJump 的監聽**：機率在編譯時固定為 `min(1, 0.3 × coef)`（`CHAIN_JUMP_CHANCE`；資料寫機率是驗證錯誤）。每個觸發每次攻擊最多觸發 `CHAIN_JUMP_EVENT_CAP` 次（`ctx.triggerState` 的 `capSerial`、`capCount`，依攻擊序號重算），在選擇器與機率之前檢查，超過的不擲骰、記 `centerEventsCapped`。
+- 派發的關卡順序見 §4.4.8。被 chainJump 上限或選擇器擋下的觸發不擲骰、不重設冷卻，但 nthAttack 已經計數，和條件不成立一樣。
+
+#### 4.7.6 地面區域與脈衝
+
+`src/sim/systems/zones.ts`。區域池 `ctx.sys.zones`（`ZonePool`，`SimState.zones` 共用）：`groundZone` 效果加效果區域，熔岩彈加招牌區域（火地）。
+
+- **脈衝的規則（C8）**：ID 為 `id`、在 tick c 建立、共 n 次的區域，在 (c, c + 15n] 裡 `t ≡ id (mod 15)` 的 tick 脈衝，剛好 n 次，不管是哪個階段建立的，所以同時建立的區域在不同 tick 脈衝。`n = max(1, round(durationSec × 4))`；`expiresAt` = c + 15n，到了 `expiresAt` 或之後的第一個 zones 階段（先跑這個 tick 該有的脈衝）才釋放它、發 `zoneEnd`，所以最後一次脈衝之後它最多還在池裡 14 tick，照樣算進上限。
+- **上限（K5）**：一個來源已經有 16 個效果區域時，新的擠掉它自己最舊的；否則池裡滿 64 個效果區域時擠掉全場最舊的效果區域；招牌區域滿 16 個時擠掉最舊的招牌區域。每次擠掉記 `zonesEvicted`、發 `zoneEnd`（`evicted: true`）。
+- **記錄**：一個區域的參數從建立到結束都留在它的記錄（`ZonePool.record`、`free`），結束時只搬依 ID 排列的槽。沒有任何擊中會新增或結束區域（擊殺與凍結只排佇列），所以脈衝進行中槽不會移動。
+- **每次脈衝**：`grid.within` 寫進 `zones.targets`，每隻活著的敵人依 ID 先吃區域的擊中（每秒傷害比例 ÷ 4 不為 0 時），再套區域自己的狀態（異常狀態層數、冰冷、減速），最後是 `inZone` 標記（只有某個 `inZone` 條件指名的來源才寫）。減速與標記維持 16 tick，所以待在區域裡的敵人一直帶著；有區域減速時移動不走快速路徑（`sys.zones.slowApplied`）。只有狀態的區域（`damagePctPerSec` 0）沒有擊中，也不擲骰。
+- **擊中**（`hitPulse`）照 `hitWithPayload` 的順序擲骰並施加異常狀態（Hoshi 的 Q4 (B)）：暴擊 → 點燃 → 中毒、流血、感電的擲骰 → 傷害 → 燃燒 → 其他異常狀態 → frostOnHit；效果區域在 `effects` stream，火地在 `combat`。和一般命中不同的三點：
+  - 不發 `hit` 事件：擊中加進脈衝的統計（`ctx.sys.pulse`，`PulseAcc`），打到東西的脈衝發一個 `pulse` 事件（`kind: 'zone'`）。施加的異常狀態照樣發它們的事件與觸發。
+  - 燃燒記錄滿了時，脈衝擊中的燃燒與區域自己燃燒的每一層，都只在比最弱那層強時才取代它（`applyPulseBurn`，Hoshi 的 Q4/F4）；被拒的燃燒什麼都不改、不發。其他燃燒（命中、`applyAilment`、擴散）照舊規則。
+  - 火地的酬載帶 `ALWAYS_IGNITES`（`Payload.flags` 的位元 20，`1 << 20`，不在 `HIT_BITS`）：點燃的骰照擲，結果一律點燃（Hoshi 的 Q4/F1）。
+- **安靜的派發**：有東西聽擊中，但每個 hit／crit 觸發都只吃招牌攻擊的擊中、而這個酬載不是，又沒有 `onHit` hook 時（`hoistPulseRows` 設 `quiet`），脈衝的擊中只留下派發的計數（`quietDispatch`），不逐一跑觸發。
+
+#### 4.7.7 線段
+
+`src/sim/systems/segments.ts`。線段授予（雷網）的發射器在 segments 階段跑（`ctx.sys.segments.emitters`）：每 `em.interval` tick（`periodSec`，0.25 秒是 15）判定一次，相位 `(3 + 4 × index) % 15`（`em.timer` 從負值起算），所以各發射器在不同 tick 判定。
+
+- 端點是帶感電的活敵人（依 ID）。每個端點用端點自己的空間格（`segments.grid`、`nearestTwo`）連到 `range` 內最近的 1 或 2 個端點，兩邊互連的只算一條。每條線用主空間格的框查詢（加 `ctx.shotPad`）與大型敵人的補查，標記半徑內的敵人（`Enemy.segMark`）；然後依 ID 掃一次，被標記的各吃一下，沒死的加 `shockStacks` 層感電（不擲骰）。端點在自己的線上，所以也會被打。
+- 擊中標籤 `hit|lightning|area`（沒有 `chain`：不吃過載、不算預算、不發 chainJump），會暴擊、**不擲異常狀態**（Q4 (B) 只指名區域與光環，線段維持 (A)，Q4/F7），在 `combat` stream；加進脈衝統計，端點有 2 個以上的判定發一個 `pulse` 事件（`kind: 'segment'`），線的端點寫進 `SimState.segments` 給畫面。
+
+#### 4.7.8 授予：荊棘、落雷、光環、環繞
+
+`src/data/emitters.ts`（授予的型別與預設值）、`src/sim/emitters/types.ts`（`grantEmitter`、`emitterPayload`）。天賦節點的 `emitters` 授予發射器：thorns、segment、strike、aura、orbit，C5 加了 drone。
+
+- `compileBuild` 把授予接在招牌攻擊（第 0 個）之後，依資料順序，同一個（種類、來源、key）只留第一個（`grantKey`：segment 的 `endpoints`、strike 的 `name`、drone 的 `name`（沒寫是空字串）、orbit 的 `ring`（沒寫是 `'0'`），thorns 與 aura 是空字串）。
+- 授予的 zod schema 在 `src/data/schema.ts`（每種一個，`GRANT_SCHEMAS`，合成 `EmitterGrantSchema`），不在模擬會 import 的 `src/data/emitters.ts`，所以模擬的模組不會載入 zod。
+- **Stream（C27）**：授予的發射器（荊棘、光環、環繞、落雷、線段）都在 `combat` 擲，光環與日冕擊中的異常狀態也是；不另開 `grants` stream，`RNG_STREAMS` 與它的測試都不用動。
+- **荊棘**（`systems/contact.ts`）：每隻碰到角色的敵人先吃每個荊棘發射器的一擊（`hit|thorns`，預設 `damagePct` 3，會暴擊、擲異常狀態，深度 0，不是攻擊）；被殺死的不扣生命、不漏怪、不發 heroHit，只派發 contact。
+- **生命比例的快照**（C4 設計 D20、N10）：`ctx.evalInput.playerLifeFrac` 每 tick 只在 contact 階段最後寫一次，所以荊棘擊中讀到的 `lifeLostPct` 縮放是上一 tick 的值，效果階段的治療也要到下一次快照才看得到。刻意保留：這是最便宜的正確讀法。
+- **落雷**（`emitters/strike.ts`）：固定週期（不看攻速），計時從 0 起。每次落雷是一次攻擊：選擇器從角色選目標（`'player'` 是驗證錯誤；選不到這次就沒了），目標吃一下（算預算 1），還活著就加 `shockStacks` 層感電；然後 `radius` 內其他活敵人依 ID 各吃一下（不算預算）；最後在一般路徑跑固定的 `chainJumps` 跳（`em.chainPayload`，每跳感電，沒有連鎖策略）。選擇器由 `createRunContext` 編（`emitters/types.ts` 不能 import `select.ts`，§4.7.15）。
+- **光環**（`emitters/aura.ts`）：每 15 tick 在相位 `(3 + 4 × index) % 15` 脈衝，`auraRadius`（160）內的活敵人依 ID 各吃一下，照區域脈衝的規則擲骰並施加異常狀態（`hitPulse`，Q4 (B)），深度 0、沒有 origin；`em.attacks` 數脈衝。`em.interval` 是 `PHASE_TICKS`，執行時不讀。
+  - 聚能脈衝（`everyNth`）：只有第 n 次脈衝作用、× `mult`；其他次只計數，不查詢、不擊中、不擲骰、不發事件。
+  - 日冕（`corona`）：`em.timer` 數到它的週期，全場每隻活著的敵人吃一下日冕酬載（`em.alt`）；日冕不算脈衝。同一個 tick 先脈衝、再日冕。
+  - **脈衝與日冕都只在打到至少一隻敵人時才發 `pulse` 事件**：`kind: 'aura'`、`id` 是發射器編號，日冕的也是 `'aura'`。
+- **環繞**（`emitters/orbit.ts`）：`count + floor(orbitCount)` 顆球（開局固定，經過 `countOf`）平均排在環上（ring 0 半徑 110、ring 1 半徑 180），每秒 `revPerSec` 圈，位置每 tick 由公式算、不擲骰。每 tick 每顆球依 ID 打它碰到的活敵人，除非這顆球在 `em.interval` tick（`round(cooldownSec × 60)`，預設 30）內打過牠：**每顆球有自己的冷卻**（Hoshi 的 Q13 (B)），其他球照樣可以打。
+  - 記憶是 `em.orbs`（`OrbMemory`，`createRunContext` 用 `createOrbMemory` 建）：每顆球 `ORB_MEMORY` 格的環形緩衝，依擊中順序排，也就是冷卻結束的順序；到期的從頭離開，滿了還要記一隻時丟掉最舊的並記 `orbMemoryFull`（那隻可能在冷卻結束前再被同一顆球打）。擊殺不清記憶：敵人 ID 不會重用。
+  - 球數沒有上限常數，也沒有夾住：每圈 8 顆是內容要守的界線（B4 讓內容留在界內，或加上限）。環繞的擊中照一般命中發 `hit` 事件，不是攻擊。
+
+#### 4.7.9 觸發的目標選擇器
+
+`src/sim/effects/select.ts`。`TriggerSpec.target`（`{pick, ailment?, from?, range?, excludeEventTarget?, excludeBoss?}`）讓觸發的效果作用在另選的敵人，而不是事件的敵人。
+
+- 每次觸發選一次，在條件之後（條件照樣讀事件的敵人）、機率之前；選不到就不觸發。選到的放進佇列項目的目標：範圍與狀態效果以它為中心（`CompiledEffect.atTarget`；它在效果執行前死了，就以死亡的位置為中心），`'player'` 以角色為中心、沒有目標；有方向的效果（`projectiles`、`slashLine`、`chainBolt`）從自己的起點朝它。
+- 選法，同值都取 ID 小的：`nearest`（`grid.nearest`）；`farthest`、`outermost`、`highestHp`、`mostStacks`（依 ID 掃一次 `ctx.enemies`，嚴格的 `>`）；`densest`（`grid.densest`，再取最靠近格子中心的）；`player`。`from` 預設是事件的位置，沒有位置的事件從角色量。
+- 選擇不配置記憶體：格子查詢都用 `createRunContext` 綁好的 `ctx.selAccept`，它讀 `select()` 寫在 `ctx.selection` 的條件。
+- explode／freeze 上有選擇器的觸發不分送；當場執行的擊殺觸發不能有選擇器（轉移一律作用在死者，驗證擋掉）。
+- 有 `maxTargets` 的範圍效果可以加 `order: 'nearest'`（`orderNearest`）：取最近的幾隻，否則是 ID 順序的前幾隻。
+
+#### 4.7.10 重複攻擊與第 7 條
+
+`src/sim/effects/execute.ts`。`repeatAttack {count, damagePct, timing?}` 把招牌攻擊再做一次，不算一次攻擊。
+
+- 每個 `repeatAttack` 效果在開局有自己的酬載（`ctx.sys.repeat.payloads`，由 `context.ts` 的 `repeatPayload` 建）：招牌攻擊的標籤、來源、連鎖策略與列的快取，`baseDamage × damagePct`，`effects` stream，旗標 `SIGNATURE | REPEAT`。
+- `'now'`（回聲）在效果階段當場跑 `count` 次；`'nextAttack'`（多重施法）把 `count` 筆放進先進先出的 `ctx.sys.repeat.charges`（最多 `REPEAT_CHARGE_CAP`，多的記 `repeatChargesDropped`），招牌攻擊下一次自己計數的攻擊之後全部跑完（`drainRepeatCharges`）。
+- 每種招牌攻擊的重複攻擊在 `REPEAT_STEPS`：`fireVolleyRepeat`、`fireLobRepeat`、`fireFanRepeat`、`fireArcRepeat`，與 C5 的 `swarmRepeat`（§4.6.4）。一次重複攻擊重新選目標、有自己的攻擊與預算，但不 `countAttack`、不算一發、不是 steady、不推進形態的計數、不發中心事件；數量在重複攻擊酬載的 stream 擲。永久的形態照套（火山、稜鏡、六線圈），跟著計數攻擊的形態不套（冰柱、遠投：重複攻擊不推進它們的計數；連環爆：重複攻擊的彈不排爆炸）。
+- **第 7 條**：佇列項目的旗標帶 `REPEAT`（事件來自重複攻擊的擊中）時，`repeatAttack` 什麼都不做。`REPEAT` 在 `HIT_BITS` 裡，所以重複攻擊的擊殺也帶它；重複攻擊的熔岩彈留下的火地帶 `ALWAYS_IGNITES | REPEAT`，它的脈衝擊中也不會再觸發重複攻擊（Hoshi 的 Q5/F1）。
+
+#### 4.7.11 引爆與剩餘值
+
+`src/sim/ailments/remaining.ts`、`execute.ts` 的 `detonate`。
+
+- **剩餘值**（`remainingOf`）是異常狀態在敵人身上還沒造成的傷害：燃燒記錄從上一步起算（`burnLeft`），分桶環讀環的剩餘，流血是已累積的、再加上依敵人現在的速率（移動中或靜止）還會造成的（`bleedRemaining`，Hoshi 的 Q7 (A)）。被燃燒或毒的那一步殺死的敵人沒吃到那一步的流血，所以牠的流血從上一步起算（Q7/F1）。
+- **取走**（`consumeAilment`）比例 f：每層照樣繼續、傷害 × (1 − f)，層數不變（分桶環每一桶一起縮放，`RingPool.consume`）；f = 1 整個移除。
+- **detonate**：活的目標取 `fraction × 剩餘值`（並從牠身上取走），× `damage`，打目標或半徑內每隻（`maxTargets`、`order`），每隻吃同樣的量。酬載是 `PRESCALED`（不再乘傷害列：剩餘值已經乘過）、不會暴擊、不擲異常狀態，所以不擲任何骰。擊殺類事件（kill、diedWithAilment、shatter）上的 detonate 讀待處理擊殺的值：`recordPendingKills` 在歸還分桶環之前記下死者的剩餘值（只給 `CompiledTrigger.detonateAilment` ≥ 0 的觸發），不取走任何東西；驗證要求半徑與同一種狀態的 `victimHas`。
+- `stacksAtLeast` 的 `'max'`（`build/eval.ts` 的 `STACKS_AT_MAX`）讀層數上限：燃燒是 `burnCapOf`（`records.ts`；無盡烈焰下是 `BURN_RINGS_MAX_STACKS` 5，否則 `ctx.burnCap`），感電是 `shockCapOf`（`shock.ts`）。它們放在施加者旁邊、不放 `remaining.ts`，是 import 規則的要求（§4.7.15）；只有 `execute.ts` 與 `dispatch.ts` import `remaining.ts`。
+
+#### 4.7.12 toSplitChildren
+
+`spreadAilment` 的 `toSplitChildren: f`（只用在當場執行的擊殺觸發、只有毒）：死者分裂出的每個子怪拿到死者毒的 f（剩餘傷害與活著的層數，`ailments/apply.ts` 的 `spreadPoisonToChildren`），不管牠在哪，也不管 `effect`、`stacks`、`maxTargets`。`fireInlineKill` 把通過的觸發記在 `ctx.sys.split.passed`；`killEnemy` 在 `split` 之後的步驟 2b（`death.ts` 的 `splitTransfers`）給 `ctx.enemies[first ..]` 的子怪，深度 `min(killDepth + 1, MAX_DEPTH)`，然後清掉記錄。不查格子、不擲骰、不發事件。
+
+#### 4.7.13 其他新效果
+
+`src/sim/effects/execute.ts`（每個欄位的意思在 `src/data/triggers.ts`）。效果的擊中都走 `hitWithPayload`，用效果自己的酬載（`effects` stream），帶佇列項目的深度與 origin。
+
+- `groundZone`：在事件位置（或選擇器選到的敵人）加一個效果區域（§4.7.6）。
+- `projectiles`：在投射物池產生小投射物（`spawnShot`，受 `PROJECTILE_CAP` 限制），從事件位置或角色出發；`target`、`distinct` 追蹤，`radial`、`fan` 直線（§4.7.3）。
+- `slashLine`：一條線，依 ID 各打一次線寬一半加上自身半徑內的敵人（`grid.inSegmentBox` 加大型敵人的補查）；`'along'` 只用在 chainJump，沿著那一跳的角度。`slash` 事件在擊中之前。
+- `coinHit`：對目標一擊，`coin` 事件在前；酬載帶 `bypass` 位元，給 C7 的護盾與堅甲。
+- `chainBolt`：自己的一次攻擊，第一下算預算 1，然後正好 `jumps` 跳（一般路徑、沒有策略，整數跳數不擲骰），每一下沒殺死就加 `shockStacks` 層感電；不發 chainJump。
+
+#### 4.7.14 暫存緩衝的擁有者
+
+規則（C4 設計 §4.0）：一個緩衝只有一個擁有者會寫它；擁有者迭代它的時候，迴圈裡走得到的程式不能寫同一個緩衝。一次擊中同步走得到的只有 `applyHitDamage` → `dispatchHit`（觸發只排佇列）→ `killEnemy`（轉移、`onKill`、分裂、toSplitChildren）→ 施加異常狀態 → `addFrost` → `raiseFreeze` → `emitCenterEvent`（觸發與 hook 只排佇列），所以表裡的緩衝，一次擊中只會寫 `ctx.spreadTargets`、`ctx.centerEvents.freezeTargets` 與 `ctx.centerScratch.list`（下表的「擊中」）。表外的：擊中同步派發的觸發有選擇器時（`passes` → `select`），會寫 `ctx.selected` 與 `ctx.selection`（同一個 `fireOne` 馬上讀完，沒有擁有者跨過擊中持有它們）；`densest` 選法還會換掉空間格最後一次 `densest()` 的區塊，所以 `aimDense` 的 `densest` 與 `blockItems` 要緊接著呼叫，中間不能跑任何選擇器（C4 設計 §4.0、N6）。連鎖不會在連鎖裡開始：只從發射器、落地、子彈的步驟與效果開始。C5 的列見 §4.6.5。
+
+| 緩衝 | 唯一的寫入者 | 迭代中寫得到的 |
+| --- | --- | --- |
+| `ctx.effectTargets` | 佇列裡的效果（效果不會巢狀執行） | 擊中 |
+| `ctx.spreadTargets` | 異常狀態的擴散 | 沒有：擴散不打任何東西 |
+| `ctx.sys.zones.targets` | `stepZones` 的脈衝 | 擊中 |
+| `ctx.sys.pulse` | 脈衝的擁有者（區域脈衝、線段判定、光環與日冕）：歸零、`hoistPulseRows`，再當 `acc` 往下傳 | 沒有：只有 `hitPulse` 會加，擊中走不到另一個脈衝 |
+| `ctx.sys.lob.blast` | `land` | 擊中；複製進清單在所有擊中之後 |
+| `ctx.sys.lob.block`、`counts`、`aimed`、`picked` | 一次發射的瞄準（`aimDense`、`aimFar`） | 沒有 |
+| `ctx.candidates` | `boxIndices` 的呼叫者（直線子彈、線段的標記） | 沒有：精確測試完才打 |
+| `ctx.shotHits` | 直線子彈的步驟，精確測試之後 | 擊中；冰錐主要命中的連鎖寫 `ctx.sys.chain` |
+| `ctx.centerScratch.list` | 發出事件的程式，緊接在 `emitCenterEvent` 之前 | 沒有：分送只排佇列、hook 只讀 |
+| `ctx.sys.chain.frontier`、`next`、`far` | `chainGeneral`、`farthestChainTarget`（`frontier` 的根由呼叫者放：`chainFrom`、三相雷、落雷、chainBolt） | 擊中 |
+| `em.targets` | 自己的發射器（落雷的範圍、光環、環繞） | 擊中（別的發射器是另一個陣列） |
+| `em.orbs` | 自己的環繞發射器，每顆球擊中之前 | 沒有 |
+| `ctx.shots.distinct` | `projectiles` 效果的 `'distinct'` | 沒有：只產生子彈 |
+| `ctx.sys.segments` 的 `ends`、`pick1/2`、`a/b`、`nearTwo` | `stepSegments` | 擊中 |
+
+可以長大的陣列（`ctx.candidates`、`shotHits.t`、`segments` 的 `pick1/2`、`a/b`、線的座標）長大後要重新讀；其他成員從不換掉，迴圈前讀進區域變數就一直有效。
+
+#### 4.7.15 物件形狀與 import 規則
+
+**形狀**（C4 設計 §0.7）：
+
+- V8（node 22）只在少於 128 個屬性時，讓同一個物件字面值的每次建立共用 hidden class；超過了，每局的 `createRunContext` 都有自己的 map，系統裡的 `ctx.x` 幾局之後就變成 megamorphic（C4.4 在 130 個屬性量到 `normal` 慢 24%）。所以 `RunContext` 要留在 128 以下、至少空一格：現在 125，`src/sim/simulation.perf.test.ts` 到 128 就失敗。**不要再加頂層成員**：
+  - 系統自己的狀態放進 `ctx.sys`（`SystemState`）的成員，一個系統一個：`pulse`、`zones`、`lob`、`repeat`、`split`、`segments`、`chain`、`drones`。
+  - 每個發射器的緩衝放 `EmitterRuntime`（`em.targets`、`em.orbs`：每種發射器都在 `createEmitterRuntime` 的字面值裡，用不到的是 `null`），投射物系統的放 `ShotPool`。
+  - 一組相關的暫存放一個子物件：`ctx.selection`（選擇器）、`ctx.centerEvents`（誰聽中心事件、freeze 清單的查詢緩衝）。
+- **一個形狀一個字面值**：熱路徑讀的物件（`Enemy` 57 個屬性、`Payload` 19、`EmitterRuntime` 17、`ShotPool` 28、`CompiledTrigger` 18、`CompiledBuild` 15、`ctx.triggerState`、`ctx.centerScratch`）都由一個字面值（或成員與順序都相同的幾個）建立，每個成員都初始化，之後不再加成員；新成員加在擁有者的字面值裡。`createPayload` 依固定順序寫每個成員、不展開 `PayloadSpec`（選用的鍵會讓酬載有不同的 map）；`extraJumpPayload` 先放型別化的佔位，建好之後再指向酬載自己。
+- `ctx.counters` 是在迴圈裡逐鍵寫進 `{}` 的，到 19 個鍵還是快速模式；現在 17 個，`simulation.perf.test.ts` 擋在 20 以下，加第 20 個之前要改成一個字面值。
+- 熱路徑的區域變數：每次擊中、每發子彈、每個區域或每隻敵人跑一次的迴圈，把用到的子物件（`ctx.sys.zones`、`ctx.shots`、`ctx.chainBudget`…）在迴圈前讀進區域變數，一次呼叫最多讀一次 `ctx.sys`；脈衝的統計由擁有者讀一次，當參數 `acc` 往下傳。
+- `createRunContext` 的建立順序：`chainRetention` 與連鎖策略在發射器的酬載之前；發射器（落雷的選擇器、冰柱與日冕的酬載、環繞的 `OrbMemory` 在這裡建好傳進去）；`zones`、`segments` 與 `shots` 在 `SimState` 的字面值之前；重複攻擊的酬載在效果酬載旁邊；最後是 ctx 的字面值，`sys` 在裡面一次建好。工廠函式都不讀 `ctx`。
+
+**Import 規則**（C4 設計 §0.7、LD2）：
+
+- **在模組頂層求值的登錄表或常數，只能引用會提升的函式宣告，不然就要放在任何循環之外的模組。** 從循環外的模組讀的值（core、`caps.ts`、`effects/types.ts`、資料模組）一定已經求值，所以只有讀同一個循環的值受限：從循環的另一邊進來時，同一個循環裡的 `const` 還在 TDZ，Node 會丟 ReferenceError，Vitest 會讀到 `undefined`。所以 `EMITTER_STEPS`（`systems/emitters.ts`）與 `REPEAT_STEPS`（`execute.ts`）的每個值都要是函式宣告，不能是箭頭函式的 `const`。
+- **依工具鏈的根據**：「函式宣告一開始就有定義」對載入 `src/sim` 的三個工具鏈各自成立。Vitest 5.0.4 用 Vite 7.3.7 的 ssrTransform，在模組最上面、它的 import 之前，把每個 export 定義成 getter（`try { return local } catch {}`，所以 TDZ 裡的 `const` 讀到 `undefined`）；`tools/` 用的 tsx 4.23.15 走 Node 的 ESM 連結（`"type": "module"`），任何模組本體執行之前就初始化函式宣告；網頁 build 的 Rollup 每個 chunk 一個 scope，函式宣告會提升。換一個到模組結尾才定義 export 的執行器或打包器，連函式宣告也會壞。
+- **葉模組**：每個 `ctx.sys` 工廠與它的型別都在 `src/sim/systems/systemState.ts`，系統從這裡 import 狀態的型別。它的 value import 只能是 `core/num.ts`、`sim/caps.ts`、`sim/build/sources.ts`、`sim/build/eval.ts`、`sim/systems/grid.ts`（與 `grid.ts` import 的 `sim/grid.ts`、`sim/types.ts`），其他都是 `import type`。守門測試 `src/sim/systems/systemState.test.ts` 用 `node:fs` 讀它與它遞移 value-import 的每個模組，檢查（1）直接的 value import 都在清單（`LEAF_IMPORTS`）裡、（2）走不到 `systems/context.ts`，也走不到自己、（3）沒有循環；也檢查 `remaining.ts` 的 value import（`REMAINING_IMPORTS`），以及只有 `execute.ts`、`dispatch.ts` import 它。整個宣告是 `import type …` 或 `export type … from` 才算只有型別：在 `verbatimModuleSyntax` 下，`import { type X } from './m'` 仍然載入 `./m`。
+- **葉模組怎麼保持是葉**：它的閉包經過 `build/eval.ts` → `effects/flags.ts` → `emitters/types.ts`（`flags.ts` 在頂層讀 `SIGNATURE`），還有 `eval.ts` import 的異常狀態模組與資料模組；其中任何一個 value-import 會回頭 import 它的模組，就形成循環。所以 `emitters/types.ts` 只用型別 import `ChainPolicy`，連鎖策略由 `createRunContext` 編好、當值傳給酬載；`emitters/types.ts` 不 import `select.ts`，落雷的選擇器也由 `createRunContext` 編；重複攻擊的酬載在 `context.ts` 建（`repeatPayload`）；層數上限的讀取放在 `records.ts`（`burnCapOf`）與 `shock.ts`（`shockCapOf`），不放 `remaining.ts`（C4.10）。閉包外的模組可以 value-import 葉模組：`context.ts` 拿工廠、`build/compile.ts` 拿 `NO_POLICY_SPEC`，還有各系統模組。
+- **`REPEAT_STEPS`，不是 `SignatureModule` 的成員**：招牌攻擊與規則模組是編譯時的程式（hook 透過 `rules/api.ts` 作用），不 value-import 任何走得到 `systems/context.ts` 的模組，所以讀它們 `const` 模組物件的 `rules/index.ts`（`SIGNATURES`、`RULE_MODULES`）也在循環外。重複攻擊如果是模組的成員，每個招牌攻擊模組都要 import `volley.ts`、`lob.ts`…，`rules/index.ts` 就會經過 `context.ts` → `build/compile.ts` 被拉進循環。`src/sim/rules/importOrder.test.ts` 守這件事：每個規則模組在新的模組登錄表裡第一個被 import，接著 import `rules/index.ts` 與 `systems/context.ts`，兩個登錄表的每一項都要有定義；執行器在 TDZ 丟錯或回傳 `undefined`，它都會失敗。
+- **C4.5b 的修正**：刪掉 `context.ts` 對 `systems/emitters.ts` 的 import（原本是 `context.ts` → `systems/emitters.ts` → `volley.ts` → `context.ts`），現在只有 `simulation.ts` import `systems/emitters.ts`；之後的 `ctx.sys` 工廠都在葉模組，`createRunContext` 不為了工廠 import 任何系統模組。它沒有讓 `context.ts` 離開循環：`context.ts` 還 import `shots.ts` 的 `createShotPool`，其他回到 `context.ts` 的路徑（例如 `shots.ts` → `lob.ts` → `volley.ts` → `context.ts`）也還在，靠上面的頂層規則與 import 順序測試守住。
+- **剩下的循環**，在 fa8a663 量的（一段腳本讀 `src/` 所有非測試模組的非型別 import 與 re-export，用和 `systemState.test.ts` 相同的規則判斷只有型別，再求強連通分量）：只有一個，15 個模組：
+  - `systems/`：`context.ts`、`shots.ts`、`death.ts`、`zones.ts`、`drones.ts`
+  - `combat/`：`hit.ts`、`chain.ts`、`policy.ts`
+  - `effects/`：`centerEvents.ts`、`dispatch.ts`、`execute.ts`
+  - `emitters/`：`volley.ts`、`lob.ts`、`fan.ts`、`arc.ts`
+- 成員之間只靠呼叫連起來（例：`shots.ts` 呼叫 `land`；`REPEAT_STEPS` 指向 `fireVolleyRepeat`、`fireLobRepeat`、`fireFanRepeat`、`fireArcRepeat` 與 `drones.ts` 的 `swarmRepeat`），除了 `REPEAT_STEPS` 在 `execute.ts` 頂層引用的這五個函式宣告，沒有一個在頂層讀同一個循環的值。從外面走到它、沒有被成員 import 回去的，`src/` 有 25 個：`sim/` 的 `simulation.ts`、`index.ts`、`testing.ts`，`systems/` 的 `ailments.ts`、`contact.ts`、`emitters.ts`、`projectiles.ts`、`segments.ts`、`waves.ts`，`emitters/` 的 `strike.ts`、`aura.ts`、`orbit.ts`，`app/` 的 `input.ts`、`loop.ts`、`main.ts`、`playtest.ts`、`session.ts`，`meta/index.ts`、`meta/startWave.ts`，`render/` 的 `backdrop.ts`、`damageNumbers.ts`、`drones.ts`、`index.ts`、`player.ts`、`renderer.ts`；`tools/balance/` 另有 15 個。
+- `src/sim` 在每個循環之外、也走不到它的有 43 個：葉模組與它的閉包、`emitters/types.ts`、`emitters/drone.ts`、`effects/` 的 `types.ts`、`select.ts`、`flags.ts`、`queue.ts`，所有 `build/` 與 `ailments/` 模組（含 `remaining.ts`），`rules/` 的 15 個模組（招牌攻擊、形態、規則模組、`index.ts`、`api.ts`、`module.ts`），以及 `movement.ts`、`spawn.ts`、`runEnd.ts`、`targeting.ts` 等。其中幾個在頂層讀彼此的 `const`（`modTable.ts` 的 `ESTIMATE = staticInput()`、`apply.ts` 的 `DAMAGE = SCOPED_INDEX.damage`、`records.ts` 的 `BURN_TICK_INTERVAL = DOT_STEP_TICKS`），只因為它們在循環之外才合規；C4.10 把層數上限的讀取放在 `records.ts` 與 `shock.ts`，就是為了不讓它們進入循環。
 
 ## 5. 大數字
 
@@ -513,10 +718,32 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 - `npm run fingerprint`（`tools/balance/fingerprint.ts`）：1,032 個案例（972 個合成 build＋60 個真實天賦 build）跑完，把每個 tick 的事件（投影到 M1 的欄位）與結果做雜湊，一個案例一行。`-- --check` 和 `tools/balance/fingerprint.baseline.txt` 逐行比對，重構必須完全相同；`-- --compare-results` 列出每個變動案例的波次、擊殺、漏怪、傷害與燃燒差多少；`-- --write` 重寫基準，只有量過、說明過的行為修改可以用。
 - `src/sim/golden.test.ts`：24 個案例 × 1,200 tick 的事件雜湊，跟著 `npm test` 跑。
+- `src/sim/goldenC4.test.ts`（GOLDEN-C4，也跟著 `npm test` 跑）：C4 與 C5 機制的 27 個 fixture（C4 的 21 個、C5 的 6 個），每個在 seed 1 與 2 各跑 1,200 tick。雜湊是 sha256 的前 16 個十六進位數字，算的是每個 tick 原樣的事件（不投影到 M1 的欄位），再加上 `projectResult`、`damageBySource` 與不為 0 的計數器（依 `COUNTER_IDS` 順序）；每個案例跑兩次，兩次要相同。落地一個機制的 commit 附上它的 fixture 與當時的雜湊；之後的 commit 不動已記錄的雜湊，除非 commit message 寫明重記哪些、為什麼。到 fa8a663 為止重記過：C4.7 的 `burst` 事件重記了用到 explode 或 nova 的 `thorns`、`selector`、`freezeList`、`zones`；`zones` 另外在 C4.6c、C4.6d、C4.7b 依 Q4 重記；C5.R 調 swarm 的數字時重記了 `swarm`、`swarmRepeat`、`swarmTurret`。後加的計數器在之前的 fixture 都是 0，不會動到雜湊。
 - `npx tsx tools/balance/probe.ts --json <檔案>` 與 `tools/balance/probeDiff.ts <前> <後>`：比兩次平衡探針（各策略的前線 F@10/20/40/60、到第 20／30 波的分鐘在 ±5% 內，T1–T8 通過）。`out/` 不進 git，參考檔放在本機的 `out/balance/`。
 - `npm run bench -- --scenario normal|hits|ailments|effects|poisonBoss`：一般一局、擊中路徑、異常狀態壓力（瘟疫＋無盡烈焰，第 30 波）、效果佇列、Boss 身上約 500 層毒（和 5 層比，持續傷害每一步的成本要和層數無關，比值 < 1.3）。
+- C4 加的場景（`--scenario` 也接受這些 id）都是**壓力家族**，C5 的 `stressBase` 也是（`hive` 不是，見 §4.6.7）：用壓力 fixture（`src/sim/testing.ts` 的 `stressData`、`stressStats`）從第 30 波跑 30 秒（3 次暖身、20 次計時），tick 300 起約 300 隻活著，不看 `--start-wave`。`--check` 另外要求 seed 1 那一局在 tick 301–1800 的平均存活數在 280–320（釘住工作量），並印出一行壓力報告：中位數、比值、一起計時的 `normal` 的中位數與工作量（存活數、峰值與計數器；`stress` 另有區域、熔岩彈與線段的工作量）。閘門欄的 CI 是下一點的 `--check`（比值與存活數區間）。
+
+  | 場景 | 內容 | 閘門 |
+  | --- | --- | --- |
+  | `stressM1` | C4.0：只有 M1 的攻擊，其他壓力場景的起點 | CI |
+  | `stress` | v1（C4.6）：四個在 M1 擊中時產生地面區域的觸發，效果區域維持在約 64 個；v2（C4.7）：最重的合理熔核，每秒 6 次、每次 2 顆熔岩彈，熔核自己的區域來源掛在自己的事件上；v3（C4.14，C4 的最後版本）：再加雷網全開（感電機率 .3、`outer.lightning` 的線段授予）；v4（C5.6）：再加 32 個召喚物，見 §4.6.7 | STRESS ≤ 4.5、CI |
+  | `stressBase` | 原封不動的 v3（C5.6，§4.6.7） | STRESS ≤ 3.5、CI |
+  | `shots` | C4.12：M1 的攻擊加上射小投射物的觸發，角色每秒 5 次射 12 發、每次擊殺射 4 發；本機報告（不是 `--check`）另外用塞滿投射物池的探針量 `PROJECTILE_CAP` 時的成本 | CI |
+  | `fan` | C4.19：霜晶的冰錐扇，每秒 7.5 輪、每輪 9 道冰錐 | CI |
+  | `arc` | C4.20：雷塔的三相雷加六線圈，每秒 6 次放電、每次兩個目標，測試用的連鎖策略每跳分岔 2，讓攻擊打到 `CHAIN_HIT_CAP` | CI |
+  | `grants` | C4.21：M1 的攻擊加上光環（`auraRadius` 160，聚能脈衝每第 4 次 × 4）、兩圈各 4 顆的環繞球（半徑 110 與 180）與荊棘 | CI |
+
 - `npm run bench -- --check`（CI，§14）：照 impl §6，參考是同一個 job 裡這一版的 `normal`。每個場景的計時和 `normal` 交替跑，各自取中位數；場景 ÷ `normal` 的比值超過 `tools/balance/bench.baseline.json` 記錄值的 1.5 倍就失敗。整個模擬一起變慢時比值不會動，所以 `normal` 自己的中位數超過 50 ms 也算失敗（本機在 `--check` 裡約 20–25 ms）。比值在本機記錄；效能特性刻意改變（新場景、取捨）或 CI 的機器穩定地不同時，用 `npm run bench -- --check --write` 重新記錄，PR 寫明原因。`--scenario` 只檢查一個場景。
-- 引擎開發期間，每個改到 `src` 的 commit 另外用 `tools/balance/benchAB.ts` 把 `normal` 與 `hits` 和前一個 commit、和 C2 的 532074c 交替計時比較（`git archive` 出來的樹）。
+- **BENCH**（引擎開發期間，C4 設計 §0.4）：每個改到 `src/sim`、`src/data` 或 `src/meta` 的 commit，用 `npx tsx tools/balance/benchAB.ts --inproc <treeA> <treeB> <normal|hits>` 比 `normal` 與 `hits`。treeA 是參考（前一個 commit，累計時是 0f9dcc5），用 `git archive` 匯出、`node_modules` 用 symlink（`git worktree add` 會寫進 repo 自己的 `.git`）；treeB 是候選。預設 7 個子程序依序跑：每個 import 兩棵樹的 `src/data`、`src/sim`、`src/sim/testing`，各暖身 5 次，再交替各跑 40 次（每輪換先後），印出 treeB 的中位數 ÷ treeA 的中位數；偶數程序先 import treeA、奇數先 import treeB（固定順序時，同一個 commit 的兩份拷貝量到差約 2%）。父程序印出每個程序的比值、兩種 import 順序各自的中位數與全部的中位數。
+  - 每個 session 第一次 BENCH 之前先跑 A/A：treeA 對同一個 commit 的另一份 `git archive`（7 個程序、兩個場景），記下中位數。
+  - 上限：對前一個 commit 的中位數 ≤ **1.03**；對 0f9dcc5（C4 開始前）的累計中位數 ≤ **1.05**，在每一層的結尾（C4.15、C4.19、C4.21）與最後一個改程式的 commit 量。中位數超過上限**而且**超過這個 session 的 A/A 中位數 + 0.02 才算失敗。
+  - 雜訊規則：中位數在門檻的 1.5% 以內時再跑 7 個程序，取 14 個的中位數；之後還失敗就停下，把兩個中位數、各 import 順序的中位數與 A/A 交給 lead。上限從不在 commit 裡改。
+  - C4.15 的累計 `normal` 在兩個 session 量到 1.0427 與 1.05085，28 個程序合併是 1.0463；Hoshi 選「先過」（2026-10-19）：以合併的 28 個程序通過，C4.1–C4.14 累積的變慢（設計預期約 1%）在 C5 之後、M2 之前追查。C4.21 的累計是 `normal` 1.0406、`hits` 1.03745（14 個程序的中位數）。
+  - C3 對 C2 的 532074c 的 ≤ 1.25 已經退休。不帶 `--inproc` 的成對模式還在，但同一份程式在兩個程序量到的比值是 0.64–1.57，看不出幾個百分點的差別。
+- **STRESS**（C4 設計 §0.5）：impl §6 在它的參考機器上量到 `normal` 約 25 ms、要求壓力場景 ≤ 50 ms，也就是比值 ≤ 2.0；這裡的閘門就是比值，在同一個程序裡和 `normal` 交替計時：`npm run bench -- --check --scenario stressBase` 與 `--scenario stress` 的壓力報告。上限：`stressBase`（v3，C4 的壓力）≤ **3.5**（Hoshi 2026-10-15 對 Q1 重問選 (A)「放寬到 3.5 倍」）；`stress` v4（加上 C5 的召喚物）≤ **4.5**（`STRESS_TOTAL_LIMIT`，Hoshi 2026-10-21「放寬到 4.5」）。
+  - 同一次的 `normal` 中位數要 ≤ 25 ms。這不是預算（`normal` 的預算是 CI 的 50 ms），只用來發現機器跑在慢的模式：超過就重跑，最多 3 次，然後停下回報數字。
+  - 比值在上限的 3% 以內時再跑兩次，取三次的中位數。重跑之後還超過，這個 commit 就停下（不提交），由 Hoshi 決定；沒有 commit 會改上限，或改場景的組成來壓到上限以下。
+  - C5.6 用 `--share`（3 個程序的閘門）量 v4，見 §4.6.7；之後的 C4 commit 用上面兩個 `--check` 的比值。C4.21 量到 `stressBase` 3.265、`stress` v4 4.246。
 
 ## 13. i18n
 
