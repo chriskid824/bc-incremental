@@ -53,9 +53,16 @@
  *   policy that forks every jump by 2 and adds an extra jump on half of them, so its attacks
  *   reach CHAIN_HIT_CAP, with a sixth of the damage of the stress start wave's target
  *   (src/sim/emitters/arc.ts).
+ * - hive: normal's 3-minute runs (C5.5) with 蜂巢's swarm as the signature, filled to the summon
+ *   cap of 24 by a test module (20 drones and 4 turrets, src/sim/systems/drones.ts), and a test
+ *   module's onCenterEvent hook that counts the droneImpact events, so the listener path runs
+ *   (docs/v3 C5 design §7.4). It is not a stress-family scenario: real game data, normal's
+ *   build and start wave. Its report adds its summon workload, from one untimed run: the
+ *   summons, drone impacts, turret firings and their shots, the droneImpact events its listener
+ *   counted, and its median against §6's 50 ms for a 3-minute run, printed and never a failure.
  *
  *   npm run bench --
- *     [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan|arc]
+ *     [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan|arc|hive]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>]
@@ -70,7 +77,9 @@
  * instead. --scenario limits the check to one scenario; normal alone checks only its budget.
  * A stress-family scenario also fails when its seed-1 run's average alive leaves 280–320, which
  * pins its workload, and prints a stress report line: its median, its ratio, the median of the
- * normal runs timed with it and its workload (the STRESS gate of docs/v3 C4 design §0.5).
+ * normal runs timed with it and its workload (the STRESS gate of docs/v3 C4 design §0.5). hive
+ * prints a summon report line: its median against 50 ms, its ratio, the median of the normal
+ * runs timed with it and the summon workload of its seed-1 run.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -82,10 +91,18 @@ import type { GameData, StatBlock } from '../../src/data';
 import type { SourcedEmitter } from '../../src/data/emitters';
 import type { Modifier, StatExtras } from '../../src/data/stats';
 import type { TriggerSpec } from '../../src/data/triggers';
-import { COUNTER_IDS, createSimulation, MAX_RUN_SECONDS, NO_INPUT, TICK_RATE } from '../../src/sim';
+import {
+  COUNTER_IDS,
+  createSimulation,
+  DRONE_KIND_DRONE,
+  MAX_RUN_SECONDS,
+  NO_INPUT,
+  TICK_RATE,
+} from '../../src/sim';
 import type { CounterId, RunConfig } from '../../src/sim';
 import { addShock } from '../../src/sim/ailments/shock';
 import { PROJECTILE_CAP } from '../../src/sim/caps';
+import { EVENT } from '../../src/sim/effects/types';
 import { aimDense, beginAim } from '../../src/sim/emitters/lob';
 import type { TestModule } from '../../src/sim/rules';
 import type { RunContext } from '../../src/sim/systems/context';
@@ -106,6 +123,7 @@ import {
   entryRatio,
   formatBaseline,
   median,
+  NORMAL_BUDGET_MS,
   parseBaseline,
 } from './benchCheck';
 import type { BenchTimings, EntryTimings } from './benchCheck';
@@ -122,6 +140,7 @@ const SCENARIO_IDS = [
   'shots',
   'fan',
   'arc',
+  'hive',
 ] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
@@ -179,6 +198,12 @@ interface Scenario {
    * (docs/v3 C4 design §7.3, §7.6).
    */
   readonly allShocked?: boolean;
+  /**
+   * A summon scenario (hive): --check and its local report add the summon workload of an
+   * untimed seed-1 run (summonWorkload) and print its median against §6's 50 ms for a 3-minute
+   * run, never a failure (docs/v3 C5 design §7.4).
+   */
+  readonly summons?: boolean;
 }
 
 /**
@@ -335,6 +360,28 @@ const ARC_POLICY: TestModule = (b) => {
   spec.extraJumpChance = 0.5;
 };
 
+/** The hive scenario's swarm (docs/v3 C5 design §7.4): 24 summons, the summon cap. */
+export const HIVE_DRONES = 20;
+export const HIVE_TURRETS = 4;
+
+/** hive's test module that fills the swarm: its SwarmParams' counts, as a rule would write them. */
+const HIVE_SWARM: TestModule = (b) => {
+  const swarm = b.signature().swarm;
+  if (swarm !== null) Object.assign(swarm, { drones: HIVE_DRONES, turrets: HIVE_TURRETS });
+};
+
+/** The droneImpact center events hive's listener has counted in this process, every run's. */
+export const hiveListened = { impacts: 0 };
+
+/**
+ * hive's droneImpact listener: an onCenterEvent hook that counts the droneImpact events, so the
+ * run takes the listener path (src/sim/effects/centerEvents.ts) as a build that listens does.
+ */
+const HIVE_LISTENER: TestModule = (b) =>
+  void b.hook('onCenterEvent', (_ctx, ev) => {
+    if (ev.event === EVENT.droneImpact) hiveListened.impacts++;
+  });
+
 /** The poisonBoss scenario's poison chance per variant. */
 const POISON_BOSS_CHANCE: Readonly<Record<string, number>> = {
   '500 stacks': 0.99,
@@ -397,7 +444,7 @@ function stressScenario(
   };
 }
 
-const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
+export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   normal: {
     runs: 50,
     warmup: 5,
@@ -566,6 +613,24 @@ const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     }),
     [ARC_POLICY],
   ),
+  // C5.5: normal's runs with the swarm as the signature, filled to the summon cap, and a
+  // droneImpact listener (docs/v3 C5 design §7.4).
+  hive: {
+    runs: 50,
+    warmup: 5,
+    seconds: MAX_RUN_SECONDS,
+    targetMs: 50,
+    testModules: [HIVE_SWARM, HIVE_LISTENER],
+    summons: true,
+    config: (seed, startWave) => ({
+      seed,
+      stats: normalStats(startWave),
+      rules: [],
+      signature: { id: 'swarm' },
+      startWave,
+      mode: 'auto',
+    }),
+  },
 };
 
 function positiveInt(name: string, text: string, min = 1): number {
@@ -960,6 +1025,75 @@ function segmentText(segments: SegmentWorkload): string {
   );
 }
 
+/** What an untimed run of a summon scenario did (summonWorkload). */
+export interface SummonWorkload {
+  /** Its drones and turrets, placed at tick 0. */
+  readonly drones: number;
+  readonly turrets: number;
+  /** Impacts of drones (a repeat's impact has droneId −1). */
+  readonly impacts: number;
+  /** turretFire events, and the shots they tried. */
+  readonly firings: number;
+  readonly turretShots: number;
+  /** The droneImpact center events its listener counted (hiveListened). */
+  readonly listened: number;
+  /** Most projectiles and shot pool shots in flight after a tick. */
+  readonly peakShots: number;
+  readonly kills: number;
+}
+
+/** The summon workload of an untimed run of `config`. */
+export function summonWorkload(
+  config: RunConfig,
+  data: GameData,
+  testModules: readonly TestModule[] = [],
+): SummonWorkload {
+  const sim = createSimulation(config, data, testModules);
+  const { state } = sim;
+  let drones = 0;
+  for (let s = 0; s < state.droneCount; s++) {
+    if (state.drones.kind[s] === DRONE_KIND_DRONE) drones++;
+  }
+  const listened = hiveListened.impacts;
+  let impacts = 0;
+  let firings = 0;
+  let turretShots = 0;
+  let peakShots = 0;
+  while (!state.finished) {
+    for (const event of sim.step(NO_INPUT)) {
+      if (event.type === 'impact' && event.droneId >= 0) impacts++;
+      else if (event.type === 'turretFire') {
+        firings++;
+        turretShots += event.count;
+      }
+    }
+    const shots = state.projectiles.length + state.shotCount;
+    if (shots > peakShots) peakShots = shots;
+  }
+  return {
+    drones,
+    turrets: state.droneCount - drones,
+    impacts,
+    firings,
+    turretShots,
+    listened: hiveListened.impacts - listened,
+    peakShots,
+    kills: sim.result().kills,
+  };
+}
+
+/** The summon workload as report text. */
+const summonText = (summons: SummonWorkload): string =>
+  `${summons.drones} drones and ${summons.turrets} turrets, ${summons.impacts} drone impacts, ` +
+  `${summons.listened} droneImpact events counted by its listener, ${summons.firings} turret ` +
+  `firings (${summons.turretShots} shots), peak ${summons.peakShots} shots, ` +
+  `${summons.kills} kills`;
+
+/** A summon scenario's median against §6's budget for a 3-minute run: printed, never gated. */
+const budgetText = (medianMs: number): string =>
+  `median ${medianMs.toFixed(2)} ms against §6's ${NORMAL_BUDGET_MS} ms for a 3-minute run ` +
+  `(${medianMs <= NORMAL_BUDGET_MS ? 'within' : 'OVER'}; printed, never a failure)`;
+
 /**
  * segmentsAllShocked (docs/v3 C4 design §7.3): `runs` runs of `config(i)` with ALL_SHOCKED
  * among the test modules, each timed in turn with a normal run (seeds from `seed`, normal's
@@ -1031,10 +1165,14 @@ export const CHECK_ENTRIES: readonly string[] = SCENARIO_IDS.filter(
   (id) => id !== 'normal',
 ).flatMap((id) => (SCENARIOS[id].variants ?? ['']).map((variant) => entryName(id, variant)));
 
-/** A timed check, with the workload of each stress-family entry by entry name. */
+/**
+ * A timed check, with the workload of each stress-family entry and the summon workload of each
+ * summon entry by entry name.
+ */
 interface CheckTimings {
   readonly timings: BenchTimings;
   readonly workloads: ReadonlyMap<string, Workload>;
+  readonly summons: ReadonlyMap<string, SummonWorkload>;
 }
 
 /**
@@ -1042,7 +1180,7 @@ interface CheckTimings {
  * warm-up runs, then its timed rounds: in each, one normal run and one run of every variant,
  * the order reversed every other round, so the reference runs share the scenario's conditions.
  * Checking normal alone times its own runs only. A stress-family scenario first measures the
- * workload of an untimed seed-1 run of each variant.
+ * workload of an untimed seed-1 run of each variant, and a summon scenario its summon workload.
  */
 function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
   const normal = SCENARIOS.normal;
@@ -1053,6 +1191,7 @@ function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
   const reference: number[] = [];
   const entries: EntryTimings[] = [];
   const workloads = new Map<string, Workload>();
+  const summons = new Map<string, SummonWorkload>();
   const others = ids.filter((id) => id !== 'normal');
   if (others.length === 0) {
     for (let i = 0; i < normal.runs; i++) reference.push(referenceRun(i));
@@ -1068,6 +1207,12 @@ function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
       for (const variant of variants) {
         const config = scenario.config(1, startWave, variant);
         workloads.set(entryName(id, variant), measureWorkload(config, data, scenario.testModules));
+      }
+    }
+    if (scenario.summons === true) {
+      for (const variant of variants) {
+        const config = scenario.config(1, startWave, variant);
+        summons.set(entryName(id, variant), summonWorkload(config, data, scenario.testModules));
       }
     }
     for (const variant of variants) {
@@ -1095,7 +1240,7 @@ function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
       });
     });
   }
-  return { timings: { reference, entries }, workloads };
+  return { timings: { reference, entries }, workloads, summons };
 }
 
 /** --check: times scenarios `ids` against normal and checks or, with `write`, records them. */
@@ -1104,7 +1249,7 @@ function check(ids: readonly ScenarioId[], write: boolean): void {
   const recorded = existsSync(BASELINE_FILE)
     ? parseBaseline(readFileSync(BASELINE_FILE, 'utf8'))
     : null;
-  const { timings, workloads } = timeCheck(ids);
+  const { timings, workloads, summons } = timeCheck(ids);
   const result = checkBench(timings, recorded, CHECK_ENTRIES, write);
   console.log(`bench check: ratio to normal's median run, against ${file}`);
   for (const line of result.lines) console.log(line);
@@ -1116,6 +1261,15 @@ function check(ids: readonly ScenarioId[], write: boolean): void {
         `ratio ${entryRatio(entry).toFixed(3)}, ` +
         `normal median ${median(entry.referenceMs).toFixed(2)} ms, ` +
         `average alive ${workload.averageAlive.toFixed(1)}; ${workloadText(workload)}`,
+    );
+  }
+  for (const entry of timings.entries) {
+    const workload = summons.get(entry.id);
+    if (workload === undefined) continue;
+    console.log(
+      `summon report ${entry.id}: ${budgetText(median(entry.ms))}, ` +
+        `ratio ${entryRatio(entry).toFixed(3)}, ` +
+        `normal median ${median(entry.referenceMs).toFixed(2)} ms; seed 1: ${summonText(workload)}`,
     );
   }
   if (write) {
@@ -1203,6 +1357,10 @@ function main(): void {
           seed,
         });
       }
+    }
+    if (scenario.summons === true) {
+      const summons = summonWorkload(configFor(variant, 0), data, modules);
+      console.log(`summon workload (seed ${seed}): ${budgetText(p50)}; ${summonText(summons)}`);
     }
     return p50;
   });

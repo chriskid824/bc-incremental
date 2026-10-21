@@ -215,6 +215,7 @@ describe('bench.baseline.json', () => {
       'shots',
       'fan',
       'arc',
+      'hive',
     ]);
   });
 });

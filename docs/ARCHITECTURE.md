@@ -1,6 +1,6 @@
 # 架構文件
 
-> 狀態：草稿 v0.3（2026-10-14）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查。
+> 狀態：草稿 v0.4（2026-10-20）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）。
 
 ## 1. 技術選型
 
@@ -78,7 +78,7 @@ flowchart LR
 ### 4.3 狀態與系統
 
 - 不用 ECS 框架。實體是物件陣列＋物件池（避免 GC 抖動）。附近目標查詢走均勻空間格（`src/sim/grid.ts`，`docs/v3/implementation-plan-v3.md` §2.3）：格子 128，場地 15 × 9 格外多一圈，更遠的夾到最外圈；每 tick 敵人移動後重建（計數排序寫進 typed array，實際排序延到當 tick 第一次查詢，沒有查詢的 tick 不花成本；敵人少於 128 隻時不排序，查詢直接線性掃描，實測比較快）。投射物選目標、連鎖、瘟疫擴散都查格子，結果和原本的線性掃描完全一樣：同距離取陣列裡較前面（ID 較小）的；同一 tick 後來才加入的敵人（分裂子怪）每次查詢另外線性掃；死掉的留在格子裡、查詢時跳過。`push` 效果推動了敵人時當場再重建一次（`src/sim/effects/execute.ts`），同一 tick 之後的查詢就在新的格子找到它們；排序一樣延到下一次查詢，所以推動之後只有第一個查詢排序，後面的查詢共用那次排序；沒有推動任何敵人的 `push` 不重建。
-- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變）：`input → spawn（含 waveStart 觸發）→ movement（冰冷減速、凍結、流血的移動計數）→ grid（重建空間格）→ contact（heroHit、contact 觸發）→ emitters（攻擊，之後是規則模組的 tick hook）→ projectiles（命中、連鎖、擊殺當下結算）→ ailments（持續傷害、ailmentTick 觸發）→ effects（到期的 periodic 觸發，再跑佇列裡的效果）→ death（派發待處理的擊殺觸發、壓縮陣列）→ waveControl → runEnd`。emitters 到 effects 只在角色活著時跑。各步驟在傷害引擎裡做什麼見 §4.4；之後才做的系統（無人機、線段、地面區域、敵人 AI）見 `docs/v3/implementation-plan-v3.md` §2.15。
+- 每個 tick 依序跑系統，每個系統一個檔案（`src/sim/systems/`，2026-10 從 `simulation.ts` 拆出，行為不變）：`input → spawn（含 waveStart 觸發）→ movement（冰冷減速、凍結、流血的移動計數）→ grid（重建空間格）→ contact（heroHit、contact 觸發）→ emitters（攻擊，之後是規則模組的 tick hook）→ drones（無人機與砲台，§4.6）→ projectiles（命中、連鎖、擊殺當下結算）→ segments（線段）→ zones（地面區域）→ ailments（持續傷害、ailmentTick 觸發）→ effects（到期的 periodic 觸發，再跑佇列裡的效果）→ death（派發待處理的擊殺觸發、壓縮陣列）→ waveControl → runEnd`。emitters 到 effects 只在角色活著時跑。各步驟在傷害引擎裡做什麼見 §4.4，無人機見 §4.6；之後才做的其他系統（敵人 AI）見 `docs/v3/implementation-plan-v3.md` §2.15。
 - 傷害引擎在 `src/sim/` 的子資料夾：`build/`（`compileBuild`、ModTable、來源、條件與縮放）、`rules/`（規則模組）、`emitters/`（發射器與酬載）、`combat/`（命中、連鎖、轉換）、`ailments/`（燃燒記錄、分桶環、流血、感電、冰冷）、`effects/`（觸發派發、效果佇列、中心事件）。熱路徑不配置記憶體：每筆傷害只新增一個 `SimEvent`；分桶環與效果佇列是 typed array 物件池，命中、擊殺、中心事件與條件的輸入各用一個重複使用的暫存物件。
 
 ### 4.4 屬性、修正與傷害引擎
@@ -275,6 +275,77 @@ type ControlMode = 'auto';
 ```
 
 - 操作模式定為全自動（GDD 2.3），`sim` 目前不讀 `InputFrame`。介面保留，之後如果要加局中操作，不必改模擬核心的呼叫方式。
+
+### 4.6 無人機與砲台
+
+v3 引擎 C5 步驟的召喚物（`docs/v3/implementation-plan-v3.md` §2.9，C5 設計 D1–D25）：蜂巢的招牌攻擊 `swarm`，以及任何角色從召喚外盤拿到的無人機發射器（`{kind: 'drone'}` 授予，`src/data/emitters.ts` 的 `DroneGrant`）。CLAUDE.md 的限制寫死在模擬裡：召喚物沒有生命、不尋路、不被敵人瞄準、不碰撞；砲台就是不動的無人機。
+
+#### 4.6.1 池、排位與上限
+
+- **池**（`ctx.sys.drones`，`DronePool`，`src/sim/systems/systemState.ts`）：所有無人機與砲台放在同一個 structure-of-arrays 的池，一格（slot）一列：位置與上一 tick 的位置、停靠點（砲台是砲座）、種類、模式、目標、下次能找目標的 tick、這趟剩下的撞擊次數、停靠剩下的時間、砲台的累加器，以及同一隻敵人的冷卻記憶（每格 `DRONE_MEMORY` = 4 筆，敵人 ID 與到期 tick）。每個發射器另有一份數字：`stepBase`、`dockTicks`、`coolTicks`、`impacts`、`splashSq`、`turretPayload`。`createRunContext` 先用 `droneLayout`（`src/sim/emitters/drone.ts`）排好每一列，再用 `createDronePool` 建池，每局都是新的陣列。`SimState.drones` 共用這些陣列、`droneCount` 是格數（和投射物池、地面區域的檢視一樣），所以停靠中的無人機從 tick 0 就看得到。M1 沒有無人機發射器，每個陣列長度都是 0。
+- **排位**：依發射器順序，每個發射器先排無人機、再排砲台；ID 從 1 起依列的順序編；局中目前不新增召喚物，所以格的順序就是 ID 順序。第 k 架無人機（共 D 架）停在角色周圍半徑 43、角度 2πk/D，第一次找目標在 tick `1 + (10k mod 30)`，所以起飛錯開。第 j 座砲台（共 T 座）坐在半徑 90 的砲座：同一個發射器有無人機時角度是 π/D + 2πj/T（D 是 T 的倍數時，每座砲台的角度都在兩架無人機正中間，例如 swarm 的 3＋1 與 `hive` 的 20＋4），只有砲台時是 2πj/T（D = 0 時 π/D 是 Infinity，位置會變成 NaN）。位置只在開局算一次，每 tick 不跑三角函數。
+- **數字從哪來**：招牌攻擊（第 0 個發射器）的數量、速度、停靠、冷卻、每趟撞擊次數、濺射半徑與砲台的傷害比例全部讀 `SwarmParams`（`CompiledBuild.signature.swarm`，規則模組可以就地改），這些不讀發射器 spec；授予的讀 `DRONE_DEFAULTS` 加上授予自己的數量與傷害比例。撞擊的傷害比例兩者都是發射器 spec 的 `damagePct`，和其他發射器一樣由 `emitterPayload` 讀（swarm 的寫在 `src/sim/rules/swarm.ts`，授予沒寫時用 `DRONE_DEFAULTS` 的）；停靠點與砲座的半徑、砲台的射速（`TURRET_RATE`）兩者都讀 `DRONE_DEFAULTS`。濺射半徑經過 `sizeOf`。
+- **上限**：`SUMMON_CAP` = 24（`src/sim/caps.ts`）算所有的格，無人機與砲台都算（之後的臨時召喚物也算）。排位到上限就拒絕之後的列，記在計數器 `summonCapped`。單一授予超過 24 格是資料驗證的錯誤；`compileBuild` 在 swarm 的 drones + turrets < 1 時丟錯（只有規則模組或 TestModule 寫得出來）。唯一能改上限的是測試用的 `TestModule.summonCap`：一局取 24 與各 TestModule 的最大值，所以只能調高；`RunConfig` 沒有這個欄位，內容碰不到。
+
+#### 4.6.2 階段：`stepDrones`
+
+`src/sim/systems/drones.ts`，`step()` 的 6b：`if (ctx.sys.drones.count !== 0) stepDrones(ctx)`，在發射器與 tick hook 之後、投射物之前。無人機看到這個 tick 的空間格與 tick hook 寫的 `em.cadence`；砲台這個 tick 射出的子彈這個 tick 就移動。M1 每 tick 只多一次讀取與比較。每格依 ID 順序走一次；除了擊中本身的傷害事件（§4.3：每筆傷害一個 `SimEvent`），只多配置 `impact` 與 `turretFire` 事件。
+
+- **攻擊頻率** `m = attackSpeed / BASE_ATTACK_SPEED × em.cadence`，每 tick 讀；m 乘移動速度，除停靠時間與冷卻。`!(m > 0)` 時（含 NaN）無人機這一格這個 tick 什麼都不做，所以位置與計時不會變成 NaN；砲台不看 m（§4.6.3）。
+- **一趟**：停靠（DOCKED）到停靠時間結束、時鐘允許時找目標（`pickOuter`），找到就衝刺（DASH），同一個 tick 開始移動。每 tick 朝目標中心直線走一步，步長碰到目標邊緣就算抵達（和追蹤子彈同一條規則，任何 m 都不會穿過），貼到目標中心撞擊（`impactAt`）。目標還活著就留在牠身上，冷卻結束再撞；這趟的撞擊用完就飛回停靠點（RETURN）。目標死了或被推出場地就失去目標：時鐘允許時重找，否則原地懸停（HOVER）；找不到目標就回家。進入 DASH 一律經過 `engage`，一次寫好 `target`、`targetId` 與 `mode`。
+- **找目標的時鐘**：每格每 `PICK_TICKS`（30 tick）最多找一次，不隨 m 縮放（impl §2.9「每 0.5 秒才重新找一次」）。
+- **冷卻記憶**：一筆在 `memUntil > now` 時有效。冷卻是 `clamp(ceil(coolTicks / m), 1, 90)` tick。寫入時覆蓋同一隻敵人的那筆，否則覆蓋到期最早的那筆，不是 FIFO：90 tick 內一格最多撞到 4 隻不同的敵人（目標只在找目標時換，30 tick 才找一次），所以 4 筆一定夠，被覆蓋的那筆一定已經到期，不管 m 中途怎麼變。
+- **找目標**（`pickOuter`）：從 `ctx.enemies` 尾端往前掃一次，取離角色最遠（`Enemy.dist`）、中心在場地內、不在自己冷卻記憶裡、沒有其他無人機在追的活敵人，同距離取 ID 小的；距離比目前最好的近就先跳過，其他檢查只在可能更好的候選上做。一個都沒有時，才從其他衝刺中的無人機的目標（最多 `SUMMON_CAP` − 1 個，同樣跳過死的、中心在場地外的與自己冷卻記憶裡的）裡挑最遠的。不看 `doomed`、不讀寫 `Enemy.inbound`，追擊的標記是池自己的 `mode` 與 `target`。
+- **和 impl §2.3 的不同**：impl §2.3 把「無人機找目標」列為空間格的使用者，但「離角色最遠」不是格子能回答的半徑查詢，所以 `pickOuter` 是線性掃描，和遠投的 `aimFar` 一樣。砲台找目標、撞擊的濺射仍然查格子。
+- **撞擊**（`impactAt`）是一次攻擊，順序照熔岩彈落地：招牌攻擊先 `countAttack` 與 `nextShotSteady` → `beginAttack` → 用 `grid.within` 列出目標中心濺射半徑內的活敵人（先列再打，所以擊殺分裂出來的子怪不在清單裡）→ 依 ID 順序各打一次，目標是主要命中（招牌攻擊才帶 `PRIMARY`）並計入這次攻擊的連鎖預算 → 招牌攻擊的連鎖 → `impact` 事件 → `droneImpact` 中心事件（沒有清單）→ `endAttack` → 招牌攻擊後面等著的重複攻擊。
+
+#### 4.6.3 砲台
+
+C5 設計 D11。砲台是 `DRONE_KIND_TURRET`、模式 FIXED 的格，坐在砲座不動，開火照 M1 的齊射，只是從砲座射（`turretStep`）：
+
+- **累加器**：每 tick 加 `em.cadence`，到 `em.interval`（無人機發射器的 `emitterInterval` 是砲台的週期：每秒 `TURRET_RATE` = 2 次 × 攻速 / 4）就開火。沒有目標時停在「準備好」、不累積（`acc = interval − cadence`），敵人出現的那個 tick 就開火。攻速 ≤ 0 時週期是 Infinity，永遠不開火。
+- **目標與數量**：第一個目標用 `pickTargetInGrid`（從砲座找最近值得打的，`focused` 的菁英與 Boss 優先，都沒有就最近的活敵人）。招牌砲台在擲數量之前 `countAttack`。數量照 `rollCount` 擲，但寫在迴圈裡（小數部分是多一發的機率、整數不擲，同一條 stream）：swarm 的 `offsetStat('projectileCount', -1)` 讓招牌砲台基礎是 1 發，授予的砲台在 M1 上是 2 發。
+- **之後幾發**用 `turretAccept`（`shootable` 且這次開火還沒選過），**沒有** M1 齊射讓 `focused` 敵人多吃幾發的例外：砲台的子彈不設 `volleyMark`、不加 `inbound`，所以聚焦的菁英每次開火只吃一發，除非沒有別的目標、走最近活敵人的後備。`focused` 量的是敵人到角色的距離，所以離砲台最遠約 890 的菁英也可能算聚焦。
+- **子彈**是投射物池的追蹤子彈（`spawnShot`，`MOTION_HOMING`，`owner` = 發射器編號），和 M1 齊射的投射物、其他池子彈一起受 `PROJECTILE_CAP`（512）限制。`turretFire` 事件的 `count` 是這次開火嘗試的發數，被上限拒絕的也算（`projectilesCapped` 另外記）。
+- **`turretPayload`**（`src/sim/emitters/types.ts`，在 `emitterPayload` 旁邊）：標籤 `hit|minion|projectile`；傷害比例在第 0 個發射器讀 `SwarmParams.turretDamagePct`（0.4），授予讀它自己的；連鎖策略和 `emitterPayload` 一樣只給第 0 個發射器。來源與 `rollsAilments` 跟著發射器，所以燃燒的歸屬不用另外登記。
+- **抵達**（`stepHoming`，`src/sim/systems/shots.ts`）：`owner ≥ 0` 且酬載帶 `SIGNATURE` 時走 `chainAttack`（主要命中加連鎖，和 M1 投射物抵達一樣）；授予的砲台與 `owner` −1 的效果子彈照舊是一般擊中。目標死了就改找子彈附近最近的敵人。
+
+#### 4.6.4 規則與 stream
+
+- **一次攻擊**（C5 設計 D12）：招牌攻擊的每次撞擊是一次攻擊、一發；每次砲台開火是一次攻擊，每顆子彈一發（被上限拒絕的也算）。攻擊序號在第 0 個發射器的無人機與砲台之間共用，所以 `steadyAim` 的節奏、nthAttack 與重複攻擊看到的是同一串攻擊。授予的無人機與砲台不計數。
+- **第 7 條**：swarm 的重複攻擊（`REPEAT_STEPS.swarm = swarmRepeat`）是一次沒有無人機的撞擊：從角色找最遠的敵人（`pickOuterFromCenter`，`pickOuter` 少了記憶與追擊的判斷），用重複攻擊的酬載（`REPEAT`）跑 `impactAt`，不計攻擊、不算一發，`impact` 事件的 `droneId` 是 −1。砲台開火後等著的重複攻擊也是這樣的撞擊，不是第二次開火。
+- **第 8 條**：`droneImpact` 只在招牌攻擊自己的撞擊派發；授予（旗標 0）與重複攻擊（`REPEAT`）的撞擊在 `emitCenterEvent` 的檢查就擋掉，`impactAt` 不用分支。
+- **Stream**：排位、移動、找目標與濺射查詢都不擲骰。擊中照酬載的 stream 擲：撞擊、濺射、連鎖與砲台子彈是 `combat`，重複攻擊是 `effects`；砲台的數量也擲在酬載的 `combat`。
+
+#### 4.6.5 暫存緩衝的擁有者
+
+C4 設計 §4.0 的規則不變，C5 加了這幾列（C5 設計 §4.0）。效果不會巢狀執行，所以 'now' 的重複攻擊只從 `runEffectQueue` 跑，不會在無人機的迴圈裡跑。
+
+| 緩衝 | 唯一的寫入者 | 迭代中 | 迭代中寫得到的 |
+| --- | --- | --- | --- |
+| `ctx.sys.drones.splash` | `impactAt`（撞擊與重複攻擊）：任何擊中之前先用 `grid.within` 填好 | 撞擊的擊中迴圈 | `spreadTargets`、`centerEvents.freezeTargets`、`centerScratch.list`（C4 的第 2 條）。`chainFrom` 在迴圈之後；重複攻擊的 `impactAt` 只在迴圈結束後寫 `splash`（撞擊結尾的 drain，或 `runEffectQueue` 的 'now'） |
+| `ctx.sys.drones.picked`、`pickedCount` | `turretStep`：每次開火歸零，每顆子彈一筆 | `pickTargetInGrid` 裡的 `turretAccept`（這次開火之後幾發的目標） | 沒有。迴圈裡只跑 `nextShotSteady`、`spawnShot`（不打任何東西）與找目標；`countAttack` 在迴圈前，重複攻擊的 drain 在迴圈後 |
+| `ctx.centerScratch.list` | 多了 `impactAt`：擊中迴圈之後、`emitCenterEvent` 之前設 `listCount = 0`；不寫 `radius`（只有帶清單時才讀） | 同 C4 | 同 C4 |
+
+冷卻記憶（`memId`、`memUntil`）與追擊標記（`mode`、`target`）不是緩衝，是每格自己的狀態，只有那一格自己的步驟會寫；`pickOuter` 與 `pickOuterFromCenter` 不寫 `ctx.enemies`。
+
+**依賴：敵人物件從不重用。** 一格的 `target[s]` 會跨 tick 留著（衝刺中、坐在冷卻中的目標上，或回程中，回到停靠點才清掉），同一個 tick 前面的格也可能殺死後面那格的目標。這只靠一件事保證安全：`addEnemy`（`src/sim/systems/spawn.ts`）每次生怪（含分裂子怪）都建新物件，`compact`（`src/sim/systems/death.ts`）只依 `alive` 過濾，所以留著的目標不是活的，就是讀到 `alive === false`；投射物池的追蹤子彈也靠同一件事。**之後如果把敵人改成物件池，無人機也要一起改。**
+
+#### 4.6.6 畫面
+
+`src/render/drones.ts`、`src/render/poolShots.ts`，只在 `?hive` 原型的蜂巢構造體（`RendererOptions.construct`）下建立，只讀狀態與事件：
+
+- `DroneLayer`：無人機是同一張烘焙風箏貼圖的 sprite，在最後兩個 tick 的位置之間插值，機頭朝移動方向；每架最近 5 個 tick 的尾跡畫成一個 `ParticleContainer` 的漸淡線段；被衝刺的敵人身上有蜂巢綠的角括號。砲台是砲座上的方形底座加一根砲管：`TurretTracks` 依 ID 記每根砲管的角度與後座，開火時對準 `turretFire` 瞄準的敵人、之後跟著牠轉。
+- `PoolShotLayer`：投射物池的追蹤子彈（砲台的，也有效果的）畫成發光的小彈頭加尾跡。池不記上一個位置，所以 `ShotTrails` 依子彈 ID 自己記，陣列依 `PROJECTILE_CAP` 一次配置好；模擬不為了畫面寫速度。
+- 撞擊在 `src/render/rings.ts` 有自己的環樣式與上限，滿了換掉最舊的撞擊環，不會擠掉衝擊波或瘟疫的火環。
+- 圖層：無人機與砲台在角色之上、投射物之下；池子彈在投射物之上、連鎖閃電之下。
+
+#### 4.6.7 檢查與工具
+
+- **模糊測試**（`src/sim/summonFuzz.test.ts`，在 `npm run check` 裡，約 2 秒）：用專案自己的 seeded RNG 從固定 seed 抽 20 個 build（產生器 `summonFuzzBuilds` 在 `src/sim/testing.ts`，測試與工具共用）：swarm 的數量由 TestModule 設定（只有無人機、只有砲台、兩者都有）；M1 加上無人機授予（含只有砲台與 0 格的授予）；超過上限的總數；TestModule 調高或調低的 `summonCap`；塞滿 `PROJECTILE_CAP` 與 `CHAIN_HIT_CAP` 的 build；以及會走到召喚物路徑的屬性（暴擊、連鎖、投射物數、攻速 0 到 64、異常狀態機率、`droneImpact` 觸發、重複攻擊、變動的 `cadence`、連鎖策略）。每個 build 從第 1 與第 30 波各跑 600 tick、跑兩次，每個 tick 檢查：敵人的血量與位置、每一格（含砲台）的位置沒有 NaN 或 Infinity；`droneCount` 不超過這局的上限；池子彈數、以及池子彈加 M1 齊射投射物的總數都不超過 `PROJECTILE_CAP`（512）；`chainHitsPeak` 不超過 32；開局排了 min(要求的格數, 上限) 格、`summonCapped` 等於被拒絕的格數；兩次的事件與結果雜湊相同。自我測試種下 NaN、Infinity、超過上限、拋出例外與跨局殘留的狀態，同一套檢查一定要抓到，乾淨的一局一定要通過。
+- **`npx tsx tools/balance/fuzzSummons.ts --builds 100`**：同一個產生器，100 個 build × 60 秒，兩個起始波次、各跑兩次。報告印出局數、tick、實際耗時、各類失敗的次數、最大的 `droneCount` 與它的上限、`summonCapped` 總數、最多的池子彈與 `projectilesCapped`、最大的 `chainHitsPeak`，以及撞擊、砲台開火與擊殺數（證明 build 沒有閒著）；任何失敗都以非 0 結束，並寫出 build、seed 與起始波次（`summonFuzzBuilds(i + 1)[i]` 重建第 i 個 build）。
+- **bench 的 `hive` 場景**：`normal` 的 3 分鐘一局，招牌攻擊換成 swarm，由 TestModule 塞滿 24 格（20 架無人機＋4 座砲台），再加一個計算 `droneImpact` 的 `onCenterEvent` hook，讓監聽的路徑也跑。它不是壓力家族（真實遊戲資料、`normal` 的 build 與起始波次，沒有存活數區間）。`--check` 和其他場景一樣比它對 `normal` 的比值（`tools/balance/bench.baseline.json`），另外印出它的中位數對 impl §6 一局 3 分鐘模擬 50 ms 的預算與這局的召喚物工作量；超過 50 ms 只印出，不算失敗。
+- **`npx tsx tools/balance/hiveFrontier.ts`**：從 `?hive` 的預設存檔，swarm 與 M1 各跑 2 個 `balanced` 策略、10 分鐘的平衡 session，印出前線波次、到第 20／30 波的分鐘與兩邊平均前線的差距。Q5（A）的規則：swarm 的前線比 M1 低超過 5 波，就做只調 swarm 數字（撞擊比例、速度、停靠）的調整 commit（C5.R）。
 
 ## 5. 大數字
 
