@@ -27,6 +27,8 @@ import {
 import type { EconomyConfig, MetaState, Settlement, StartWaveProbeOptions } from '../meta';
 import { NO_INPUT, compileBuild, createSimulation, signatureRows } from '../sim';
 import type { RunConfig, RunResult, SimEvent, Simulation } from '../sim';
+import type { ArcParams } from '../sim/build/compile';
+import type { EmitterSpec } from '../sim/emitters/types';
 
 /** How long the result screen stays up before the next run starts (a click skips it). */
 export const RESULT_SCREEN_MS = 6000;
@@ -61,8 +63,9 @@ export interface ActiveRun {
   readonly config: RunConfig;
   readonly sim: Simulation;
   /**
-   * Damage of a plain (non-crit, non-chain) hit: the damage stat through the hit row of the run's
-   * signature attack (signatureRows); scales damage numbers and screen shake.
+   * Damage of a plain (non-crit, non-chain) hit of the run's signature attack: the damage stat
+   * times the attack's share of it, as its payload takes it (emitterPayload), through its hit row
+   * (signatureRows); scales damage numbers, screen shake and the crit hit-stop.
    */
   readonly typicalHit: number;
 }
@@ -515,9 +518,13 @@ export class Session {
       ...(this.waveCap === undefined ? {} : { waveCap: Math.max(this.waveCap, this.startWave) }),
     };
     // The signature attack's hit row includes Searing Crits' ×0.5, Glass Cannon's ×2 and
-    // Pandemic's ×0.7.
+    // Pandemic's ×0.7. Its share of the damage stat is its payload's (emitterPayload), because
+    // the renderer sizes numbers, shake and the crit hit-stop against this hit.
     const build = compileBuild(stats, config.rules, config.signature);
-    const typicalHit = build.values.damage * build.table.damage(signatureRows(build).hit);
+    const attack = build.emitters[0] as EmitterSpec;
+    const arc = attack.kind === 'arc' ? (build.signature.arc as ArcParams) : null;
+    const share = arc === null ? attack.damagePct : attack.damagePct * arc.damageMult;
+    const typicalHit = build.values.damage * share * build.table.damage(signatureRows(build).hit);
     this.active = {
       number: this.meta.runs + 1,
       config,

@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadGameData } from '../data';
 import type { GameData } from '../data';
 import { TAG } from '../data/tags';
 import { num, toNumber } from '../core/num';
+import { createStreams } from '../core/rng';
 import {
   DEFAULT_ECONOMY,
   PROBE_SEEDS,
@@ -15,8 +16,13 @@ import {
   statBlockFor,
 } from '../meta';
 import type { MetaState } from '../meta';
-import type { SignatureSpec } from '../data/rules';
+import type { RuleSpec, SignatureId, SignatureSpec } from '../data/rules';
 import { MAX_RUN_SECONDS, TICK_RATE, compileBuild, signatureRows } from '../sim';
+import { CritStopGate } from '../render/critStop';
+import { loadSave } from '../save';
+import { emitterPayload } from '../sim/emitters/types';
+import type { DroneSpec, EmitterSpec } from '../sim/emitters/types';
+import { SIGNATURES } from '../sim/rules';
 import { damageRow } from '../sim/testing';
 import {
   FAILED_START_RATIO,
@@ -26,6 +32,7 @@ import {
   leadsToTalents,
 } from './session';
 import type { ActiveRun, RunReport, SessionOptions } from './session';
+import HIVE_PRESET from './hivePreset.json';
 
 const data = loadGameData();
 
@@ -649,9 +656,11 @@ describe('Session with a signature and a minimum start wave (?hive)', () => {
       'waveCap',
     ]);
     expect(config.signature).toEqual(SWARM);
+    // An impact's plain hit: the impact's share of the damage stat through its hit row.
     const typical = compileBuild(config.stats, config.rules, SWARM);
+    const impact = typical.emitters[0] as EmitterSpec;
     expect(hive.session.run.typicalHit).toBe(
-      typical.values.damage * typical.table.damage(signatureRows(typical).hit),
+      typical.values.damage * impact.damagePct * typical.table.damage(signatureRows(typical).hit),
     );
 
     const m1 = createSession({ waveCap: WAVE_CAP });
@@ -731,5 +740,223 @@ describe('Session with a signature and a minimum start wave (?hive)', () => {
     session.openTalents();
     session.startNextRun();
     expect(session.run.config.startWave).toBe(30);
+  });
+});
+
+/** 六線圈 (C13) as a talent's rule: six coils, two targets a discharge, 55% of the arc's damage. */
+const SIX_COILS: RuleSpec = { id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55 };
+
+/**
+ * M1's talents with a thorns grant on Keen Eye, an emitter after any signature's, and 六線圈 on
+ * Sharpen, which only the arc's runs may take (another signature's compile throws on it).
+ */
+const SHARE_DATA: GameData = {
+  ...data,
+  talents: data.talents.map((node) =>
+    node.id === 'keenEye'
+      ? { ...node, emitters: [...node.emitters, { kind: 'thorns' } as const] }
+      : node.id === 'sharpen'
+        ? { ...node, rules: [...node.rules, SIX_COILS] }
+        : node,
+  ),
+};
+
+/** The first run of a fresh profile on SHARE_DATA with `nodes` allocated, playing `signature`. */
+function shareRun(signature: SignatureSpec, nodes: readonly string[]): ActiveRun {
+  const meta = createMetaState();
+  for (const id of nodes) meta.allocated.add(id);
+  const session = new Session(
+    SHARE_DATA,
+    meta,
+    {
+      runStarted: () => undefined,
+      runFinished: () => undefined,
+      talentsOpened: () => undefined,
+      profileChanged: () => undefined,
+    },
+    { signature },
+  );
+  session.start();
+  return session.run;
+}
+
+/**
+ * The plain hit of `run`'s signature payload: its base damage, the share of the damage stat that
+ * emitterPayload gives emitter 0, through the signature attack's hit row.
+ */
+function payloadHit(run: ActiveRun): number {
+  const { seed, stats, rules, signature } = run.config;
+  const build = compileBuild(stats, rules, signature);
+  const spec = build.emitters[0] as EmitterSpec;
+  const payload = emitterPayload(build, spec, createStreams(seed).combat, null);
+  return toNumber(payload.baseDamage) * build.table.damage(signatureRows(build).hit);
+}
+
+/** Makes the swarm's impacts 200% of the damage stat, as C5.R's options (A) and (C) tune them. */
+function tuneImpacts() {
+  const untuned = SIGNATURES.swarm.emitter;
+  return vi
+    .spyOn(SIGNATURES.swarm, 'emitter')
+    .mockImplementation((spec): EmitterSpec => ({ ...(untuned(spec) as DroneSpec), damagePct: 2 }));
+}
+
+describe('Session typical hit', () => {
+  it.each(Object.keys(SIGNATURES) as SignatureId[])(
+    "is the plain hit of %s's payload, its share of the damage stat included, beside a granted emitter",
+    (id) => {
+      const run = shareRun({ id }, ['keenEye']);
+      const { stats, rules } = run.config;
+      // The thorns grant (300%) follows the signature emitter, and the typical hit never reads it.
+      expect(compileBuild(stats, rules, { id }).emitters[1]?.kind).toBe('thorns');
+      expect(run.typicalHit).toBe(payloadHit(run));
+    },
+  );
+
+  it("takes 六線圈's damageMult into the arc's share, as the arc's payload does", () => {
+    const arc: SignatureSpec = { id: 'triphaseArc' };
+    const run = shareRun(arc, ['sharpen']);
+    const { stats, rules } = run.config;
+    const build = compileBuild(stats, rules, arc);
+    expect(build.signature.arc?.damageMult).toBe(0.55);
+    expect(run.typicalHit).toBe(payloadHit(run));
+    expect(run.typicalHit).toBe(
+      stats.values.damage * 0.55 * build.table.damage(signatureRows(build).hit),
+    );
+  });
+
+  it("follows a tuning of the swarm's impact share (C5.R), not DRONE_DEFAULTS' or the turret's", () => {
+    const untuned = SIGNATURES.swarm.emitter;
+    const spy = tuneImpacts();
+    try {
+      const { session } = createSession({ signature: SWARM });
+      session.start();
+      const { stats, rules } = session.run.config;
+      const build = compileBuild(stats, rules, SWARM);
+      expect((build.emitters[0] as EmitterSpec).damagePct).toBe(2);
+      expect(session.run.typicalHit).toBe(payloadHit(session.run));
+      expect(session.run.typicalHit).toBe(
+        stats.values.damage * 2 * build.table.damage(signatureRows(build).hit),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(SIGNATURES.swarm.emitter).toBe(untuned);
+  });
+
+  it("is each run's own: the run after purchases on the talent web measures its own build's plain hit", () => {
+    const { session, meta } = createSession();
+    session.start();
+    const first = session.run.typicalHit;
+    expect(first).toBe(payloadHit(session.run));
+    playRun(session);
+    session.openTalents();
+    meta.shards = num(1e9);
+    meta.cores = 10;
+    buyMight(session, 1);
+    expect(session.allocate('glassCannon')).toBe(true);
+    session.startNextRun();
+    expect(session.run.number).toBe(2);
+    expect(session.run.typicalHit).toBe(payloadHit(session.run));
+    // Might's ×1.1 and Glass Cannon's ×2 reach the hit row.
+    expect(session.run.typicalHit / first).toBeCloseTo(2.2, 12);
+  });
+
+  it("counts a 六線圈 allocated between runs in the next arc run's share, as that run's payload does", () => {
+    const arc: SignatureSpec = { id: 'triphaseArc' };
+    const meta = createMetaState();
+    const session = new Session(
+      SHARE_DATA,
+      meta,
+      {
+        runStarted: () => undefined,
+        runFinished: () => undefined,
+        talentsOpened: () => undefined,
+        profileChanged: () => undefined,
+      },
+      { signature: arc },
+    );
+    session.start();
+    const before = session.run;
+    playRun(session);
+    session.openTalents();
+    // SHARE_DATA's Sharpen carries 六線圈; set directly, as a loaded profile would.
+    meta.allocated.add('keenEye');
+    meta.allocated.add('sharpen');
+    session.startNextRun();
+    const after = session.run;
+    const compiled = (run: ActiveRun) =>
+      compileBuild(run.config.stats, run.config.rules, run.config.signature);
+    expect(compiled(before).signature.arc?.damageMult).toBe(1);
+    expect(compiled(after).signature.arc?.damageMult).toBe(0.55);
+    expect(before.typicalHit).toBe(payloadHit(before));
+    expect(after.typicalHit).toBe(payloadHit(after));
+  });
+});
+
+/**
+ * The crit hit-stops the renderer's gate asks for in the first minute at 1× of the ?hive preset's
+ * first run, opened as main.ts opens it, with every crit's decades taken over `typical` of the
+ * run, and the ticks it played: review 2's T4, shared with the control that shows it counts.
+ */
+function presetCritStops(typical: (run: ActiveRun) => number): { stops: number; ticks: number } {
+  const loaded = loadSave(JSON.stringify(HIVE_PRESET), data);
+  if (!loaded.ok) throw new Error(loaded.error);
+  const session = new Session(
+    data,
+    loaded.profile.meta,
+    {
+      runStarted: () => undefined,
+      runFinished: () => undefined,
+      talentsOpened: () => undefined,
+      profileChanged: () => undefined,
+    },
+    { waveCap: WAVE_CAP, signature: SWARM },
+  );
+  // As main.ts opens ?hive on a returning profile: the talent web, then Enter.
+  session.resume();
+  session.startNextRun();
+  const typicalHit = typical(session.run);
+  // The renderer's gate (src/render/renderer.ts onHit), fed every crit's decades over the
+  // typical hit (DamageNumbers.decades) and a frame of wall-clock time a tick, as at 1×.
+  const gate = new CritStopGate();
+  let stops = 0;
+  let ticks = 0;
+  for (; ticks < 60 * TICK_RATE && session.phase === 'running'; ticks++) {
+    for (const event of session.step()) {
+      if (event.type !== 'hit' || !event.crit) continue;
+      const decades = Math.log10(toNumber(event.amount)) - Math.log10(typicalHit);
+      if (gate.crit(decades) > 0) stops++;
+    }
+    gate.update(1000 / TICK_RATE);
+  }
+  return { stops, ticks };
+}
+
+/** 5d10c39's typical hit (review 2's B1): the damage stat through the hit row, with no share. */
+function sharelessHit(run: ActiveRun): number {
+  const { stats, rules, signature } = run.config;
+  const build = compileBuild(stats, rules, signature);
+  return build.values.damage * build.table.damage(signatureRows(build).hit);
+}
+
+describe('?hive crit hit-stops (C5.R option (A); review 2)', () => {
+  it('asks for at most one crit hit-stop in the preset’s first ?hive minute at 1×, as on C5.4: a rare accent, not a beat (ARCHITECTURE §10.3)', () => {
+    const { stops, ticks } = presetCritStops((run) => run.typicalHit);
+    // The preset's first ?hive run outlives the minute (about 70 s from wave 13).
+    expect(ticks).toBe(60 * TICK_RATE);
+    expect(stops).toBeLessThanOrEqual(1);
+  });
+
+  it('counts the hitch it guards against: 200% impacts stop every few seconds over the share-less typical hit (B1), at most once over theirs', () => {
+    const untuned = SIGNATURES.swarm.emitter;
+    const spy = tuneImpacts();
+    try {
+      expect(presetCritStops((run) => run.typicalHit).stops).toBeLessThanOrEqual(1);
+      // One every 5 s at least, where the gate's 2.5 s cooldown allows 24 a minute.
+      expect(presetCritStops(sharelessHit).stops).toBeGreaterThanOrEqual(12);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(SIGNATURES.swarm.emitter).toBe(untuned);
   });
 });
