@@ -605,6 +605,14 @@ export const COEF_FIELDS: {
   chainBolt: ['damagePct'],
 };
 
+/**
+ * The bounds of a fusion's coefficient (docs/v3 C6 design D10; implementation-plan-v3 §4's
+ * 二分法範圍 0.1–10): calibration searches inside them, and a fusion's coefRange
+ * (src/data/fusion/sensitivity.ts) never leaves them.
+ */
+export const COEF_MIN = 0.1;
+export const COEF_MAX = 10;
+
 /** When `on` happens and every `when` condition holds, run each effect of `do` in order. */
 export interface TriggerSpec {
   readonly on: TriggerEventId;

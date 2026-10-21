@@ -309,6 +309,8 @@ export interface FusionDef {
   readonly template: FusionTemplate | null;
   /** CALIBRATED[key].coef, or 1 without an entry (V9 fails that in CHECK); options.coefs overrides it (§4.3). */
   readonly coef: number;
+  /** coef also scales the bonus and r3: a template pair's payload has coefScalesBonus (Q2 (A)). */
+  readonly coefScalesBonus: boolean;
   /** The outer's skin with the override's; the UI blends in the character colour. */
   readonly skin: Skin;
   /** fusionDigest of what calibration depends on (F28). */

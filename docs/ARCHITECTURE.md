@@ -23,9 +23,10 @@
 
 ```
 src/
-  core/        Num、數字格式化、seeded RNG、數學工具（純 TS）
+  core/        Num、數字格式化、seeded RNG、內容摘要、數學工具（純 TS）
   data/        天賦、敵人、波次、昇華的資料檔與 zod schema（純 TS）
     web/       v3 天賦網的內容型別、zod schema、節點 ID 文法、範圍與測試 fixture，和 M1 天賦網分開
+    fusion/    v3 的融合產生器、覆寫、校準紀錄與係數範圍
     characters/  v3 的四個角色，一個角色一個檔
     outer/     v3 的外盤，一塊外盤一個檔
   sim/         一局的模擬：狀態、系統、固定 timestep（純 TS）
@@ -580,6 +581,10 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - 招牌攻擊與規則的表在 `src/data/rules.ts`：`CHARACTER_SIGNATURE`（角色 → 招牌攻擊）、`SIGNATURE_EVENT`（招牌攻擊 → 中心事件）、`SIGNATURE_FORMS`（每種招牌攻擊能接的形態規則）；`RULE_COEF_FIELDS` 列出融合係數要縮放的規則欄位，`scaleRuleSpec` 照這張表縮放一個 spec（`pct`、`mult` 乘上係數，`chance` 乘完夾到 1）；`POLICY_RULES` 是 ◆ 可以帶的連鎖政策規則。這兩張表都從空的開始，每個規則模組上線時加上自己那一筆。
 - v3 的內容檔：每個角色一個檔，放在 `src/data/characters/`，四個角色從 C6.3 起都登記在 `CHARACTERS`（`src/data/characters/index.ts`，選角畫面的「第一次玩推薦」是 `FIRST_PICK = 'fire'`），各帶 `docs/v3/game-design-v3.md` 的選角卡資料（主色、難度、構造體、推薦外盤、第 15 波揭露的外盤、敵人對照列）；`center` 與 `ascendancies` 在該批內容寫好前是 `null`，選角畫面顯示「製作中」。外盤一塊一個檔，登記在 `OUTERS`（`src/data/outer/index.ts`）；樞紐環是 `src/data/hub.ts` 的 `HUB`。兩者在 B1 前都是空的。內容檔只 import `src/data/templates.ts` 與型別。
 - `src/data/templates.ts` 是寫內容用的函式：修正（`flat`、`inc`、`more`）、節點模板（`ranked`、`rankedMods`、`notable`、`keystone`、`threshold`、`entry`、`mastery`、`might`、`signatureNode`、`ascNode`、`ascFinal`、`answers`、`fusionRank`）與建盤函式（`centerBranch`、`outerBranch`、`ascendancy`、`defineCharacter`、`defineOuter`、`defineHub`）。作者只填槽，替 ◆、★ 與分支取 slug；建盤函式照 ID 文法替每個節點命名、放進它的槽，再加上盤的固定連線：中心盤 40 個節點、45 條邊，接口 c1–c6 在 1、3、5、7、9、11 點鐘；外盤 18 個節點、20 條邊；樞紐環 24 個節點照固定表放：12 個連成一圈，每個再向內接出一個；昇華 3 個節點。作者不寫 ID、連線或座標。`defineCharacter` 從角色 ID 推出 `archetype`、`arena`、名稱與介紹的 i18n key、招牌攻擊和它的中心事件。沒寫目標的精通由建盤函式依盤補上：中心盤是 `scope 'center'`，外盤是該流派的標籤（連擊、彈幕、貪婪沒有標籤，改成 `scope 'outer.<外盤>'`），融合是 `scope 'fusion.<角色>.<外盤>'`。`rankedMods` 的發射器只在第 1 級給一次，不會每級重複。建盤函式不丟例外：槽裡放錯模板就照寫的記下來，漏寫的槽就少那個節點，都留給驗證回報。
+- 融合盤由產生器生成，作者不寫：`src/data/fusion/generate.ts` 的 `generate(角色, 外盤, 覆寫, coef)` 產生一條融合的 5 個節點，核心（1 級）、`r1`–`r3` 與精通，ID 是 `fusion.<角色>.<外盤>.<槽>`，連成核心–r1–r2–r3–精通一直線。角色接另一個流派角色的外盤是手工融合（`HAND_PAIRS`，12 條），核心是覆寫給的規則；其他 32 條是模板融合，核心是外盤酬載放到角色中心事件上的一個觸發，加上酬載的加成。產生器不看酬載是哪一種，只補中心事件決定的落點（`place`）：斬擊線在爆炸時從爆炸點朝最近的敵人，在凍結與無人機撞擊時從目標往外，在連鎖跳躍時順著跳的方向；子彈從事件點出發；新星以事件點為中心；上狀態的效果不帶半徑，爆炸與凍結時由引擎分給事件名單上的每隻敵人。加成（`bonusModifiers`）都是 `scope 'center'` 的傷害修正：`status` 是目標帶著該狀態時、`inZone` 是目標站在這條融合自己的區域裡時增加傷害，`scaling` 是縮放的修正；`inPayload` 與 `null` 不加修正。`r1`–`r3` 用覆寫的等級，沒有就用手工融合的預設 `HAND_RANKS`（3 個節點，各 3 級、每級 +10% 增加傷害）或酬載的等級；寫成 `scope 'fusion'` 的修正收窄成這條融合，所以一個外盤檔可以給它的 3–4 條融合共用。精通每級 `more 0.04` 傷害，只算這條融合。產生器不丟例外：缺覆寫的手工融合拿到空核心與 `HAND_RANKS`，沒有酬載的模板融合拿到空核心與 `EMPTY_RANKS`，都留給驗證回報。
+- 覆寫在 `src/data/fusion/overrides.ts`，B1 前是空的。`OVERRIDES` 依融合逐條覆寫，套用順序是：`triggers` 取代模板的觸發，`addTriggers` 接在後面（火毒的瘟疫爆彈就是一條），`bonus` 取代酬載的加成（`null` 是拿掉），`modifiers` 接在加成的修正後面，手工融合的 `rule` 或模板融合的 `addRules` 放進規則，`ranks` 取代預設的等級，`skin` 蓋在外盤的外觀上。只有冰光與雷光（`TEMPLATE_RULE_OVERRIDES`）可以加規則。`ACCEPTED_FAILS` 記校準 FAIL 但接受的融合與理由。
+- 融合係數 `coef` 在產生器裡不縮放觸發與規則（那是編譯時的事），只在模板融合的酬載標了 `coefScalesBonus`（沒有可縮放傷害的連擊、不造成傷害的光環）時乘上加成與 `r3`，`FusionDef.coefScalesBonus` 記下這件事；`r1`、`r2` 與精通從不縮放。係數的範圍是 `COEF_MIN` 0.1 到 `COEF_MAX` 10（`src/data/triggers.ts`）。`coefRange(fusion)`（`src/data/fusion/sensitivity.ts`）從核心的觸發與規則算出校準與 fuzz 用的區間：有值大於 0 的 COEF 欄位（沒寫的算 1；地面區域的 `ailmentDamagePct` 要有 `ailment` 才算）或 `pct`、`mult` 規則欄位時是 [0.1, 10]，每個效果 e 的轉移把上限壓到 0.99 / e（瘟疫爆彈的 0.5 → 1.98）；不然有機率 p < 1（機率條件、chainJump 的 0.3）或規則的 `chance` 欄位時是 [0.1, 1 / p]，p 取最大的；再不然有 `coefScalesBonus` 時是 [0.1, 10]；都沒有就是 `null`，係數什麼都不動，校準記為 insensitive。區間不會超出 [`COEF_MIN`, `COEF_MAX`]。
+- 校準結果是 `src/data/fusion/calibrated.ts` 的 `CALIBRATED`，由校準工具寫入（檔頭註明是產生的檔案，不要手改），B1 前是空的。每條融合帶一個摘要（`fusionDigest`），涵蓋中心事件、模板、覆寫、照寫的等級與 `coefScalesBonus`，不含 coef，所以看得出哪條校準紀錄過期；中心、外盤的其他節點與引擎改變強度時摘要不動，留給 C10 的夜間檢查。摘要用 `src/core/digest.ts` 的 `digest(value)`：鍵排序後的標準 JSON，兩條 32 位元 FNV-1a，16 個十六進位數字；不用 `node:crypto`，維持純 TS。
 - 範圍（`src/data/web/scope.ts`）決定一張網顯示哪些角色與外盤：`FULL_SCOPE` 是全部已登記的內容；`DEMO_SCOPE_A` 是 Demo（熔核＋蜂巢，外盤火、冰、毒、暴擊、召喚，第 40 波上限）；`DEMO_SCOPE_B` 是 10/28 的備案（熔核＋霜晶，外盤火、冰、毒、暴擊、雷，第 40 波上限）。範圍外的外盤是鎖住的「完整版」。`BATCH_COUNTS` 是每一批做完後組起來的節點總數，含生成的融合節點：156、246、405、632、644。
 - 測試用的內容 `fixtureContent(variant?)`（`src/data/web/testing.ts`，只有測試與工具 import）用真的角色與外盤 ID 寫滿整張網的每個槽：4 × 40 個中心盤、24 個樞紐環、12 × 18 個外盤與 8 × 3 個昇華節點，共 424 個；組網時再生成 220 個融合節點，合計 644 個。它也有 12 條手工融合的覆寫與冰光、雷光 2 條規則覆寫，借用 M1 的四個規則模組（冷靜狙擊、無盡烈焰、過載、玻璃大砲），每張網的每個規則只在一塊盤上；火毒另有瘟疫爆彈的覆寫（`addTriggers` 加一個擊殺觸發），所以 32 條模板融合裡有 3 條帶覆寫。`variant` 是批次 B1–B5，只登記那一批與之前各批的內容。fixture 的數值是設計給的預設值，不是平衡過的數值。
 
