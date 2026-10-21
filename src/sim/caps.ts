@@ -77,3 +77,10 @@ export const DRONE_MEMORY = 4;
 export const PICK_TICKS = 30;
 /** The longest same-enemy cooldown of a drone, in ticks, which keeps DRONE_MEMORY enough. */
 export const DRONE_COOLDOWN_MAX = 90;
+/**
+ * Enemies one orb remembers having hit, each until its cooldown ends (src/sim/emitters/orbit.ts);
+ * a power of two, so its ring buffer wraps with a mask. An orb that hits one more while it
+ * remembers this many forgets the oldest, counted in orbMemoryFull, and may hit that one again
+ * before its cooldown ends.
+ */
+export const ORB_MEMORY = 64;

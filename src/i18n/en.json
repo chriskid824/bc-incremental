@@ -162,6 +162,8 @@
   "stat.shatterDamage": "Shatter damage",
   "stat.shatterRadius": "Shatter radius",
   "stat.frozenDamageTaken": "Damage taken while frozen",
+  "stat.auraRadius": "Aura radius",
+  "stat.orbitCount": "Orbs",
   "enemy.triangle.name": "Triangle",
   "enemy.triangle.plural": "Triangles",
   "enemy.square.name": "Square",

@@ -162,6 +162,8 @@
   "stat.shatterDamage": "碎裂傷害",
   "stat.shatterRadius": "碎裂範圍",
   "stat.frozenDamageTaken": "凍結中受到傷害",
+  "stat.auraRadius": "光環半徑",
+  "stat.orbitCount": "環繞球數量",
   "enemy.triangle.name": "三角",
   "enemy.triangle.plural": "三角",
   "enemy.square.name": "方塊",

@@ -67,6 +67,12 @@
  *   design §7.3), which keeps C4's ratio lineage; two JSON snapshots beside this file pin its
  *   seed-1 config and workload (bench.test.ts). --check prints stress − stressBase when it times
  *   both.
+ * - grants: a stress-family scenario (C4.21, docs/v3 C4 design §7.3), M1's attack with impl §6's
+ *   aura and orbs beside a thorns grant: an aura of auraRadius 160 on outer.aura, its every
+ *   fourth pulse merged at × 4 (聚能脈衝), whose pulses roll ailments (Q4 (B)); two orbit rings on
+ *   outer.aura, 110 and 180 from the player (雙軌), of 4 orbs each, every orb with its own
+ *   cooldown on each enemy it hits (Q13 (B), src/sim/emitters/orbit.ts); and thorns on
+ *   outer.thorns. Only CI's ratio rule and the alive band gate it.
  *
  * hiveStress (C5.6, docs/v3 C5 design §7.4) is print-only: the stress fixture under 蜂巢's swarm
  * at 24 units with 螢火's pulse zones, timed only by --share and printed beside stress v4. It is
@@ -75,7 +81,7 @@
  *
  *   npm run bench --
  *     [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan|arc|hive|
- *       stressBase]
+ *       stressBase|grants]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>]
@@ -178,6 +184,7 @@ export const SCENARIO_IDS = [
   'arc',
   'hive',
   'stressBase',
+  'grants',
 ] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
@@ -620,6 +627,18 @@ const FIREFLY: SourcedTrigger = {
 };
 
 /**
+ * The grants scenario's emitters (docs/v3 C4 design §7.3, C4.21) at their default shares: an aura
+ * of auraRadius 160 whose every fourth pulse is merged at × 4 (聚能脈衝), ring 0 and ring 1 (雙軌)
+ * of 4 orbs each, all on outer.aura, and a thorns grant on outer.thorns.
+ */
+const GRANTS_EMITTERS: readonly SourcedEmitter[] = [
+  { source: 'outer.aura', grant: { kind: 'aura', everyNth: { n: 4, mult: 4 } } },
+  { source: 'outer.aura', grant: { kind: 'orbit', count: 4 } },
+  { source: 'outer.aura', grant: { kind: 'orbit', ring: 1, count: 4 } },
+  { source: 'outer.thorns', grant: { kind: 'thorns' } },
+];
+
+/**
  * Scenarios only --share times and prints (docs/v3 C5 design §7.4, PG3): outside SCENARIO_IDS,
  * so --check neither times nor records them, and no alive band applies.
  */
@@ -808,6 +827,14 @@ export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   // C5.6: stress v3 (C4.14) under its own key, as C4.14 recorded it under stress (docs/v3 C5
   // design §7.3): magmaBomb at 12 bombs a second with 熔核's zone sources and 雷網全開.
   stressBase: stressScenario(stressV3, [FROST_FIRE], undefined, true),
+  // C4.21: the aura, two orbit rings and thorns on M1's attack.
+  grants: stressScenario(() => ({
+    stats: stressStats(
+      { auraRadius: 160 },
+      { triggers: [], conversions: [], emitters: GRANTS_EMITTERS },
+    ),
+    rules: [],
+  })),
 };
 
 function positiveInt(name: string, text: string, min = 1): number {

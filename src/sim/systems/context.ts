@@ -20,6 +20,7 @@ import { statAt, staticInput } from '../build/eval';
 import type { EvalInput } from '../build/eval';
 import type { ModTable } from '../build/modTable';
 import { SCOPED_INDEX } from '../build/modTable';
+import { countOf } from '../build/size';
 import { ailmentCredit, MAX_SOURCES, SOURCE_CLASS_ORDINAL } from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
 import { SUMMON_CAP } from '../caps';
@@ -35,7 +36,9 @@ import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import { droneLayout } from '../emitters/drone';
 import {
   ALWAYS_IGNITES,
+  coronaPayload,
   createEmitterRuntime,
+  createOrbMemory,
   createPayload,
   emitterInterval,
   emitterPayload,
@@ -720,7 +723,8 @@ export function createRunContext(
   // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
   // contact stage the thorns, the segment stage the segments and the drone stage the drones. A
   // strike picks its target as a periodic trigger does, from the player; a fan's icicle cones
-  // (冰柱) take a payload of their own.
+  // (冰柱) and an aura's corona (日冕) take a payload of their own; an orbit's orbs, counted
+  // once for the run, each remember the enemies they hit.
   const emitters = build.emitters.map((spec, index) => {
     const payload = emitterPayload(build, spec, combatRng, index === 0 ? policy : null);
     return createEmitterRuntime(
@@ -729,7 +733,14 @@ export function createRunContext(
       index,
       emitterInterval(build, spec),
       spec.kind === 'strike' ? compileSelector(spec.target, 'periodic') : null,
-      spec.kind === 'fan' ? iciclePayload(build, payload) : null,
+      spec.kind === 'fan'
+        ? iciclePayload(build, payload)
+        : spec.kind === 'aura'
+          ? coronaPayload(build, spec, payload)
+          : null,
+      spec.kind === 'orbit'
+        ? createOrbMemory(countOf(build, spec.count + Math.floor(values.orbitCount)))
+        : null,
     );
   });
   // The drone emitters' summons, placed once in emitter order up to the summon cap, which only a

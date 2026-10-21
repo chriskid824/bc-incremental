@@ -407,6 +407,47 @@ function grantIssues(grant: EmitterGrant): string[] {
       }
       break;
     }
+    case 'aura': {
+      if (grant.damagePct !== undefined && !(grant.damagePct > 0)) {
+        issues.push(`damagePct must be > 0 (got ${grant.damagePct})`);
+      }
+      const nth = grant.everyNth;
+      if (nth !== undefined) {
+        if (!(Number.isInteger(nth.n) && nth.n >= 2)) {
+          issues.push(`everyNth.n must be an integer >= 2 (got ${nth.n})`);
+        }
+        if (!(nth.mult > 0)) issues.push(`everyNth.mult must be > 0 (got ${nth.mult})`);
+      }
+      const corona = grant.corona;
+      if (corona !== undefined) {
+        if (!(corona.periodSec >= CORONA_PERIOD_MIN)) {
+          issues.push(`corona.periodSec must be >= ${CORONA_PERIOD_MIN} (got ${corona.periodSec})`);
+        }
+        if (!(corona.damagePct > 0)) {
+          issues.push(`corona.damagePct must be > 0 (got ${corona.damagePct})`);
+        }
+      }
+      break;
+    }
+    case 'orbit': {
+      const { ring, count } = grant;
+      if (ring !== undefined && ring !== 0 && ring !== 1) {
+        issues.push(`ring must be 0 or 1 (got ${ring})`);
+      }
+      if (count !== undefined && !(Number.isInteger(count) && count >= 0)) {
+        issues.push(`count must be an integer >= 0 (got ${count})`);
+      }
+      if (grant.damagePct !== undefined && !(grant.damagePct > 0)) {
+        issues.push(`damagePct must be > 0 (got ${grant.damagePct})`);
+      }
+      if (grant.cooldownSec !== undefined && !(grant.cooldownSec >= ORB_COOLDOWN_MIN)) {
+        issues.push(`cooldownSec must be >= 1/60 (got ${grant.cooldownSec})`);
+      }
+      if (grant.orbRadius !== undefined && !(grant.orbRadius > 0)) {
+        issues.push(`orbRadius must be > 0 (got ${grant.orbRadius})`);
+      }
+      break;
+    }
   }
   return issues;
 }
@@ -422,6 +463,12 @@ const STRIKE_CHAIN_JUMPS_MAX = 8;
  * so a grant past it could never be placed whole.
  */
 const SUMMON_SLOTS_MAX = 24;
+
+/** The shortest period of an aura's corona: one pulse, a quarter of a second. */
+const CORONA_PERIOD_MIN = 0.25;
+
+/** The shortest cooldown of an orb: one tick of the simulation's 60 a second. */
+const ORB_COOLDOWN_MIN = 1 / 60;
 
 /** Parameter ranges of one rule; the simulation relies on them (src/sim/rules/). */
 function ruleIssues(rule: RuleSpec): string[] {

@@ -110,7 +110,51 @@ export interface DroneGrant {
   readonly name?: string;
 }
 
-export type EmitterGrant = ThornsGrant | SegmentGrant | StrikeGrant | DroneGrant;
+/**
+ * An aura (光環): four times a second, every alive enemy within the auraRadius stat of the
+ * player takes a hit (src/sim/emitters/aura.ts), and the pulse's hits add up to one pulse event.
+ * With everyNth (聚能脈衝) only every n-th pulse hits, at × mult, and the pulses between do
+ * nothing; with corona (日冕) every alive enemy also takes a hit of corona.damagePct × a pulse's
+ * every corona.periodSec. The hits are tagged hit and aura, can crit and roll ailments.
+ */
+export interface AuraGrant {
+  readonly kind: 'aura';
+  /** Base damage of a pulse's hit as a fraction of the damage stat; AURA_DEFAULTS.damagePct. */
+  readonly damagePct?: number;
+  /** Pulses merged into one, n an integer ≥ 2, whose hits deal × mult (mult = n: the same DPS). */
+  readonly everyNth?: { readonly n: number; readonly mult: number };
+  /**
+   * Seconds between its coronas, at least one pulse's 0.25 s, and a corona hit's damage as a
+   * multiple of a pulse hit's (1: one pulse's).
+   */
+  readonly corona?: { readonly periodSec: number; readonly damagePct: number };
+}
+
+/**
+ * Orbs (環繞球): count orbs plus the orbitCount stat's whole part, evenly spaced on a ring around
+ * the player, turning once a second. An enemy an orb touches takes a hit, and that orb passes it
+ * over for cooldownSec, while the ring's other orbs can still hit it (src/sim/emitters/orbit.ts).
+ * The hits are tagged hit and orbit, can crit and roll ailments.
+ */
+export interface OrbitGrant {
+  readonly kind: 'orbit';
+  /**
+   * Its ring, 0 or 1 (雙軌), at ORBIT_DEFAULTS.ringRadius of it; 0 when omitted. What tells two
+   * orbit grants of one source apart (grantKey).
+   */
+  readonly ring?: number;
+  /** Orbs it adds to the orbitCount stat's, a whole number; 0 when omitted. */
+  readonly count?: number;
+  /** Base damage of an orb's hit as a fraction of the damage stat; ORBIT_DEFAULTS.damagePct. */
+  readonly damagePct?: number;
+  /** Seconds before an orb can hit an enemy it hit again; ORBIT_DEFAULTS.cooldownSec. */
+  readonly cooldownSec?: number;
+  /** An orb's radius; ORBIT_DEFAULTS.orbRadius when omitted. */
+  readonly orbRadius?: number;
+}
+
+export type EmitterGrant =
+  ThornsGrant | SegmentGrant | StrikeGrant | DroneGrant | AuraGrant | OrbitGrant;
 export type GrantKind = EmitterGrant['kind'];
 
 /** A thorns hit's base damage when its grant names none: 300% of the damage stat. */
@@ -152,6 +196,25 @@ export const DRONE_DEFAULTS = {
   turretRate: 2,
 } as const;
 
+/** An aura grant's share of the damage stat a pulse hit when it names none (初始值). */
+export const AURA_DEFAULTS = {
+  damagePct: 0.25,
+} as const;
+
+/**
+ * An orbit grant's numbers (初始值): its ring when it names none, each ring's radius around the
+ * player (ring 0, ring 1), the orbs' turns a second, and its hits' share of the damage stat, an
+ * orb's same-enemy cooldown in seconds and its radius when it names none.
+ */
+export const ORBIT_DEFAULTS = {
+  ring: 0,
+  ringRadius: [110, 180],
+  revPerSec: 1,
+  damagePct: 0.6,
+  cooldownSec: 0.5,
+  orbRadius: 12,
+} as const;
+
 /** An emitter grant of an allocated node, with the source of its node (sourceOfNode). */
 export interface SourcedEmitter {
   /** Source id (src/data/sources.ts) its damage is credited to. */
@@ -161,9 +224,10 @@ export interface SourcedEmitter {
 
 /**
  * What tells two grants of one kind and source apart: grants that share it are one emitter, and
- * the build keeps the first. A source has one thorns emitter, so thorns has no key; it has one
- * segment emitter per kind of endpoint, one strike per name, and one drone emitter per name (''
- * for a grant without one).
+ * the build keeps the first. A source has one thorns emitter and one aura, so neither has a key;
+ * it has one segment emitter per kind of endpoint, one strike per name, one drone emitter per
+ * name ('' for a grant without one), and one orbit emitter per ring ('0' for a grant without
+ * one).
  */
 export function grantKey(grant: EmitterGrant): string {
   switch (grant.kind) {
@@ -175,5 +239,9 @@ export function grantKey(grant: EmitterGrant): string {
       return grant.name;
     case 'drone':
       return grant.name ?? '';
+    case 'aura':
+      return '';
+    case 'orbit':
+      return String(grant.ring ?? ORBIT_DEFAULTS.ring);
   }
 }

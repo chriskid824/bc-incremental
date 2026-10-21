@@ -39,7 +39,9 @@
       "freezeDuration": 1.2,
       "shatterDamage": 0.15,
       "shatterRadius": 90,
-      "frozenDamageTaken": 0.3
+      "frozenDamageTaken": 0.3,
+      "auraRadius": 160,
+      "orbitCount": 0
     },
     "values": {
       "damage": 450.22067097931824,
@@ -79,7 +81,9 @@
       "freezeDuration": 1.2,
       "shatterDamage": 0.15,
       "shatterRadius": 90,
-      "frozenDamageTaken": 0.3
+      "frozenDamageTaken": 0.3,
+      "auraRadius": 160,
+      "orbitCount": 0
     },
     "scoped": [
       {

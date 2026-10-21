@@ -508,6 +508,28 @@ export const GRANT_SCHEMAS = {
       name: z.string().exactOptional(),
     })
     .readonly(),
+  // validate.ts holds everyNth.n to a whole number of at least 2, the corona's period to at
+  // least one pulse and every share above 0.
+  aura: z
+    .strictObject({
+      kind: z.literal('aura'),
+      damagePct: finite.exactOptional(),
+      everyNth: z.strictObject({ n: finite, mult: finite }).readonly().exactOptional(),
+      corona: z.strictObject({ periodSec: finite, damagePct: finite }).readonly().exactOptional(),
+    })
+    .readonly(),
+  // validate.ts holds the ring to 0 or 1, the count to a whole number, the cooldown to at least
+  // a tick and the share and the orb's radius above 0.
+  orbit: z
+    .strictObject({
+      kind: z.literal('orbit'),
+      ring: finite.exactOptional(),
+      count: finite.exactOptional(),
+      damagePct: finite.exactOptional(),
+      cooldownSec: finite.exactOptional(),
+      orbRadius: finite.exactOptional(),
+    })
+    .readonly(),
 } as const satisfies { readonly [K in GrantKind]: z.ZodType<Extract<EmitterGrant, { kind: K }>> };
 
 export const EmitterGrantSchema = exact<EmitterGrant>()(
@@ -516,6 +538,8 @@ export const EmitterGrantSchema = exact<EmitterGrant>()(
     GRANT_SCHEMAS.segment,
     GRANT_SCHEMAS.strike,
     GRANT_SCHEMAS.drone,
+    GRANT_SCHEMAS.aura,
+    GRANT_SCHEMAS.orbit,
   ]),
 );
 

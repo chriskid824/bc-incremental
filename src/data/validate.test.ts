@@ -2080,6 +2080,123 @@ describe('emitter grant validation', () => {
     ).toEqual([]);
   });
 
+  it('accepts aura and orbit grants, with or without their fields', () => {
+    for (const grant of [
+      { kind: 'aura' },
+      { kind: 'aura', damagePct: 0.5 },
+      { kind: 'aura', everyNth: { n: 2, mult: 2 } },
+      { kind: 'aura', everyNth: { n: 4, mult: 4 }, corona: { periodSec: 8, damagePct: 1 } },
+      { kind: 'aura', corona: { periodSec: 0.25, damagePct: 0.1 } },
+      { kind: 'orbit' },
+      { kind: 'orbit', ring: 0, count: 2 },
+      { kind: 'orbit', ring: 1, count: 0, damagePct: 0.6, cooldownSec: 1 / 60, orbRadius: 12 },
+    ] as EmitterGrant[]) {
+      expect(
+        grantIssues({ id: 'outer.aura.pulse', emitters: [grant] }),
+        JSON.stringify(grant),
+      ).toEqual([]);
+    }
+    // Each ring of a source is an emitter of its own.
+    expect(
+      grantIssues({
+        id: 'outer.aura.orbs',
+        emitters: [
+          { kind: 'orbit', count: 2 },
+          { kind: 'orbit', ring: 1, count: 4, cooldownSec: 1 },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects an everyNth.n below 2 or not whole, a corona under 0.25 s, and aura shares not above 0', () => {
+    expect(
+      grantIssues({
+        id: 'outer.aura.pulse',
+        emitters: [
+          { kind: 'aura', damagePct: 0 },
+          { kind: 'aura', everyNth: { n: 1, mult: 1 } },
+          { kind: 'aura', everyNth: { n: 2.5, mult: 2.5 } },
+          { kind: 'aura', everyNth: { n: 4, mult: 0 } },
+          { kind: 'aura', everyNth: { n: NaN, mult: -1 } },
+          { kind: 'aura', corona: { periodSec: 0.2, damagePct: 1 } },
+          { kind: 'aura', corona: { periodSec: 8, damagePct: -1 } },
+        ],
+      }),
+    ).toEqual([
+      "talent 'outer.aura.pulse': emitters[0] damagePct must be > 0 (got 0)",
+      "talent 'outer.aura.pulse': emitters[1] everyNth.n must be an integer >= 2 (got 1)",
+      "talent 'outer.aura.pulse': emitters[2] everyNth.n must be an integer >= 2 (got 2.5)",
+      "talent 'outer.aura.pulse': emitters[3] everyNth.mult must be > 0 (got 0)",
+      "talent 'outer.aura.pulse': emitters[4] everyNth.n must be an integer >= 2 (got NaN)",
+      "talent 'outer.aura.pulse': emitters[4] everyNth.mult must be > 0 (got -1)",
+      "talent 'outer.aura.pulse': emitters[5] corona.periodSec must be >= 0.25 (got 0.2)",
+      "talent 'outer.aura.pulse': emitters[6] corona.damagePct must be > 0 (got -1)",
+      // A source has one aura (grantKey ''), so these also conflict.
+      "talents: emitter aura '' is granted twice by source 'outer.aura' with different fields; " +
+        'keep it on one node',
+    ]);
+  });
+
+  it('rejects an orbit ring other than 0 or 1, a count that is not whole, a cooldown under a tick, and shares or radii not above 0', () => {
+    expect(
+      grantIssues({
+        id: 'outer.aura.orbs',
+        emitters: [
+          { kind: 'orbit', ring: 2 },
+          { kind: 'orbit', ring: 0.5 },
+          { kind: 'orbit', count: -1 },
+          { kind: 'orbit', count: 1.5 },
+          { kind: 'orbit', damagePct: 0 },
+          { kind: 'orbit', cooldownSec: 0.01 },
+          { kind: 'orbit', orbRadius: 0 },
+        ],
+      }),
+    ).toEqual([
+      "talent 'outer.aura.orbs': emitters[0] ring must be 0 or 1 (got 2)",
+      "talent 'outer.aura.orbs': emitters[1] ring must be 0 or 1 (got 0.5)",
+      "talent 'outer.aura.orbs': emitters[2] count must be an integer >= 0 (got -1)",
+      "talent 'outer.aura.orbs': emitters[3] count must be an integer >= 0 (got 1.5)",
+      "talent 'outer.aura.orbs': emitters[4] damagePct must be > 0 (got 0)",
+      "talent 'outer.aura.orbs': emitters[5] cooldownSec must be >= 1/60 (got 0.01)",
+      "talent 'outer.aura.orbs': emitters[6] orbRadius must be > 0 (got 0)",
+      // Without a ring each is ring 0's (grantKey '0'), so these also conflict.
+      "talents: emitter orbit '0' is granted twice by source 'outer.aura' with different " +
+        'fields; keep it on one node',
+    ]);
+  });
+
+  it('keeps one orbit emitter per source and ring, ring 0 when it names none', () => {
+    const orbit = (id: string, fields: object): Leaf => ({
+      id,
+      emitters: [{ kind: 'orbit', ...fields } as EmitterGrant],
+    });
+    expect(
+      grantIssues(orbit('outer.aura.orbs', { count: 2 }), orbit('outer.aura.more', { ring: 0 })),
+    ).toEqual([
+      "talents: emitter orbit '0' is granted twice by source 'outer.aura' with different " +
+        'fields; keep it on one node',
+    ]);
+    expect(
+      grantIssues(orbit('outer.aura.orbs', { count: 2 }), orbit('outer.aura.more', { ring: 1 })),
+    ).toEqual([]);
+    expect(
+      grantIssues(orbit('outer.aura.orbs', { count: 2 }), orbit('hub.orbs', { count: 3 })),
+    ).toEqual([]);
+    // An aura of one source is one emitter however its nodes differ.
+    expect(
+      grantIssues(
+        { id: 'outer.aura.pulse', emitters: [{ kind: 'aura' }] },
+        {
+          id: 'outer.aura.corona',
+          emitters: [{ kind: 'aura', corona: { periodSec: 8, damagePct: 1 } }],
+        },
+      ),
+    ).toEqual([
+      "talents: emitter aura '' is granted twice by source 'outer.aura' with different fields; " +
+        'keep it on one node',
+    ]);
+  });
+
   it('accepts a keystone whose behaviour is a grant, and needs a descKey for one', () => {
     expect(
       issuesAfter((d) => {

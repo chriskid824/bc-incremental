@@ -91,6 +91,10 @@ export const STAT_IDS = [
   'shatterRadius',
   /** Extra damage a frozen enemy takes, e.g. 0.3 = +30%. */
   'frozenDamageTaken',
+  /** Radius of the aura grants' pulses around the player, in arena units. */
+  'auraRadius',
+  /** Orbs every orbit grant adds to its own count; its whole part counts. */
+  'orbitCount',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -136,6 +140,8 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   shatterDamage: 0.15,
   shatterRadius: 90,
   frozenDamageTaken: 0.3,
+  auraRadius: 160,
+  orbitCount: 0,
 };
 
 /**

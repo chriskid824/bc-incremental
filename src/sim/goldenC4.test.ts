@@ -1325,6 +1325,45 @@ const TURRET_GRANT_STATS = makeStats(
   },
 );
 
+/**
+ * C4.21's aura and orbit grants beside M1's volley, over the drones entry's base (crits, ignites
+ * and maskProbeMods()) with poison rolls: an aura on outer.aura within an auraRadius of 120,
+ * every fourth pulse merged at × 4 (聚能脈衝) and a corona (日冕) on every alive enemy every 2 s at
+ * half a pulse; a plain aura on the hub at 15%; and two orbit rings on outer.aura, each with the
+ * orbitCount stat's whole 1 added: ring 0's 3 orbs at its 0.5 s cooldown and ring 1's (雙軌) 2 at
+ * 0.25 s. Every hit rolls on the combat stream.
+ */
+const AURA_ORBIT_STATS = makeStats(
+  {
+    damage: 5,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.3,
+    poisonChance: 0.2,
+    auraRadius: 120,
+    orbitCount: 1.5,
+  },
+  maskProbeMods(),
+  {
+    triggers: [],
+    conversions: [],
+    emitters: [
+      {
+        source: 'outer.aura',
+        grant: {
+          kind: 'aura',
+          everyNth: { n: 4, mult: 4 },
+          corona: { periodSec: 2, damagePct: 0.5 },
+        },
+      },
+      { source: 'hub', grant: { kind: 'aura', damagePct: 0.15 } },
+      { source: 'outer.aura', grant: { kind: 'orbit', count: 2 } },
+      { source: 'outer.aura', grant: { kind: 'orbit', ring: 1, count: 1, cooldownSec: 0.25 } },
+    ],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1499,6 +1538,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'turretGrant',
     config: { stats: TURRET_GRANT_STATS, rules: [], startWave: 12 },
     expected: ['8a777f4c0552d30e', 'fb814938ecce6f51'],
+  },
+  {
+    name: 'auraOrbit',
+    config: { stats: AURA_ORBIT_STATS, rules: [], startWave: 12 },
+    expected: ['c51b22133cb0e4a3', '3570db88979fdb90'],
   },
 ];
 

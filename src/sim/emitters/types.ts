@@ -7,15 +7,18 @@
  * (lob.ts), 霜晶's the fan (fan.ts), 雷塔's the arc (arc.ts). The talent nodes' emitter grants
  * (src/data/emitters.ts) follow it, such as thorns, whose hits the contact stage deals
  * (src/sim/systems/contact.ts), segments, whose judgements the segment stage makes
- * (src/sim/systems/segments.ts), strikes, which the emitter stage fires after the signature
- * (strike.ts), and drones, which the drone stage flies (src/sim/systems/drones.ts).
+ * (src/sim/systems/segments.ts), strikes, auras and orbits, which the emitter stage runs after
+ * the signature (strike.ts, aura.ts, orbit.ts), and drones, which the drone stage flies
+ * (src/sim/systems/drones.ts).
  */
 
 import type { Num } from '../../core/num';
 import { mul, num } from '../../core/num';
 import type { Rng } from '../../core/rng';
 import {
+  AURA_DEFAULTS,
   DRONE_DEFAULTS,
+  ORBIT_DEFAULTS,
   SEGMENT_DEFAULTS,
   STRIKE_DEFAULTS,
   THORNS_DAMAGE_PCT,
@@ -26,6 +29,7 @@ import type { TagMask } from '../../data/tags';
 import type { TargetSelector } from '../../data/triggers';
 import type { ArcParams, CompiledBuild } from '../build/compile';
 import { ailmentCredit, rowKey } from '../build/sources';
+import { ORB_MEMORY } from '../caps';
 import type { CompiledSelector } from '../effects/select';
 import type { Enemy, RunContext } from '../systems/context';
 import type { ChainPolicy } from '../systems/systemState';
@@ -154,9 +158,55 @@ export interface DroneSpec extends EmitterBase {
   readonly turretDamagePct: number;
 }
 
+/**
+ * An aura grant (光環): every PHASE_TICKS ticks, at its phase, each alive enemy within the
+ * auraRadius stat of the player takes a pulse hit; with everyNth only every n-th pulse hits, at
+ * × mult, and with a corona every alive enemy also takes a corona hit every periodSec (aura.ts).
+ */
+export interface AuraSpec extends EmitterBase {
+  readonly kind: 'aura';
+  /** 聚能脈衝: n pulses merged into their n-th, which hits at × mult; null for none. */
+  readonly everyNth: { readonly n: number; readonly mult: number } | null;
+  /**
+   * 日冕: seconds between coronas, and a corona hit's base damage as a multiple of a pulse hit's
+   * (EmitterRuntime.alt); null for none.
+   */
+  readonly corona: { readonly periodSec: number; readonly damagePct: number } | null;
+}
+
+/**
+ * An orbit grant (環繞球): orbs evenly spaced on a ring of `radius` around the player, turning
+ * revPerSec times a second, each hitting every enemy it touches at most once every cooldownSec
+ * (orbit.ts). The run counts its orbs once, when it starts (OrbMemory.n).
+ */
+export interface OrbitSpec extends EmitterBase {
+  readonly kind: 'orbit';
+  /** 0, or 1 (雙軌). */
+  readonly ring: number;
+  /** The ring's radius around the player. */
+  readonly radius: number;
+  /** Orbs it adds to the orbitCount stat's whole part. */
+  readonly count: number;
+  /** Turns of the ring a second. */
+  readonly revPerSec: number;
+  /** Seconds before an orb can hit an enemy it hit again (EmitterRuntime.interval). */
+  readonly cooldownSec: number;
+  /** An orb's radius. */
+  readonly orbRadius: number;
+}
+
 /** What an emitter is; `kind` says how it deals its damage. */
 export type EmitterSpec =
-  VolleySpec | LobSpec | FanSpec | ArcSpec | ThornsSpec | SegmentSpec | StrikeSpec | DroneSpec;
+  | VolleySpec
+  | LobSpec
+  | FanSpec
+  | ArcSpec
+  | ThornsSpec
+  | SegmentSpec
+  | StrikeSpec
+  | DroneSpec
+  | AuraSpec
+  | OrbitSpec;
 
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
@@ -225,6 +275,38 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
         turrets: grant.turrets ?? 0,
         turretDamagePct: grant.turretDamagePct ?? DRONE_DEFAULTS.turretDamagePct,
       };
+    case 'aura':
+      return {
+        kind: 'aura',
+        signature: false,
+        source,
+        damagePct: grant.damagePct ?? AURA_DEFAULTS.damagePct,
+        tags: TAG.hit | TAG.aura,
+        chains: false,
+        rollsAilments: true,
+        canCrit: true,
+        everyNth: grant.everyNth ?? null,
+        corona: grant.corona ?? null,
+      };
+    case 'orbit': {
+      const ring = grant.ring ?? ORBIT_DEFAULTS.ring;
+      return {
+        kind: 'orbit',
+        signature: false,
+        source,
+        damagePct: grant.damagePct ?? ORBIT_DEFAULTS.damagePct,
+        tags: TAG.hit | TAG.orbit,
+        chains: false,
+        rollsAilments: true,
+        canCrit: true,
+        ring,
+        radius: ORBIT_DEFAULTS.ringRadius[ring] as number,
+        count: grant.count ?? 0,
+        revPerSec: ORBIT_DEFAULTS.revPerSec,
+        cooldownSec: grant.cooldownSec ?? ORBIT_DEFAULTS.cooldownSec,
+        orbRadius: grant.orbRadius ?? ORBIT_DEFAULTS.orbRadius,
+      };
+    }
   }
 }
 
@@ -409,9 +491,9 @@ function sharedRows(spec: PayloadSpec): Int32Array {
 /**
  * The payload of an emitter: its share of the damage stat, its tags and source, on `rng`, with
  * the chain policy `policy` (the signature's, which createRunContext compiles; null for the
- * others); a lob's carries its fire zone's (lobZonePayload); a segment's is a pulse's, one tally
- * per judgement. The signature arc's share is × ArcParams.damageMult (六線圈's), so its hits
- * scale by 1, and its chain jumps raise chainJump.
+ * others); a lob's carries its fire zone's (lobZonePayload); a segment's and an aura's are a
+ * pulse's, one tally per judgement or pulse. The signature arc's share is × ArcParams.damageMult
+ * (六線圈's), so its hits scale by 1, and its chain jumps raise chainJump.
  */
 export function emitterPayload(
   build: CompiledBuild,
@@ -436,7 +518,7 @@ export function emitterPayload(
     policy,
     raisesChainJump: arc !== null && spec.signature,
     zoneVariant: spec.kind === 'lob' ? lobZonePayload(build, spec, rng) : null,
-    aggregate: spec.kind === 'segment',
+    aggregate: spec.kind === 'segment' || spec.kind === 'aura',
   });
 }
 
@@ -507,7 +589,10 @@ export const VOLLEY_RATE = 4;
 /** A drone emitter's turret firings a second at BASE_ATTACK_SPEED (DRONE_DEFAULTS.turretRate). */
 export const TURRET_RATE = DRONE_DEFAULTS.turretRate;
 
-/** Ticks between the attacks of an emitter of `spec` in `build` (EmitterRuntime.interval). */
+/**
+ * Ticks between the attacks of an emitter of `spec` in `build` (EmitterRuntime.interval); for an
+ * orbit, its orbs' cooldown on an enemy each hit.
+ */
 export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number {
   switch (spec.kind) {
     case 'volley':
@@ -536,13 +621,21 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
     case 'drone':
       // Its turrets' period; its drones keep their own clocks (src/sim/systems/drones.ts).
       return periodTicks((TURRET_RATE * build.values.attackSpeed) / BASE_ATTACK_SPEED);
+    case 'aura':
+      // A pulse every PHASE_TICKS on its phase (aura.ts), whatever the attack speed; a corona
+      // keeps its own period.
+      return PHASE_TICKS;
+    case 'orbit':
+      // Not a period: the ticks an orb passes over an enemy it hit (orbit.ts), whole ticks.
+      return Math.round(spec.cooldownSec * TICK_RATE);
   }
 }
 
 /**
  * Whether an emitter of `spec` sends its damage as shots that fly to their targets (volley, lob,
  * fan), so the damage in flight can be counted for targeting (RunContext.projectileEstimate).
- * Arcs, thorns, segments, strikes and drones hit where they are, a drone where it impacts.
+ * Arcs, thorns, segments, strikes, drones, auras and orbits hit where they are, a drone where it
+ * impacts.
  */
 export function shotsInFlight(spec: EmitterSpec): boolean {
   switch (spec.kind) {
@@ -555,6 +648,8 @@ export function shotsInFlight(spec: EmitterSpec): boolean {
     case 'segment':
     case 'strike':
     case 'drone':
+    case 'aura':
+    case 'orbit':
       return false;
   }
 }
@@ -563,7 +658,7 @@ export function shotsInFlight(spec: EmitterSpec): boolean {
  * The ticks a periodic emitter's phase rule counts in: an emitter of index i takes the phase
  * (3 + 4 × i) % PHASE_TICKS, so emitters of one period act on different ticks.
  */
-const PHASE_TICKS = 15;
+export const PHASE_TICKS = 15;
 
 /** One emitter of the run: its spec, payload and counters. */
 export interface EmitterRuntime {
@@ -575,14 +670,17 @@ export interface EmitterRuntime {
    * which the other stages run from their own lists (RunContext.thornsEmitters).
    */
   readonly index: number;
-  /** Ticks between its attacks (emitterInterval); Infinity disables attacking. */
+  /**
+   * Ticks between its attacks (emitterInterval); Infinity disables attacking. An orbit's is its
+   * orbs' cooldown on an enemy each hit.
+   */
   interval: number;
   /** Ticks accumulated towards the next attack, cadence per tick. */
   acc: number;
   /**
-   * Ticks counted towards the next judgement of a segment (stepSegments) or the next strike of a
-   * strike (runStrike), one per tick; a segment's starts its phase below 0, so segments judge on
-   * different ticks. 0 for the other kinds.
+   * Ticks counted towards the next judgement of a segment (stepSegments), the next strike of a
+   * strike (runStrike) or the next corona of an aura (runAura), one per tick; a segment's starts
+   * its phase below 0, so segments judge on different ticks. 0 for the other kinds.
    */
   timer: number;
   /**
@@ -595,11 +693,15 @@ export interface EmitterRuntime {
    * createRunContext. Null for the other kinds.
    */
   selector: CompiledSelector | null;
-  /** A strike's area hits, its within() output, allocated once; null for the other kinds. */
+  /**
+   * The within() output of a strike's area hits, an aura's pulse and an orbit's orbs, allocated
+   * once; null for the other kinds.
+   */
   readonly targets: Enemy[] | null;
   /**
-   * A fan's icicle payload (冰柱, FanParams.icicleEvery), which createRunContext makes; null for a
-   * fan without icicle rounds and for the other kinds.
+   * A fan's icicle payload (冰柱, FanParams.icicleEvery) or an aura's corona payload (日冕,
+   * AuraSpec.corona), which createRunContext makes; null for a fan without icicle rounds, an aura
+   * without a corona and the other kinds.
    */
   alt: Payload | null;
   /** An arc's coil of its next discharge, 0 .. ArcParams.coils − 1, for drawing; 0 otherwise. */
@@ -609,7 +711,10 @@ export interface EmitterRuntime {
    * steadyAim's every-Nth shot.
    */
   shots: number;
-  /** Attacks made, for steadyAim's every-Nth attack; nthAttack triggers count in TriggerState. */
+  /**
+   * Attacks made, for steadyAim's every-Nth attack, and an aura's pulses, for its everyNth;
+   * nthAttack triggers count in TriggerState.
+   */
   attacks: number;
   /** Serial of the current attack's volley; enemies it already targets carry it. */
   volley: number;
@@ -617,12 +722,18 @@ export interface EmitterRuntime {
   steadyAttack: boolean;
   /** Ticks the accumulator gains per tick; exactly 1 until attack-speed buffs exist. */
   cadence: number;
+  /**
+   * An orbit's per-orb cooldown memory (Hoshi's Q13 (B)), which createRunContext makes with the
+   * run's orb count; null for the other kinds.
+   */
+  readonly orbs: OrbMemory | null;
 }
 
 /**
  * The runtime of the emitter of `spec` at `index`, with its payload, its interval, for a strike
- * its compiled target selector and for a fan its icicle payload (`alt`; both null for the other
- * kinds): a strike's chain payload and area buffer are made here, once.
+ * its compiled target selector, for a fan its icicle payload and for an aura its corona payload
+ * (`alt`), and for an orbit its orb memory (all null for the other kinds): a strike's chain
+ * payload and the target buffer of a strike, an aura and an orbit are made here, once.
  */
 export function createEmitterRuntime(
   spec: EmitterSpec,
@@ -631,6 +742,7 @@ export function createEmitterRuntime(
   interval: number,
   selector: CompiledSelector | null,
   alt: Payload | null,
+  orbs: OrbMemory | null,
 ): EmitterRuntime {
   return {
     spec,
@@ -641,7 +753,7 @@ export function createEmitterRuntime(
     timer: spec.kind === 'segment' ? -((3 + 4 * index) % PHASE_TICKS) : 0,
     chainPayload: spec.kind === 'strike' ? strikeChainPayload(payload, spec.shockStacks) : null,
     selector,
-    targets: spec.kind === 'strike' ? [] : null,
+    targets: spec.kind === 'strike' || spec.kind === 'aura' || spec.kind === 'orbit' ? [] : null,
     alt,
     coil: 0,
     shots: 0,
@@ -649,6 +761,41 @@ export function createEmitterRuntime(
     volley: 0,
     steadyAttack: false,
     cadence: 1,
+    orbs,
+  };
+}
+
+/**
+ * An orbit emitter's per-orb cooldown memory (Hoshi's Q13 (B), orbit.ts): orb o owns the slots
+ * o × ORB_MEMORY … o × ORB_MEMORY + ORB_MEMORY − 1 of `ids` and `until`, a ring buffer of the
+ * enemies it hit, oldest first, count[o] of them from head[o]. All of them take the emitter's
+ * one cooldown, so they end in the order they were written.
+ */
+export interface OrbMemory {
+  /**
+   * Orbs on the ring, fixed for the run: countOf(build, spec.count + floor(values.orbitCount)),
+   * none below 0.
+   */
+  readonly n: number;
+  /** n × ORB_MEMORY: the id of each enemy remembered. */
+  readonly ids: Int32Array;
+  /** n × ORB_MEMORY: the tick from which this orb may hit that enemy again. */
+  readonly until: Int32Array;
+  /** n: each orb's oldest entry, an offset within its block. */
+  readonly head: Int32Array;
+  /** n: each orb's entries, 0 … ORB_MEMORY. */
+  readonly count: Int32Array;
+}
+
+/** The memory of `n` orbs (none for n ≤ 0), which remember no enemy yet. */
+export function createOrbMemory(n: number): OrbMemory {
+  const orbs = Math.max(0, n);
+  return {
+    n: orbs,
+    ids: new Int32Array(orbs * ORB_MEMORY),
+    until: new Int32Array(orbs * ORB_MEMORY),
+    head: new Int32Array(orbs),
+    count: new Int32Array(orbs),
   };
 }
 
@@ -669,6 +816,30 @@ function strikeChainPayload(p: Payload, shockStacks: number): Payload {
     canCrit: p.canCrit,
     damageMode: p.damageMode,
     shockOnHit: shockStacks,
+    rowsOf: p,
+  });
+}
+
+/**
+ * The corona payload of an aura of payload `p` (日冕, AuraSpec.corona): p's at corona.damagePct ×
+ * the aura's damagePct of the damage stat, a pulse's like p, sharing its rows; null without a
+ * corona.
+ */
+export function coronaPayload(build: CompiledBuild, spec: AuraSpec, p: Payload): Payload | null {
+  const corona = spec.corona;
+  if (corona === null) return null;
+  return createPayload({
+    baseDamage: mul(num(build.values.damage), spec.damagePct * corona.damagePct),
+    tags: p.tags,
+    source: p.source,
+    jumpSource: p.jumpSource,
+    flags: p.flags,
+    rng: p.rng,
+    chains: p.chains,
+    rollsAilments: p.rollsAilments,
+    canCrit: p.canCrit,
+    damageMode: p.damageMode,
+    aggregate: p.aggregate,
     rowsOf: p,
   });
 }

@@ -674,6 +674,13 @@ const SAMPLE_GRANTS: { readonly [K in GrantKind]: Extract<EmitterGrant, { kind: 
     turretDamagePct: 0.4,
     name: 'sample',
   },
+  aura: {
+    kind: 'aura',
+    damagePct: 0.3,
+    everyNth: { n: 4, mult: 4 },
+    corona: { periodSec: 8, damagePct: 1 },
+  },
+  orbit: { kind: 'orbit', ring: 1, count: 2, damagePct: 0.5, cooldownSec: 0.25, orbRadius: 16 },
 };
 
 describe('EmitterGrantSchema', () => {
@@ -738,6 +745,44 @@ describe('EmitterGrantSchema', () => {
       expect(EmitterGrantSchema.parse(grant)).toEqual(grant);
       expect(GRANT_SCHEMAS.drone.parse(grant)).toEqual(grant);
     }
+  });
+
+  it('accepts aura and orbit grants with any of their fields left out', () => {
+    for (const grant of [
+      { kind: 'aura' },
+      { kind: 'aura', damagePct: 0.5 },
+      { kind: 'aura', everyNth: { n: 4, mult: 4 } },
+      { kind: 'aura', corona: { periodSec: 8, damagePct: 1 } },
+      { kind: 'orbit' },
+      { kind: 'orbit', count: 2 },
+      { kind: 'orbit', ring: 1, cooldownSec: 1 },
+      // validate.ts rejects a ring other than 0 or 1, a count that is not whole and an everyNth.n
+      // below 2, not the schema.
+      { kind: 'orbit', ring: 2, count: 1.5 },
+      { kind: 'aura', everyNth: { n: 1.5, mult: 0 }, corona: { periodSec: 0.1, damagePct: 0 } },
+    ] as const) {
+      expect(EmitterGrantSchema.parse(grant)).toEqual(grant);
+      expect(GRANT_SCHEMAS[grant.kind].parse(grant)).toEqual(grant);
+    }
+  });
+
+  it.each([
+    ['an aura with an unknown key', { kind: 'aura', radius: 160 }],
+    ['an aura damage share that is not finite', { kind: 'aura', damagePct: Infinity }],
+    ['an everyNth without its multiplier', { kind: 'aura', everyNth: { n: 4 } }],
+    ['an everyNth with an unknown key', { kind: 'aura', everyNth: { n: 4, mult: 4, every: 2 } }],
+    ['an everyNth that is a number', { kind: 'aura', everyNth: 4 }],
+    ['a corona without its period', { kind: 'aura', corona: { damagePct: 1 } }],
+    [
+      'a corona share that is not a number',
+      { kind: 'aura', corona: { periodSec: 8, damagePct: '1' } },
+    ],
+    ['an orbit with an unknown key', { kind: 'orbit', revPerSec: 2 }],
+    ['an orbit ring that is not a number', { kind: 'orbit', ring: 'outer' }],
+    ['an orbit count that is not finite', { kind: 'orbit', count: Infinity }],
+    ['an orbit cooldown that is not finite', { kind: 'orbit', cooldownSec: NaN }],
+  ])('rejects %s', (_label, grant) => {
+    expect(EmitterGrantSchema.safeParse(grant).success).toBe(false);
   });
 
   it.each([
@@ -860,7 +905,7 @@ describe('GameDataSchema', () => {
     expect(GameDataSchema.safeParse(grants).success).toBe(true);
 
     const bad = content();
-    Object.assign(talentAt(bad, 'vitality')[1], { emitters: [{ kind: 'aura' }] });
+    Object.assign(talentAt(bad, 'vitality')[1], { emitters: [{ kind: 'nova' }] });
     expect(GameDataSchema.safeParse(bad).success).toBe(false);
 
     const missing = content();

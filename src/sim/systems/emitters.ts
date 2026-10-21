@@ -1,14 +1,16 @@
 /**
  * Emitters system (docs/v3/implementation-plan-v3.md §2.15): every emitter of the build that
  * attacks in this stage does, in emitter order, the signature attack first (src/sim/emitters/),
- * then the grants' strikes; then the rule modules' tick hooks run. runEmitters skips the kinds
- * whose EMITTER_STEPS entry is null, which another stage runs (thorns in the contact stage,
- * segments and drones in their own).
+ * then the grants' strikes, auras and orbits; then the rule modules' tick hooks run. runEmitters
+ * skips the kinds whose EMITTER_STEPS entry is null, which another stage runs (thorns in the
+ * contact stage, segments and drones in their own).
  */
 
 import { runArc } from '../emitters/arc';
+import { runAura } from '../emitters/aura';
 import { runFan } from '../emitters/fan';
 import { runLob } from '../emitters/lob';
+import { runOrbit } from '../emitters/orbit';
 import { runStrike } from '../emitters/strike';
 import type { EmitterRuntime, EmitterSpec } from '../emitters/types';
 import { runVolley } from '../emitters/volley';
@@ -33,6 +35,8 @@ export const EMITTER_STEPS: { readonly [K in EmitterSpec['kind']]: EmitterStep |
   strike: runStrike,
   // Its drones fly in the drone stage, after the tick hooks (src/sim/systems/drones.ts).
   drone: null,
+  aura: runAura,
+  orbit: runOrbit,
 };
 
 /**

@@ -363,7 +363,7 @@ export type SimEvent =
    * One pulse, whose hits raise no hit events: `hits` enemies hit for `total` damage in all,
    * `crits` the ids of those it crit. `id` is the zone's for kind 'zone', and the emitter's index
    * (CompiledBuild.emitters) for kind 'segment', one per judgement that found 2 endpoints or
-   * more; the aura pulses come later in C4.
+   * more, and for kind 'aura', one per pulse or corona of an aura that hit anything.
    */
   | {
       readonly type: 'pulse';
@@ -494,6 +494,11 @@ export const COUNTER_IDS = [
   'centerEventsCapped',
   /** Drones not placed because the run had placed its summon cap of them (SUMMON_CAP). */
   'summonCapped',
+  /**
+   * Enemies an orb forgot, oldest first, to remember one more it hit while it remembered
+   * ORB_MEMORY of them; each may be hit by that orb again before its cooldown ends.
+   */
+  'orbMemoryFull',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

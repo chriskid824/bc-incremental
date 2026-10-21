@@ -185,8 +185,11 @@ function placed(run: ReturnType<typeof seedOne>): {
 describe('stressBase (docs/v3 C5 design §7.3, §9 C5.6)', () => {
   it('is a stress-family scenario on v3’s modules, after hive in SCENARIO_IDS and CHECK_ENTRIES', () => {
     const base = SCENARIOS.stressBase;
-    expect(SCENARIO_IDS.slice(-2)).toEqual(['hive', 'stressBase']);
-    expect(CHECK_ENTRIES.slice(-2)).toEqual(['hive', 'stressBase']);
+    // Right after hive; C4.21's grants comes after it.
+    const afterHive = (ids: readonly string[]): string[] =>
+      ids.slice(ids.indexOf('hive'), ids.indexOf('hive') + 2);
+    expect(afterHive(SCENARIO_IDS)).toEqual(['hive', 'stressBase']);
+    expect(afterHive(CHECK_ENTRIES)).toEqual(['hive', 'stressBase']);
     expect([base.runs, base.warmup, base.seconds, base.targetMs, base.startWave]).toEqual([
       20, 3, 30, 50, 30,
     ]);
@@ -718,5 +721,40 @@ describe('--share’s report (docs/v3 C5 design §7.3, §9 C5.6)', () => {
       );
       expect(result.pass).toBe(pass);
     }
+  });
+});
+
+describe('grants (docs/v3 C4 design §7.3, §8.3 C4.21)', () => {
+  it('is a stress-family scenario, last in SCENARIO_IDS and CHECK_ENTRIES: an aura, two rings of 4 orbs and thorns on M1’s attack', () => {
+    const grants = SCENARIOS.grants;
+    expect(SCENARIO_IDS.at(-1)).toBe('grants');
+    expect(CHECK_ENTRIES.at(-1)).toBe('grants');
+    expect([grants.runs, grants.warmup, grants.seconds, grants.targetMs, grants.startWave]).toEqual(
+      [20, 3, 30, 50, 30],
+    );
+    expect([grants.stress, grants.testModules, grants.capProbe, grants.allShocked]).toEqual([
+      true,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(grants.data).toBe(stressData);
+    const run = seedOne(grants);
+    expect(run.config.signature).toBeUndefined();
+    expect(run.config.stats.values.auraRadius).toBe(160);
+    expect(run.config.stats.emitters).toEqual([
+      { source: 'outer.aura', grant: { kind: 'aura', everyNth: { n: 4, mult: 4 } } },
+      { source: 'outer.aura', grant: { kind: 'orbit', count: 4 } },
+      { source: 'outer.aura', grant: { kind: 'orbit', ring: 1, count: 4 } },
+      { source: 'outer.thorns', grant: { kind: 'thorns' } },
+    ]);
+    const { ctx } = watchRun(run, 1);
+    expect(ctx.emitters.map((em) => [em.spec.kind, em.orbs?.n ?? null])).toEqual([
+      ['volley', null],
+      ['aura', null],
+      ['orbit', 4],
+      ['orbit', 4],
+      ['thorns', null],
+    ]);
   });
 });

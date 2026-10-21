@@ -217,6 +217,7 @@ describe('bench.baseline.json', () => {
       'arc',
       'hive',
       'stressBase',
+      'grants',
     ]);
   });
 });
