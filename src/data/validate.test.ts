@@ -5,7 +5,7 @@ import { loadGameData, parseGameData } from './index';
 import { TALENTS } from './talents';
 import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
-import type { ConversionSpec, SlashLineSpec, TriggerSpec } from './triggers';
+import type { ConversionSpec, ScalingSpec, SlashLineSpec, TriggerSpec } from './triggers';
 import type { GameData, TalentNode } from './types';
 import { MAX_KEYSTONES, starArchetypeIssues, validateGameData } from './validate';
 import { WAVES } from './waves';
@@ -293,6 +293,68 @@ describe('validateGameData: talents', () => {
       "talent 'staticFocus': modifiers[3] scaling.every must be > 0 (got 0)",
       "talent 'staticFocus': modifiers[4] scaling.exponent must be > 0 (got -1)",
     ]);
+  });
+
+  /** A powFactor damage more of value 1 at exponent 0.12, with `mod` and `scaling` over it. */
+  const factor = (
+    mod: Partial<Mutable<Modifier>> = {},
+    scaling: Partial<ScalingSpec> = {},
+  ): Mutable<Modifier> => ({
+    stat: 'damage',
+    kind: 'more',
+    value: 1,
+    ...mod,
+    scaling: { per: 'chainJump', curve: 'powFactor', exponent: 0.12, ...scaling },
+  });
+
+  it('rejects powFactor off a more of value 1, with a cap below 1 or exponent <= 0', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'staticFocus').modifiers.push(
+        factor({ kind: 'increased' }),
+        factor({ value: 0.5 }),
+        factor({}, { cap: 0.8 }),
+        factor({}, { exponent: 0 }),
+        factor({ stat: 'critChance', kind: 'flat' }),
+        factor({ value: 2 }),
+        factor({ kind: 'increased', value: 0.1 }, { cap: 0, exponent: -0.5 }),
+      );
+    });
+    expect(issues).toEqual([
+      "talent 'staticFocus': modifiers[3] kind must be 'more' with scaling.curve 'powFactor' (got 'increased')",
+      "talent 'staticFocus': modifiers[4] value must be 1 with scaling.curve 'powFactor' (got 0.5)",
+      "talent 'staticFocus': modifiers[5] scaling.cap must be >= 1 with curve 'powFactor' (got 0.8)",
+      "talent 'staticFocus': modifiers[6] scaling.exponent must be > 0 (got 0)",
+      "talent 'staticFocus': modifiers[7] kind must be 'more' with scaling.curve 'powFactor' (got 'flat')",
+      "talent 'staticFocus': modifiers[8] value must be 1 with scaling.curve 'powFactor' (got 2)",
+      "talent 'staticFocus': modifiers[9] scaling.exponent must be > 0 (got -0.5)",
+      "talent 'staticFocus': modifiers[9] kind must be 'more' with scaling.curve 'powFactor' (got 'increased')",
+      "talent 'staticFocus': modifiers[9] value must be 1 with scaling.curve 'powFactor' (got 0.1)",
+      "talent 'staticFocus': modifiers[9] scaling.cap must be >= 1 with curve 'powFactor' (got 0)",
+    ]);
+  });
+
+  it('accepts powFactor on a more of value 1, uncapped or capped at 1 or more', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'staticFocus').modifiers.push(
+        factor(),
+        factor({}, { cap: 1 }),
+        factor({ tags: ['hit'], scope: 'center' }, { cap: 9, every: 10, exponent: 0.06 }),
+      );
+    });
+    expect(issues).toEqual([]);
+    // The other curves keep their caps below 1 and their other kinds and values.
+    const others = issuesAfter((d) => {
+      talent(d, 'staticFocus').modifiers.push(
+        { stat: 'damage', kind: 'increased', value: 0.5, scaling: { per: 'chainJump', cap: 0.8 } },
+        {
+          stat: 'damage',
+          kind: 'more',
+          value: 0.1,
+          scaling: { per: 'chainJump', curve: 'pow', exponent: 2, cap: 0.5 },
+        },
+      );
+    });
+    expect(others).toEqual([]);
   });
 
   it('rejects rule parameters out of range', () => {

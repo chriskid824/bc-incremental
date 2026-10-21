@@ -36,23 +36,25 @@ export const SCALING_VARS = [
 ] as const;
 export type ScalingVar = (typeof SCALING_VARS)[number];
 
-export const SCALING_CURVES = ['linear', 'log10', 'pow'] as const;
+export const SCALING_CURVES = ['linear', 'log10', 'pow', 'powFactor'] as const;
 export type ScalingCurve = (typeof SCALING_CURVES)[number];
 
 /**
  * How a modifier's value scales with a variable x (Modifier.scaling): its contribution is
  * c = min(cap, value × g(x)). With `every`, x first steps down to floor(x / every); then g is x
  * (linear, the default), log10(1 + x) or x^exponent (pow). A flat or increased modifier adds c,
- * a more modifier multiplies by 1 + c.
+ * a more modifier multiplies by 1 + c. powFactor is a factor, with no 1 +: on a more modifier of
+ * value 1, the only one validation takes it on (exponent > 0, cap absent or ≥ 1), it multiplies
+ * by min(cap, max(1, x)^exponent), greed's held-shard factor (docs/v3/game-design-v3.md §4.12).
  */
 export interface ScalingSpec {
   readonly per: ScalingVar;
   /** Step size: x counts whole steps of `every`. Continuous without it. */
   readonly every?: number;
   readonly curve?: ScalingCurve;
-  /** Exponent of the pow curve; required exactly with curve 'pow'. */
+  /** Exponent of the pow and powFactor curves; required exactly with those two. */
   readonly exponent?: number;
-  /** Upper bound on the contribution. Uncapped without it. */
+  /** Upper bound on the contribution, or on powFactor's factor. Uncapped without it. */
   readonly cap?: number;
 }
 

@@ -49,10 +49,12 @@ const INCREASED = 1;
 const LINEAR = 0;
 const LOG10 = 1;
 const POW = 2;
+const POW_FACTOR = 3;
 const CURVE_CODE: Readonly<Record<ScalingCurve, CompiledScaling['curve']>> = {
   linear: LINEAR,
   log10: LOG10,
   pow: POW,
+  powFactor: POW_FACTOR,
 };
 
 /**
@@ -157,10 +159,13 @@ export interface CompiledScaling {
   readonly read: (ev: Readonly<EvalInput>) => number;
   /** Step size; 0 for a continuous variable. */
   readonly every: number;
-  /** 0 linear, 1 log10, 2 pow. */
-  readonly curve: 0 | 1 | 2;
+  /** 0 linear, 1 log10, 2 pow, 3 powFactor. */
+  readonly curve: 0 | 1 | 2 | 3;
   readonly exponent: number;
-  /** Upper bound on the contribution; Infinity when uncapped. */
+  /**
+   * Upper bound on the contribution; Infinity when uncapped. powFactor stores its cap − 1, since
+   * its contribution is its factor − 1.
+   */
   readonly cap: number;
 }
 
@@ -170,11 +175,15 @@ export function compileScaling(spec: ScalingSpec): CompiledScaling {
     every: spec.every ?? 0,
     curve: CURVE_CODE[spec.curve ?? 'linear'],
     exponent: spec.exponent ?? 1,
-    cap: spec.cap ?? Infinity,
+    cap: spec.curve === 'powFactor' ? (spec.cap ?? Infinity) - 1 : (spec.cap ?? Infinity),
   };
 }
 
-/** The contribution c = min(cap, value × g(x)) of a scaling modifier (src/data/triggers.ts). */
+/**
+ * The contribution c = min(cap, value × g(x)) of a scaling modifier (src/data/triggers.ts).
+ * powFactor's g is max(1, x)^exponent − 1 and its cap is stored − 1, so its more of value 1
+ * multiplies by 1 + c = min(cap, max(1, x)^exponent).
+ */
 export function scaledValue(value: number, scaling: CompiledScaling, x: number): number {
   const steps = scaling.every > 0 ? Math.floor(x / scaling.every) : x;
   const g =
@@ -182,7 +191,9 @@ export function scaledValue(value: number, scaling: CompiledScaling, x: number):
       ? steps
       : scaling.curve === LOG10
         ? Math.log10(1 + steps)
-        : steps ** scaling.exponent;
+        : scaling.curve === POW
+          ? steps ** scaling.exponent
+          : Math.max(1, steps) ** scaling.exponent - 1;
   return Math.min(scaling.cap, value * g);
 }
 

@@ -571,9 +571,23 @@ function modifierIssues(mod: Modifier): string[] {
   if (scaling.every !== undefined && !(scaling.every > 0)) {
     issues.push(`scaling.every must be > 0 (got ${scaling.every})`);
   }
-  // A positive exponent keeps g(0) = 0, so the primary hit gets no contribution.
+  // A positive exponent keeps pow's g(0) = 0, so the primary hit gets no contribution, and
+  // makes powFactor's factor grow with x.
   if (scaling.exponent !== undefined && !(scaling.exponent > 0)) {
     issues.push(`scaling.exponent must be > 0 (got ${scaling.exponent})`);
+  }
+  // powFactor's contribution is its factor − 1 (src/sim/build/eval.ts): only a more of value 1
+  // multiplies by the factor itself, and a cap below 1 would make it a penalty at every x.
+  if (scaling.curve === 'powFactor') {
+    if (mod.kind !== 'more') {
+      issues.push(`kind must be 'more' with scaling.curve 'powFactor' (got '${mod.kind}')`);
+    }
+    if (mod.value !== 1) {
+      issues.push(`value must be 1 with scaling.curve 'powFactor' (got ${mod.value})`);
+    }
+    if (scaling.cap !== undefined && !(scaling.cap >= 1)) {
+      issues.push(`scaling.cap must be >= 1 with curve 'powFactor' (got ${scaling.cap})`);
+    }
   }
   return issues;
 }

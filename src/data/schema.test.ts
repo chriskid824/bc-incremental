@@ -265,6 +265,28 @@ describe('ModifierSchema', () => {
     });
     expect(pow.error?.issues.map((issue) => issue.path)).toEqual([['scaling', 'exponent']]);
   });
+
+  it('takes powFactor with an exponent and rejects it without one, as pow', () => {
+    const factor = {
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      scaling: { per: 'chainJump', curve: 'powFactor', exponent: 0.12 },
+    };
+    expect(ModifierSchema.parse(factor)).toEqual(factor);
+    const capped = { ...factor, scaling: { ...factor.scaling, every: 10, cap: 9 } };
+    expect(ModifierSchema.parse(capped)).toEqual(capped);
+    const missing = ModifierSchema.safeParse({
+      ...factor,
+      scaling: { per: 'chainJump', curve: 'powFactor' },
+    });
+    expect(missing.error?.issues.map((issue) => [issue.path, issue.message])).toEqual([
+      [
+        ['scaling', 'exponent'],
+        "exponent is required with curve 'pow' or 'powFactor' and allowed only there",
+      ],
+    ]);
+  });
 });
 
 describe('ConditionSchema', () => {

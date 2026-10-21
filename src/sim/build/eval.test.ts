@@ -20,6 +20,7 @@ import {
   compileCondition,
   compileScaling,
   conditionsMet,
+  pctMaxHpFactor,
   scaledValue,
   statAt,
   staticInput,
@@ -70,6 +71,42 @@ describe('scaledValue', () => {
     expect(g({ cap: 0.25 }, 0.1, 2)).toBe(0.2);
     expect(g({ cap: 0.25 }, 0.1, 3)).toBe(0.25);
     expect(g({ cap: 0.25 }, 0.1, 30)).toBe(0.25);
+  });
+
+  it('caps the log10 and pow contributions at the cap itself, as linear', () => {
+    expect(g({ curve: 'log10', cap: 0.5 }, 1, 9)).toBe(0.5);
+    expect(g({ curve: 'log10', cap: 2 }, 1, 9)).toBe(1);
+    expect(g({ curve: 'pow', exponent: 2, cap: 3 }, 1, 2)).toBe(3);
+    expect(g({ curve: 'pow', exponent: 2, cap: 3 }, 1, 1)).toBe(1);
+    expect(compileScaling({ per: 'chainJump', curve: 'pow', exponent: 2, cap: 3 }).cap).toBe(3);
+  });
+
+  it('gives powFactor the contribution max(1, x)^exponent − 1, its cap stored − 1', () => {
+    const spec = { per: 'chainJump', curve: 'powFactor', exponent: 0.12 } as const;
+    expect(compileScaling({ ...spec, cap: 2 })).toMatchObject({
+      curve: 3,
+      exponent: 0.12,
+      cap: 1,
+      every: 0,
+    });
+    expect(compileScaling(spec).cap).toBe(Infinity);
+    expect(g({ curve: 'powFactor', exponent: 0.12 }, 1, 1e4)).toBe(1e4 ** 0.12 - 1);
+    expect(g({ curve: 'powFactor', exponent: 0.12 }, 1, 1)).toBe(0);
+    expect(g({ curve: 'powFactor', exponent: 0.12 }, 1, 0.5)).toBe(0);
+    expect(g({ curve: 'powFactor', exponent: 0.12, cap: 2 }, 1, 1e8)).toBe(1);
+  });
+
+  it('compiles every curve to an object of the same members in the same order', () => {
+    const keys = (['linear', 'log10', 'pow', 'powFactor'] as const).map((curve) =>
+      Object.keys(
+        compileScaling({
+          per: 'chainJump',
+          curve,
+          ...(curve === 'pow' || curve === 'powFactor' ? { exponent: 2 } : {}),
+        }),
+      ),
+    );
+    for (const k of keys) expect(k).toEqual(['read', 'every', 'curve', 'exponent', 'cap']);
   });
 });
 
@@ -212,6 +249,84 @@ describe('statAt', () => {
       // Damage rows ignore both arrays.
       expect(statAt(table, row, DAMAGE, staticInput(jump))).toBe(1 + jump);
     }
+  });
+});
+
+describe('the powFactor curve (H17)', () => {
+  /** A powFactor damage more of value 1, scoped to the center, so a shatter takes it too. */
+  const factorMod = (exponent: number, scaling: Omit<ScalingSpec, 'per'> = {}): Modifier =>
+    perJump('damage', 'more', 1, { curve: 'powFactor', exponent, ...scaling }, { scope: 'center' });
+
+  /**
+   * The damage factor of `modifiers` at x = `x`, read through statAt (evalDynamic) and through
+   * pctMaxHpFactor at a shatter mult of 1, on a center hit's row.
+   */
+  function factors(modifiers: Modifier[], x: number): [number, number] {
+    const table = modTableFor(makeStats({}, modifiers));
+    const row = table.row(rowKey(TAG.hit, CENTER));
+    expect(table.dynCount[row * S + DAMAGE]).toBe(modifiers.length);
+    return [
+      statAt(table, row, DAMAGE, staticInput(x)),
+      pctMaxHpFactor(table, row, staticInput(x), 1),
+    ];
+  }
+
+  it("multiplies by x^exponent with no 1 +: H17's 3.020, 1.738 and 9.120", () => {
+    const cases = [
+      [0.12, 1e4, 3.02],
+      [0.06, 1e4, 1.738],
+      [0.12, 1e8, 9.12],
+    ] as const;
+    for (const [exponent, x, factor] of cases) {
+      for (const read of factors([factorMod(exponent)], x)) {
+        expect(read, `${x}^${exponent}`).toBeCloseTo(factor, 3);
+        expect(read, `${x}^${exponent}`).toBeCloseTo(x ** exponent, 12);
+      }
+    }
+  });
+
+  it('gives a factor of 1 at x = 0 and x = 0.5, and from x = 1 on grows', () => {
+    for (const x of [0, 0.5, 1]) expect(factors([factorMod(0.12)], x)).toEqual([1, 1]);
+    for (const read of factors([factorMod(0.12)], 2)) expect(read).toBeCloseTo(2 ** 0.12, 12);
+  });
+
+  it('holds a cap of 2 on the factor, and leaves a factor below it alone', () => {
+    expect(factors([factorMod(0.12, { cap: 2 })], 1e8)).toEqual([2, 2]);
+    expect(factors([factorMod(0.12, { cap: 2 })], 1e4)).toEqual([2, 2]);
+    for (const read of factors([factorMod(0.12, { cap: 2 })], 100)) {
+      expect(read).toBeCloseTo(100 ** 0.12, 12);
+    }
+    expect(factors([factorMod(0.12, { cap: 1 })], 1e8)).toEqual([1, 1]);
+  });
+
+  it('multiplies two 0.03 modifiers to one 0.06', () => {
+    const [one] = factors([factorMod(0.06)], 1e4);
+    for (const read of factors([factorMod(0.03), factorMod(0.03)], 1e4)) {
+      expect(read).toBeCloseTo(one, 12);
+      expect(read).toBeCloseTo(1.738, 3);
+    }
+  });
+
+  it('counts whole steps of every before the power', () => {
+    for (const read of factors([factorMod(0.12, { every: 10 })], 1e4)) {
+      expect(read).toBeCloseTo(1000 ** 0.12, 12);
+    }
+    expect(factors([factorMod(0.12, { every: 10 })], 15)).toEqual([1, 1]);
+    expect(factors([factorMod(0.12, { every: 10 })], 9)).toEqual([1, 1]);
+  });
+
+  it('folds after the static parts, and a shatter takes it times its mult', () => {
+    const table = modTableFor(
+      makeStats({}, [
+        factorMod(0.12),
+        { stat: 'damage', kind: 'increased', value: 0.5 },
+        { stat: 'damage', kind: 'more', value: 1 },
+      ]),
+    );
+    const row = table.row(rowKey(TAG.hit, CENTER));
+    expect(statAt(table, row, DAMAGE, staticInput(1e4))).toBeCloseTo(1.5 * 2 * 1e4 ** 0.12, 12);
+    // A shatter leaves the static parts out (pctMaxHpFactor), and multiplies by its mult.
+    expect(pctMaxHpFactor(table, row, staticInput(1e4), 2)).toBeCloseTo(2 * 1e4 ** 0.12, 12);
   });
 });
 

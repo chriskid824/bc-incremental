@@ -116,8 +116,8 @@ export const ScalingSpecSchema = exact<ScalingSpec>()(
       exponent: finite.exactOptional(),
       cap: finite.exactOptional(),
     })
-    .refine((s) => (s.curve === 'pow') === (s.exponent !== undefined), {
-      message: "exponent is required with curve 'pow' and allowed only there",
+    .refine((s) => (s.curve === 'pow' || s.curve === 'powFactor') === (s.exponent !== undefined), {
+      message: "exponent is required with curve 'pow' or 'powFactor' and allowed only there",
       path: ['exponent'],
     })
     .readonly(),
