@@ -25,6 +25,7 @@
 src/
   core/        Num、數字格式化、seeded RNG、數學工具（純 TS）
   data/        天賦、敵人、波次、昇華的資料檔與 zod schema（純 TS）
+    web/       v3 天賦網的內容型別、zod schema 與節點 ID 文法，和 M1 天賦網分開
   sim/         一局的模擬：狀態、系統、固定 timestep（純 TS）
   meta/        局外進度：資源、天賦配點、轉生、昇華（純 TS）
   save/        存檔序列化、版本遷移（純 TS）
@@ -567,9 +568,14 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 ## 6. 資料檔
 
 - 每類資料一個 TS 檔，用 `satisfies` 拿到編輯器型別提示，載入時再過 zod schema。
-- 天賦節點：`{ id, kind, pos: {x, y}, links: id[], 價格欄位, modifiers, rules, triggers, conversions, archetype, nameKey, descKey? }`（`src/data/types.ts`）。修正、規則、觸發與轉換見 §4.4；節點有規則、觸發、轉換或行為修正（帶標籤的非傷害屬性、`notTags`、`when`、`scaling`、`*Always`）時必須有 `descKey`。
+- M1 天賦節點：`{ id, kind, pos: {x, y}, links: id[], 價格欄位, modifiers, rules, triggers, conversions, archetype, nameKey, descKey? }`（`src/data/types.ts`）。修正、規則、觸發與轉換見 §4.4；節點有規則、觸發、轉換或行為修正（帶標籤的非傷害屬性、`notTags`、`when`、`scaling`、`*Always`）時必須有 `descKey`。
 - 驗證（Vitest 裡也跑一次）：ID 唯一、連線雙向、從起點全部可達、keystone 數量在範圍內、每個 i18n key 在 en 與 zh-TW 都存在。
 - `tools/talent-viewer`：開發用頁面，畫出天賦網並標示錯誤，存檔後熱更新。不做拖拉編輯。
+- v3 天賦網（C6）是另一份內容：M1 天賦網照舊是 `loadGameData().talents`；v3 天賦網的型別、schema 與 ID 文法在 `src/data/web/`，`src/data/index.ts` 不 re-export 這個資料夾。`src/data/web/isolation.test.ts` 讀各檔自己寫的 import，確認 M1 天賦網的使用者（`src/meta/talents.ts`、`src/meta/stats.ts`、`src/app/session.ts` 與 `tools/balance/` 的每個檔）和 `src/data/index.ts` 都不 import `src/data/web`，`src/data/web` 也不 import M1 天賦網與 `src/data/index.ts`，`src/sim` 不讀 `.talents`。
+- v3 的內容型別在 `src/data/web/types.ts`：節點 `WebNode { id, kind, board, slot, ranks, effects, answers }` 沒有座標也沒有連線（邊記在盤 `BoardDef` 上，位置由排版從 `slot` 與盤的鐘點算出），`kind` 有 11 種（`WEB_NODE_KINDS`），`effects` 就是 M1 節點的五個陣列（修正、觸發、轉換、發射器、規則）；另外有角色 `CharacterDef`（`center`、`ascendancies` 在該批內容做好前是 `null`）、外盤 `OuterDef` 與它的融合酬載 `OuterPayload`、融合覆寫 `FusionOverride`、校準紀錄 `CalibrationEntry` 與範圍 `WebScope`。構造體的 ID（`CONSTRUCT_IDS`）也定義在這裡，`src/render/constructs` re-export。
+- `src/data/web/schema.ts` 的 zod schema 由 M1 的 schema 組成，全部是 strict（多一個欄位就報錯），輸出型別用 `exact` 檢查和介面相同。酬載效果（`PayloadEffectSchema`）不能寫中心事件決定的落點欄位：slashLine 的 `from`、`toward`，projectiles 的 `from`，nova 的 `at`。
+- 節點 ID（`src/data/web/ids.ts`）：中心盤 `<角色>.center.<分支>.<名稱>`、樞紐環 `hub.<群組>.<名稱>`、外盤 `outer.<外盤>.<分支>.<名稱>`、融合 `fusion.<角色>.<外盤>.<槽>`、昇華 `<角色>.asc.<slug>.<槽>`。分支外的節點放在假分支 `main`；◆ 與 ★ 用 slug（kebab-case 英文，不能是 `main`、`signature`、`threshold`、`entry`、`mastery`、`core`、`final`、`might` 或 `r<n>`、`c<n>`、`n<n>`），其他節點用固定的槽名（中心盤分支上 `r1`–`r6`、`mastery`，`main` 上 `signature`、`threshold`、`c1`–`c6`；外盤分支上 `r1`–`r4`、`mastery`，`main` 上 `entry`、`threshold`；樞紐環 `r1`–`r5`，強化∞ 是 `hub.might.might`；融合 `core`、`r1`–`r3`、`mastery`；昇華 `n1`、`n2`、`final`）。`parseNodeId` 不收的 ID 就是寫錯了；收下的 ID，`sourceOfNode` 一定等於它所在盤的來源，打錯字不會再默默算成 `center`。`nearestName` 找編輯距離 2 以內最近的名稱，給驗證訊息的「是不是要寫…」用。
+- 招牌攻擊與規則的表在 `src/data/rules.ts`：`CHARACTER_SIGNATURE`（角色 → 招牌攻擊）、`SIGNATURE_EVENT`（招牌攻擊 → 中心事件）、`SIGNATURE_FORMS`（每種招牌攻擊能接的形態規則）；`RULE_COEF_FIELDS` 列出融合係數要縮放的規則欄位，`scaleRuleSpec` 照這張表縮放一個 spec（`pct`、`mult` 乘上係數，`chance` 乘完夾到 1）；`POLICY_RULES` 是 ◆ 可以帶的連鎖政策規則。這兩張表都從空的開始，每個規則模組上線時加上自己那一筆。
 
 ## 7. 平台抽象層
 

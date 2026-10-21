@@ -64,7 +64,7 @@ type Equals<A, B> =
     : false;
 
 /** Identity that fails typecheck unless the schema's output type is exactly `T`. */
-const exact =
+export const exact =
   <T>() =>
   <S extends z.ZodType>(schema: S & (Equals<z.output<S>, T> extends true ? unknown : never)): S =>
     schema;

@@ -5,7 +5,15 @@
  * express (a tagged chance, an *Always stat, a scaling, notTags) is data instead, like the
  * bridge notables and Searing Crits, and so is one that triggers can express, like Pandemic's
  * spread on death (src/data/talents.ts).
+ *
+ * The v3 web's tables over rules and signatures live here too (docs/v3 C6 design §3.7, §4.2):
+ * each character's signature, its center event and its forms; the rule fields a fusion's
+ * coefficient scales; and the chain-policy rules a notable may hold. This module imports types
+ * only, so the registries stay outside every value-import cycle.
  */
+
+import type { CharacterId } from './sources';
+import type { CenterEvent } from './triggers';
 
 export type RuleSpec =
   /**
@@ -131,3 +139,75 @@ export type SignatureId = SignatureSpec['id'];
 
 /** The signature attack of runs that name none (RunConfig.signature). */
 export const M1_SIGNATURE: SignatureSpec = { id: 'm1Volley' };
+
+/** Each character's signature attack (CharacterDef.signature; implementation-plan-v3 §2.13). */
+export const CHARACTER_SIGNATURE: Readonly<Record<CharacterId, Exclude<SignatureId, 'm1Volley'>>> =
+  {
+    fire: 'magmaBomb',
+    ice: 'iceFan',
+    lightning: 'triphaseArc',
+    summon: 'swarm',
+  };
+
+/** The center event each character signature raises: the event of every template fusion core. */
+export const SIGNATURE_EVENT: Readonly<Record<Exclude<SignatureId, 'm1Volley'>, CenterEvent>> = {
+  magmaBomb: 'explode',
+  iceFan: 'freeze',
+  triphaseArc: 'chainJump',
+  swarm: 'droneImpact',
+};
+
+/**
+ * The form rules each signature takes (src/sim/rules/lobForms.ts, fanForms.ts, sixCoils.ts); web
+ * validation rejects a form on another character's nodes.
+ */
+export const SIGNATURE_FORMS: Readonly<Record<SignatureId, readonly RuleId[]>> = {
+  m1Volley: [],
+  magmaBomb: ['farThrow', 'volcano', 'chainBlast'],
+  iceFan: ['icicle', 'prism'],
+  triphaseArc: ['sixCoils'],
+  swarm: [],
+};
+
+/** How a fusion's coef scales a rule field: pct and mult × coef, chance min(1, p × coef). */
+export type CoefFieldKind = 'pct' | 'mult' | 'chance';
+
+/**
+ * The fields of each rule's spec that a fusion's coefficient scales, when the rule sits on a
+ * fusion board (a hand fusion's core, or 冰光's and 雷光's added rules). A rule with no entry is
+ * not scaled. Each hand module's entry lands with the module.
+ */
+export const RULE_COEF_FIELDS: {
+  readonly [K in RuleId]?: Readonly<
+    Partial<Record<keyof Extract<RuleSpec, { id: K }> & string, CoefFieldKind>>
+  >;
+} = {};
+
+/**
+ * `spec` with the fields its `fields` entry lists scaled by `coef`: pct and mult × coef, chance
+ * min(1, p × coef); a listed field the spec leaves out stays out. `spec` itself at coef 1 or for
+ * an id with no entry. A fusion board's rules compile from the scaled spec, so a rule module never
+ * sees the coefficient and can neither forget it nor apply it twice.
+ */
+export function scaleRuleSpec<S extends RuleSpec>(
+  spec: S,
+  coef: number,
+  fields = RULE_COEF_FIELDS,
+): S {
+  const entry = fields[spec.id] as Readonly<Record<string, CoefFieldKind>> | undefined;
+  if (coef === 1 || entry === undefined) return spec;
+  const scaled: Record<string, unknown> = { ...spec };
+  for (const [field, kind] of Object.entries(entry)) {
+    const value = scaled[field];
+    if (typeof value !== 'number') continue; // an optional field left out stays out
+    scaled[field] = kind === 'chance' ? Math.min(1, value * coef) : value * coef;
+  }
+  return scaled as S;
+}
+
+/**
+ * The rule ids web validation admits on a ◆ (kind notable or asc) beyond a center's forms: the
+ * chain policies, which no data member can write, only a rule module through
+ * BuildCompiler.chainPolicy. Each chain-policy module adds its id when it lands.
+ */
+export const POLICY_RULES: readonly RuleId[] = [];
