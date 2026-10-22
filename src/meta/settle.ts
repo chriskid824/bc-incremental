@@ -11,8 +11,17 @@ import type { EnemyId, GameData } from '../data/types';
 import type { RunResult, SimState } from '../sim/types';
 import type { EconomyConfig, MetaState, Settlement } from './types';
 
+/**
+ * What a settlement credits: M1's MetaState, or the copy settleWebRun makes of a v3 character's
+ * progress (docs/v3 C6 design D21).
+ */
+export type SettleTarget = Pick<MetaState, 'shards' | 'cores' | 'maxWave' | 'runs'>;
+
 /** Highest start wave the player may pick: max(1, floor(maxWave × startWaveRatio)). */
-export function allowedStartWave(meta: Readonly<MetaState>, economy: EconomyConfig): number {
+export function allowedStartWave(
+  meta: Readonly<Pick<MetaState, 'maxWave'>>,
+  economy: Pick<EconomyConfig, 'startWaveRatio'>,
+): number {
   return Math.max(1, Math.floor(meta.maxWave * economy.startWaveRatio));
 }
 
@@ -70,11 +79,11 @@ const CORE_FLOOR_EPSILON = 1e-9;
  * skip cores floored. Also updates maxWave and the run counter.
  */
 export function settleRun(
-  meta: MetaState,
+  meta: SettleTarget,
   result: RunResult,
   data: GameData,
   stats: StatBlock,
-  economy: EconomyConfig,
+  economy: Pick<EconomyConfig, 'skipRewardRate'>,
 ): Settlement {
   let skipShards = ZERO;
   let skipCores = 0;
@@ -108,7 +117,7 @@ export function settleRun(
  * compensation, since the run never finished clearing its start wave on record.
  */
 export function settleUnfinishedRun(
-  meta: MetaState,
+  meta: SettleTarget,
   progress: Pick<SimState, 'shards' | 'cores' | 'highestWaveReached'>,
 ): Settlement {
   meta.shards = assertFinite(add(meta.shards, progress.shards), 'settleUnfinishedRun shards');

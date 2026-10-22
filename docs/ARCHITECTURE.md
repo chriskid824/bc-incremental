@@ -31,6 +31,7 @@ src/
     outer/     v3 的外盤，一塊外盤一個檔
   sim/         一局的模擬：狀態、系統、固定 timestep（純 TS）
   meta/        局外進度：資源、天賦配點、轉生、昇華（純 TS）
+    web/       v3 天賦網的角色進度、價格、購買規則、路徑、外盤揭露與角色局的 build、結算
   save/        存檔序列化、版本遷移（純 TS）
   platform/    平台介面與各平台實作（web、steam、portal）
   render/      PixiJS：實體外觀、粒子、傷害數字、鏡頭、展示模式
@@ -61,7 +62,8 @@ flowchart LR
   S -.headless.-> B[tools/balance<br/>CSV]
 ```
 
-- `meta` 把天賦網與昇華編譯成一個 `StatBlock`（屬性的最終值，加上帶標籤、範圍或條件的修正、觸發與轉換，§4.4）和一組 `RuleSpec`（keystone 規則與參數），連同起始波次交給 `sim` 開一局。v3 的角色局另外帶 `RunConfig.character`（`CharacterRun`：角色 ID 與帶來源、係數的規則 `SourcedRule`，§4.8），這時 `RunConfig.rules` 是空的、招牌攻擊是那個角色的；M1 的局不帶。跳波補償由 `meta` 在結算時依期望掉落計算，`sim` 只回報有沒有清掉起始波次。
+- `meta` 把天賦網與昇華編譯成一個 `StatBlock`（屬性的最終值，加上帶標籤、範圍或條件的修正、觸發與轉換，§4.4）和一組 `RuleSpec`（keystone 規則與參數），連同起始波次交給 `sim` 開一局。v3 的角色局另外帶 `RunConfig.character`（`CharacterRun`：角色 ID 與帶來源、係數的規則 `SourcedRule`，§4.8），這時 `RunConfig.rules` 是空的、招牌攻擊是那個角色的；M1 的局不帶。v3 這一側在 `src/meta/web`：`webBuild` 依 `web.nodes` 的順序收集擁有的節點（招牌攻擊節點除外），沒有縮放的修正把階數併成一筆（`flat`、`increased` 乘上階數，`more` 是 (1 + 值)^階數 − 1），有縮放的照階數重複；觸發與轉換照階數重複、發射器只算一次，融合盤的觸發與規則帶那條融合的係數，規則每條只放一次、不照階數重複。`webRunConfig` 把它包成 `RunConfig`，`webStartWave` 讀這輪轉生的最遠波次（`cycleBest`），一局結束走 `settleWebRun`（同一個 `settleRun`，另外更新歷來最遠波次 `bestWave`）。跳波補償由 `meta` 在結算時依期望掉落計算，`sim` 只回報有沒有清掉起始波次。
+- v3 的購買規則也在 `src/meta/web`：`canBuy` 依十二列的順序回傳第一個不通過的理由（`BUY_REASONS`），`buy` 把價格從錢包移到 `spent`。要碎片的節點各走三條成長曲線之一（`PRICE_CURVE_OF`；★ 只收核心、昇華節點只收迴響），買幾次的總價是封閉式，和購買順序無關，所以 `refundNode`、`refundPreview` 與 `legalize` 退回的都是兩個封閉式的差（最多退到 `spent`），`refundAll` 整筆退回 `spent`。外盤揭露（`revealedOuters`）由歷來最遠波次算出來，不另外存。角色與帳號的進度（`CharacterProgress`、`AccountProgress`）是不可變的值，C8 之前只放在記憶體，不動存檔格式。
 - `sim` 每個 tick 產出 `SimEvents`（擊中、暴擊、點燃、連鎖、死亡、掉落）。`render` 只讀狀態和事件，不改狀態。
 - 一局結束時 `sim` 回傳 `RunResult`（最遠波次、各類與各來源的傷害統計、掉落、計數器），`meta` 結算資源後存檔。
 - 平衡模擬器直接呼叫 `meta` 與 `sim`，不載入 `render`、`ui`、`platform`。
