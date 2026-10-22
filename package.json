@@ -20,6 +20,9 @@
     "bench": "tsx tools/balance/bench.ts",
     "fingerprint": "tsx tools/balance/fingerprint.ts",
     "snapshots": "tsx tools/content/snapshots.ts",
+    "content": "tsx tools/content/check.ts",
+    "calibrate": "tsx tools/content/calibrate.ts",
+    "fuzz:web": "tsx tools/content/fuzzWeb.ts",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
   },
   "dependencies": {

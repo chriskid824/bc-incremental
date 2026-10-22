@@ -3,9 +3,10 @@
  * /viewer.html and never built, as sheet.html is: each registered character's web as an SVG
  * (src/ui/web/svg.ts) in every scope, expanded or collapsed, with every load-time issue and every
  * test-time check but V23, the fuzz, beside the node it names (V21 and V22 on the snapshots
- * loaded with `?raw`); hovering a node shows describeNode in both languages, clicking an outer
- * its preview card. `?fixture` shows fixtureContent() through the fixture's text instead (the
- * lead's ruling R2). Vite reloads the page when a content file is saved.
+ * loaded with `?raw`, V9 beside each fusion's core from C6.9); hovering a node shows
+ * describeNode in both languages, clicking an outer its preview card. `?fixture` shows
+ * fixtureContent() through the fixture's text instead (the lead's ruling R2). Vite reloads the
+ * page when a content file is saved.
  *
  * URL parameters pick the view: `scope` (full, demoA, demoB), `character`, `collapsed`,
  * `labels=zh-TW`, `node=<id>` and `outer=<o>` (what hover and click show).
@@ -23,6 +24,7 @@ import { CHARACTER_IDS, OUTER_IDS } from '../data/sources';
 import type { CharacterId, OuterId } from '../data/sources';
 import {
   assembleWeb,
+  calibrationIssues,
   contentIds,
   contentIssues,
   idSnapshotIssues,
@@ -117,7 +119,10 @@ const errorText = (error: unknown): string =>
 /** Every web the content assembles, and the issues of the whole content. */
 interface Checked {
   readonly webs: ReadonlyMap<string, AssembledWeb>;
-  /** Load-time issues (with their node), V16, V17–V20 over every web, V21, assembly failures. */
+  /**
+   * Load-time issues and V9 (with their node), V16, V17–V20 over every web, V21, assembly
+   * failures.
+   */
   readonly issues: readonly SvgIssue[];
 }
 
@@ -146,6 +151,19 @@ function check(src: Source): Checked {
   run('economyIssues', () => economyIssues(DEFAULT_WEB_ECONOMY));
   run('idSnapshotIssues', () => idSnapshotIssues(contentIds(src.content), src.ids));
   run('textIssues', () => textIssues([...webs.values()], src.lookups));
+  // V9 in every scope, beside the fusion's core: a fusion two scopes assemble is one issue.
+  const calibration = new Set<string>();
+  for (const scope of SCOPES) {
+    try {
+      for (const { node, message } of calibrationIssues(src.content, scope)) {
+        if (calibration.has(message)) continue;
+        calibration.add(message);
+        issues.push({ node, message });
+      }
+    } catch (error) {
+      issues.push({ node: null, message: `calibrationIssues failed: ${errorText(error)}` });
+    }
+  }
   return { webs, issues };
 }
 

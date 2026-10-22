@@ -54,6 +54,30 @@ export function stdHp(wave: number): number {
   return hpTable[wave] as number;
 }
 
+/**
+ * The growth from wave `wave` − 1 to `wave`: the last HP_SEGMENTS entry with fromWave ≤ wave;
+ * HP_SEGMENTS[0]'s below 2 (docs/v3 C6 design §4.10).
+ */
+export function growthInto(wave: number): number {
+  let growth = (HP_SEGMENTS[0] as { readonly growth: number }).growth;
+  for (const segment of HP_SEGMENTS) {
+    if (wave >= segment.fromWave) growth = segment.growth;
+  }
+  return growth;
+}
+
+/**
+ * Standard HP at a fractional wave, geometric inside a wave (docs/v3 C6 design §4.10, F28):
+ * stdHp(⌊x⌋) × growthInto(⌊x⌋ + 1)^(x − ⌊x⌋), and HP_WAVE_1 × growthInto(1)^(x − 1) below 1, so
+ * it equals stdHp at every wave and the 25/26, 50/51 and 100/101 seams need no rule of their own.
+ * Calibration reads a run's fractional frontier through it.
+ */
+export function stdHpAt(x: number): number {
+  if (x < 1) return HP_WAVE_1 * Math.pow(growthInto(1), x - 1);
+  const wave = Math.floor(x);
+  return stdHp(wave) * Math.pow(growthInto(wave + 1), x - wave);
+}
+
 /** Target effective damage per attack when `wave` is the frontier: HP(F) ÷ hits-to-kill. */
 export function targetDamage(frontierWave: number): number {
   return stdHp(frontierWave) / FRONTIER_HITS_TO_KILL;

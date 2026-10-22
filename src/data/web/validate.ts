@@ -1,6 +1,7 @@
 /**
  * Content validation of the v3 web (docs/v3 C6 design D23, §4.8): the load-time checks V1–V8,
- * V10–V14, V18 and V24, which loadContent() runs, and zodIssueText, which words a zod issue.
+ * V10–V14, V18 and V24, which loadContent() runs, zodIssueText, which words a zod issue, and V9,
+ * calibrationIssues, a test-time check that the tests, the viewer and `npm run content` call.
  * Every message reads `<subject> '<id>' (<file>): <problem>; <what to do>`, with the nearest
  * valid name for a misspelt one (nearestName); the checks extracted from M1's validation keep
  * M1's text after the subject and file (rule (a)), and the file follows from the board (rule
@@ -1739,4 +1740,48 @@ export function contentIssues(content: Content, options: ValidateOptions = {}): 
   }
   issues.push(...batchIssues(content, built), ...deadEntryIssues(content, entries, assembled));
   return sortedIssues(issues);
+}
+
+// V9 (C6.9, S-2): the calibration is fresh.
+
+/** A digest as V9's messages print it (§4.8's example): its first 8 hex digits. */
+const shortDigest = (digest: string): string => `${digest.slice(0, 8)}…`;
+
+/**
+ * V9 (§4.8, D26, F21): each fusion `scope` assembles, for every built character it holds, has a
+ * CALIBRATED entry for its current digest, with status ok or an ACCEPTED_FAILS reason. The
+ * reason excuses a status only: a missing or stale entry fails with one too. Pure: it reads the
+ * fusions' digests, content.calibrated and content.acceptedFails, and runs no simulation. Each
+ * issue names the fusion's core, which the viewer draws it beside.
+ */
+export function calibrationIssues(content: Content, scope: WebScope): ContentIssue[] {
+  const issues: ContentIssue[] = [];
+  for (const c of CHARACTER_IDS) {
+    if (content.characters[c].center === null || !scopeHolds(scope.characters, c)) continue;
+    for (const fusion of assembleWeb(content, c, scope).fusions.values()) {
+      const { key } = fusion;
+      const rerun = `run npm run calibrate -- --only ${key}`;
+      const entry = content.calibrated[key];
+      const reason = content.acceptedFails[key];
+      let problem: string | null = null;
+      if (entry === undefined) problem = `has no CALIBRATED entry; ${rerun}`;
+      else if (entry.digest !== fusion.digest) {
+        problem =
+          `calibrated for digest ${shortDigest(entry.digest)}, its inputs now hash to ` +
+          `${shortDigest(fusion.digest)}; ${rerun}`;
+      } else if (entry.status !== 'ok' && (reason === undefined || reason.trim() === '')) {
+        problem =
+          `calibrated ${entry.status} at coef ${num(entry.coef)} (median ${num(entry.median)}, ` +
+          `seeds ${num(entry.min)} to ${num(entry.max)}); a FAIL lands only with its reason in ` +
+          `ACCEPTED_FAILS (${OVERRIDES_FILE}), or rework the fusion and ${rerun}`;
+      }
+      if (problem === null) continue;
+      issues.push({
+        file: CALIBRATED_FILE,
+        node: fusion.board.nodes.find((node) => node.kind === 'core')?.id ?? null,
+        message: `fusion '${key}' (${CALIBRATED_FILE}): ${problem}`,
+      });
+    }
+  }
+  return issues;
 }

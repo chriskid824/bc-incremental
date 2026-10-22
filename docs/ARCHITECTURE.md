@@ -1,6 +1,6 @@
 # 架構文件
 
-> 狀態：草稿 v0.5（2026-10-21）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）；v0.5 加上 C4 的引擎（§4.7），改寫 §4.3 的 tick 順序與 §12 的效能閘門。
+> 狀態：草稿 v0.6（2026-10-22）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）；v0.5 加上 C4 的引擎（§4.7），改寫 §4.3 的 tick 順序與 §12 的效能閘門；v0.6 加上 C6 的天賦網內容管線。
 
 ## 1. 技術選型
 
@@ -608,6 +608,9 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - 時鐘佈局：`layoutWeb(web)`（`src/data/web/layout.ts`）算出每個節點的座標。鐘點 k 的角度 β = 30° × k，徑向單位 u = (sin β, −cos β)，順時針單位 v = (cos β, sin β)；深度 d、側移 l 的槽在 S × (d·u + l·v)，S = 100（`LAYOUT_UNIT`）。0 點鐘朝上，y 往下增加，和 PixiJS 一樣。中心盤的三條分支在 0、4、8 點鐘，深度 8.2 的圈上有奇數鐘點的接口、2 與 10 點鐘的 ★、6 點鐘的門檻；樞紐環在深度 9.6 的圈上，每個環節點向內接出的節點在深度 8.75、往順時針偏 12°；融合沿著自己外盤的輻條排在深度 10.8–14.8、側移 −0.6；昇華在自己的鐘點，深度 11–13，兩條各在左右 0.8；外盤從深度 17 的入口往外，檔案裡第一條分支在順時針那一側。節點的位置只看自己的槽和盤的鐘點，不看別的盤、內容或陣列順序，所以後面的批次不會移動前面批次的節點。每塊盤另有標籤位置，外盤有收合時的小圓（半徑 200），每條開放的輻條有「中心 8/8・毒 3/6」的位置。完整的 fixture 每個角色 323 個節點、367 條邊，節點間距至少 100，邊和不相干的節點至少相距約 53.5，邊不交叉，全部在 ±2,380 內。這些常數都是初始值。
 - 內容驗證：`loadContent()`（`src/data/web/index.ts`）第一次呼叫時驗證登記的內容（每個寫好中心盤的角色在每個列出它的範圍各組一次網），之後回傳同一個 `Content`；`center` 是 `null` 的角色只跑 V1 與 V4，不組網。有問題就丟一個 `ContentError`，列出全部問題，依檔案排序。檢查在 `src/data/web/validate.ts` 的 `contentIssues`：schema 與 M1 抽出的節點檢查（V1）；ID 文法與 slug（V2）；每個槽放對模板、盤的形狀與固定連線（V3，樞紐環照固定表）；登記表、`FIRST_PICK` 與角色的推導欄位（V4）；形態規則只放在招牌攻擊接得上的中心 ◆ 或 ★（V5）；規則只放在 ★、融合核心、昇華終點，或 `POLICY_RULES` 列出的 ◆，每張網的同一個規則只在一塊盤上（V6）；外盤 ★ 的流派規則（V7）；轉移效果乘上係數後小於 1（V8）；沒有範圍組得到的融合不能有覆寫或校準紀錄（V10）；手工融合的覆寫要有規則，不能有觸發、加成或額外規則；模板融合的覆寫不能有規則（V11）；酬載與加成對得上，放到每個中心事件上都合法（V12）；從招牌攻擊走得到每個節點，外盤入口不能只經過融合節點連到（V13）；節點總數符合 gd §2.1 的公式，登記的內容是某一批做完的樣子時也符合 `BATCH_COUNTS`（V14）；敵人對照列標 ✗ 的敵人有節點回應（V18）；範圍裡的 ID 都存在（V24）。訊息寫成 `<對象> '<id>' (<檔案>): <問題>; <怎麼改>`，拼錯的名稱附上最接近的正確名稱（`zodIssueText` 把 zod 的問題也寫成這個樣子），M1 抽出的檢查保留 M1 的文字；訊息給內容作者看，不走 i18n。
 - 快照：`src/data/web/snapshots/ids.txt` 是登記的每個節點 ID（排序，一行一個），`layout-<角色>.txt` 是那個角色在 `FULL_SCOPE` 的佈局（節點座標、盤的標籤與收合小圓、邊數與外框，取整數）；fixture 的一份在 `snapshots/fixture/`。兩份都由 `npm run snapshots -- --write`（`tools/content/snapshots.ts`）產生，不要手改；B1 之前登記的內容是空的，檔案也是空的。`idSnapshotIssues`（V21）確認快照裡的每個 ID 都還在，或在 `ID_RENAMES`（`src/data/web/renames.ts`，B1 前是空的）裡改名或退點（`null`），因為存檔用 ID 記配點；`layoutIssues`（V22）確認節點間距至少 90、邊和不相干的節點至少相距 40、邊不交叉，而且快照裡的節點與盤都沒有移動，新增的不算。這兩個函式吃快照的文字，不讀檔，所以模擬核心照樣是純 TS；讀檔的是工具。`npm run snapshots` 檢查兩份快照，有問題就失敗，只是過期時列出 `--write` 會改哪些檔；`--write` 只寫有變的檔，有 ID 從內容消失又不在 `ID_RENAMES` 時整份拒寫。`src/data/web/content.test.ts` 在 Vitest 裡對登記的內容跑 V21 與 V22。
+- 內容檢查：`npm run content`（`tools/content/check.ts`）用驗證、測試與檢視器共用的函式，跑 C6 設計 §4.8 除了 V23（fuzz）以外的每個檢查：載入時的檢查（`contentIssues`）、每個範圍的 V9（`calibrationIssues`：每條組得到的融合都有摘要相符、狀態 ok 或有 `ACCEPTED_FAILS` 理由的校準紀錄）、每張網的 V15 與 V25、V16、V17、V19、V20，以及那份內容的快照的 V21 與 V22（登記的內容對 `snapshots/`，`--fixture` 對 `snapshots/fixture/`），有任何問題就以非 0 結束。它依範圍與角色印出摘要：每張網的節點數與範圍的總數（`FULL_SCOPE` 在登記的內容是某一批做完的樣子時對照 `BATCH_COUNTS`）、各語言缺的 key、未校準、過期與失敗的融合、買不到的節點。`-- --fixture` 改查 fixture（`src/ui/web/testing.ts` 的文字與 `snapshots/fixture/`）：fixture 沒有校準紀錄，所以 V9 回報的每條「沒有 `CALIBRATED` 紀錄」列為預期，不算問題。`-- --stubs` 替每個缺的 key 在缺它的 web JSON 檔寫一個 `TODO`，只用在登記的內容（不接受 `--fixture`）；文字寫好以前 V17 會一直失敗。
+- 校準：`npm run calibrate`（`tools/content/calibrate.ts`）在程序內一條接一條校準融合（`src/meta/web/calibrate.ts` 的 `calibrateFusion`，C6 設計 §4.10）：每個寫好中心盤的角色在 `FULL_SCOPE` 的網、新存檔的帳號，以解鎖投入（`unlockInvestment`）為底，加不加核心各從第 1 波打到死（最多 72,000 tick），8 個 seed 成對比較兩者最遠前線（小數波次）上的標準血量，在 `coefRange` 裡對數二分搜尋，讓中位數是 +20 %，係數取 3 位有效數字。預設 `--stale`（沒有紀錄或摘要過期的融合），`--all` 全部，`--only <key>` 一條，`--seeds` 改 seed 數；結果照 key 排序，有變才寫回 `calibrated.ts`，印出每條的 key、種類、係數、狀態、中位數、最小、最大與區間，有狀態不是 ok 又沒有 `ACCEPTED_FAILS` 理由時以非 0 結束。B1 之前沒有寫好中心盤的角色，所以什麼都不校準，檔案不變。
+- fuzz：`npm run fuzz:web`（`tools/content/fuzzWeb.ts`）在程序內跑天賦網的 fuzz（`src/meta/web/fuzz.ts` 的 `runWebFuzz`，§12）：登記的網 1,000 個 build，再加 fixture 的 100 個；B1 之前登記的內容沒有網，只跑 fixture 的。`--fixture` 只跑 fixture 的，`--builds`、`--ticks`、`--seed` 在本機改數量，`--only <build>` 照失敗訊息的重現指令重跑一個 build。CI 在 `npm test` 之後跑它（§14）。
 - 匯入順序（L8）：內容的登記表、`templates.ts` 建盤函式讀的模組常數，和 `src/data/fusion/generate.ts` 在模組層算好的 `HAND_PAIRS`、`HAND_RANKS`、`EMPTY_RANKS`，都要在任何值匯入的循環之外，不然內容檔可能在 `templates.ts` 跑完前就呼叫建盤函式。`src/data/web/importOrder.test.ts` 每次清掉模組快取，先 import v3 天賦網的一個模組，再呼叫 `loadContent()`、驗證 fixture，確認每個登記表的每一項都有定義。
 
 ## 7. 平台抽象層
@@ -783,6 +786,8 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
   - 同一次的 `normal` 中位數要 ≤ 25 ms。這不是預算（`normal` 的預算是 CI 的 50 ms），只用來發現機器跑在慢的模式：超過就重跑，最多 3 次，然後停下回報數字。
   - 比值在上限的 3% 以內時再跑兩次，取三次的中位數。重跑之後還超過，這個 commit 就停下（不提交），由 Hoshi 決定；沒有 commit 會改上限，或改場景的組成來壓到上限以下。
   - C5.6 用 `--share`（3 個程序的閘門）量 v4，見 §4.6.7；之後的 C4 commit 用上面兩個 `--check` 的比值。C4.21 量到 `stressBase` 3.265、`stress` v4 4.246。
+- **天賦網的 fuzz**（C6.9，C6 設計 §4.9）：`npm run fuzz:web`（CI，§14）。登記的每張網（每個寫好中心盤的角色在每個列出它的範圍）依序輪流分到 1,000 個 build，第 i 個 build 從 `createRng(deriveSeed(1029, 'webFuzz:' + i))` 抽：10–140 次購買、四分之一開第三個融合槽、最佳波次 1、15 或 30（決定揭露）、30 % 轉生（昇華走第一個買到的昇華節點那一條）、三分之一把每條融合的係數放在 `coefRange` 的一端（insensitive 的放 1），再由 `sampleProgress` 從 `canBuy` 接受的節點裡均勻地抽來買，所以每個 build 都合法；起始波次 1、15 或 30（不超過範圍的上限）。每局最多 3,600 tick（60 秒），開局與每個 tick 之後跑 `checkSummonTick`（血量與位置有限、召喚物 ≤ 24、投射物 ≤ 512、連鎖 ≤ 32）並看存活數（超過 400 只警告，C7 匯出 `ENEMY_CAP_ENFORCED` 後才算失敗）；結束時 `effectsDropped` 要是 0、`effectBudgetStreakMax` 要小於 30。每 10 個 build 跑兩次，兩次的事件與結果雜湊要相同；拋出例外算那個 tick 的失敗。一局在第一個失敗的 tick 停下，接著跑下一個 build；報告寫出停下的局數（「N runs stopped early」）、各類失敗、峰值（存活、召喚物、飛行中的投射物、連鎖、效果佇列、效果預算連續爆掉的 tick 數）與擊殺、撞擊數，每個失敗附上重現指令（`npm run fuzz:web -- --only fire.full.7`，fixture 的加 `--fixture`）與 build 擁有的節點，任何失敗都以非 0 結束。`runWebFuzz` 不讀時鐘：工具傳 `performance.now` 進去，印出實際耗時、每個 build 每 tick 的微秒數與最慢 10 個對程序內 `normal` 的比值。fixture 的 100 個 build 是第二次呼叫，所以真的內容落地前，harness 與 fixture 的 build 走得到的引擎路徑就跑得到（fixture 的 build 買不到第三個融合核心）。`npm test` 的 V23（`src/meta/web/fuzz.test.ts`）跑 20 個 build × 600 tick，B1 之前在 fixture 上。
+- **內容檢查與校準**（C6.9，§6）：`npm run content` 跑 fuzz 以外的每個內容檢查；`npm run calibrate -- --stale` 校準改過的融合並寫回 `calibrated.ts`，`npm test` 的 V9 擋下沒有紀錄、摘要過期或沒人接受的 FAIL。
 
 ## 13. i18n
 
@@ -794,7 +799,7 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 ## 14. CI 與發布
 
-- GitHub Actions：`format:check` → `lint` → `typecheck` → `test` → `bench -- --check`（模擬的效能，§12）→ `vite build`，build 結果存成 artifact。
+- GitHub Actions：`format:check` → `lint` → `typecheck` → `test` → `fuzz:web`（天賦網的 fuzz，§12）→ `bench -- --check`（模擬的效能，§12）→ `vite build`，build 結果存成 artifact。
 - 試玩版發布到 itch.io（免費，可以設成限制存取的頁面）：`.github/workflows/itch.yml`，推 `playtest-v*` tag（或在 Actions 頁手動執行）時跑 `npm run check`、`npm run build`、刪掉 source map，再用 butler 推到 `ITCH_TARGET` 的 `html5` channel，userversion 是 `tag+sha`。需要 repo secret `BUTLER_API_KEY`（itch API key，只放 GitHub，不貼在任何地方）。第一次上傳後要在 itch 編輯頁勾「This file will be played in the browser」。
 - 試玩版從 tag 之後只修 bug：修好的 commit 打下一個 tag（`playtest-v2`…），CI 自動上傳。
 - Steam 版在本機用 `npm run build:steam` 產出，用 SteamPipe 上傳（M3）。

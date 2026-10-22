@@ -23,6 +23,9 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      # The web fuzz in-process: the registered webs' 1,000 builds, then the fixture's 100
+      # (tools/content/fuzzWeb.ts, docs/v3 C6 design §4.9).
+      - run: npm run fuzz:web
       # Each simulation scenario timed against the normal run in this job, and the normal
       # run's own budget (tools/balance/bench.ts --check, bench.baseline.json).
       - run: npm run bench -- --check
