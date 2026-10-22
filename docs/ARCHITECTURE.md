@@ -36,14 +36,15 @@ src/
   platform/    平台介面與各平台實作（web、steam、portal）
   render/      PixiJS：實體外觀、粒子、傷害數字、鏡頭、展示模式
   ui/          DOM：主選單、結算、天賦網外框、設定、HUD
-  i18n/        en.json、zh-TW.json、型別化的 key
+    web/       v3 天賦網的產生文字、融合名稱、預覽卡、天賦網 SVG 與文字檢查
+  i18n/        en.json、zh-TW.json，v3 天賦網的 web.en.json、web.zh-TW.json，型別化的 key
   app/         啟動、場景切換、遊戲主迴圈、平台注入
 tools/
   balance/     平衡模擬器 CLI 與 build 策略
   content/     v3 內容的工具：天賦網快照（`npm run snapshots`）
-  talent-viewer/  開發用天賦網檢視器（Vite dev 頁面）
 electron/      main process、preload、steamworks 橋接
 tests/         跨模組測試、存檔 fixture
+viewer.html    開發用天賦網檢視器（`npm run dev` 的 /viewer.html，不進 build）
 ```
 
 **純度邊界**：`core`、`data`、`sim`、`meta`、`save` 用獨立的 `tsconfig.sim.json` 編譯，`lib` 不含 DOM，所以碰到 `window`、`document` 會直接型別錯誤。ESLint 再加 `no-restricted-imports`（禁止 import `pixi.js`、`src/render`、`src/ui`、`src/platform`、`src/app` 與 Node 內建模組，資料夾本身與裡面的檔案都擋）、`no-restricted-properties`（禁止 `Math.random`、`Date.now`、`performance.now`）與 `no-restricted-syntax`（禁止動態 `import()`、讀取現在時間的 `new Date()`）。`tsc` 有 `skipLibCheck`，擋不住 `pixi.js` 這類套件，所以 `tests/purity-lint.test.ts` 用探針原始碼確認這些規則一直有效。
@@ -589,7 +590,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - 每類資料一個 TS 檔，用 `satisfies` 拿到編輯器型別提示，載入時再過 zod schema。
 - M1 天賦節點：`{ id, kind, pos: {x, y}, links: id[], 價格欄位, modifiers, rules, triggers, conversions, archetype, nameKey, descKey? }`（`src/data/types.ts`）。修正、規則、觸發與轉換見 §4.4；節點有規則、觸發、轉換或行為修正（帶標籤的非傷害屬性、`notTags`、`when`、`scaling`、`*Always`）時必須有 `descKey`。
 - 驗證（Vitest 裡也跑一次）：ID 唯一、連線雙向、從起點全部可達、keystone 數量在範圍內、每個 i18n key 在 en 與 zh-TW 都存在。節點效果的合法性（`nodeEffectIssues`）、外盤 ★ 的流派規則（`starArchetypeIssues`）與發射器授予的衝突（`grantConflicts`）是 `src/data/validate.ts` 匯出的函式，訊息開頭由呼叫的人給（M1 是 `talent '<id>'` 與 `talents`），v3 的內容驗證也用同一份；M1 的訊息一字不變。
-- `tools/talent-viewer`：開發用頁面，畫出天賦網並標示錯誤，存檔後熱更新。不做拖拉編輯。
+- 開發用天賦網檢視器：`npm run dev` 後開 `/viewer.html`（`viewer.html` 與 `src/app/viewer.ts`，不進 build）。每個寫好中心盤的角色在每個範圍的天賦網畫成 SVG（`src/ui/web/svg.ts` 的 `webSvg`，節點照種類畫成 `docs/v3/talent-web-v3.svg` 圖例的形狀），外盤可以展開或收合；載入時的檢查與測試時的檢查（V23 的 fuzz 除外，V21、V22 用 `?raw` 讀快照）的問題標在它說的節點或盤旁邊，其他的列在側欄。滑鼠移到節點上顯示兩種語言的 `describeNode`，點外盤或融合顯示它的預覽卡；存檔後熱更新。網址加 `?fixture` 改看測試用的內容，文字來自 `src/ui/web/testing.ts`。不做拖拉編輯。
 - v3 天賦網（C6）是另一份內容：M1 天賦網照舊是 `loadGameData().talents`；v3 天賦網的型別、schema 與 ID 文法在 `src/data/web/`，`src/data/index.ts` 不 re-export 這個資料夾。`src/data/web/isolation.test.ts` 讀各檔自己寫的 import，確認 M1 天賦網的使用者（`src/meta/talents.ts`、`src/meta/stats.ts`、`src/app/session.ts` 與 `tools/balance/` 的每個檔）和 `src/data/index.ts` 都不 import v3 天賦網的模組（`src/data/web/`、`src/data/templates.ts`、`src/data/hub.ts`、`src/data/characters/`、`src/data/outer/`、`src/data/fusion/`），這些模組也不 import M1 天賦網與 `src/data/index.ts`，`src/sim` 不讀 `.talents`。
 - v3 的內容型別在 `src/data/web/types.ts`：節點 `WebNode { id, kind, board, slot, ranks, effects, answers }` 沒有座標也沒有連線（邊記在盤 `BoardDef` 上，位置由排版從 `slot` 與盤的鐘點算出），`kind` 有 11 種（`WEB_NODE_KINDS`），`effects` 就是 M1 節點的五個陣列（修正、觸發、轉換、發射器、規則）；另外有角色 `CharacterDef`（`center`、`ascendancies` 在該批內容做好前是 `null`）、外盤 `OuterDef` 與它的融合酬載 `OuterPayload`、融合覆寫 `FusionOverride`、校準紀錄 `CalibrationEntry` 與範圍 `WebScope`。構造體的 ID（`CONSTRUCT_IDS`）也定義在這裡，`src/render/constructs` re-export。
 - `src/data/web/schema.ts` 的 zod schema 由 M1 的 schema 組成，全部是 strict（多一個欄位就報錯），輸出型別用 `exact` 檢查和介面相同。酬載效果（`PayloadEffectSchema`）不能寫中心事件決定的落點欄位：slashLine 的 `from`、`toward`，projectiles 的 `from`，nova 的 `at`。
@@ -785,7 +786,7 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 ## 13. i18n
 
-- `en.json` 是 key 的來源，`zh-TW.json` 由測試檢查是否缺漏；key 的型別從 `en.json` 產生，打錯 key 會編譯失敗。
+- `en.json` 與 v3 天賦網的 `web.en.json` 是 key 的來源，`zh-TW.json` 與 `web.zh-TW.json` 由編譯器與測試檢查是否缺漏；key 的型別從兩份英文檔合起來產生，打錯 key 會編譯失敗。同一個 key 不能同時在 `en.json` 與 `web.en.json`（`i18n.test.ts`）。
 - 插值用 `{name}` 語法，數字一律先經過 `num.ts` 格式化。
 - 語系依瀏覽器語言選擇（繁中標籤 `zh-TW`、`zh-Hant`、`zh-HK`、`zh-MO` 用 `zh-TW`，其他用英文）；網址加 `?lang=zh-TW` 或 `?lang=en` 可以直接切換，方便測試。
 - 天賦名稱走 `nameKey`；`descKey` 目前沒有畫面用到，M1 做天賦網 UI 時再補文字與檢查。

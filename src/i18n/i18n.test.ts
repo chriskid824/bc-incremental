@@ -3,6 +3,10 @@ import { STAT_IDS } from '../data/stats';
 import { TALENTS } from '../data/talents';
 import { LOCALES, MESSAGES, fill, getLocale, isMessageKey, pickLocale, setLocale, t } from '.';
 import type { MessageKey } from '.';
+import en from './en.json';
+import webEn from './web.en.json';
+import webZhTW from './web.zh-TW.json';
+import zhTW from './zh-TW.json';
 
 const placeholders = (template: string): string[] =>
   [...template.matchAll(/\{(\w+)\}/g)].map((match) => match[1] as string).sort();
@@ -26,6 +30,16 @@ describe('messages', () => {
     }
     expect(isMessageKey('talent.missing.name')).toBe(false);
     expect(isMessageKey('toString')).toBe(false);
+  });
+
+  it('defines each key in one file: no web key shadows an M1 key (docs/v3 C6 design D22)', () => {
+    for (const [m1, web] of [
+      [en, webEn],
+      [zhTW, webZhTW],
+    ] as const) {
+      expect(Object.keys(web).filter((key) => Object.hasOwn(m1, key))).toEqual([]);
+      expect(Object.keys(web).filter((key) => !key.startsWith('web.'))).toEqual([]);
+    }
   });
 
   it('labels the ?hive prototype in both locales', () => {
