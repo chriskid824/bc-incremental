@@ -11,9 +11,11 @@
  * elites and bosses that come close, and retarget when their target dies first
  * (src/sim/targeting.ts). Target queries read a spatial grid rebuilt every tick
  * (src/sim/grid.ts), with exactly the results of a linear scan.
- * The build's stats and keystone rules (config.rules) compile once per run
- * (src/sim/build/compile.ts): each rule is a module (src/sim/rules/) that changes stats, flags
- * and modifiers and may hook into the tick. The scoped stats (damage multiplier, crit and ignite
+ * The build's stats and keystone rules (config.rules, or a character run's sourced
+ * config.character.rules) compile once per run (src/sim/build/compile.ts): each rule is a module
+ * (src/sim/rules/) that changes stats, flags and modifiers and may hook into the tick. A
+ * character run also credits ailments and the center's chain jumps by its character
+ * (src/sim/build/sources.ts). The scoped stats (damage multiplier, crit and ignite
  * chances, crit multiplier) per tag mask and damage source fill a ModTable on first use
  * (src/sim/build/modTable.ts, src/sim/build/sources.ts).
  * The build's triggers (StatBlock.triggers, and those rule modules add) listen to events of the
@@ -21,7 +23,11 @@
  * (src/sim/effects/).
  */
 
+import { CHARACTER_SIGNATURE } from '../data/rules';
+import type { RuleId } from '../data/rules';
 import { STAT_IDS } from '../data/stats';
+import type { SourcedRule } from '../data/stats';
+import { COEF_MAX, COEF_MIN } from '../data/triggers';
 import type { GameData } from '../data/types';
 import { dispatchPendingKills } from './effects/dispatch';
 import { runEffectQueue } from './effects/execute';
@@ -72,6 +78,49 @@ function validateConfig(config: RunConfig): void {
   if (values.projectileSpeed <= 0) throw new RangeError('projectileSpeed must be positive');
   for (const mod of scoped) {
     if (!Number.isFinite(mod.value)) throw new RangeError(`A ${mod.stat} modifier is not finite`);
+  }
+  // A fusion's coefficient stays in its range, and a transfer it scales below 1 (docs/v3 C6
+  // design D10, F39).
+  const legalCoef = (coef: number): boolean =>
+    Number.isFinite(coef) && coef >= COEF_MIN && coef <= COEF_MAX;
+  for (const { spec, coef } of config.stats.triggers) {
+    if (coef === undefined) continue; // every M1 trigger
+    if (!legalCoef(coef)) {
+      throw new RangeError(`A trigger's coef must be in [${COEF_MIN}, ${COEF_MAX}], got ${coef}`);
+    }
+    for (const effect of spec.do) {
+      if (effect.kind === 'spreadAilment' && (effect.effect ?? 1) * coef >= 1) {
+        throw new RangeError(
+          `A transfer at effect ${effect.effect ?? 1} × coef ${coef} must stay below 1`,
+        );
+      }
+    }
+  }
+  // A character run (docs/v3 C6 design D7, D9): its rules come sourced, one source and one coef
+  // per rule id, and it attacks with its character's signature. The character is never derived
+  // from the signature.
+  const character = config.character;
+  if (character !== undefined) {
+    if (config.rules.length > 0) {
+      throw new Error('A character run takes its rules from character.rules');
+    }
+    if (config.signature?.id !== CHARACTER_SIGNATURE[character.id]) {
+      throw new Error(
+        `Character '${character.id}' attacks with ${CHARACTER_SIGNATURE[character.id]}`,
+      );
+    }
+    const first = new Map<RuleId, SourcedRule>();
+    for (const rule of character.rules) {
+      if (!legalCoef(rule.coef)) throw new RangeError(`Rule '${rule.spec.id}': coef ${rule.coef}`);
+      const seen = first.get(rule.spec.id);
+      if (seen === undefined) first.set(rule.spec.id, rule);
+      else if (seen.source !== rule.source || seen.coef !== rule.coef) {
+        throw new Error(
+          `Rule '${rule.spec.id}' on sources '${seen.source}' and '${rule.source}': ` +
+            'one source and one coef per rule id',
+        );
+      }
+    }
   }
 }
 

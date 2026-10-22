@@ -4,6 +4,7 @@
  */
 
 import type { SourcedEmitter } from './emitters';
+import type { RuleSpec } from './rules';
 import type { SourceSelector } from './sources';
 import type { DamageTag } from './tags';
 import type { ConversionSpec, ScalingSpec, TargetCondition, TriggerSpec } from './triggers';
@@ -224,6 +225,20 @@ export interface SourcedTrigger {
   /** Source id (src/data/sources.ts), from the node's id. */
   readonly source: string;
   readonly spec: TriggerSpec;
+  /** The fusion coefficient (docs/v3 C6 design D10); 1 when absent. Only fusion boards set it. */
+  readonly coef?: number;
+}
+
+/**
+ * A rule of an owned node of a v3 web, with its board's source and its fusion's coefficient (1
+ * on every other board; docs/v3 C6 design D9, D10): a character run's rules (CharacterRun,
+ * src/sim/types.ts).
+ */
+export interface SourcedRule {
+  /** Source id (src/data/sources.ts), from the node's id. */
+  readonly source: string;
+  readonly spec: RuleSpec;
+  readonly coef: number;
 }
 
 /**

@@ -1,13 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { createRng, deriveSeed } from '../core/rng';
 import { shardsPerStdEnemy, stdHp } from '../data/curve';
+import { CHARACTER_SIGNATURE, M1_SIGNATURE } from '../data/rules';
 import type { RuleSpec } from '../data/rules';
+import { CHARACTER_IDS } from '../data/sources';
 import type { SourceSelector } from '../data/sources';
 import { BASE_STATS } from '../data/stats';
-import type { Modifier } from '../data/stats';
+import type { Modifier, SourcedRule, StatBlock } from '../data/stats';
 import { TAG } from '../data/tags';
+import type { TriggerSpec } from '../data/triggers';
 import type { EnemyId, GameData, WaveTable } from '../data/types';
+import type { Payload } from './emitters/types';
 import { BURN_TICK_INTERVAL, createSimulation } from './simulation';
+import { createRunContext } from './systems/context';
 import { FOCUS_RANGE } from './targeting';
 import {
   centerTriggers,
@@ -1492,5 +1497,154 @@ describe('targeting doomed enemies', () => {
     const hits = eventsOf(ticks, 'hit');
     expect(hits.length).toBeGreaterThanOrEqual(2);
     expect(hits[1]?.targetId).not.toBe(hits[0]?.targetId);
+  });
+});
+
+describe('character runs (docs/v3 C6 design §4.2, D7–D10)', () => {
+  const data = makeTestData();
+  const glass = (source: string, coef = 1, damageMore = 1): SourcedRule => ({
+    source,
+    spec: { id: 'glassCannon', damageMore },
+    coef,
+  });
+  /** A 熔核 run with these sourced rules, `overrides` on top. */
+  const fireRun = (overrides: Partial<RunConfig> = {}, ...sourced: SourcedRule[]): RunConfig =>
+    makeConfig({
+      signature: { id: 'magmaBomb' },
+      character: { id: 'fire', rules: sourced },
+      ...overrides,
+    });
+  const start = (config: RunConfig) => (): Simulation => createSimulation(config, data);
+  /** Stats with one fusion trigger, at `coef` or without one. */
+  const withTrigger = (spec: TriggerSpec, coef?: number): StatBlock =>
+    makeStats({}, [], {
+      triggers: [{ source: 'fusion.fire.poison', spec, ...(coef === undefined ? {} : { coef }) }],
+      conversions: [],
+      emitters: [],
+    });
+
+  it('accepts each character on its signature, with sourced rules of one source and one coef per id', () => {
+    for (const id of CHARACTER_IDS) {
+      const config = makeConfig({
+        signature: { id: CHARACTER_SIGNATURE[id] },
+        character: { id, rules: [] },
+      });
+      expect(start(config), id).not.toThrow();
+    }
+    const eternal: SourcedRule = {
+      source: 'center',
+      spec: { id: 'eternalFlame', durationMore: 0.5 },
+      coef: 1,
+    };
+    expect(start(fireRun({}, glass('hub', 2), eternal, glass('hub', 2, 0.5)))).not.toThrow();
+  });
+
+  it('rejects a character run with rules of its own', () => {
+    expect(start(fireRun({ rules: [{ id: 'glassCannon', damageMore: 1 }] }))).toThrow(
+      'A character run takes its rules from character.rules',
+    );
+  });
+
+  it("rejects a character run on another signature than its character's", () => {
+    for (const signature of [{ id: 'iceFan' }, M1_SIGNATURE] as const) {
+      expect(start(fireRun({ signature })), signature.id).toThrow(
+        "Character 'fire' attacks with magmaBomb",
+      );
+    }
+    // No signature: M1's volley.
+    expect(start(makeConfig({ character: { id: 'fire', rules: [] } }))).toThrow(
+      "Character 'fire' attacks with magmaBomb",
+    );
+  });
+
+  it('rejects two sources or two coefs for one rule id', () => {
+    expect(start(fireRun({}, glass('hub'), glass('asc')))).toThrow(
+      "Rule 'glassCannon' on sources 'hub' and 'asc': one source and one coef per rule id",
+    );
+    expect(start(fireRun({}, glass('hub', 1), glass('hub', 2)))).toThrow(
+      "Rule 'glassCannon' on sources 'hub' and 'hub': one source and one coef per rule id",
+    );
+  });
+
+  it('rejects a coef outside [0.1, 10], on a trigger or a rule, and accepts the bounds', () => {
+    const poison: TriggerSpec = { on: 'hit', do: [{ kind: 'applyAilment', ailment: 'poison' }] };
+    for (const coef of [0.0999, 10.01, 0, -1, Number.NaN, Infinity]) {
+      expect(start(makeConfig({ stats: withTrigger(poison, coef) })), `${coef}`).toThrow(
+        `A trigger's coef must be in [0.1, 10], got ${coef}`,
+      );
+      expect(start(fireRun({}, glass('hub', coef))), `${coef}`).toThrow(
+        `Rule 'glassCannon': coef ${coef}`,
+      );
+    }
+    for (const coef of [0.1, 10]) {
+      expect(start(makeConfig({ stats: withTrigger(poison, coef) })), `${coef}`).not.toThrow();
+      expect(start(fireRun({}, glass('hub', coef))), `${coef}`).not.toThrow();
+    }
+  });
+
+  it('rejects a transfer at effect × coef ≥ 1 on a trigger with a coef, and checks no trigger without one', () => {
+    const spread = (effect?: number): TriggerSpec => ({
+      on: 'kill',
+      do: [
+        {
+          kind: 'spreadAilment',
+          ailment: 'poison',
+          radius: 150,
+          ...(effect === undefined ? {} : { effect }),
+        },
+      ],
+    });
+    expect(start(makeConfig({ stats: withTrigger(spread(0.5), 2) }))).toThrow(
+      'A transfer at effect 0.5 × coef 2 must stay below 1',
+    );
+    expect(start(makeConfig({ stats: withTrigger(spread(), 1) }))).toThrow(
+      'A transfer at effect 1 × coef 1 must stay below 1',
+    );
+    expect(start(makeConfig({ stats: withTrigger(spread(0.5), 1.98) }))).not.toThrow();
+    // Every M1 trigger: no coef, so no check, whatever its effect.
+    for (const effect of [undefined, 1, 2]) {
+      expect(start(makeConfig({ stats: withTrigger(spread(effect)) })), `${effect}`).not.toThrow();
+    }
+  });
+
+  it('rejects a transfer at effect × coef ≥ 1 wherever it sits among the trigger’s effects', () => {
+    const spreads: TriggerSpec = {
+      on: 'kill',
+      do: [
+        { kind: 'spreadAilment', ailment: 'burn', radius: 150, effect: 0.25 },
+        { kind: 'spreadAilment', ailment: 'poison', radius: 150, effect: 0.5 },
+      ],
+    };
+    expect(start(makeConfig({ stats: withTrigger(spreads, 2) }))).toThrow(
+      'A transfer at effect 0.5 × coef 2 must stay below 1',
+    );
+    expect(start(makeConfig({ stats: withTrigger(spreads, 1.98) }))).not.toThrow();
+  });
+
+  it("credits a center chainBolt's jumps to outer.lightning on a fire run, to its own source on an M1 run", () => {
+    const bolt: TriggerSpec = { on: 'kill', do: [{ kind: 'chainBolt', jumps: 2, damagePct: 0.5 }] };
+    const stats = makeStats({}, [], {
+      triggers: [
+        { source: 'center', spec: bolt },
+        { source: 'fusion.fire.lightning', spec: bolt, coef: 1 },
+      ],
+      conversions: [],
+      emitters: [],
+    });
+    const boltSources = (config: RunConfig): (string | undefined)[][] => {
+      const ctx = createRunContext(config, data);
+      return ctx.effectPayloads.map((payload) => {
+        const { source, jumpSource } = payload as Payload;
+        return [ctx.sources.names[source], ctx.sources.names[jumpSource]];
+      });
+    };
+    expect(boltSources(fireRun({ stats }))).toEqual([
+      ['center', 'outer.lightning'],
+      ['fusion.fire.lightning', 'fusion.fire.lightning'],
+    ]);
+    expect(boltSources(makeConfig({ stats }))).toEqual([
+      ['center', 'center'],
+      ['fusion.fire.lightning', 'fusion.fire.lightning'],
+    ]);
   });
 });

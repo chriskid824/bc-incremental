@@ -218,6 +218,7 @@ describe('bench.baseline.json', () => {
       'hive',
       'stressBase',
       'grants',
+      'v3fire',
     ]);
   });
 });

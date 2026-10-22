@@ -28,7 +28,7 @@ import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { TargetSelector } from '../../data/triggers';
 import type { ArcParams, CompiledBuild } from '../build/compile';
-import { ailmentCredit, rowKey } from '../build/sources';
+import { ailmentCredit, jumpCredit, rowKey } from '../build/sources';
 import { ORB_MEMORY } from '../caps';
 import type { CompiledSelector } from '../effects/select';
 import type { Enemy, RunContext } from '../systems/context';
@@ -489,11 +489,13 @@ function sharedRows(spec: PayloadSpec): Int32Array {
 }
 
 /**
- * The payload of an emitter: its share of the damage stat, its tags and source, on `rng`, with
- * the chain policy `policy` (the signature's, which createRunContext compiles; null for the
- * others); a lob's carries its fire zone's (lobZonePayload); a segment's and an aura's are a
- * pulse's, one tally per judgement or pulse. The signature arc's share is × ArcParams.damageMult
- * (六線圈's), so its hits scale by 1, and its chain jumps raise chainJump.
+ * The payload of an emitter: its share of the damage stat, its tags and source, its chain jumps
+ * credited by the build's attribution (jumpCredit: outer.lightning for the center's on 熔核,
+ * 霜晶 and 蜂巢), on `rng`, with the chain policy `policy` (the signature's, which
+ * createRunContext compiles; null for the others); a lob's carries its fire zone's
+ * (lobZonePayload); a segment's and an aura's are a pulse's, one tally per judgement or pulse.
+ * The signature arc's share is × ArcParams.damageMult (六線圈's), so its hits scale by 1, and its
+ * chain jumps raise chainJump.
  */
 export function emitterPayload(
   build: CompiledBuild,
@@ -502,13 +504,15 @@ export function emitterPayload(
   policy: ChainPolicy | null,
 ): Payload {
   const arc = spec.kind === 'arc' ? (build.signature.arc as ArcParams) : null;
+  const source = build.sources.index(spec.source);
   return createPayload({
     baseDamage: mul(
       num(build.values.damage),
       arc === null ? spec.damagePct : spec.damagePct * arc.damageMult,
     ),
     tags: spec.tags,
-    source: build.sources.index(spec.source),
+    source,
+    jumpSource: jumpCredit(build.attribution, source),
     flags: spec.signature ? SIGNATURE : 0,
     rng,
     chains: spec.chains,
@@ -526,10 +530,11 @@ export function emitterPayload(
  * The payload of a drone emitter's turret shots (turretStep, src/sim/systems/drones.ts): `pct` of
  * the damage stat, the share src/sim/emitters/drone.ts reads (SwarmParams.turretDamagePct for
  * the swarm, the spec's for a grant), tagged hit, minion and projectile, with the emitter's
- * source, SIGNATURE when it is the signature's, and its chains, ailment rolls and crits, on
- * `rng`, with the chain policy `policy` by emitterPayload's rule (the signature's; null for the
- * others). Its burns need no credit of their own: its source and ailment rolls are those of its
- * emitter's payload, which createRunContext credits already.
+ * source and its jump credit by emitterPayload's rule, SIGNATURE when it is the signature's, and
+ * its chains, ailment rolls and crits, on `rng`, with the chain policy `policy` by
+ * emitterPayload's rule (the signature's; null for the others). Its burns need no credit of
+ * their own: its source and ailment rolls are those of its emitter's payload, which
+ * createRunContext credits already.
  */
 export function turretPayload(
   build: CompiledBuild,
@@ -538,10 +543,12 @@ export function turretPayload(
   rng: Rng,
   policy: ChainPolicy | null,
 ): Payload {
+  const source = build.sources.index(spec.source);
   return createPayload({
     baseDamage: mul(num(build.values.damage), pct),
     tags: TAG.hit | TAG.minion | TAG.projectile,
-    source: build.sources.index(spec.source),
+    source,
+    jumpSource: jumpCredit(build.attribution, source),
     flags: spec.signature ? SIGNATURE : 0,
     rng,
     chains: spec.chains,

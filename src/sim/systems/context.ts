@@ -21,7 +21,7 @@ import type { EvalInput } from '../build/eval';
 import type { ModTable } from '../build/modTable';
 import { SCOPED_INDEX } from '../build/modTable';
 import { countOf } from '../build/size';
-import { ailmentCredit, MAX_SOURCES, SOURCE_CLASS_ORDINAL } from '../build/sources';
+import { ailmentCredit, jumpCredit, MAX_SOURCES, SOURCE_CLASS_ORDINAL } from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
 import { SUMMON_CAP } from '../caps';
 import { createCenterEventState, FREEZE_PAYLOADS } from '../effects/centerEvents';
@@ -617,9 +617,16 @@ export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= F
  * ailment, no damage row, so its payload draws nothing. A slashLine's base damage is × (1 +
  * critScale × `critChance`), the build's crit chance read once here (A21); a coinHit's payload
  * carries its bypass bits; a chainBolt's shocks each enemy its jumps hit by its shockStacks
- * (Payload.shockOnHit), and raises no chainJump.
+ * (Payload.shockOnHit), raises no chainJump, and credits its jumps by the build's `attribution`
+ * (jumpCredit: a center chainBolt's to outer.lightning on 熔核, 霜晶 and 蜂巢; docs/v3 C6 design
+ * D8).
  */
-function effectPayload(fx: CompiledEffect, rng: Rng, critChance: number): Payload | null {
+function effectPayload(
+  fx: CompiledEffect,
+  rng: Rng,
+  critChance: number,
+  attribution: AttributionPolicy,
+): Payload | null {
   const spec = fx.spec;
   // A shatter's payload depends on its credit (RunContext.shatterPayloads).
   if (fx.tags === 0 || spec.kind === 'shatter') return null;
@@ -632,6 +639,7 @@ function effectPayload(fx: CompiledEffect, rng: Rng, critChance: number): Payloa
     baseDamage: critScale > 0 ? mul(fx.baseDamage, 1 + critScale * critChance) : fx.baseDamage,
     tags: fx.tags,
     source: fx.source,
+    jumpSource: spec.kind === 'chainBolt' ? jumpCredit(attribution, fx.source) : fx.source,
     flags: 0,
     rng,
     chains: false,
@@ -702,7 +710,13 @@ export function createRunContext(
   data: GameData,
   testModules: readonly TestModule[] = [],
 ): RunContext {
-  const build = compileBuild(config.stats, config.rules, config.signature, testModules);
+  const build = compileBuild(
+    config.stats,
+    config.rules,
+    config.signature,
+    testModules,
+    config.character ?? null,
+  );
   const { values, flags, signature, sources, attribution, table } = build;
   const {
     spawn: spawnRng,
@@ -823,7 +837,9 @@ export function createRunContext(
   const killInline = Int32Array.from(killTriggers.filter((t) => t.inline).map((t) => t.index));
   const killPending = Int32Array.from(killTriggers.filter((t) => !t.inline).map((t) => t.index));
   const critChance = clamp01(values.critChance);
-  const effectPayloads = effects.map((fx) => effectPayload(fx, effectsRng, critChance));
+  const effectPayloads = effects.map((fx) =>
+    effectPayload(fx, effectsRng, critChance, attribution),
+  );
   const repeatPayloads = effects.map((fx) => repeatPayload(fx, signaturePayload, effectsRng));
   // Who burn damage can be credited to: the applier of every payload whose hits ignite, an
   // emitter's zone payload among them (Payload.zoneVariant), and of every applyAilment and

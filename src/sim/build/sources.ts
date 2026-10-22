@@ -1,6 +1,7 @@
 /**
  * Damage sources of one run (docs/v3/implementation-plan-v3.md §2.1): the source table that
- * numbers the run's source ids, and the attribution policy that credits ailment damage.
+ * numbers the run's source ids, and the attribution policy that credits ailment damage and the
+ * center's chain jumps.
  *
  * Every damage instance carries a source index next to its tags. ModTable keys put it above the
  * 17 tag bits (rowKey), so a modifier scoped to a source (Modifier.scope) reaches only the rows
@@ -8,7 +9,7 @@
  */
 
 import { AILMENT_OUTER, isSourceSelector, SOURCE_CLASSES, sourceClass } from '../../data/sources';
-import type { SourceClass, SourceSelector } from '../../data/sources';
+import type { CharacterId, SourceClass, SourceSelector } from '../../data/sources';
 import { DAMAGE_TAGS } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { AILMENT_KINDS } from '../../data/triggers';
@@ -95,23 +96,55 @@ export const AILMENT_ORDINAL: Readonly<Record<AilmentKind, number>> = Object.fro
   AILMENT_KINDS.map((kind, i) => [kind, i]),
 ) as Record<AilmentKind, number>;
 
-/** Who ailment damage is credited to (implementation-plan-v3 §2.1). */
+/**
+ * Who ailment damage and the center's chain jumps are credited to (implementation-plan-v3 §2.1;
+ * docs/v3 C6 design D8).
+ */
 export interface AttributionPolicy {
   /** Bit AILMENT_ORDINAL[kind] is set for the kinds of the character's own archetype. */
   readonly centerAilments: number;
   /** Per AILMENT_ORDINAL: index of the kind's outer board, or -1 until first credited. */
   readonly outerSource: Int32Array;
+  /**
+   * Source index of the center payloads' chain jumps: 'outer.lightning' on a fire, ice or summon
+   * run; −1 keeps them at the center (M1, lightning).
+   */
+  readonly jumpSource: number;
 }
 
 /** M1 has no characters: every ailment is the center's own. */
 export const M1_CENTER_AILMENTS: readonly AilmentKind[] = AILMENT_KINDS;
 
-/** A policy crediting `centerAilments`, the character's own kinds, to the center. */
-export function createAttribution(centerAilments: readonly AilmentKind[]): AttributionPolicy {
+/**
+ * A policy crediting `centerAilments`, the character's own kinds, to the center, and the
+ * center's chain jumps to source `jumpSource` (−1, the default: to the center).
+ */
+export function createAttribution(
+  centerAilments: readonly AilmentKind[],
+  jumpSource = -1,
+): AttributionPolicy {
   let bits = 0;
   for (const kind of centerAilments) bits |= 1 << AILMENT_ORDINAL[kind];
-  return { centerAilments: bits, outerSource: new Int32Array(AILMENT_KINDS.length).fill(-1) };
+  return {
+    centerAilments: bits,
+    outerSource: new Int32Array(AILMENT_KINDS.length).fill(-1),
+    jumpSource,
+  };
 }
+
+/**
+ * Source credited with the chain jumps of a payload of source `source` (Payload.jumpSource): the
+ * policy's jumpSource for a center payload when it has one, else `source` itself.
+ */
+export const jumpCredit = (policy: AttributionPolicy, source: number): number =>
+  source === CENTER && policy.jumpSource >= 0 ? policy.jumpSource : source;
+
+/**
+ * The ailment kinds of the character's own archetype, which a character run credits to the
+ * center: fire [burn], ice [frost], lightning [shock], summon [].
+ */
+export const ownAilments = (character: CharacterId): AilmentKind[] =>
+  AILMENT_KINDS.filter((kind) => AILMENT_OUTER[kind] === character);
 
 /**
  * Source credited with the damage of a `kind` ailment applied by an instance of source

@@ -9,7 +9,7 @@ import { SUMMON_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../../src/sim/caps';
 import { BASE_ATTACK_SPEED } from '../../src/sim/emitters/types';
 import type { TestModule } from '../../src/sim/rules';
 import type { RunContext } from '../../src/sim/systems/context';
-import { stressData } from '../../src/sim/testing';
+import { makeStats, makeTestData, maskProbeMods, stressData } from '../../src/sim/testing';
 import {
   aliveTwin,
   ALIVE_TWIN_DELTA,
@@ -725,10 +725,13 @@ describe('--share’s report (docs/v3 C5 design §7.3, §9 C5.6)', () => {
 });
 
 describe('grants (docs/v3 C4 design §7.3, §8.3 C4.21)', () => {
-  it('is a stress-family scenario, last in SCENARIO_IDS and CHECK_ENTRIES: an aura, two rings of 4 orbs and thorns on M1’s attack', () => {
+  it('is a stress-family scenario, after stressBase in SCENARIO_IDS and CHECK_ENTRIES: an aura, two rings of 4 orbs and thorns on M1’s attack', () => {
     const grants = SCENARIOS.grants;
-    expect(SCENARIO_IDS.at(-1)).toBe('grants');
-    expect(CHECK_ENTRIES.at(-1)).toBe('grants');
+    // Right after stressBase; C6.6's v3fire comes after it.
+    const afterBase = (ids: readonly string[]): string[] =>
+      ids.slice(ids.indexOf('stressBase'), ids.indexOf('stressBase') + 2);
+    expect(afterBase(SCENARIO_IDS)).toEqual(['stressBase', 'grants']);
+    expect(afterBase(CHECK_ENTRIES)).toEqual(['stressBase', 'grants']);
     expect([grants.runs, grants.warmup, grants.seconds, grants.targetMs, grants.startWave]).toEqual(
       [20, 3, 30, 50, 30],
     );
@@ -756,5 +759,99 @@ describe('grants (docs/v3 C4 design §7.3, §8.3 C4.21)', () => {
       ['orbit', 4],
       ['thorns', null],
     ]);
+  });
+});
+
+describe('v3fire (docs/v3 C6 design §5.4, §8 C6.6)', () => {
+  it('is a scenario with no alive band, last in SCENARIO_IDS and CHECK_ENTRIES, on GOLDEN-C4’s v3fire: a fire character run', () => {
+    const v3fire = SCENARIOS.v3fire;
+    expect(SCENARIO_IDS.at(-1)).toBe('v3fire');
+    expect(CHECK_ENTRIES.at(-1)).toBe('v3fire');
+    expect([v3fire.runs, v3fire.warmup, v3fire.seconds, v3fire.targetMs, v3fire.startWave]).toEqual(
+      [50, 5, 20, 50, 12],
+    );
+    // Not of the stress family: --check measures no workload of it and checks no alive band.
+    expect([v3fire.stress, v3fire.summons, v3fire.variants, v3fire.testModules]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(v3fire.data?.()).toEqual(makeTestData());
+    const run = seedOne(v3fire);
+    const { stats, ...rest } = run.config;
+    expect(rest).toEqual({
+      seed: 1,
+      rules: [],
+      signature: { id: 'magmaBomb' },
+      character: {
+        id: 'fire',
+        rules: [
+          { source: 'center', spec: { id: 'eternalFlame', durationMore: 0.5 }, coef: 1 },
+          {
+            source: 'center',
+            spec: { id: 'volcano', periodSec: 1, radiusMult: 2, damageMult: 3 },
+            coef: 1,
+          },
+        ],
+      },
+      startWave: 12,
+      mode: 'auto',
+      maxTicks: 1200,
+    });
+    expect(stats.triggers).toEqual([
+      {
+        source: 'fusion.fire.poison',
+        spec: { on: 'explode', do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
+        coef: 1.5,
+      },
+    ]);
+    expect([stats.values.poisonChance, stats.values.chainCount]).toEqual([0.2, 1]);
+    // A fire run's center chain jumps are outer.lightning's, numbered after its data triggers.
+    const { ctx } = watchRun(run, 1);
+    expect(ctx.build.sources.names).toEqual(['center', 'fusion.fire.poison', 'outer.lightning']);
+    expect(ctx.build.attribution.jumpSource).toBe(2);
+  });
+
+  it('times GOLDEN-C4’s v3fire build whole: every stat value, modifier, trigger, conversion and emitter of the entry', () => {
+    // bench.ts holds a copy of the entry's build (V3_FIRE_STATS, src/sim/goldenC4.test.ts), which
+    // it cannot import: pin all of it, so the scenario times the run GOLDEN-C4 records.
+    const { stats } = seedOne(SCENARIOS.v3fire).config;
+    expect(stats).toEqual(
+      makeStats(
+        {
+          damage: 8,
+          maxLife: 1e6,
+          critChance: 0.2,
+          critMultiplier: 2,
+          igniteChance: 0.3,
+          poisonChance: 0.2,
+          chainCount: 1,
+          attackSpeed: 6,
+          projectileCount: 2,
+        },
+        [
+          ...maskProbeMods(),
+          {
+            stat: 'damage',
+            kind: 'increased',
+            value: 0.2,
+            scope: 'center',
+            when: [{ targetHas: 'poison' }],
+          },
+        ],
+        {
+          triggers: [
+            {
+              source: 'fusion.fire.poison',
+              spec: { on: 'explode', do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
+              coef: 1.5,
+            },
+          ],
+          conversions: [],
+          emitters: [],
+        },
+      ),
+    );
   });
 });

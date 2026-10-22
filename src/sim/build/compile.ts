@@ -3,15 +3,17 @@
  * reads (docs/v3/implementation-plan-v3.md §2.7). The signature's module compiles first, after
  * the build's own triggers, when it has changes of its own (SignatureModule.compile); then the
  * rule modules (src/sim/rules/) run once, in the order their ids first appear in the rules, each
- * with all of its instances. Both scale and offset stats, add modifiers, set flags and the
- * signature attack's parameters, and add triggers, effects and hooks. The result holds the final
- * stat values, the ModTable of the build's scoped modifiers followed by the module-added ones,
- * the run's damage sources and ailment attribution, the hook lists, the emitters: the
- * signature's first, then the emitter grants, the build's (StatBlock.emitters) and the modules',
- * one per kind, source and key; the triggers with their effects: the built-in shatter
- * (SHATTER_TRIGGER) first, then the build's own (StatBlock.triggers), then the modules', in
- * compile order (src/sim/effects/types.ts); and the build's damage conversions, which the
- * ModTable lists per hit row (src/sim/combat/convert.ts).
+ * with all of its instances: at the center on an M1 run, and on a character run (CharacterRun)
+ * at their board's source, from specs scaled by its fusion's coefficient (docs/v3 C6 design D9,
+ * D10). Both scale and offset stats, add modifiers, set flags and the signature attack's
+ * parameters, and add triggers, effects and hooks. The result holds the final stat values, the
+ * ModTable of the build's scoped modifiers followed by the module-added ones, the run's damage
+ * sources and who its ailments and the center's chain jumps are credited to (D8), the hook
+ * lists, the emitters: the signature's first, then the emitter grants, the build's
+ * (StatBlock.emitters) and the modules', one per kind, source and key; the triggers with their
+ * effects: the built-in shatter (SHATTER_TRIGGER) first, then the build's own
+ * (StatBlock.triggers), then the modules', in compile order (src/sim/effects/types.ts); and the
+ * build's damage conversions, which the ModTable lists per hit row (src/sim/combat/convert.ts).
  *
  * The source table, the attribution's outer sources and the ModTable rows grow while a run
  * uses them, so createRunContext compiles a fresh build for every run. The talent screen and
@@ -21,10 +23,10 @@
 
 import { grantKey } from '../../data/emitters';
 import type { SourcedEmitter } from '../../data/emitters';
-import { M1_SIGNATURE } from '../../data/rules';
+import { M1_SIGNATURE, RULE_COEF_FIELDS, scaleRuleSpec } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { isScopedStat, SCOPED_STATS, STAT_IDS } from '../../data/stats';
-import type { Modifier, StatBlock, StatId } from '../../data/stats';
+import type { Modifier, SourcedRule, StatBlock, StatId } from '../../data/stats';
 import { jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { TRIGGER_EVENTS } from '../../data/triggers';
@@ -44,6 +46,7 @@ import { RULE_MODULES, SIGNATURES } from '../rules';
 import type { BuildCompiler, HookName, Hooks, TestModule } from '../rules';
 import { NO_POLICY_SPEC } from '../systems/systemState';
 import type { ChainPolicySpec } from '../systems/systemState';
+import type { CharacterRun } from '../types';
 import { statAt, staticInput } from './eval';
 import { compileConversions, compileMods, ModTable } from './modTable';
 import type { CompiledConversion, CompiledMod } from './modTable';
@@ -51,8 +54,11 @@ import {
   CENTER,
   createAttribution,
   createSourceTable,
+  jumpCredit,
   M1_CENTER_AILMENTS,
+  ownAilments,
   rowKey,
+  SOURCE_CLASS_ORDINAL,
 } from './sources';
 import type { AttributionPolicy, SourceTable } from './sources';
 
@@ -193,7 +199,10 @@ export interface CompiledBuild {
   readonly mods: readonly CompiledMod[];
   /** The run's source ids; index 0 is 'center'. */
   readonly sources: SourceTable;
-  /** Who ailment damage is credited to; in M1 every ailment is the center's own. */
+  /**
+   * Who ailment damage and the center's chain jumps are credited to; in M1 every ailment is the
+   * center's own, and so are its jumps.
+   */
   readonly attribution: AttributionPolicy;
   readonly flags: Readonly<BuildFlags>;
   readonly signature: Readonly<SignatureParams>;
@@ -283,14 +292,17 @@ function grantEmitters(grants: readonly SourcedEmitter[]): EmitterSpec[] {
 }
 
 /**
- * Compiles `stats` with `rules` and the `signature` attack for one run. testModules are for
- * tests only (TestModule); they compile after the rule modules.
+ * Compiles `stats` with `rules` and the `signature` attack for one run, an M1 run; with
+ * `character`, a character run, whose rules are character.rules (`rules` is empty; validateConfig,
+ * src/sim/simulation.ts). testModules are for tests only (TestModule); they compile after the
+ * rule modules.
  */
 export function compileBuild(
   stats: StatBlock,
   rules: readonly RuleSpec[],
   signature: SignatureSpec = M1_SIGNATURE,
   testModules: readonly TestModule[] = [],
+  character: CharacterRun | null = null,
 ): CompiledBuild {
   const sources = createSourceTable();
   const values: Record<StatId, number> = { ...stats.values };
@@ -394,6 +406,7 @@ export function compileBuild(
     flags,
     signature: () => params,
     source: (name) => sources.index(name),
+    credit: () => ({ source: instanceSource, name: sources.names[instanceSource] as string }),
     hook(name, fn) {
       hooks[name].push(fn);
       const owner = instanceTrigger();
@@ -412,17 +425,52 @@ export function compileBuild(
       grants.push({ source, grant });
     },
     chainPolicy() {
+      // The jumps a policy adds are the signature payload's (Payload.extraJumpPayload), credited
+      // as the center's: on a character run only an instance at that credit may write it, or,
+      // on 雷塔, one at an ascendancy node, whose added jumps are the center's (gd:575; docs/v3
+      // C6 design D8, F38). Content that would credit them elsewhere fails here.
+      if (
+        character !== null &&
+        instanceSource !== jumpCreditOfCenter &&
+        !(character.id === 'lightning' && sources.cls[instanceSource] === SOURCE_CLASS_ORDINAL.asc)
+      ) {
+        throw new Error(
+          `chainPolicy() from source '${sources.names[instanceSource]}' on a ${character.id} run: ` +
+            `the center's chain jumps are credited to '${sources.names[jumpCreditOfCenter]}'`,
+        );
+      }
       chainPolicy ??= { ...NO_POLICY_SPEC, decay: [] };
       return chainPolicy;
     },
   };
 
-  for (const { source, spec } of stats.triggers) addTrigger(sources.index(source), spec, 1);
+  for (const { source, spec, coef } of stats.triggers) {
+    addTrigger(sources.index(source), spec, coef ?? 1);
+  }
+  // Numbered here, after the data triggers and before anything else, so its index depends only
+  // on them (docs/v3 C6 design D8, F37): on 熔核, 霜晶 and 蜂巢 the center's chain jumps are
+  // credited to outer.lightning, a zero row while nothing jumps; on 雷塔 and M1, to the center.
+  const centerJump =
+    character === null || character.id === 'lightning' ? -1 : sources.index('outer.lightning');
+  const jumpCreditOfCenter = centerJump >= 0 ? centerJump : CENTER;
   // The signature's changes come before the rules', whose scaleStat calls then scale them too.
   compileInstance(CENTER, () => compileSignature(signature.id, signature, compiler, CENTER));
-  // Every rule is credited to the center until characters give rules their own sources.
-  for (const id of new Set(rules.map((rule) => rule.id))) {
-    compileInstance(CENTER, () => compileRule(id, rules, compiler, CENTER));
+  if (character === null) {
+    // An M1 run: every rule is the center's.
+    for (const id of new Set(rules.map((rule) => rule.id))) {
+      compileInstance(CENTER, () => compileRule(id, rules, compiler, CENTER));
+    }
+  } else {
+    // A character run: each rule id's group at its board's source, from specs its fusion's
+    // coefficient scaled, so a module never sees the coefficient (docs/v3 C6 design D9, D10).
+    // validateConfig keeps one source and one coef per rule id.
+    for (const id of new Set(character.rules.map((rule) => rule.spec.id))) {
+      const group = character.rules.filter((rule) => rule.spec.id === id);
+      const { source, coef } = group[0] as SourcedRule;
+      const ix = sources.index(source);
+      const specs = group.map((rule) => scaleRuleSpec(rule.spec, coef, RULE_COEF_FIELDS));
+      compileInstance(ix, () => compileRule(id, specs, compiler, ix));
+    }
   }
   for (const module of testModules) {
     const source = module.source === undefined ? CENTER : sources.index(module.source);
@@ -469,7 +517,10 @@ export function compileBuild(
     table,
     mods,
     sources,
-    attribution: createAttribution(M1_CENTER_AILMENTS),
+    attribution: createAttribution(
+      character === null ? M1_CENTER_AILMENTS : ownAilments(character.id),
+      centerJump,
+    ),
     flags,
     signature: params,
     hooks,
@@ -486,7 +537,8 @@ export function compileBuild(
 /**
  * ModTable keys (rowKey) of the signature attack's hits, from its emitter's tags and source
  * (CompiledBuild.emitters[0]): its primary hit's without and with crit, and its chain jumps',
- * jumpMask of the tags credited to the same source (an emitter payload's jumpSource), without
+ * jumpMask of the tags credited to the jump credit of that source (jumpCredit: an emitter
+ * payload's jumpSource; outer.lightning for the center's on 熔核, 霜晶 and 蜂巢), without
  * and with crit. They are the rows its payload's SLOT_HIT, SLOT_HIT_CRIT, SLOT_JUMP and
  * SLOT_JUMP_CRIT read in a run (src/sim/emitters/types.ts); the estimates outside a run read
  * them too (the talent screen's summary, typicalHit, the balance tools): M1's hits are hit and
@@ -508,12 +560,13 @@ export interface SignatureRows {
 export function signatureRows(build: CompiledBuild): SignatureRows {
   const spec = build.emitters[0] as EmitterSpec;
   const source = build.sources.index(spec.source);
+  const jumpSource = jumpCredit(build.attribution, source);
   const jump = jumpMask(spec.tags);
   return {
     hit: rowKey(spec.tags, source),
     hitCrit: rowKey(spec.tags | TAG.crit, source),
-    jump: rowKey(jump, source),
-    jumpCrit: rowKey(jump | TAG.crit, source),
+    jump: rowKey(jump, jumpSource),
+    jumpCrit: rowKey(jump | TAG.crit, jumpSource),
   };
 }
 

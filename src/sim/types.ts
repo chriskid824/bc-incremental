@@ -8,7 +8,8 @@ import type { Num } from '../core/num';
 import type { Vec2 } from '../core/vec';
 import type { EnemyId } from '../data/types';
 import type { RuleSpec, SignatureSpec } from '../data/rules';
-import type { StatBlock } from '../data/stats';
+import type { CharacterId } from '../data/sources';
+import type { SourcedRule, StatBlock } from '../data/stats';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -34,12 +35,28 @@ export interface InputFrame {
 
 export const NO_INPUT: InputFrame = { cursor: null, activate: false };
 
+/**
+ * A v3 character's run (docs/v3 C6 design D7): its character, which sets the attribution and
+ * the center's jump credit (src/sim/build/sources.ts), and its owned nodes' rules, each compiled
+ * at its board's source.
+ */
+export interface CharacterRun {
+  readonly id: CharacterId;
+  /** The owned nodes' rules, sourced (docs/v3 C6 design D9); RunConfig.rules stays empty. */
+  readonly rules: readonly SourcedRule[];
+}
+
 export interface RunConfig {
   readonly seed: number;
   readonly stats: StatBlock;
   readonly rules: readonly RuleSpec[];
   /** The signature attack; M1_SIGNATURE (src/data/rules.ts) when omitted. */
   readonly signature?: SignatureSpec;
+  /**
+   * A v3 character's run, with rules empty and the character's signature
+   * (CHARACTER_SIGNATURE); an M1 run when omitted. Never derived from the signature.
+   */
+  readonly character?: CharacterRun;
   /** First wave of the run (docs/GDD.md §2.2). */
   readonly startWave: number;
   readonly mode: ControlMode;

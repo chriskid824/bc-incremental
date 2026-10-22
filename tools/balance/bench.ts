@@ -73,6 +73,11 @@
  *   outer.aura, 110 and 180 from the player (雙軌), of 4 orbs each, every orb with its own
  *   cooldown on each enemy it hits (Q13 (B), src/sim/emitters/orbit.ts); and thorns on
  *   outer.thorns. Only CI's ratio rule and the alive band gate it.
+ * - v3fire: a character run (C6.6, docs/v3 C6 design §5.4, P7), GOLDEN-C4's v3fire entry: 熔核's
+ *   magma bombs under 火山 and eternalFlame, igniting, poisoning and chaining once, with
+ *   fusion.fire.poison's explode trigger at coef 1.5, 20 s from wave 12 on the fixture data
+ *   (makeTestData), whatever --start-wave says. It is not of the stress family and has no alive
+ *   band: CI's ratio rule alone gates it.
  *
  * hiveStress (C5.6, docs/v3 C5 design §7.4) is print-only: the stress fixture under 蜂巢's swarm
  * at 24 units with 螢火's pulse zones, timed only by --share and printed beside stress v4. It is
@@ -81,7 +86,7 @@
  *
  *   npm run bench --
  *     [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan|arc|hive|
- *       stressBase|grants]
+ *       stressBase|grants|v3fire]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>]
@@ -152,6 +157,7 @@ import {
   centerTriggers,
   makeStats,
   makeTestData,
+  maskProbeMods,
   PANDEMIC_MODS,
   PANDEMIC_TRIGGER,
   STRESS_START_WAVE,
@@ -185,6 +191,7 @@ export const SCENARIO_IDS = [
   'hive',
   'stressBase',
   'grants',
+  'v3fire',
 ] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
@@ -638,6 +645,67 @@ const GRANTS_EMITTERS: readonly SourcedEmitter[] = [
   { source: 'outer.thorns', grant: { kind: 'thorns' } },
 ];
 
+/** The v3fire scenario's run: GOLDEN-C4's 1,200 ticks from wave 12. */
+const V3FIRE_SECONDS = 20;
+const V3FIRE_START_WAVE = 12;
+
+/**
+ * The v3fire scenario's build (docs/v3 C6 design §5.4, P7, F48), GOLDEN-C4's v3fire entry
+ * (src/sim/goldenC4.test.ts): a 熔核 character run, its magma bombs under 火山 (periodSec 1, twice
+ * the radius, three times the damage) and eternalFlame, both at the center, igniting, poisoning
+ * and chaining once, with a status bonus on poisoned enemies scoped to the center and
+ * fusion.fire.poison's explode trigger, two poison stacks over the blast's list, at coef 1.5.
+ */
+const V3FIRE_BUILD: Pick<RunConfig, 'stats' | 'rules' | 'signature' | 'character'> = {
+  stats: makeStats(
+    {
+      damage: 8,
+      maxLife: 1e6,
+      critChance: 0.2,
+      critMultiplier: 2,
+      igniteChance: 0.3,
+      poisonChance: 0.2,
+      chainCount: 1,
+      attackSpeed: 6,
+      projectileCount: 2,
+    },
+    [
+      ...maskProbeMods(),
+      {
+        stat: 'damage',
+        kind: 'increased',
+        value: 0.2,
+        scope: 'center',
+        when: [{ targetHas: 'poison' }],
+      },
+    ],
+    {
+      triggers: [
+        {
+          source: 'fusion.fire.poison',
+          spec: { on: 'explode', do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
+          coef: 1.5,
+        },
+      ],
+      conversions: [],
+      emitters: [],
+    },
+  ),
+  rules: [],
+  signature: { id: 'magmaBomb' },
+  character: {
+    id: 'fire',
+    rules: [
+      { source: 'center', spec: { id: 'eternalFlame', durationMore: 0.5 }, coef: 1 },
+      {
+        source: 'center',
+        spec: { id: 'volcano', periodSec: 1, radiusMult: 2, damageMult: 3 },
+        coef: 1,
+      },
+    ],
+  },
+};
+
 /**
  * Scenarios only --share times and prints (docs/v3 C5 design §7.4, PG3): outside SCENARIO_IDS,
  * so --check neither times nor records them, and no alive band applies.
@@ -835,6 +903,23 @@ export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     ),
     rules: [],
   })),
+  // C6.6: GOLDEN-C4's v3fire, a 熔核 character run on the fixture data (docs/v3 C6 design §5.4,
+  // P7). Not of the stress family: no alive band.
+  v3fire: {
+    runs: 50,
+    warmup: 5,
+    seconds: V3FIRE_SECONDS,
+    targetMs: 50,
+    startWave: V3FIRE_START_WAVE,
+    data: () => makeTestData(),
+    config: (seed) => ({
+      seed,
+      ...V3FIRE_BUILD,
+      startWave: V3FIRE_START_WAVE,
+      mode: 'auto',
+      maxTicks: V3FIRE_SECONDS * TICK_RATE,
+    }),
+  },
 };
 
 function positiveInt(name: string, text: string, min = 1): number {

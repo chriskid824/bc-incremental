@@ -61,7 +61,7 @@ flowchart LR
   S -.headless.-> B[tools/balance<br/>CSV]
 ```
 
-- `meta` 把天賦網與昇華編譯成一個 `StatBlock`（屬性的最終值，加上帶標籤、範圍或條件的修正、觸發與轉換，§4.4）和一組 `RuleSpec`（keystone 規則與參數），連同起始波次交給 `sim` 開一局。跳波補償由 `meta` 在結算時依期望掉落計算，`sim` 只回報有沒有清掉起始波次。
+- `meta` 把天賦網與昇華編譯成一個 `StatBlock`（屬性的最終值，加上帶標籤、範圍或條件的修正、觸發與轉換，§4.4）和一組 `RuleSpec`（keystone 規則與參數），連同起始波次交給 `sim` 開一局。v3 的角色局另外帶 `RunConfig.character`（`CharacterRun`：角色 ID 與帶來源、係數的規則 `SourcedRule`，§4.8），這時 `RunConfig.rules` 是空的、招牌攻擊是那個角色的；M1 的局不帶。跳波補償由 `meta` 在結算時依期望掉落計算，`sim` 只回報有沒有清掉起始波次。
 - `sim` 每個 tick 產出 `SimEvents`（擊中、暴擊、點燃、連鎖、死亡、掉落）。`render` 只讀狀態和事件，不改狀態。
 - 一局結束時 `sim` 回傳 `RunResult`（最遠波次、各類與各來源的傷害統計、掉落、計數器），`meta` 結算資源後存檔。
 - 平衡模擬器直接呼叫 `meta` 與 `sim`，不載入 `render`、`ui`、`platform`。
@@ -159,8 +159,8 @@ type Modifier = {
 
 - 來源 ID 以盤為單位：`center`、`hub`、`asc`、`outer.<外盤>`、`fusion.<角色>.<外盤>`。節點 ID 用 `sourceOfNode` 換算，M1 的節點全部算 `center`。每局一張來源表，第 0 個固定是 `center`，最多 64 個（key 裡的 6 bit）。
 - 修正的 `scope` 選來源：一個類別（`center|outer|fusion|hub|asc`）或一個確切的 ID。例：融合精通 `more .04 scope 'fusion.<c>.<o>'`、外盤 ★ 的 `scope 'outer.<o>'`。
-- 異常狀態的跳傷歸屬（`ailmentCredit`）：① 施加者是融合 → 那條融合；② 種類屬於角色自己的流派 → `center`；③ 其他 → 那個種類的外盤（燃燒 fire、毒 poison、流血 bleed、感電 lightning、冰冷 ice）。M1 沒有角色，所有種類都算 `center`；C6 起依角色的流派設定。持續傷害讀歸屬後那個來源的列。
-- 連鎖跳：酬載的 `jumpSource`（預設是酬載自己的來源）決定第 1 跳起的列與統計；跳躍施加的異常狀態仍以酬載的來源當施加者。C6 起，非雷角色的中心酬載的跳躍算 `outer.lightning`。
+- 異常狀態的跳傷歸屬（`ailmentCredit`）：① 施加者是融合 → 那條融合；② 種類屬於角色自己的流派 → `center`；③ 其他 → 那個種類的外盤（燃燒 fire、毒 poison、流血 bleed、感電 lightning、冰冷 ice）。M1 沒有角色，所有種類都算 `center`；角色局依角色的流派設定（`ownAilments`，§4.8）。持續傷害讀歸屬後那個來源的列。
+- 連鎖跳：酬載的 `jumpSource`（預設是酬載自己的來源）決定第 1 跳起的列與統計；跳躍施加的異常狀態仍以酬載的來源當施加者。角色局裡，非雷角色（熔核、霜晶、蜂巢）的中心酬載的跳躍算 `outer.lightning`（`jumpCredit`，§4.8）。
 - 每筆傷害都依來源累計（`RunResult.damageBySource`，用 `num.ts` 的 `add` 加）。中心主體性、鏡像融合與結算的傷害組成都讀它（C10）。
 
 #### 4.4.5 規則模組
@@ -558,6 +558,19 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - 成員之間只靠呼叫連起來（例：`shots.ts` 呼叫 `land`；`REPEAT_STEPS` 指向 `fireVolleyRepeat`、`fireLobRepeat`、`fireFanRepeat`、`fireArcRepeat` 與 `drones.ts` 的 `swarmRepeat`），除了 `REPEAT_STEPS` 在 `execute.ts` 頂層引用的這五個函式宣告，沒有一個在頂層讀同一個循環的值。從外面走到它、沒有被成員 import 回去的，`src/` 有 25 個：`sim/` 的 `simulation.ts`、`index.ts`、`testing.ts`，`systems/` 的 `ailments.ts`、`contact.ts`、`emitters.ts`、`projectiles.ts`、`segments.ts`、`waves.ts`，`emitters/` 的 `strike.ts`、`aura.ts`、`orbit.ts`，`app/` 的 `input.ts`、`loop.ts`、`main.ts`、`playtest.ts`、`session.ts`，`meta/index.ts`、`meta/startWave.ts`，`render/` 的 `backdrop.ts`、`damageNumbers.ts`、`drones.ts`、`index.ts`、`player.ts`、`renderer.ts`；`tools/balance/` 另有 15 個。
 - `src/sim` 在每個循環之外、也走不到它的有 43 個：葉模組與它的閉包、`emitters/types.ts`、`emitters/drone.ts`、`effects/` 的 `types.ts`、`select.ts`、`flags.ts`、`queue.ts`，所有 `build/` 與 `ailments/` 模組（含 `remaining.ts`），`rules/` 的 15 個模組（招牌攻擊、形態、規則模組、`index.ts`、`api.ts`、`module.ts`），以及 `movement.ts`、`spawn.ts`、`runEnd.ts`、`targeting.ts` 等。其中幾個在頂層讀彼此的 `const`（`modTable.ts` 的 `ESTIMATE = staticInput()`、`apply.ts` 的 `DAMAGE = SCOPED_INDEX.damage`、`records.ts` 的 `BURN_TICK_INTERVAL = DOT_STEP_TICKS`），只因為它們在循環之外才合規；C4.10 把層數上限的讀取放在 `records.ts` 與 `shock.ts`，就是為了不讓它們進入循環。
 
+### 4.8 C6 的角色局
+
+`src/sim/types.ts`、`src/sim/simulation.ts`、`src/sim/build/compile.ts`、`src/sim/build/sources.ts`（C6 設計 D7–D10、§3.7、§4.2、§5.2）。一局有 `RunConfig.character`（`CharacterRun`：角色 ID 與擁有節點的 `SourcedRule`）就是 v3 角色局，沒有就是 M1 的局：編譯與執行都和 C6 之前完全一樣（`jumpSource` 是 −1、`jumpCredit` 原樣傳回、同一個規則迴圈），所以指紋、golden、既有的 GOLDEN-C4 案例、T6 與平衡探針都不變。角色從不由招牌攻擊推回來：那樣會改掉每個不帶角色、用 v3 招牌攻擊的 GOLDEN-C4 案例與 `hive` 場景的歸屬。M1 的工作階段、平衡模擬器的 CLI 與 `?hive` 仍是 M1 的局。
+
+- **設定檢查**（`validateConfig`）：角色局的 `RunConfig.rules` 要是空的（規則在 `character.rules`），招牌攻擊要是 `CHARACTER_SIGNATURE[id]`；每條規則的係數在 [`COEF_MIN`, `COEF_MAX`]（0.1–10）裡，同一個規則 ID 只能有一個來源、一個係數。帶係數的觸發（不分是不是角色局）係數也要在這個範圍裡，其中每個轉移效果（`spreadAilment`）的 `(effect ?? 1) × coef` 要小於 1。沒有係數的觸發（所有 M1 的觸發）不檢查。
+- **歸屬**（`AttributionPolicy`）：角色自己流派的異常狀態算 `center`（`ownAilments`：熔核燃燒、霜晶冰冷、雷塔感電、蜂巢沒有），其他種類照 §4.4.4 算各自的外盤，融合施加的算那條融合；M1 用 `M1_CENTER_AILMENTS`，全部算 `center`。
+- **中心的跳躍**：熔核、霜晶、蜂巢的局在資料觸發編譯完、招牌攻擊與規則之前，立刻替 `outer.lightning` 編號（F37），所以它的編號只看資料觸發；沒有東西連鎖時它是一列 0。`AttributionPolicy.jumpSource` 存這個編號（雷塔與 M1 是 −1），`jumpCredit(policy, source)` 對 `center` 的酬載傳回它、其他來源原樣傳回。`emitterPayload`、`turretPayload` 與 chainBolt 效果的酬載（`effectPayload`）在開局建酬載時各算一次 `jumpSource`，之後每次擊中不多做事；衍生的酬載（落雷的連鎖、冰柱、日冕、重複攻擊）照抄，熔岩彈的火地酬載不連鎖，不設 `jumpSource`（它的重複攻擊版本靠 `rowsOf` 共用它的列）。`signatureRows` 的跳躍列也用它，所以估計讀到的就是一局用的列。雷塔的跳躍留在 `center`，昇華模組加的跳躍也是（gd:575）。
+- **帶來源的規則**（D9）：`character.rules` 依規則 ID 第一次出現的順序分組，每組編譯一次，在那塊盤的來源（組裡第一條的 `source`）：模組的 `compile` 收到那個來源的編號，`BuildCompiler.credit()`（`RuleCredit`：編號與來源 ID）讓模組把自己加的觸發、效果與發射器記到自己的盤。M1 的局維持原本的迴圈，全部在 `center`。
+- **係數**（D10）：融合盤的觸發帶 `SourcedTrigger.coef`，編譯時用 `coef ?? 1`：效果的 `COEF_FIELDS` 乘上係數（沒寫的欄位當 1），觸發的機率也乘上係數、上限 1（chainJump 固定的 0.3 也算）。融合盤的規則從 `scaleRuleSpec` 縮放過的 spec 編譯，只動 `RULE_COEF_FIELDS` 列出的欄位（`pct`、`mult` 乘上係數，`chance` 乘完上限 1），所以模組看不到係數，不會忘了乘，也不會乘兩次。`RULE_COEF_FIELDS` 目前是空的，每個手寫模組落地時加上自己的那一項。
+- **連鎖策略的檢查**：`chainPolicy()` 寫的連鎖策略加的跳躍與反彈，是招牌攻擊酬載的 `extraJumpPayload`（就是酬載自己）打的，算中心的跳躍。所以角色局裡，只有編譯位置等於中心跳躍歸屬的實例能呼叫它（熔核、霜晶、蜂巢是 `outer.lightning`，雷塔是 `center`），雷塔的昇華節點（`asc`）例外：那些跳躍也是中心的（C-1、F38）。其他位置呼叫時編譯就丟錯，內容不會悄悄把跳躍記到別處。連鎖策略只能由規則模組透過這個呼叫寫，所以八個連鎖策略 ◆（跳電、電荷、遠雷、分岔、回彈、蓄電、渦流、導雷）都是規則模組；資料驗證（V6）在 ◆ 上除了中心的形態，只接受 `POLICY_RULES`（`src/data/rules.ts`）列出的規則 ID。`POLICY_RULES` 目前是空的，每個連鎖策略模組落地時在同一個 commit 加上自己的 ID（D8、F50）。
+- 物件形狀不變（§4.7.15）：`RunContext` 仍是 125 個屬性、`ctx.sys` 沒有新成員、`COUNTER_IDS` 不變、`CompiledBuild` 仍是 15 個成員（`AttributionPolicy` 多一個數字）。`src/sim/build/sources.ts` 仍是葉模組的允許 import（只 import `src/data`）。
+- GOLDEN-C4 的 `v3fire`、`v3ice`、`v3lightning`、`v3summon`（每個角色一局）一起釘住歸屬、跳躍列、帶來源的規則與係數；`npm run bench` 的 `v3fire` 場景讓 CI 計時一局角色局（§12）。
+
 ## 5. 大數字
 
 - 設計天花板 ≤ 1e300，所以 `Num` 是加上品牌的 `number`：`type Num = number & { readonly __num: unique symbol }`。
@@ -741,9 +754,9 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 - `npm run fingerprint`（`tools/balance/fingerprint.ts`）：1,032 個案例（972 個合成 build＋60 個真實天賦 build）跑完，把每個 tick 的事件（投影到 M1 的欄位）與結果做雜湊，一個案例一行。`-- --check` 和 `tools/balance/fingerprint.baseline.txt` 逐行比對，重構必須完全相同；`-- --compare-results` 列出每個變動案例的波次、擊殺、漏怪、傷害與燃燒差多少；`-- --write` 重寫基準，只有量過、說明過的行為修改可以用。
 - `src/sim/golden.test.ts`：24 個案例 × 1,200 tick 的事件雜湊，跟著 `npm test` 跑。
-- `src/sim/goldenC4.test.ts`（GOLDEN-C4，也跟著 `npm test` 跑）：C4 與 C5 機制的 27 個 fixture（C4 的 21 個、C5 的 6 個），每個在 seed 1 與 2 各跑 1,200 tick。雜湊是 sha256 的前 16 個十六進位數字，算的是每個 tick 原樣的事件（不投影到 M1 的欄位），再加上 `projectResult`、`damageBySource` 與不為 0 的計數器（依 `COUNTER_IDS` 順序）；每個案例跑兩次，兩次要相同。落地一個機制的 commit 附上它的 fixture 與當時的雜湊；之後的 commit 不動已記錄的雜湊，除非 commit message 寫明重記哪些、為什麼。到 fa8a663 為止重記過：C4.7 的 `burst` 事件重記了用到 explode 或 nova 的 `thorns`、`selector`、`freezeList`、`zones`；`zones` 另外在 C4.6c、C4.6d、C4.7b 依 Q4 重記；C5.R 調 swarm 的數字時重記了 `swarm`、`swarmRepeat`、`swarmTurret`。後加的計數器在之前的 fixture 都是 0，不會動到雜湊。
+- `src/sim/goldenC4.test.ts`（GOLDEN-C4，也跟著 `npm test` 跑）：C4、C5 機制與 C6 角色局的 31 個 fixture（C4 的 21 個、C5 的 6 個、C6 的 4 個），每個在 seed 1 與 2 各跑 1,200 tick。雜湊是 sha256 的前 16 個十六進位數字，算的是每個 tick 原樣的事件（不投影到 M1 的欄位），再加上 `projectResult`、`damageBySource` 與不為 0 的計數器（依 `COUNTER_IDS` 順序）；每個案例跑兩次，兩次要相同。落地一個機制的 commit 附上它的 fixture 與當時的雜湊；之後的 commit 不動已記錄的雜湊，除非 commit message 寫明重記哪些、為什麼。到 fa8a663 為止重記過：C4.7 的 `burst` 事件重記了用到 explode 或 nova 的 `thorns`、`selector`、`freezeList`、`zones`；`zones` 另外在 C4.6c、C4.6d、C4.7b 依 Q4 重記；C5.R 調 swarm 的數字時重記了 `swarm`、`swarmRepeat`、`swarmTurret`。後加的計數器在之前的 fixture 都是 0，不會動到雜湊。
 - `npx tsx tools/balance/probe.ts --json <檔案>` 與 `tools/balance/probeDiff.ts <前> <後>`：比兩次平衡探針（各策略的前線 F@10/20/40/60、到第 20／30 波的分鐘在 ±5% 內，T1–T8 通過）。`out/` 不進 git，參考檔放在本機的 `out/balance/`。
-- `npm run bench -- --scenario normal|hits|ailments|effects|poisonBoss`：一般一局、擊中路徑、異常狀態壓力（瘟疫＋無盡烈焰，第 30 波）、效果佇列、Boss 身上約 500 層毒（和 5 層比，持續傷害每一步的成本要和層數無關，比值 < 1.3）。
+- `npm run bench -- --scenario normal|hits|ailments|effects|poisonBoss|v3fire`：一般一局、擊中路徑、異常狀態壓力（瘟疫＋無盡烈焰，第 30 波）、效果佇列、Boss 身上約 500 層毒（和 5 層比，持續傷害每一步的成本要和層數無關，比值 < 1.3）、熔核的角色局（C6.6：GOLDEN-C4 的 `v3fire`，測試資料從第 12 波跑 20 秒，不看 `--start-wave`；不是壓力家族，沒有存活數區間，§4.8）。
 - C4 加的場景（`--scenario` 也接受這些 id）都是**壓力家族**，C5 的 `stressBase` 也是（`hive` 不是，見 §4.6.7）：用壓力 fixture（`src/sim/testing.ts` 的 `stressData`、`stressStats`）從第 30 波跑 30 秒（3 次暖身、20 次計時），tick 300 起約 300 隻活著，不看 `--start-wave`。`--check` 另外要求 seed 1 那一局在 tick 301–1800 的平均存活數在 280–320（釘住工作量），並印出一行壓力報告：中位數、比值、一起計時的 `normal` 的中位數與工作量（存活數、峰值與計數器；`stress` 另有區域、熔岩彈與線段的工作量）。閘門欄的 CI 是下一點的 `--check`（比值與存活數區間）。
 
   | 場景 | 內容 | 閘門 |

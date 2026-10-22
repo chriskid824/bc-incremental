@@ -9,6 +9,7 @@ import {
   createSourceTable,
   M1_CENTER_AILMENTS,
   MAX_SOURCES,
+  ownAilments,
   rowKey,
   SOURCE_CLASS_ORDINAL,
   SOURCE_SHIFT,
@@ -142,5 +143,26 @@ describe('ailment attribution', () => {
     expect(ailmentCredit(sources, policy, 'bleed', CENTER)).toBe(bleed);
     expect(sources.names).toEqual(['center', 'outer.bleed']);
     expect(policy.centerAilments).toBe(1 << AILMENT_KINDS.indexOf('frost'));
+  });
+});
+
+describe('character attribution (docs/v3 C6 design D8)', () => {
+  it("names each character's own ailment kinds: 熔核 burn, 霜晶 frost, 雷塔 shock, 蜂巢 none", () => {
+    expect(Object.fromEntries(CHARACTER_IDS.map((id) => [id, ownAilments(id)]))).toEqual({
+      fire: ['burn'],
+      ice: ['frost'],
+      lightning: ['shock'],
+      summon: [],
+    });
+  });
+
+  it("keeps the center's chain jumps at the center by default, and credits them to jumpSource when given", () => {
+    expect(createAttribution(M1_CENTER_AILMENTS).jumpSource).toBe(-1);
+    expect(createAttribution(['burn']).jumpSource).toBe(-1);
+    expect(createAttribution(['burn'], 3)).toEqual({
+      centerAilments: 1 << AILMENT_KINDS.indexOf('burn'),
+      outerSource: new Int32Array(AILMENT_KINDS.length).fill(-1),
+      jumpSource: 3,
+    });
   });
 });

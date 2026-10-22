@@ -63,7 +63,7 @@ export const chainBlast: RuleModule<Extract<RuleSpec, { id: 'chainBlast' }>> = {
       damagePct: spec.damagePct,
       perBomb: spec.perBomb,
       trigger: b.instanceTrigger(),
-      // Credited to the center, as every rule is until characters give rules their own sources.
+      // Credited to the center: a form sits on a center node (V5), so the center is its source.
       effect: b.addEffect('center', {
         kind: 'explode',
         radius: spec.radius,

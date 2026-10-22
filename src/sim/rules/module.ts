@@ -28,9 +28,21 @@ export interface RuleModule<P extends RuleSpec> {
   readonly id: P['id'];
   /**
    * Called once per run with every instance of this id, in node order, and the source the
-   * rules are credited to. Instances merge as M1 did: min, product or sum per parameter.
+   * rules are credited to: the center on an M1 run, their board's on a character run, with
+   * their specs already scaled by a fusion board's coefficient (scaleRuleSpec,
+   * src/data/rules.ts). Instances merge as M1 did: min, product or sum per parameter.
    */
   compile(b: BuildCompiler, specs: readonly P[], source: number): void;
+}
+
+/**
+ * The source a module instance compiles at (docs/v3 C6 design D9): its index, and its name
+ * (SourceTable.names), which addTrigger, addEffect and addEmitter take, so a module credits what
+ * it adds to its own board.
+ */
+export interface RuleCredit {
+  readonly source: number;
+  readonly name: string;
 }
 
 /** What a rule module may change while it compiles. */
@@ -60,6 +72,8 @@ export interface BuildCompiler {
   signature(): SignatureParams;
   /** Index of a damage source, numbering it on first use (SourceTable.index). */
   source(name: string): number;
+  /** The source the instance being compiled is credited to (RuleCredit). */
+  credit(): RuleCredit;
   /**
    * Adds a hook; hooks of one name run in the order they were added. Returns the instance's
    * trigger index (instanceTrigger): the origin of what its hooks queue.
@@ -90,7 +104,10 @@ export interface BuildCompiler {
   /**
    * The build's chain policy, which the modules write in place: NO_POLICY_SPEC's values at the
    * first call, the same object after it. The signature payload and its repeats chain by it
-   * (CompiledBuild.chainPolicy); a build whose modules never call it chains without one.
+   * (CompiledBuild.chainPolicy); a build whose modules never call it chains without one. The
+   * jumps it adds are the signature payload's, credited as the center's (jumpCredit), so on a
+   * character run it throws unless the instance compiles at that credit, or, on a lightning
+   * run, at an ascendancy node (docs/v3 C6 design D8).
    */
   chainPolicy(): ChainPolicySpec;
 }

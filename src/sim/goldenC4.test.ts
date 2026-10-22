@@ -1364,6 +1364,147 @@ const AURA_ORBIT_STATS = makeStats(
   },
 );
 
+/**
+ * C6.6's character runs (docs/v3 C6 design §5.4), one per v3 character: its signature, its rules
+ * at their boards' sources (CharacterRun) and a fusion's trigger at the fusion's coefficient,
+ * over maskProbeMods(). Together they pin who a character run credits its damage to (D8), its
+ * jump rows, its sourced rules and the coefficient (D9, D10).
+ *
+ * `v3fire` (熔核): magma bombs, two a firing, under 火山 (periodSec 1, twice the radius, three
+ * times the damage) with eternalFlame's longer, uncapped burns, both rules at the center; the
+ * bombs ignite, poison and chain once, and a status bonus raises the center's damage on poisoned
+ * enemies. Its explode trigger, on fusion.fire.poison at coef 1.5, fans two poison stacks out
+ * over the blast's list at 1.5 × their damage. The bombs, their fire zones and their burns are
+ * the center's, their hits' poison outer.poison's, their jumps outer.lightning's and the fusion's
+ * poison the fusion's.
+ */
+const V3_STATUS_BONUS: Modifier = {
+  stat: 'damage',
+  kind: 'increased',
+  value: 0.2,
+  scope: 'center',
+  when: [{ targetHas: 'poison' }],
+};
+const V3_FIRE_STATS = makeStats(
+  {
+    damage: 8,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.3,
+    poisonChance: 0.2,
+    chainCount: 1,
+    attackSpeed: 6,
+    projectileCount: 2,
+  },
+  [...maskProbeMods(), V3_STATUS_BONUS],
+  {
+    triggers: [
+      {
+        source: 'fusion.fire.poison',
+        spec: { on: 'explode', do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
+        coef: 1.5,
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
+/**
+ * `v3ice` (霜晶): the ice fan, 3.125 rounds a second of 5.5 cones, chilling and igniting, with
+ * steadyAim on every fourth cone on outer.crit; each freeze sets off fusion.ice.crit's slash,
+ * which always crits, at coef 0.8. The fan's hits and the shatters are the center's (frost is its
+ * own), their burns outer.fire's, the slashes and their burns the fusion's; outer.lightning is
+ * numbered though nothing chains.
+ */
+const V3_ICE_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.3,
+    frostOnHit: 0.15,
+    attackSpeed: 5,
+    projectileCount: 2.5,
+  },
+  maskProbeMods(),
+  {
+    triggers: [
+      {
+        source: 'fusion.ice.crit',
+        spec: {
+          on: 'freeze',
+          do: [
+            {
+              kind: 'slashLine',
+              length: 300,
+              width: 24,
+              damagePct: 1,
+              alwaysCrit: true,
+              critScale: 1,
+              from: 'target',
+              toward: 'outward',
+            },
+          ],
+        },
+        coef: 0.8,
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
+/**
+ * `v3lightning` (雷塔): the three-phase arc at chainCount 1, under overload at the center (twice
+ * the chain count, 0.2 less retention, chain hits 50% more); each chain jump has
+ * fusion.lightning.poison's chance, 0.3 × coef 2, to poison its target with two stacks. The arc's
+ * hits and jumps stay the center's, as does its shock; the base ignite chance's burns are
+ * outer.fire's and the fusion's poison the fusion's.
+ */
+const V3_LIGHTNING_STATS = makeStats(
+  { damage: 6, maxLife: 1e6, critChance: 0.2, critMultiplier: 2, chainCount: 1, attackSpeed: 4 },
+  maskProbeMods(),
+  {
+    triggers: [
+      {
+        source: 'fusion.lightning.poison',
+        spec: { on: 'chainJump', do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
+        coef: 2,
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
+/**
+ * `v3summon` (蜂巢): the swarm with its turret over the swarm entry's base (crits, ignites and a
+ * chain jump), under glassCannon on the hub; its max life of 1 ends the run at the first contact,
+ * so the swarm hits harder (damage 40, attackSpeed 8 and projectileCount 3) and holds wave 12
+ * off for the whole run. Each impact raises droneImpact, whose trigger on fusion.summon.poison
+ * poisons the target with two stacks at coef 1.2. The impacts and the turret's shots are the
+ * center's, their jumps outer.lightning's, their burns outer.fire's and the fusion's poison the
+ * fusion's; the hub's row stays 0.
+ */
+const V3_SUMMON_STATS = makeStats(
+  { ...SWARM_VALUES, damage: 40, attackSpeed: 8, projectileCount: 3 },
+  maskProbeMods(),
+  {
+    triggers: [
+      {
+        source: 'fusion.summon.poison',
+        spec: { on: 'droneImpact', do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
+        coef: 1.2,
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1543,6 +1684,86 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'auraOrbit',
     config: { stats: AURA_ORBIT_STATS, rules: [], startWave: 12 },
     expected: ['c51b22133cb0e4a3', '3570db88979fdb90'],
+  },
+  {
+    name: 'v3fire',
+    config: {
+      stats: V3_FIRE_STATS,
+      rules: [],
+      signature: { id: 'magmaBomb' },
+      character: {
+        id: 'fire',
+        rules: [
+          { source: 'center', spec: { id: 'eternalFlame', durationMore: 0.5 }, coef: 1 },
+          {
+            source: 'center',
+            spec: { id: 'volcano', periodSec: 1, radiusMult: 2, damageMult: 3 },
+            coef: 1,
+          },
+        ],
+      },
+      startWave: 12,
+    },
+    expected: ['0ff0fa2f75385e27', '7db1f6ed925dc1ba'],
+  },
+  {
+    name: 'v3ice',
+    config: {
+      stats: V3_ICE_STATS,
+      rules: [],
+      signature: { id: 'iceFan' },
+      character: {
+        id: 'ice',
+        rules: [
+          {
+            source: 'outer.crit',
+            spec: { id: 'steadyAim', everyNth: 4, critMultiplierMore: 0.5, counts: 'shot' },
+            coef: 1,
+          },
+        ],
+      },
+      startWave: 12,
+    },
+    expected: ['75d7b40db114dfc0', 'cb670b31d3706200'],
+  },
+  {
+    name: 'v3lightning',
+    config: {
+      stats: V3_LIGHTNING_STATS,
+      rules: [],
+      signature: { id: 'triphaseArc' },
+      character: {
+        id: 'lightning',
+        rules: [
+          {
+            source: 'center',
+            spec: {
+              id: 'overload',
+              chainCountMultiplier: 2,
+              retentionPenalty: 0.2,
+              chainMore: 0.5,
+            },
+            coef: 1,
+          },
+        ],
+      },
+      startWave: 12,
+    },
+    expected: ['91921960d5e13d28', '033e1fd4a062dc89'],
+  },
+  {
+    name: 'v3summon',
+    config: {
+      stats: V3_SUMMON_STATS,
+      rules: [],
+      signature: { id: 'swarm' },
+      character: {
+        id: 'summon',
+        rules: [{ source: 'hub', spec: { id: 'glassCannon', damageMore: 1 }, coef: 1 }],
+      },
+      startWave: 12,
+    },
+    expected: ['355df9aee23cbec2', '84d7dbc4c3567175'],
   },
 ];
 
