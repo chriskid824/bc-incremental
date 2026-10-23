@@ -48,6 +48,16 @@ describe('parseShellArgs', () => {
     expect(parseShellArgs(['--bc-user-data-dir=C:\\bc\\smoke'], 'win32').userDataDir).toBe(
       'C:\\bc\\smoke',
     );
+    // Resolved, so that no `..` keeps a user name in the shown path (and the check's report).
+    expect(parseShellArgs(['--bc-user-data-dir=/home/hoshi/../x'], 'linux').userDataDir).toBe(
+      '/home/x',
+    );
+    expect(parseShellArgs(['--bc-user-data-dir=/tmp/a/./b//c/'], 'linux').userDataDir).toBe(
+      '/tmp/a/b/c',
+    );
+    expect(
+      parseShellArgs(['--bc-user-data-dir=C:\\Users\\Hoshi\\..\\x'], 'win32').userDataDir,
+    ).toBe('C:\\Users\\x');
     for (const [value, platform] of [
       ['tmp/smoke', 'linux'],
       ['./smoke', 'linux'],

@@ -2,7 +2,14 @@ import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RENAME_RETRY_MS, SAVE_SLOTS, TEMP_SUFFIX, openSaveFiles } from './saveFiles';
+import {
+  RENAME_RETRY_MS,
+  SAVE_SLOTS,
+  TEMP_SUFFIX,
+  openSaveFiles,
+  reportFileName,
+  writeReport,
+} from './saveFiles';
 import type { FileOps, SaveFilesDeps } from './saveFiles';
 
 let root: string;
@@ -80,6 +87,22 @@ function failingRename(code: string, times: number): FileOps['renameSync'] {
     }
     fs.renameSync(from, to);
   };
+}
+
+/**
+ * A write that takes nothing (answers 0) on its first call and writes on later ones: a writer that
+ * tried again would succeed and one that stopped would keep a short file, so neither passes, and
+ * neither loops forever as it would on a write that always answers 0.
+ */
+function writesNothingFirst(): FileOps['writeSync'] {
+  let first = true;
+  return ((fd: number, data: Buffer, offset: number, length: number) => {
+    if (first) {
+      first = false;
+      return 0;
+    }
+    return fs.writeSync(fd, data, offset, length);
+  }) as FileOps['writeSync'];
 }
 
 function open(deps: SaveFilesDeps = {}) {
@@ -206,6 +229,18 @@ describe('openSaveFiles', () => {
     expect(files.write('main', 'newer progress')).toEqual({
       ok: false,
       error: 'ENOSPC: failed, write',
+    });
+    expect(text('main.json')).toBe('old progress');
+    expect(names()).toEqual(['main.json']);
+    expect(files.read('main')).toBe('old progress');
+  });
+
+  it('keeps the old file and leaves no temp when the OS writes nothing (writeSync answers 0)', () => {
+    open().files.write('main', 'old progress');
+    const { files } = open({ fs: { ...fs, writeSync: writesNothingFirst() } });
+    expect(files.write('main', 'newer progress')).toEqual({
+      ok: false,
+      error: `could not write ${join(dir, 'main.json.tmp')}`,
     });
     expect(text('main.json')).toBe('old progress');
     expect(names()).toEqual(['main.json']);
@@ -367,5 +402,71 @@ describe('openSaveFiles', () => {
     expect(result.ok ? '' : result.error).toContain('ENOENT');
     expect(files.read('main')).toBeNull();
     expect(files.list()).toEqual([]);
+  });
+});
+
+describe('writeReport', () => {
+  const NOW = new Date('2026-10-30T09:15:42.123Z');
+  /** The check's reports' folder, beside saves/ in userData. */
+  const reports = (): string => join(root, 'steam-check');
+
+  it('writes the report as a new text file named by the time, making the folder', () => {
+    const report = 'bc-incremental steam check v1\nerrors: 0\n';
+    const file = join(reports(), 'report-2026-10-30T09-15-42-123Z.txt');
+    expect(writeReport(reports(), report, { now: () => NOW })).toEqual({ ok: true, where: file });
+    expect(fs.readFileSync(file, 'utf8')).toBe(report);
+    expect(fs.readdirSync(root)).toEqual(['steam-check']);
+    // No ':' (Windows refuses it), and never a name Auto-Cloud's *.json would take.
+    expect(reportFileName(NOW)).toBe('report-2026-10-30T09-15-42-123Z.txt');
+    expect(autoCloudSees([reportFileName(NOW)])).toEqual([]);
+  });
+
+  it('never replaces a file: a second report in the same millisecond fails, the first kept', () => {
+    expect(writeReport(reports(), 'first', { now: () => NOW }).ok).toBe(true);
+    const second = writeReport(reports(), 'second', { now: () => NOW });
+    expect(second.ok).toBe(false);
+    expect(second.where).toMatch(/^EEXIST/);
+    expect(fs.readFileSync(join(reports(), reportFileName(NOW)), 'utf8')).toBe('first');
+  });
+
+  it('removes a half-written report and says why, never throwing', () => {
+    const failures: readonly (readonly [Partial<FileOps>, string])[] = [
+      [{ writeSync: writesNothingFirst() }, 'could not write '],
+      [
+        {
+          writeSync: ((fd: number, data: Buffer, offset: number, length: number) => {
+            if (offset > 0) throw fsError('ENOSPC', 'write');
+            return fs.writeSync(fd, data, offset, Math.min(length, 4));
+          }) as FileOps['writeSync'],
+        },
+        'ENOSPC: failed, write',
+      ],
+      [
+        {
+          closeSync: () => {
+            throw fsError('EIO', 'close');
+          },
+        },
+        'EIO: failed, close',
+      ],
+    ];
+    for (const [failure, why] of failures) {
+      const result = writeReport(reports(), 'bc-incremental steam check v1\n', {
+        now: () => NOW,
+        fs: { ...fs, ...failure },
+      });
+      expect(result.ok, why).toBe(false);
+      expect(result.where.startsWith(why), result.where).toBe(true);
+      expect(fs.readdirSync(reports()), why).toEqual([]);
+    }
+    const blocked = writeReport(reports(), 'x', {
+      fs: {
+        ...fs,
+        mkdirSync: (() => {
+          throw fsError('EACCES', 'mkdir');
+        }) as FileOps['mkdirSync'],
+      },
+    });
+    expect(blocked).toEqual({ ok: false, where: 'EACCES: failed, mkdir' });
   });
 });

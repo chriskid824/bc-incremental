@@ -2,12 +2,21 @@
  * ESMOKE, the Steam build's shell in the container (docs/v3 C9 design §2.2, C9/F10; C10 ruling
  * L1): launches Electron on this repository through Playwright's `_electron`, with no Steam
  * running and each run's userData in a fresh temporary folder, and plays the page under xvfb on
- * SwiftShader. The runs (the design's run 2, the check mode, comes with its panel):
+ * SwiftShader. The runs:
  *
  * 1. Normal: the intro; the page has no `require` or `process`, and bcNative is exactly the minimal
  *    API; Steam is not connected at stage init, so steamworks.js loaded; no overlay switch;
- *    userData is the temporary folder. 20 s at 4×, Enter each second. After closing, saves/
- *    holds main.json (written as the window closed) and backup.json, both saves, and no temp.
+ *    userData is the temporary folder; the page is denied a permission check (geolocation) and a
+ *    request (notifications). 20 s at 4×, Enter each second, then Enter each second until the
+ *    first game run has ended and saved main.json (within TIMEOUT_MS, however slow the frames).
+ *    After closing, saves/ holds main.json (written as the window closed) and backup.json, both
+ *    saves, and no temp.
+ * 2. `--steam-check` on run 1's save: the talent web and the check panel (design §2.2); bcNative
+ *    carries `check`; the page is denied run 1's permission check and request, as the check mode
+ *    permits nothing more; no panel button keeps the focus; [Unlock] logs that Steam is not
+ *    connected; [Copy report] puts one report in the textarea, the clipboard and
+ *    `<userData>/steam-check/` (not saves/), reading `steam: not-connected stage=init`, with every
+ *    path redacted.
  * 3. Garbage in main.json beside run 1's save as backup.json: the page lands on the talent web
  *    from the backup, with a warning and no error.
  * 4. `--bc-overlay-switches`: the intro without errors while in-process-gpu is set (weak, and
@@ -19,7 +28,9 @@
  * run ends, so those from before Playwright attached count), the main process's ring buffer of
  * renderer errors (electron/ipc.ts), the main process's console errors and exceptions (its console
  * history, read through an inspector session in that process), and the main process's error lines
- * on stderr until it exits.
+ * on stderr until it exits. Every run also checks the game window's security settings as Electron
+ * applied them (getLastWebPreferences; design §1.3), and that the panel's `[data-check]` elements
+ * exist only in the check mode. Each shell's process has exited before its folder is removed.
  *
  *   electron_config_cache=<folder> npm run electron:install   (once: Electron's binary)
  *   xvfb-run -a -s "-screen 0 1280x800x24" npm run smoke:electron [-- --out out/electron-smoke]
@@ -44,7 +55,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
-import type { App, BrowserWindow } from 'electron';
+import type { App, BrowserWindow, Clipboard } from 'electron';
 import { RECENT_ERRORS_GLOBAL } from '../../electron/ipc';
 import { OVERLAY_SWITCHES } from '../../electron/steam';
 
@@ -66,6 +77,24 @@ const TALENTS = '.bc-talents:not([hidden])';
 const HUD = '.bc-hud:not([hidden])';
 
 const BRIDGE_KEYS = '["achievements","steamInfo","storage","version"]';
+const CHECK_BRIDGE_KEYS = '["achievements","check","steamInfo","storage","version"]';
+const CHECK_KEYS =
+  '["clearAchievement","listSaves","openOverlay","recentErrors","saveReport","showSaves"]';
+/** The check panel (src/platform/steam/checkPanel.ts) and its parts. */
+const PANEL = '[data-check="panel"]';
+const PANEL_BUTTONS = 17;
+const REPORT_TITLE = 'bc-incremental steam check v1';
+/** The game window's security settings (design §1.3), as getLastWebPreferences() must give them. */
+const SECURE_PREFERENCES = {
+  sandbox: true,
+  contextIsolation: true,
+  webSecurity: true,
+  nodeIntegration: false,
+  nodeIntegrationInSubFrames: false,
+  webviewTag: false,
+  allowRunningInsecureContent: false,
+  experimentalFeatures: false,
+};
 const GARBAGE = 'not a save {';
 const REPLAY = 'renderStress';
 const BAD_REPLAY = 'a&b';
@@ -96,6 +125,7 @@ interface Page {
   readonly keyboard: { press(key: string): Promise<void> };
   context(): { newCDPSession(page: Page): Promise<CdpSession> };
   waitForSelector(selector: string, options: { timeout: number }): Promise<unknown>;
+  click(selector: string, options: { timeout: number }): Promise<void>;
   waitForTimeout(ms: number): Promise<void>;
   evaluate(expression: string): Promise<unknown>;
   screenshot(options: { path: string }): Promise<unknown>;
@@ -104,6 +134,7 @@ interface Page {
 interface MainModule {
   readonly app: App;
   readonly BrowserWindow: typeof BrowserWindow;
+  readonly clipboard: Clipboard;
 }
 interface ElectronApplication {
   firstWindow(options: { timeout: number }): Promise<Page>;
@@ -269,19 +300,36 @@ function mainHistory(shell: Shell): Promise<Logged[]> {
   }, null);
 }
 
-/** What the main process knows: userData, the overlay's switches, its windows, the ring buffer. */
+/**
+ * What the main process knows: userData, the overlay's switches, its windows, the ring buffer, and
+ * the game window's security settings (getLastWebPreferences(), which Electron 44's typings leave
+ * out).
+ */
 function mainFacts(shell: Shell) {
   return shell.app.evaluate(
-    ({ app, BrowserWindow }, { key, switches }) => {
+    ({ app, BrowserWindow }, { key, switches, preferences }) => {
       const recent: unknown = Reflect.get(globalThis, key);
+      const windows = BrowserWindow.getAllWindows();
+      const contents = windows[0]?.webContents;
+      const read: unknown =
+        contents === undefined ? undefined : Reflect.get(contents, 'getLastWebPreferences');
+      const last: unknown = typeof read === 'function' ? read.call(contents) : null;
       return {
         userData: app.getPath('userData'),
         switches: switches.filter((name) => app.commandLine.hasSwitch(name)),
-        windows: BrowserWindow.getAllWindows().length,
+        windows: windows.length,
         recentErrors: typeof recent === 'function' ? (recent() as string[]) : null,
+        preferences:
+          typeof last === 'object' && last !== null
+            ? Object.fromEntries(preferences.map((name) => [name, Reflect.get(last, name)]))
+            : null,
       };
     },
-    { key: RECENT_ERRORS_GLOBAL, switches: [...OVERLAY_SWITCHES] },
+    {
+      key: RECENT_ERRORS_GLOBAL,
+      switches: [...OVERLAY_SWITCHES],
+      preferences: Object.keys(SECURE_PREFERENCES),
+    },
   );
 }
 
@@ -307,7 +355,11 @@ async function shellView(page: Page): Promise<ShellView | null> {
  */
 async function finish(
   shell: Shell,
-  expect: { readonly switches: readonly string[]; readonly ignored: readonly string[] },
+  expect: {
+    readonly switches: readonly string[];
+    readonly ignored: readonly string[];
+    readonly checkMode: boolean;
+  },
 ): Promise<{ page: Logged[]; main: Logged[] }> {
   const page = await pageHistory(shell.page);
   const main = await mainHistory(shell);
@@ -331,6 +383,10 @@ async function finish(
   check(facts.userData === shell.userData, `userData is ${facts.userData}`);
   check(facts.windows === 1, `${facts.windows} windows`);
   check(
+    JSON.stringify(facts.preferences) === JSON.stringify(SECURE_PREFERENCES),
+    `the window's web preferences are ${JSON.stringify(facts.preferences)}`,
+  );
+  check(
     JSON.stringify(facts.switches) === JSON.stringify(expect.switches),
     `the overlay switches set are ${JSON.stringify(facts.switches)}`,
   );
@@ -345,9 +401,19 @@ async function finish(
     JSON.stringify(ignored) === JSON.stringify(expect.ignored),
     `the terminal's ignored arguments are ${JSON.stringify(ignored)}`,
   );
+  // The check panel, and the bridge's check, only in the check mode.
+  const panelParts = Number(
+    await shell.page.evaluate("document.querySelectorAll('[data-check]').length"),
+  );
+  check(
+    expect.checkMode ? panelParts > 0 : panelParts === 0,
+    `the page has ${panelParts} [data-check] elements`,
+  );
+  const hasCheck = await shell.page.evaluate("'check' in window.bcNative");
+  check(hasCheck === expect.checkMode, `'check' in bcNative is ${String(hasCheck)}`);
   const view = await shellView(shell.page);
   if (view !== null) {
-    check(view.checkMode === false, 'checkMode is on');
+    check(view.checkMode === expect.checkMode, `checkMode is ${String(view.checkMode)}`);
     check(
       view.steam.ok === false && view.steam.stage === 'init',
       `steam is ${JSON.stringify(view.steam)}`,
@@ -380,6 +446,21 @@ async function close(shell: Shell): Promise<void> {
   check(code === 0, `the main process exited with ${String(code)}`);
 }
 
+/** Removes `folder`, and once more a second later if something wrote to it meanwhile. */
+async function remove(folder: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      rmSync(folder, { recursive: true, force: true });
+    } catch (error) {
+      if (attempt === 2) console.error(`Could not remove ${folder}: ${String(error)}`);
+    }
+    if (!existsSync(folder) || attempt === 2) break;
+    await new Promise((done) => setTimeout(done, 1_000));
+  }
+  current = 'cleanup';
+  check(!existsSync(folder), `${folder} is still there`);
+}
+
 /** `promise`'s value, or 'timeout' after `ms`. */
 async function within<T>(promise: Promise<T>, ms: number): Promise<T | 'timeout'> {
   let timer: NodeJS.Timeout | undefined;
@@ -406,6 +487,19 @@ function savesIn(saves: string) {
   return { names, main: parse('main.json'), backup: parse('backup.json') };
 }
 
+/**
+ * The window's one permission is the clipboard's (design §1.3), in the check mode too: a
+ * permission check (geolocation) and a request (notifications) both fail.
+ */
+async function checkPermissionsDenied(page: Page): Promise<void> {
+  const geolocation = await page.evaluate(
+    "navigator.permissions.query({ name: 'geolocation' }).then((status) => status.state)",
+  );
+  check(geolocation === 'denied', `geolocation's permission is ${String(geolocation)}`);
+  const notifications = await page.evaluate('Notification.requestPermission()');
+  check(notifications === 'denied', `a notification request answered ${String(notifications)}`);
+}
+
 async function runNormal(electron: Playwright['_electron'], binary: string, out: string) {
   current = 'run 1 (normal)';
   const shell = await launch(electron, binary, []);
@@ -424,6 +518,8 @@ async function runNormal(electron: Playwright['_electron'], binary: string, out:
       `steam ${JSON.stringify(view?.steam)}`,
   );
 
+  await checkPermissionsDenied(page);
+
   await page.keyboard.press('Enter');
   await page.waitForSelector(HUD, { timeout: TIMEOUT_MS });
   await page.keyboard.press('4');
@@ -432,8 +528,18 @@ async function runNormal(electron: Playwright['_electron'], binary: string, out:
     if (waited === PLAY_MS / 2) await page.screenshot({ path: join(out, 'run1-play.png') });
     await page.keyboard.press('Enter');
   }
+  // On until the first game run has ended and saved, however slow the frames (the first run at
+  // seed 1000 lasts 53 s of game time; a busy container needs more than 20 s for it at 4×).
+  const saved = join(shell.saves, 'main.json');
+  let extra = 0;
+  for (; !existsSync(saved) && extra < TIMEOUT_MS; extra += CONFIRM_EVERY_MS) {
+    await page.waitForTimeout(CONFIRM_EVERY_MS);
+    await page.keyboard.press('Enter');
+  }
+  check(existsSync(saved), `no main.json after ${PLAY_MS + extra} ms at 4×`);
+  console.log(`${current}: main.json was there after ${PLAY_MS + extra} ms at 4×`);
   const closing = new Date().toISOString();
-  await finish(shell, { switches: [], ignored: [] });
+  await finish(shell, { switches: [], ignored: [], checkMode: false });
 
   const saves = savesIn(shell.saves);
   check(
@@ -449,6 +555,125 @@ async function runNormal(electron: Playwright['_electron'], binary: string, out:
   );
   console.log(`${current}: saves/ holds ${saves.names.join(', ')}; main.json saved at ${savedAt}`);
   return readFileSync(join(shell.saves, 'main.json'), 'utf8');
+}
+
+/** The text of the panel's element named `name` (its data-check), or null without one. */
+async function panelText(page: Page, name: string): Promise<string | null> {
+  const text = await page.evaluate(
+    `document.querySelector('[data-check=${JSON.stringify(name)}]')?.textContent ?? null`,
+  );
+  return typeof text === 'string' ? text : null;
+}
+
+async function runCheck(
+  electron: Playwright['_electron'],
+  binary: string,
+  out: string,
+  save: string,
+) {
+  current = 'run 2 (--steam-check)';
+  const shell = await launch(electron, binary, ['--steam-check'], (saves) => {
+    mkdirSync(saves, { recursive: true });
+    writeFileSync(join(saves, 'main.json'), save);
+  });
+  const { page } = shell;
+  await page.waitForSelector(TALENTS, { timeout: TIMEOUT_MS });
+  await page.waitForSelector(PANEL, { timeout: TIMEOUT_MS });
+  const keys = await page.evaluate('JSON.stringify(Object.keys(window.bcNative).sort())');
+  check(keys === CHECK_BRIDGE_KEYS, `bcNative's keys are ${String(keys)}`);
+  const checkKeys = await page.evaluate(
+    'JSON.stringify(Object.keys(window.bcNative.check).sort())',
+  );
+  check(checkKeys === CHECK_KEYS, `bcNative.check's keys are ${String(checkKeys)}`);
+  // The check mode permits nothing more than the normal one.
+  await checkPermissionsDenied(page);
+  const steam = await panelText(page, 'steam');
+  check(
+    steam?.startsWith('Steam: NOT connected (init): ') === true,
+    `the panel's Steam line is ${JSON.stringify(steam)}`,
+  );
+  const buttons = await page.evaluate(
+    `JSON.stringify([...document.querySelectorAll('${PANEL} button')].map((button) => button.tabIndex))`,
+  );
+  check(
+    buttons === JSON.stringify(Array.from({ length: PANEL_BUTTONS }, () => -1)),
+    `the panel's buttons' tabIndex are ${String(buttons)}`,
+  );
+  const readOnly = await page.evaluate(`document.querySelector('[data-check="report"]').readOnly`);
+  check(readOnly === true, 'the report textarea is not read-only');
+
+  // [Unlock] without Steam: logged as not connected, and the button lets the focus go.
+  await page.click('[data-check="unlock"]', { timeout: TIMEOUT_MS });
+  const logged = await panelText(page, 'ach-log');
+  check(
+    /^\d\d:\d\d:\d\d Unlock returned=no now=unknown \(Steam not connected\)$/.test(logged ?? ''),
+    `the panel logged ${JSON.stringify(logged)}`,
+  );
+  const focused = await page.evaluate('document.activeElement?.tagName ?? null');
+  check(focused !== 'BUTTON', `a ${String(focused)} kept the focus after [Unlock]`);
+  await page.click('[data-check="open-overlay"]', { timeout: TIMEOUT_MS });
+  await page.click('[data-check="overlay_page=nothing"]', { timeout: TIMEOUT_MS });
+  await page.click('[data-check="refresh"]', { timeout: TIMEOUT_MS });
+  const files = await panelText(page, 'save-files');
+  check(files?.startsWith('main.json ') === true, `the panel lists ${JSON.stringify(files)}`);
+
+  // [Copy report]: one report in the textarea, the clipboard and steam-check/.
+  await page.click('[data-check="copy-report"]', { timeout: TIMEOUT_MS });
+  await page.waitForTimeout(1_000);
+  const status = await panelText(page, 'report-status');
+  const shown = String(
+    await page.evaluate(`document.querySelector('[data-check="report"]').value`),
+  );
+  const reports = join(shell.userData, 'steam-check');
+  const written = existsSync(reports) ? readdirSync(reports) : [];
+  check(
+    written.length === 1 && /^report-[\dT-]+Z\.txt$/.test(written[0] ?? ''),
+    `steam-check/ holds ${JSON.stringify(written)}`,
+  );
+  const file = written.length === 1 ? readFileSync(join(reports, written[0] ?? ''), 'utf8') : '';
+  check(file === shown, 'the saved report differs from the textarea');
+  check(
+    status === `Copied to the clipboard. Saved as ${join(reports, written[0] ?? '')}.`,
+    `the panel says ${JSON.stringify(status)}`,
+  );
+  const copied = await shell.app.evaluate(({ clipboard }) => clipboard.readText(), null);
+  check(copied === shown, 'the clipboard holds another text than the textarea');
+  const lines = shown.split('\n');
+  check(lines[0] === REPORT_TITLE, `the report starts ${JSON.stringify(lines[0])}`);
+  const steamLine = lines.find((line) => line.startsWith('steam: '));
+  check(
+    steamLine?.startsWith('steam: not-connected stage=init error="') === true,
+    `the report's steam line is ${JSON.stringify(steamLine)}`,
+  );
+  const savesLine = lines.find((line) => line.startsWith('saves: '));
+  check(
+    savesLine === 'saves: <path>   autocloud: LinuxHome .config/bc-incremental/saves *.json',
+    `the report's saves line is ${JSON.stringify(savesLine)}`,
+  );
+  check(
+    lines.includes(
+      'answers: hint_at_start=unknown unlock_popup=unknown shift_tab=unknown overlay_page=nothing',
+    ),
+    'the report does not say what the panel was answered',
+  );
+  check(
+    lines.includes('ach: before=unknown | unlock returned=no now=unknown'),
+    'the report does not log [Unlock]',
+  );
+  for (const absolute of [shell.userData, tmpdir(), '/root/', '/home/']) {
+    check(!shown.includes(absolute), `the report holds ${absolute}`);
+  }
+  await page.screenshot({ path: join(out, 'check-panel.png') });
+  console.log(`${current}: the report, ${lines.length - 1} lines:`);
+  for (const line of lines.slice(0, -1)) console.log(`  ${line}`);
+
+  await finish(shell, { switches: [], ignored: [], checkMode: true });
+  // Reports stay out of saves/, where Auto-Cloud's *.json looks.
+  const saves = savesIn(shell.saves).names;
+  check(
+    saves.every((name) => name === 'main.json' || name === 'backup.json'),
+    `saves/ holds ${JSON.stringify(saves)}`,
+  );
 }
 
 async function runGarbage(
@@ -467,7 +692,7 @@ async function runGarbage(
   await shell.page.screenshot({ path: join(out, 'run3-backup.png') });
   const read = await shell.page.evaluate("window.bcNative.storage.read('main')");
   check(read === GARBAGE, `main.json reads as ${JSON.stringify(read)}`);
-  const { page } = await finish(shell, { switches: [], ignored: [] });
+  const { page } = await finish(shell, { switches: [], ignored: [], checkMode: false });
   const warned = page.filter(
     (line) => line.type === 'warning' && line.text.startsWith('Ignoring main save:'),
   );
@@ -484,7 +709,7 @@ async function runOverlaySwitches(electron: Playwright['_electron'], binary: str
   const shell = await launch(electron, binary, ['--bc-overlay-switches']);
   await shell.page.waitForSelector(INTRO, { timeout: TIMEOUT_MS });
   await shell.page.screenshot({ path: join(out, 'run4-overlay-switches.png') });
-  await finish(shell, { switches: [...OVERLAY_SWITCHES], ignored: [] });
+  await finish(shell, { switches: [...OVERLAY_SWITCHES], ignored: [], checkMode: false });
 }
 
 async function runReplay(electron: Playwright['_electron'], binary: string, out: string) {
@@ -494,7 +719,7 @@ async function runReplay(electron: Playwright['_electron'], binary: string, out:
   await taken.page.screenshot({ path: join(out, 'run5-replay.png') });
   const search = await taken.page.evaluate('location.search');
   check(search === `?replay=${REPLAY}`, `location.search is ${JSON.stringify(search)}`);
-  await finish(taken, { switches: [], ignored: [] });
+  await finish(taken, { switches: [], ignored: [], checkMode: false });
 
   current = `run 5b (--bc-replay=${BAD_REPLAY})`;
   const ignored = await launch(electron, binary, [`--bc-replay=${BAD_REPLAY}`]);
@@ -510,7 +735,7 @@ async function runReplay(electron: Playwright['_electron'], binary: string, out:
   await page.waitForTimeout(1_000);
   const href = String(await page.evaluate('location.href'));
   check(href.endsWith('/dist-steam/index.html'), `the page navigated to ${href}`);
-  await finish(ignored, { switches: [], ignored: [BAD_REPLAY_LINE] });
+  await finish(ignored, { switches: [], ignored: [BAD_REPLAY_LINE], checkMode: false });
 }
 
 async function main(): Promise<void> {
@@ -524,14 +749,18 @@ async function main(): Promise<void> {
   const { _electron: electron } = loadPlaywright();
   try {
     const save = await runNormal(electron, binary, out);
+    await runCheck(electron, binary, out, save);
     await runGarbage(electron, binary, out, save);
     await runOverlaySwitches(electron, binary, out);
     await runReplay(electron, binary, out);
     console.log(`screenshots in ${out}:`);
     for (const name of readdirSync(out).sort()) console.log(`  ${name}`);
   } finally {
+    // Every shell's process has exited before its folder goes, so that no late write of
+    // Chromium's leaves a file behind; a folder still there after its removal gets one more.
     for (const shell of running) shell.app.process().kill('SIGKILL');
-    for (const folder of temporary) rmSync(folder, { recursive: true, force: true });
+    await Promise.all([...running].map((shell) => within(shell.exited, TIMEOUT_MS)));
+    for (const folder of temporary) await remove(folder);
     // Printed here so that what was found before an error is not lost with it.
     if (failures.length > 0) console.error(`failures:\n  ${failures.join('\n  ')}`);
   }

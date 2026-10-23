@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ShellInfo } from '../src/platform/steam/bridge';
+import type { SaveFileInfo, ShellInfo } from '../src/platform/steam/bridge';
 import { CHANNELS } from './channels';
 import type { Channel } from './channels';
 import {
+  MAX_REPORT_BYTES,
   MAX_SAVE_BYTES,
   RECENT_ERRORS,
   RecentErrors,
@@ -12,6 +13,8 @@ import {
   registerSync,
 } from './ipc';
 import type { HandlerDeps, SyncEvent, SyncIpc } from './ipc';
+import type { ReportResult } from './saveFiles';
+import type { OverlayDialog } from './steam';
 
 /** ipcMain as registerSync sees it: one listener per channel, called as Electron would. */
 class FakeIpc implements SyncIpc {
@@ -44,16 +47,52 @@ function event(sender: unknown, url: string | null, parent: unknown = null): Syn
 }
 
 const INFO = { bridgeVersion: 1, checkMode: false } as ShellInfo;
+const SAVE_FILES: readonly SaveFileInfo[] = [
+  { name: 'main.json', bytes: 812, modified: '2026-10-23T09:00:00.000Z' },
+];
+const REPORT_FILE = '/home/hoshi/.config/bc-incremental/steam-check/report-x.txt';
+const ERRORS: readonly string[] = ['console error: boom (file:///app/dist-steam/x.js:1)'];
 
-function deps() {
+/** The handlers' deps, all fakes; `checkMode` is the shell's `--steam-check`. */
+function deps(checkMode = false) {
   return {
     info: vi.fn(() => INFO),
     saves: {
       read: vi.fn((): string | null => 'progress'),
       write: vi.fn(() => ({ ok: true }) as const),
+      list: vi.fn(() => SAVE_FILES),
     },
-    steam: { unlock: vi.fn(() => true), isUnlocked: vi.fn(() => true) },
+    steam: {
+      unlock: vi.fn(() => true),
+      isUnlocked: vi.fn(() => true),
+      clear: vi.fn((_id: string) => true),
+      openOverlay: vi.fn((_dialog: OverlayDialog) => {}),
+    },
+    checkMode,
+    saveReport: vi.fn((_text: string): ReportResult => ({ ok: true, where: REPORT_FILE })),
+    showSaves: vi.fn(() => {}),
+    recentErrors: vi.fn(() => ERRORS),
   } satisfies HandlerDeps;
+}
+
+/** The deps a test's calls reached, by name. */
+function reached(given: ReturnType<typeof deps>): string[] {
+  const fakes = {
+    info: given.info,
+    'saves.read': given.saves.read,
+    'saves.write': given.saves.write,
+    'saves.list': given.saves.list,
+    'steam.unlock': given.steam.unlock,
+    'steam.isUnlocked': given.steam.isUnlocked,
+    'steam.clear': given.steam.clear,
+    'steam.openOverlay': given.steam.openOverlay,
+    saveReport: given.saveReport,
+    showSaves: given.showSaves,
+    recentErrors: given.recentErrors,
+  };
+  return Object.entries(fakes)
+    .filter(([, fake]) => fake.mock.calls.length > 0)
+    .map(([name]) => name);
 }
 
 /** Every handler of createHandlers registered on a fake ipcMain, trusting only PAGE. */
@@ -75,20 +114,46 @@ function registered(given = deps()) {
   return { ipc, deps: given, log, call };
 }
 
-/** Each channel's fallback (§1.3): reads null, writes not-ok with an error, Steam false. */
+/**
+ * Each channel's fallback (§1.3): reads and void calls null, writes not-ok with an error, Steam
+ * false, lists empty.
+ */
 const FALLBACKS: Readonly<Record<Channel, unknown>> = {
   [CHANNELS.info]: null,
   [CHANNELS.saveRead]: null,
   [CHANNELS.saveWrite]: { ok: false, error: 'bc:save:write failed' },
   [CHANNELS.achUnlock]: false,
   [CHANNELS.achIsUnlocked]: false,
+  [CHANNELS.checkClear]: false,
+  [CHANNELS.checkOverlay]: null,
+  [CHANNELS.checkSaves]: [],
+  [CHANNELS.checkShowSaves]: null,
+  [CHANNELS.checkReport]: { ok: false, where: 'bc:check:report failed' },
+  [CHANNELS.checkErrors]: [],
 };
 
+/** A valid call's arguments on each channel. */
+const VALID_ARGS: Readonly<Record<Channel, readonly unknown[]>> = {
+  [CHANNELS.info]: [],
+  [CHANNELS.saveRead]: ['main'],
+  [CHANNELS.saveWrite]: ['main', 'x'],
+  [CHANNELS.achUnlock]: ['ACH_WIN_ONE_GAME'],
+  [CHANNELS.achIsUnlocked]: ['ACH_WIN_ONE_GAME'],
+  [CHANNELS.checkClear]: ['ACH_WIN_ONE_GAME'],
+  [CHANNELS.checkOverlay]: ['achievements'],
+  [CHANNELS.checkSaves]: [],
+  [CHANNELS.checkShowSaves]: [],
+  [CHANNELS.checkReport]: ['bc-incremental steam check v1\n'],
+  [CHANNELS.checkErrors]: [],
+};
+
+const CHECK_CHANNELS = Object.values(CHANNELS).filter((channel) => channel.startsWith('bc:check:'));
+
 describe('createHandlers', () => {
-  it("answers §1.3's five channels and no check channel (C9.2b's)", () => {
+  it('answers every channel, the six bc:check:* ones included, each with its fallback', () => {
     const handlers = createHandlers(deps());
     expect(Object.keys(handlers).sort()).toEqual(Object.values(CHANNELS).sort());
-    expect(Object.keys(handlers).filter((channel) => channel.startsWith('bc:check:'))).toEqual([]);
+    expect(CHECK_CHANNELS).toHaveLength(6);
     for (const [channel, { fallback }] of Object.entries(handlers)) {
       expect(fallback, channel).toEqual(FALLBACKS[channel as Channel]);
     }
@@ -160,6 +225,92 @@ describe('createHandlers', () => {
     given.steam.unlock.mockReturnValue(false);
     expect(call(CHANNELS.achUnlock, 'ACH_WIN_ONE_GAME')).toBe(false);
   });
+
+  it('answers every bc:check:* call outside the check mode with its fallback, its handler not run', () => {
+    const { call, deps: given } = registered(deps(false));
+    for (const channel of CHECK_CHANNELS) {
+      expect(call(channel, ...VALID_ARGS[channel]), channel).toEqual(FALLBACKS[channel]);
+    }
+    expect(reached(given)).toEqual([]);
+    // The rest of the bridge answers as ever.
+    expect(call(CHANNELS.achUnlock, 'ACH_WIN_ONE_GAME')).toBe(true);
+  });
+
+  it("passes the check mode's calls through to Steam, the files and the shell", () => {
+    const { call, deps: given } = registered(deps(true));
+    expect(call(CHANNELS.checkClear, 'ACH_WIN_ONE_GAME')).toBe(true);
+    expect(given.steam.clear).toHaveBeenCalledWith('ACH_WIN_ONE_GAME');
+    given.steam.clear.mockReturnValue(false);
+    expect(call(CHANNELS.checkClear, 'ACH_WIN_ONE_GAME')).toBe(false);
+    expect(call(CHANNELS.checkOverlay, 'achievements')).toBeNull();
+    expect(call(CHANNELS.checkOverlay, 'friends', 'extra')).toBeNull();
+    expect(given.steam.openOverlay.mock.calls).toEqual([['achievements'], ['friends']]);
+    expect(call(CHANNELS.checkSaves)).toBe(SAVE_FILES);
+    // The page names no file to show: whatever it sends is dropped.
+    expect(call(CHANNELS.checkShowSaves, '/etc/passwd')).toBeNull();
+    expect(given.showSaves.mock.calls).toEqual([[]]);
+    const report = VALID_ARGS[CHANNELS.checkReport][0];
+    expect(call(CHANNELS.checkReport, report)).toEqual({ ok: true, where: REPORT_FILE });
+    // Nor does it name the report's file: main names it by the time, in steam-check/.
+    expect(call(CHANNELS.checkReport, report, '../saves/main.json')).toEqual({
+      ok: true,
+      where: REPORT_FILE,
+    });
+    expect(given.saveReport.mock.calls).toEqual([[report], [report]]);
+    expect(call(CHANNELS.checkErrors)).toBe(ERRORS);
+  });
+
+  it("checks the achievement id and the overlay's dialog before Steam sees them", () => {
+    const { call, deps: given } = registered(deps(true));
+    for (const id of ['', 'ACH WIN', '../x', 'A'.repeat(65), 7, null]) {
+      expect(call(CHANNELS.checkClear, id), String(id)).toBe(false);
+    }
+    for (const dialog of [
+      'Achievements',
+      'achievements ',
+      'players',
+      'toString',
+      '__proto__',
+      'hasOwnProperty',
+      '',
+      2,
+      null,
+      undefined,
+      ['achievements'],
+      { dialog: 'achievements' },
+    ]) {
+      expect(call(CHANNELS.checkOverlay, dialog), String(dialog)).toBeNull();
+    }
+    expect(given.steam.clear).not.toHaveBeenCalled();
+    expect(given.steam.openOverlay).not.toHaveBeenCalled();
+  });
+
+  it('saves only a report that is text of at most 64 KiB in UTF-8', () => {
+    const { call, deps: given } = registered(deps(true));
+    for (const text of [42, null, undefined, { text: 'x' }, ['x']]) {
+      expect(call(CHANNELS.checkReport, text), String(text)).toEqual({
+        ok: false,
+        where: 'the report is not text',
+      });
+    }
+    expect(MAX_REPORT_BYTES).toBe(64 * 1024);
+    const over = { ok: false, where: 'the report is over 64 KiB' };
+    expect(call(CHANNELS.checkReport, 'x'.repeat(MAX_REPORT_BYTES + 1))).toEqual(over);
+    // Fewer than 64 Ki characters, but three bytes each.
+    const wide = '進'.repeat(Math.floor(MAX_REPORT_BYTES / 3) + 1);
+    expect(wide.length).toBeLessThan(MAX_REPORT_BYTES);
+    expect(call(CHANNELS.checkReport, wide)).toEqual(over);
+    expect(given.saveReport).not.toHaveBeenCalled();
+    expect(call(CHANNELS.checkReport, 'x'.repeat(MAX_REPORT_BYTES))).toEqual({
+      ok: true,
+      where: REPORT_FILE,
+    });
+    expect(call(CHANNELS.checkReport, 'é'.repeat(MAX_REPORT_BYTES / 2))).toEqual({
+      ok: true,
+      where: REPORT_FILE,
+    });
+    expect(given.saveReport).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('registerSync', () => {
@@ -167,12 +318,18 @@ describe('registerSync', () => {
     const thrown = (): never => {
       throw new Error('disk on fire');
     };
-    const failing = deps();
+    const failing = deps(true);
     failing.info.mockImplementation(thrown);
     failing.saves.read.mockImplementation(thrown);
     failing.saves.write.mockImplementation(thrown);
+    failing.saves.list.mockImplementation(thrown);
     failing.steam.unlock.mockImplementation(thrown);
     failing.steam.isUnlocked.mockImplementation(thrown);
+    failing.steam.clear.mockImplementation(thrown);
+    failing.steam.openOverlay.mockImplementation(thrown);
+    failing.saveReport.mockImplementation(thrown);
+    failing.showSaves.mockImplementation(thrown);
+    failing.recentErrors.mockImplementation(thrown);
     const { call, log } = registered(failing);
     expect(call(CHANNELS.info)).toBeNull();
     expect(call(CHANNELS.saveRead, 'main')).toBeNull();
@@ -182,12 +339,18 @@ describe('registerSync', () => {
     });
     expect(call(CHANNELS.achUnlock, 'ACH_WIN_ONE_GAME')).toBe(false);
     expect(call(CHANNELS.achIsUnlocked, 'ACH_WIN_ONE_GAME')).toBe(false);
-    expect(log).toHaveBeenCalledTimes(5);
+    for (const channel of CHECK_CHANNELS) {
+      expect(call(channel, ...VALID_ARGS[channel]), channel).toEqual(FALLBACKS[channel]);
+    }
+    expect(reached(failing)).toHaveLength(11);
+    expect(log).toHaveBeenCalledTimes(11);
     expect(log.mock.calls[0]?.[0]).toMatch(/^bc:info failed: Error: disk on fire/);
+    expect(log.mock.calls.at(-1)?.[0]).toMatch(/^bc:check:errors failed: Error: disk on fire/);
   });
 
   it('answers a refused sender with the fallback, without running the handler', () => {
-    const { ipc, deps: given, log } = registered();
+    // In the check mode, so that the bc:check:* channels' answers come from the refusal.
+    const { ipc, deps: given, log } = registered(deps(true));
     const refused: readonly SyncEvent[] = [
       event(OTHER, PAGE_URL),
       event(null, PAGE_URL),
@@ -199,16 +362,14 @@ describe('registerSync', () => {
     for (const sent of refused) {
       for (const channel of Object.values(CHANNELS)) {
         sent.returnValue = UNSET;
-        const args = channel === CHANNELS.saveWrite ? ['main', 'x'] : ['main'];
-        expect(ipc.send(channel, sent, ...args), channel).toEqual(FALLBACKS[channel]);
+        expect(ipc.send(channel, sent, ...VALID_ARGS[channel]), channel).toEqual(
+          FALLBACKS[channel],
+        );
       }
     }
-    expect(given.info).not.toHaveBeenCalled();
-    expect(given.saves.read).not.toHaveBeenCalled();
-    expect(given.saves.write).not.toHaveBeenCalled();
-    expect(given.steam.unlock).not.toHaveBeenCalled();
-    expect(given.steam.isUnlocked).not.toHaveBeenCalled();
+    expect(reached(given)).toEqual([]);
     expect(log).toHaveBeenCalledWith(`Refused bc:info from ${PAGE_URL}`);
+    expect(log).toHaveBeenCalledWith(`Refused bc:check:report from ${PAGE_URL}`);
     expect(log).toHaveBeenCalledWith('Refused bc:info from a closed frame');
   });
 
@@ -309,8 +470,22 @@ describe('RecentErrors', () => {
     expect(list[0]).toBe('error 3');
     expect(list.at(-1)).toBe('error 52');
     expect(echo).toHaveBeenCalledTimes(52);
-    expect(echo).toHaveBeenLastCalledWith('error 52');
+    expect(echo).toHaveBeenLastCalledWith('"error 52"');
     (list as string[]).length = 0;
     expect(errors.list()).toHaveLength(50);
+  });
+
+  it('echoes each error JSON-quoted, so that a page writes no control sequence to the terminal', () => {
+    const echo = vi.fn((_line: string) => {});
+    const errors = new RecentErrors(echo);
+    const line = 'console error: \u001b[2J\u001b]0;title\u0007 "x"\r\n[renderer] fake';
+    errors.add(line);
+    expect(echo).toHaveBeenCalledWith(
+      '"console error: \\u001b[2J\\u001b]0;title\\u0007 \\"x\\"\\r\\n[renderer] fake"',
+    );
+    const echoed = String(echo.mock.calls[0]?.[0]);
+    expect([...echoed].filter((char) => char < ' ')).toEqual([]);
+    // The buffer keeps the text as it came; only the terminal gets it quoted.
+    expect(errors.list()).toEqual([line]);
   });
 });

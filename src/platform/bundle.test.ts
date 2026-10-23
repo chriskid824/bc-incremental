@@ -64,6 +64,9 @@ describe('build-time platform selection', { timeout: 60_000 }, () => {
     ]);
     expect(web.code).toContain('bc-incremental.save.');
     expect(web.code).not.toContain('bcNative');
+    // Nor anything of the check mode (C9 design §2.2).
+    expect(web.code).not.toContain('data-check');
+    expect(web.code).not.toContain('bc-incremental steam check');
   });
 
   it('builds the Steam platform alone in the steam build, with no localStorage save', async () => {
@@ -73,9 +76,12 @@ describe('build-time platform selection', { timeout: 60_000 }, () => {
       'src/platform/index.ts',
       'src/platform/platform.ts',
       'src/platform/steam/bridge.ts',
+      'src/platform/steam/checkPanel.ts',
       'src/platform/steam/index.ts',
+      'src/platform/steam/report.ts',
     ]);
     expect(steam.code).toContain('bcNative');
+    expect(steam.code).toContain('bc-incremental steam check v1');
     expect(steam.code).not.toContain('bc-incremental.save.');
   });
 });

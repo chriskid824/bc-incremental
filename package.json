@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "electron:install": "install-electron",
     "electron": "npm run build:electron && electron .",
+    "steam:check": "npm run build:electron && electron . --steam-check",
     "smoke:electron": "npm run build:electron && tsx tools/electron/smoke.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.sim.json --noEmit && tsc -p tsconfig.tools.json --noEmit",
     "lint": "eslint .",

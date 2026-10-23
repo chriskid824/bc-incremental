@@ -91,6 +91,7 @@
 | `npm run build` | 型別檢查＋網頁版 build（輸出到 `dist/`） |
 | `npm run build:steam` | 型別檢查＋Steam 版 build（頁面輸出到 `dist-steam/`，Electron 殼輸出到 `dist-electron/`） |
 | `npm run electron` | build Steam 版後用 Electron 開（App ID 480，沒開 Steam 也能玩）；第一次先跑 `npm run electron:install` 下載 Electron |
+| `npm run steam:check` | 同 `npm run electron`，但開 Steam 檢查模式（`--steam-check`）：畫面右上角的英文檢查面板測成就、overlay 和存檔，「Copy report」把報告複製到剪貼簿，並存到 userData 的 `steam-check/` |
 | `npm run smoke:electron` | Electron 冒煙測試（沒有 Steam 也能跑）：先 `npm run electron:install`，再在 container 裡用 `xvfb-run -a -s "-screen 0 1280x800x24" npm run smoke:electron` 跑，截圖輸出到 `out/electron-smoke/` |
 | `npm run balance -- --strategy all --sessions 8 --minutes 60` | 平衡模擬器，CSV 輸出到 `out/balance/`（參數見 `tools/balance/cli.ts`） |
 | `npm run bench` | 模擬核心效能量測 |

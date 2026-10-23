@@ -3,10 +3,12 @@
  * ./channels.ts answers (createHandlers, pure), how a channel is registered (registerSync), and
  * which sender may call it (isGamePage): only the game window's main frame showing a page from
  * dist-steam/. Every argument comes from the page, so each is checked before it reaches the files
- * or Steam. A sender that is refused, or a handler that throws, gets the channel's fallback.
+ * or Steam. A sender that is refused, or a handler that throws, gets the channel's fallback; so
+ * does every bc:check:* call outside the check mode (`--steam-check`, design §2.2), its handler
+ * not run.
  *
  * Also the ring buffer of the renderer's recent errors, which main.ts fills and echoes to the
- * terminal; the check mode's report will read it.
+ * terminal; the check mode's report counts it.
  */
 
 import { posix, win32 } from 'node:path';
@@ -16,17 +18,29 @@ import type { SaveWriteResult, ShellInfo } from '../src/platform/steam/bridge';
 import { CHANNELS } from './channels';
 import type { Channel } from './channels';
 import { isSaveSlot } from './saveFiles';
-import type { SaveFiles } from './saveFiles';
+import type { ReportResult, SaveFiles } from './saveFiles';
+import { isOverlayDialog } from './steam';
 import type { SteamSession } from './steam';
 
 /** The largest save text a write takes, in UTF-8 bytes. */
 export const MAX_SAVE_BYTES = 8 * 1024 * 1024;
 
+/** The largest report the check mode saves, in UTF-8 bytes. */
+export const MAX_REPORT_BYTES = 64 * 1024;
+
 /** What the handlers answer from. */
 export interface HandlerDeps {
   readonly info: () => ShellInfo;
-  readonly saves: Pick<SaveFiles, 'read' | 'write'>;
-  readonly steam: Pick<SteamSession, 'unlock' | 'isUnlocked'>;
+  readonly saves: Pick<SaveFiles, 'read' | 'write' | 'list'>;
+  readonly steam: Pick<SteamSession, 'unlock' | 'isUnlocked' | 'clear' | 'openOverlay'>;
+  /** `--steam-check`: without it, every bc:check:* call gets its fallback. */
+  readonly checkMode: boolean;
+  /** Saves a report as `<userData>/steam-check/report-<stamp>.txt`. */
+  readonly saveReport: (text: string) => ReportResult;
+  /** Shows the save folder in the OS's file manager, at a file of main's choosing. */
+  readonly showSaves: () => void;
+  /** The ring buffer of the page's recent errors (a copy). */
+  readonly recentErrors: () => readonly string[];
 }
 
 /** A channel's handler, and what the page gets instead when it is refused or throws. */
@@ -41,8 +55,24 @@ const WRITE_FALLBACK: SaveWriteResult = Object.freeze({
   error: `${CHANNELS.saveWrite} failed`,
 });
 
-/** Each channel's handler: reads and void calls fall back to null, writes to not-ok, Steam to false. */
+/** The report's fallback likewise: the panel shows why the report was not saved. */
+const REPORT_FALLBACK: ReportResult = Object.freeze({
+  ok: false,
+  where: `${CHANNELS.checkReport} failed`,
+});
+
+/** The lists' fallback. */
+const NONE: readonly never[] = Object.freeze([]);
+
+/**
+ * Each channel's handler: reads and void calls fall back to null, writes to not-ok, Steam to
+ * false, lists to an empty list. Outside the check mode a bc:check:* handler answers its fallback.
+ */
 export function createHandlers(deps: HandlerDeps): Readonly<Record<Channel, SyncHandler>> {
+  const check = (handle: SyncHandler['handle'], fallback: unknown): SyncHandler => ({
+    handle: deps.checkMode ? handle : () => fallback,
+    fallback,
+  });
   return {
     [CHANNELS.info]: { handle: () => deps.info(), fallback: null },
     [CHANNELS.saveRead]: {
@@ -61,7 +91,19 @@ export function createHandlers(deps: HandlerDeps): Readonly<Record<Channel, Sync
       handle: (id) => isAchievementId(id) && deps.steam.isUnlocked(id),
       fallback: false,
     },
-    // C9.2b adds the bc:check:* handlers here, each refused without checkMode.
+    [CHANNELS.checkClear]: check((id) => isAchievementId(id) && deps.steam.clear(id), false),
+    [CHANNELS.checkOverlay]: check((dialog) => {
+      if (isOverlayDialog(dialog)) deps.steam.openOverlay(dialog);
+      return null;
+    }, null),
+    [CHANNELS.checkSaves]: check(() => deps.saves.list(), NONE),
+    // The page names no file: main shows the folder its own way.
+    [CHANNELS.checkShowSaves]: check(() => {
+      deps.showSaves();
+      return null;
+    }, null),
+    [CHANNELS.checkReport]: check((text) => saveReport(deps, text), REPORT_FALLBACK),
+    [CHANNELS.checkErrors]: check(() => deps.recentErrors(), NONE),
   };
 }
 
@@ -73,6 +115,14 @@ function writeSave(saves: HandlerDeps['saves'], slot: unknown, text: unknown): S
     return { ok: false, error: 'the save is over 8 MiB' };
   }
   return saves.write(slot, text);
+}
+
+function saveReport(deps: HandlerDeps, text: unknown): ReportResult {
+  if (typeof text !== 'string') return { ok: false, where: 'the report is not text' };
+  if (text.length > MAX_REPORT_BYTES || Buffer.byteLength(text, 'utf8') > MAX_REPORT_BYTES) {
+    return { ok: false, where: 'the report is over 64 KiB' };
+  }
+  return deps.saveReport(text);
 }
 
 /** The frame an IPC message came from: Electron's WebFrameMain, as far as it is read here. */
@@ -170,7 +220,10 @@ export const RECENT_ERRORS = 50;
  */
 export const RECENT_ERRORS_GLOBAL = 'bcShellRecentErrors';
 
-/** The renderer's last errors, oldest first; each is echoed as it comes. */
+/**
+ * The renderer's last errors, oldest first; each is echoed as it comes, JSON-quoted (as ./args.ts
+ * quotes its lines), so that a page cannot write control sequences to the terminal.
+ */
 export class RecentErrors {
   private readonly lines: string[] = [];
 
@@ -182,7 +235,7 @@ export class RecentErrors {
   add(line: string): void {
     this.lines.push(line);
     if (this.lines.length > this.limit) this.lines.shift();
-    this.echo(line);
+    this.echo(JSON.stringify(line));
   }
 
   list(): readonly string[] {

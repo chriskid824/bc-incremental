@@ -6,6 +6,10 @@
  * on dist-steam/index.html, the page `vite build --mode steam` makes. Without Steam the game plays
  * on, saving to files and keeping achievements locally (C9/F6).
  *
+ * `--steam-check` (`npm run steam:check`) adds the check mode's channels for the page's check
+ * panel (design §2.2): clearing the achievement, the overlay's dialogs, the save files, and the
+ * report saved beside them in userData's steam-check/ folder.
+ *
  * Never restartAppIfNecessary (this is a dev run from a terminal), and never
  * disableHardwareAcceleration (it can break the overlay; C9/F7).
  */
@@ -27,12 +31,15 @@ import {
   isGamePage,
   registerSync,
 } from './ipc';
-import { autoCloudRow, saveDirOf, shownPath, userDataDir } from './paths';
-import { openSaveFiles } from './saveFiles';
+import { autoCloudRow, reportDirOf, saveDirOf, shownPath, userDataDir } from './paths';
+import { openSaveFiles, writeReport } from './saveFiles';
 import { SPACEWAR_APP_ID, startSteam } from './steam';
 import type { SteamworksModule } from './steam';
 
-/** The one permission the page may have: writing the clipboard (the check mode's report). */
+/**
+ * The one permission the page may have, in every mode: writing the clipboard (only [Copy report],
+ * in the check mode, uses it).
+ */
 const PERMITTED = 'clipboard-sanitized-write';
 
 const args = parseShellArgs(process.argv.slice(1));
@@ -93,16 +100,31 @@ function start(): void {
     },
     gpu: compactGpu(app.getGPUFeatureStatus()),
   });
-  const handlers = createHandlers({ info, saves, steam });
+  // The renderer's errors, echoed to the terminal; the check's report and the smoke read them.
+  const errors = new RecentErrors((line) => console.error(`[renderer] ${line}`));
+  Reflect.set(globalThis, RECENT_ERRORS_GLOBAL, () => errors.list());
+
+  const reportDir = reportDirOf(userData);
+  const handlers = createHandlers({
+    info,
+    saves,
+    steam,
+    checkMode: args.checkMode,
+    saveReport: (text) => writeReport(reportDir, text),
+    // main.json selected in its folder, once there is one; else the folder itself.
+    showSaves: () =>
+      shell.showItemInFolder(
+        saves.list().some(({ name }) => name === 'main.json')
+          ? join(saveDir, 'main.json')
+          : saveDir,
+      ),
+    recentErrors: () => errors.list(),
+  });
   for (const [channel, { handle, fallback }] of Object.entries(handlers)) {
     registerSync(ipcMain, channel as Channel, handle, fallback, (event) =>
       isGamePage(event, { webContents: game, dir: pageDir }),
     );
   }
-
-  // The renderer's errors, echoed to the terminal; the container smoke reads them too.
-  const errors = new RecentErrors((line) => console.error(`[renderer] ${line}`));
-  Reflect.set(globalThis, RECENT_ERRORS_GLOBAL, () => errors.list());
 
   app.on('second-instance', () => {
     const window = game === null ? null : BrowserWindow.fromWebContents(game);

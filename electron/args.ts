@@ -3,7 +3,8 @@
  * in process.argv among Electron's and Chromium's, which are left alone:
  *
  * - `--steam-check`: the check mode (design §2.2's panel), reported as ShellInfo.checkMode.
- * - `--bc-user-data-dir=<absolute>`: userData in another folder (the smoke's temporary one).
+ * - `--bc-user-data-dir=<absolute>`: userData in another folder (the smoke's temporary one),
+ *   resolved by the OS's rules, so no `..` segment reaches a shown path or the check's report.
  * - `--bc-overlay-switches`: the Steam overlay's Chromium switches without Steam (the smoke).
  * - `--bc-replay=<spec>`: the page opens with the query `?replay=<spec>` (C10's replay route).
  *
@@ -49,7 +50,7 @@ export function parseShellArgs(
     } else if (arg === OVERLAY_SWITCHES) {
       overlaySwitches = true;
     } else if (name === USER_DATA_DIR) {
-      if (paths.isAbsolute(value)) userDataDir = value;
+      if (paths.isAbsolute(value)) userDataDir = paths.resolve(value);
       else ignored.push(`Ignoring ${shown(name, value)}: the folder must be an absolute path.`);
     } else if (name === REPLAY) {
       if (REPLAY_SPEC.test(value)) replay = value;

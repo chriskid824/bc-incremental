@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { APP_FOLDER, autoCloudRow, saveDirOf, shownPath, userDataDir } from './paths';
+import {
+  APP_FOLDER,
+  REPORTS_FOLDER,
+  SAVES_FOLDER,
+  autoCloudRow,
+  reportDirOf,
+  saveDirOf,
+  shownPath,
+  userDataDir,
+} from './paths';
 
 const WINDOWS = { home: 'C:\\Users\\Hoshi', appData: 'C:\\Users\\Hoshi\\AppData\\Roaming' };
 const MAC = { home: '/Users/hoshi', appData: '/Users/hoshi/Library/Application Support' };
@@ -25,6 +34,17 @@ describe('userDataDir', () => {
     );
     expect(saveDirOf('/home/hoshi/.config/bc-incremental', 'linux')).toBe(
       '/home/hoshi/.config/bc-incremental/saves',
+    );
+  });
+
+  it("keeps the check's reports in userData's steam-check folder, beside the saves", () => {
+    expect(REPORTS_FOLDER).toBe('steam-check');
+    expect(REPORTS_FOLDER).not.toBe(SAVES_FOLDER);
+    expect(reportDirOf('C:\\Users\\Hoshi\\AppData\\Roaming\\bc-incremental', 'win32')).toBe(
+      'C:\\Users\\Hoshi\\AppData\\Roaming\\bc-incremental\\steam-check',
+    );
+    expect(reportDirOf('/Users/hoshi/Library/Application Support/bc-incremental', 'darwin')).toBe(
+      '/Users/hoshi/Library/Application Support/bc-incremental/steam-check',
     );
   });
 });

@@ -4,7 +4,9 @@
  * achievements; while Steam is not running the achievements go to a local record and the build
  * plays on (C9/F6). Without the bridge, or with another version of it, the page has nowhere to
  * save: createSteamPlatform throws MissingBridgeError, which src/app/main.ts shows as a fatal
- * error. Playtest events stay in the local log (C9/F12) until M3 applies ARCH §9's table.
+ * error. Playtest events stay in the local log (C9/F12) until M3 applies ARCH §9's table. Under
+ * `--steam-check` the shell's bridge also carries the check's calls, and the page shows the check
+ * panel (./checkPanel.ts, design §2.2).
  *
  * Nothing here runs on import, so the web build drops this directory (../index.ts).
  */
@@ -15,7 +17,9 @@ import { openKeyValueStore, pageLocalStorage } from '../platform';
 import type { AnalyticsPolicy, Platform, PlatformSetup } from '../platform';
 import type { SaveSlot, SaveStorage } from '../storage';
 import { BRIDGE_VERSION, NATIVE_BRIDGE_KEY } from './bridge';
-import type { NativeBridge } from './bridge';
+import type { NativeBridge, ShellInfo } from './bridge';
+import { mountCheckPanel } from './checkPanel';
+import type { CheckPanelBridge } from './checkPanel';
 
 /** Check runs stay out of the playtest data: the local log only (C9/F12). */
 export const STEAM_ANALYTICS_POLICY: AnalyticsPolicy = { cloud: false, sendByDefault: false };
@@ -93,6 +97,8 @@ export interface SteamEnv {
   readonly global: object;
   /** For the local achievements record while Steam is not running. */
   readonly localStorage: () => Storage;
+  /** Shows the check panel; mountCheckPanel on the page's body when left out. */
+  readonly mountCheckPanel?: (bridge: CheckPanelBridge, info: ShellInfo) => void;
 }
 
 export function createSteamPlatform(
@@ -100,15 +106,25 @@ export function createSteamPlatform(
   env: SteamEnv = { global: globalThis, localStorage: pageLocalStorage },
 ): Platform {
   const bridge = readBridge(env.global);
-  return {
+  const info = shellInfo(bridge);
+  const platform: Platform = {
     id: 'steam',
     // setup.savePrefix names localStorage keys; the files have their own names.
     storage: new BridgeSaveStorage(bridge.storage),
-    achievements: steamStarted(bridge)
+    achievements: steamStarted(info)
       ? new SteamAchievements(bridge.achievements)
       : new LocalAchievements(openKeyValueStore(env.localStorage)),
     analytics: setup.analytics(STEAM_ANALYTICS_POLICY),
   };
+  // Only under --steam-check, where the preload also exposes the check's calls (design §2.2).
+  const check = bridge.check;
+  if (info !== null && info.checkMode === true && check !== undefined) {
+    (env.mountCheckPanel ?? mountCheckPanel)(
+      { steamInfo: () => bridge.steamInfo(), achievements: bridge.achievements, check },
+      info,
+    );
+  }
+  return platform;
 }
 
 /** The bridge on `global`; MissingBridgeError when there is none or it is another version. */
@@ -120,11 +136,18 @@ function readBridge(global: object): NativeBridge {
   return found as NativeBridge;
 }
 
-/** Whether Steam started in the main process; a bridge that cannot tell counts as no. */
-function steamStarted(bridge: NativeBridge): boolean {
+/** The shell's ShellInfo, or null when the bridge cannot tell (its call throws or answers nothing). */
+function shellInfo(bridge: NativeBridge): ShellInfo | null {
   try {
-    return bridge.steamInfo().steam.ok === true;
+    const info: unknown = bridge.steamInfo();
+    return typeof info === 'object' && info !== null ? (info as ShellInfo) : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Whether Steam started in the main process; a bridge that cannot tell counts as no. */
+function steamStarted(info: ShellInfo | null): boolean {
+  const steam: unknown = info === null ? undefined : Reflect.get(info, 'steam');
+  return typeof steam === 'object' && steam !== null && Reflect.get(steam, 'ok') === true;
 }

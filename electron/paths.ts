@@ -2,7 +2,8 @@
  * Where the shell keeps its files (docs/v3 C9 design §1.4): userData is appData + APP_FOLDER
  * unless `--bc-user-data-dir` names another folder, and the saves live in its `saves/` folder,
  * the only part of userData that Steam's Auto-Cloud may sync (Chromium's own data shares
- * userData). shownPath() writes a path without the home or appData folder in it, for reports;
+ * userData). The check mode's reports go beside it, in `steam-check/` (design §2.2).
+ * shownPath() writes a path without the home or appData folder in it, for reports;
  * autoCloudRow() is the Auto-Cloud path M3 configures for this OS. Pure: every function takes the
  * OS it answers for.
  */
@@ -20,6 +21,9 @@ export const APP_FOLDER = 'bc-incremental';
 /** The save files' folder inside userData. */
 export const SAVES_FOLDER = 'saves';
 
+/** The check mode's reports' folder inside userData, outside saves/ so that Auto-Cloud skips it. */
+export const REPORTS_FOLDER = 'steam-check';
+
 function pathOf(platform: NodeJS.Platform): PlatformPath {
   return platform === 'win32' ? win32 : posix;
 }
@@ -36,6 +40,14 @@ export function userDataDir(
 /** The save files' folder in `userData`. */
 export function saveDirOf(userData: string, platform: NodeJS.Platform = process.platform): string {
   return pathOf(platform).join(userData, SAVES_FOLDER);
+}
+
+/** The check mode's reports' folder in `userData`. */
+export function reportDirOf(
+  userData: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return pathOf(platform).join(userData, REPORTS_FOLDER);
 }
 
 /** The folders a shown path leaves out. */

@@ -10,7 +10,7 @@
  */
 
 import { isAchievementId } from '../src/platform/achievements';
-import type { SteamStatus } from '../src/platform/steam/bridge';
+import type { CheckBridge, SteamStatus } from '../src/platform/steam/bridge';
 
 /** Spacewar, the App ID every Steam account may run; C9 only (M3 uses the game's and the demo's). */
 export const SPACEWAR_APP_ID = 480;
@@ -36,13 +36,19 @@ export interface SteamworksModule {
   electronEnableSteamOverlay(): void;
 }
 
-export type OverlayDialog = 'achievements' | 'friends';
+/** The overlay's dialogs the check opens: the bridge's own union (CheckBridge.openOverlay). */
+export type OverlayDialog = Parameters<CheckBridge['openOverlay']>[0];
 
 /** steamworks.js' overlay.Dialog values for the dialogs the check opens. */
 export const OVERLAY_DIALOGS: Readonly<Record<OverlayDialog, number>> = {
   achievements: 6,
   friends: 0,
 };
+
+/** Whether `dialog` is one of OVERLAY_DIALOGS' own keys (no inherited name such as toString). */
+export function isOverlayDialog(dialog: unknown): dialog is OverlayDialog {
+  return typeof dialog === 'string' && Object.hasOwn(OVERLAY_DIALOGS, dialog);
+}
 
 export interface SteamSession {
   readonly status: SteamStatus;
@@ -120,7 +126,7 @@ function session(
     isUnlocked: (id) => achievement(id, (steam) => steam.achievement.isActivated(id)),
     clear: (id) => achievement(id, (steam) => steam.achievement.clear(id)),
     openOverlay(dialog) {
-      if (client === null || !Object.hasOwn(OVERLAY_DIALOGS, dialog)) return;
+      if (client === null || !isOverlayDialog(dialog)) return;
       try {
         client.overlay.activateDialog(OVERLAY_DIALOGS[dialog]);
       } catch {

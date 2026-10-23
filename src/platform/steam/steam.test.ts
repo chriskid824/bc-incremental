@@ -6,8 +6,14 @@ import type { Analytics } from '../analytics';
 import type { AnalyticsPolicy } from '../platform';
 import type { SaveSlot } from '../storage';
 import { BRIDGE_VERSION, NATIVE_BRIDGE_KEY } from './bridge';
-import type { NativeBridge, SaveWriteResult, ShellInfo, SteamStatus } from './bridge';
-import { MissingBridgeError, STEAM_ANALYTICS_POLICY, createSteamPlatform } from './index';
+import type { CheckBridge, NativeBridge, SaveWriteResult, ShellInfo, SteamStatus } from './bridge';
+import type { CheckPanelBridge } from './checkPanel';
+import {
+  MissingBridgeError,
+  STEAM_ANALYTICS_POLICY,
+  SteamAchievements,
+  createSteamPlatform,
+} from './index';
 import type { SteamEnv } from './index';
 
 /** A Map-backed Storage, standing in for the page's localStorage. */
@@ -42,10 +48,10 @@ const STEAM_OK: SteamStatus = {
 };
 const NO_STEAM: SteamStatus = { ok: false, stage: 'init', error: 'Steam is not running' };
 
-function shellInfo(steam: SteamStatus): ShellInfo {
+function shellInfo(steam: SteamStatus, checkMode = false): ShellInfo {
   return {
     bridgeVersion: 1,
-    checkMode: false,
+    checkMode,
     steam,
     overlaySwitches: steam.ok ? ['in-process-gpu', 'disable-direct-composition'] : [],
     saveDir: '/home/player/.config/bc-incremental/saves',
@@ -63,16 +69,17 @@ function shellInfo(steam: SteamStatus): ShellInfo {
 
 /**
  * A bridge like the preload's: save files in a map, Steam's achievements in a set; every call is
- * logged. `writeResult` answers the writes; `steamInfo` can be swapped for a failing one.
+ * logged. `writeResult` answers the writes; `steamInfo` can be swapped for a failing one. With
+ * `checkMode`, steamInfo says the shell runs `--steam-check` (the check itself is fakeCheck's).
  */
-function fakeBridge(steam: SteamStatus = STEAM_OK) {
+function fakeBridge(steam: SteamStatus = STEAM_OK, checkMode = false) {
   const files = new Map<SaveSlot, string>();
   const steamUnlocked = new Set<string>();
   const calls: string[] = [];
   const state = { writeResult: { ok: true } as SaveWriteResult };
   const bridge = {
     version: 1,
-    steamInfo: vi.fn((): ShellInfo => shellInfo(steam)),
+    steamInfo: vi.fn((): ShellInfo => shellInfo(steam, checkMode)),
     storage: {
       read: vi.fn((slot: SaveSlot): string | null => {
         calls.push(`read ${slot}`);
@@ -99,6 +106,18 @@ function fakeBridge(steam: SteamStatus = STEAM_OK) {
   return { bridge, files, steamUnlocked, calls, state };
 }
 
+/** The check's calls, as the preload exposes them under --steam-check. */
+function fakeCheck() {
+  return {
+    clearAchievement: vi.fn((_id: string) => true),
+    openOverlay: vi.fn((_dialog: 'achievements' | 'friends') => {}),
+    listSaves: vi.fn(() => []),
+    showSaves: vi.fn(() => {}),
+    saveReport: vi.fn((_text: string) => ({ ok: true, where: 'report.txt' })),
+    recentErrors: vi.fn(() => []),
+  } satisfies CheckBridge;
+}
+
 const ANALYTICS: Analytics = {
   installId: 'install',
   canSend: false,
@@ -108,13 +127,14 @@ const ANALYTICS: Analytics = {
   exportLocal: () => '{}',
 };
 
-/** A page holding `bridge` (if any) under bcNative, with its own localStorage. */
+/** A page holding `bridge` (if any) under bcNative, with its own localStorage and panel mount. */
 function page(bridge?: unknown) {
   const storage = new MapStorage();
   const global = bridge === undefined ? {} : { [NATIVE_BRIDGE_KEY]: bridge };
-  const env: SteamEnv = { global, localStorage: () => storage };
+  const mount = vi.fn((_bridge: CheckPanelBridge, _info: ShellInfo) => {});
+  const env: SteamEnv = { global, localStorage: () => storage, mountCheckPanel: mount };
   const analytics = vi.fn((_policy: AnalyticsPolicy): Analytics => ANALYTICS);
-  return { env, storage, analytics };
+  return { env, storage, analytics, mount };
 }
 
 afterEach(() => {
@@ -235,6 +255,59 @@ describe('createSteamPlatform', () => {
       expect(calls).toEqual([]);
       expect(bridge.steamInfo).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it("mounts the check panel under --steam-check, on Steam's own achievements and the check", () => {
+    for (const steam of [STEAM_OK, NO_STEAM]) {
+      const { bridge, calls } = fakeBridge(steam, true);
+      const check = fakeCheck();
+      const { env, analytics, mount } = page({ ...bridge, check });
+      const platform = createSteamPlatform({ analytics }, env);
+      expect(mount).toHaveBeenCalledTimes(1);
+      const [given, info] = mount.mock.calls[0] ?? [];
+      expect(info).toEqual(shellInfo(steam, true));
+      expect(given?.check).toBe(check);
+      // Steam's achievements even while the game keeps its own in the local record (C9/F6).
+      expect(given?.achievements).toBe(bridge.achievements);
+      expect(platform.achievements instanceof SteamAchievements, JSON.stringify(steam)).toBe(
+        steam.ok,
+      );
+      // One bc:info for the platform and the panel; the panel asks again for its report.
+      expect(bridge.steamInfo).toHaveBeenCalledTimes(1);
+      expect(given?.steamInfo()).toEqual(shellInfo(steam, true));
+      expect(bridge.steamInfo).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it('mounts no panel outside the check mode, without check, or when the shell cannot tell', () => {
+    const check = fakeCheck();
+    const throwing = fakeBridge(STEAM_OK, true);
+    throwing.bridge.steamInfo.mockImplementation(() => {
+      throw new Error('IPC failed');
+    });
+    const silent = fakeBridge(STEAM_OK, true);
+    silent.bridge.steamInfo.mockReturnValue(null as unknown as ShellInfo);
+    const loose = fakeBridge(STEAM_OK, true);
+    loose.bridge.steamInfo.mockReturnValue({
+      ...shellInfo(STEAM_OK),
+      checkMode: 'true',
+    } as unknown as ShellInfo);
+    const cases: readonly (readonly [string, unknown])[] = [
+      ['not the check mode', { ...fakeBridge(STEAM_OK, false).bridge, check }],
+      ['no check on the bridge', fakeBridge(STEAM_OK, true).bridge],
+      ['check: undefined', { ...fakeBridge(STEAM_OK, true).bridge, check: undefined }],
+      ['steamInfo throws', { ...throwing.bridge, check }],
+      ['steamInfo answers null', { ...silent.bridge, check }],
+      ["checkMode: 'true'", { ...loose.bridge, check }],
+    ];
+    for (const [name, bridge] of cases) {
+      const { env, analytics, mount } = page(bridge);
+      const platform = createSteamPlatform({ analytics }, env);
+      expect(mount, name).not.toHaveBeenCalled();
+      expect(platform.id, name).toBe('steam');
+    }
+    for (const call of Object.values(check)) expect(call).not.toHaveBeenCalled();
   });
 
   it('builds the analytics once, local only and off by default (C9/F12)', () => {

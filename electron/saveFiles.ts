@@ -12,11 +12,14 @@
  * fails keeps the old file and answers why; the page's next autosave tries again. A read never
  * throws: a missing, empty or unreadable file is null (logged once), which sends the page's loader
  * to the backup.
+ *
+ * Also the check mode's reports (writeReport, design §2.2): each a new file of its own, never a
+ * save, so it needs neither the temp nor the rename.
  */
 
 import * as fs from 'node:fs';
 import { join } from 'node:path';
-import type { SaveFileInfo, SaveWriteResult } from '../src/platform/steam/bridge';
+import type { CheckBridge, SaveFileInfo, SaveWriteResult } from '../src/platform/steam/bridge';
 import type { SaveSlot } from '../src/platform/storage';
 
 export interface SaveFiles {
@@ -98,15 +101,10 @@ export function openSaveFiles(dir: string, deps: SaveFilesDeps = {}): SaveFiles 
 
   /** Writes `text` to `temp` and flushes it to disk before closing it. */
   const writeTemp = (temp: string, text: string): void => {
-    const data = Buffer.from(text, 'utf8');
     const fd = ops.openSync(temp, 'w');
     let closed = false;
     try {
-      for (let at = 0; at < data.length;) {
-        const wrote = ops.writeSync(fd, data, at, data.length - at);
-        if (wrote <= 0) throw new Error(`could not write ${temp}`);
-        at += wrote;
-      }
+      writeAll(ops, fd, text, temp);
       ops.fsyncSync(fd);
       closed = true;
       ops.closeSync(fd);
@@ -210,6 +208,62 @@ export function openSaveFiles(dir: string, deps: SaveFilesDeps = {}): SaveFiles 
         });
     },
   };
+}
+
+/** What CheckBridge.saveReport answers: the file written, or why there is none. */
+export type ReportResult = ReturnType<CheckBridge['saveReport']>;
+
+/** A report's file name: `report-<UTC time>.txt`, without ':' (Windows) and never `*.json`. */
+export function reportFileName(time: Date): string {
+  return `report-${time.toISOString().replaceAll(':', '-').replaceAll('.', '-')}.txt`;
+}
+
+/**
+ * Writes `text` as a new file in `dir` (created if missing), named by `now`, and answers its path,
+ * or why it could not (the half-written file removed). Never throws, and never replaces a file.
+ */
+export function writeReport(
+  dir: string,
+  text: string,
+  deps: { readonly fs?: FileOps; readonly now?: () => Date } = {},
+): ReportResult {
+  const ops = deps.fs ?? fs;
+  const file = join(dir, reportFileName((deps.now ?? (() => new Date()))()));
+  let created = false;
+  try {
+    ops.mkdirSync(dir, { recursive: true });
+    const fd = ops.openSync(file, 'wx');
+    created = true;
+    let closed = false;
+    try {
+      writeAll(ops, fd, text, file);
+      closed = true;
+      ops.closeSync(fd);
+    } finally {
+      if (!closed) closeQuietly(ops, fd);
+    }
+    return { ok: true, where: file };
+  } catch (error) {
+    // Only a file this call created is removed; 'wx' never opens another's.
+    if (created) {
+      try {
+        ops.unlinkSync(file);
+      } catch {
+        // Already gone.
+      }
+    }
+    return { ok: false, where: describe(error) };
+  }
+}
+
+/** Writes all of `text` to `fd`, however few bytes each call takes. */
+function writeAll(ops: FileOps, fd: number, text: string, name: string): void {
+  const data = Buffer.from(text, 'utf8');
+  for (let at = 0; at < data.length;) {
+    const wrote = ops.writeSync(fd, data, at, data.length - at);
+    if (wrote <= 0) throw new Error(`could not write ${name}`);
+    at += wrote;
+  }
 }
 
 function closeQuietly(ops: FileOps, fd: number): void {

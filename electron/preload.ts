@@ -4,14 +4,41 @@
  * object under bcNative (src/platform/steam/bridge.ts; ARCH §11's minimal API: storage,
  * achievements, steamInfo). Each function sends exactly its declared arguments on its own channel
  * (./channels.ts) and returns the main process's answer; the page gets no ipcRenderer, no channel
- * of its choosing and no listener.
+ * of its choosing and no listener. Only when main says the shell runs `--steam-check` (one bc:info
+ * while loading) does the bridge carry `check`, the check mode's calls (design §2.2).
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
 import { BRIDGE_VERSION, NATIVE_BRIDGE_KEY } from '../src/platform/steam/bridge';
-import type { NativeBridge, SaveWriteResult, ShellInfo } from '../src/platform/steam/bridge';
+import type {
+  CheckBridge,
+  NativeBridge,
+  SaveFileInfo,
+  SaveWriteResult,
+  ShellInfo,
+} from '../src/platform/steam/bridge';
 import type { SaveSlot } from '../src/platform/storage';
 import { CHANNELS } from './channels';
+
+const check: CheckBridge = Object.freeze({
+  clearAchievement: (id: string): boolean => ipcRenderer.sendSync(CHANNELS.checkClear, id),
+  openOverlay: (dialog: Parameters<CheckBridge['openOverlay']>[0]): void => {
+    ipcRenderer.sendSync(CHANNELS.checkOverlay, dialog);
+  },
+  listSaves: (): readonly SaveFileInfo[] => ipcRenderer.sendSync(CHANNELS.checkSaves),
+  showSaves: (): void => {
+    ipcRenderer.sendSync(CHANNELS.checkShowSaves);
+  },
+  saveReport: (text: string): ReturnType<CheckBridge['saveReport']> =>
+    ipcRenderer.sendSync(CHANNELS.checkReport, text),
+  recentErrors: (): readonly string[] => ipcRenderer.sendSync(CHANNELS.checkErrors),
+});
+
+/** Whether main runs the check mode; a refused or failed bc:info is no. */
+function checkMode(): boolean {
+  const info: unknown = ipcRenderer.sendSync(CHANNELS.info);
+  return typeof info === 'object' && info !== null && Reflect.get(info, 'checkMode') === true;
+}
 
 const bridge: NativeBridge = Object.freeze({
   version: BRIDGE_VERSION,
@@ -25,7 +52,7 @@ const bridge: NativeBridge = Object.freeze({
     unlock: (id: string): boolean => ipcRenderer.sendSync(CHANNELS.achUnlock, id),
     isUnlocked: (id: string): boolean => ipcRenderer.sendSync(CHANNELS.achIsUnlocked, id),
   }),
-  // C9.2b adds `check` (CheckBridge) here, only when one sendSync(CHANNELS.info) says checkMode.
+  ...(checkMode() ? { check } : {}),
 });
 
 contextBridge.exposeInMainWorld(NATIVE_BRIDGE_KEY, bridge);
