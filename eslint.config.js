@@ -11,7 +11,9 @@ const CLOCK_MESSAGE =
   'Pure modules must not read the wall clock; time comes from ticks or the caller.';
 
 export default tseslint.config(
-  { ignores: ['dist', 'dist-steam', 'out', 'coverage', 'node_modules', '.claude'] },
+  {
+    ignores: ['dist', 'dist-steam', 'dist-electron', 'out', 'coverage', 'node_modules', '.claude'],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

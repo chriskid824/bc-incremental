@@ -1,5 +1,6 @@
 dist
 dist-steam
+dist-electron
 out
 coverage
 package-lock.json

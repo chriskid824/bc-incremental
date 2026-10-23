@@ -30,8 +30,15 @@ jobs:
       # run's own budget (tools/balance/bench.ts --check, bench.baseline.json).
       - run: npm run bench -- --check
       - run: npx vite build
+      # The Steam build's page (dist-steam/) and the Electron shell (dist-electron/); no Electron
+      # binary is needed to build them (docs/v3 C9 design §1.6).
+      - run: npm run build:electron
       - uses: actions/upload-artifact@v4
         with:
           name: web-build
           path: dist
           retention-days: 14
+      # Electron fetches its ~120 MB binary on its first run or require('electron') from Node, so
+      # a test or build step that loaded Electron for real fails here (C9/F1).
+      - name: No Electron binary downloaded
+        run: test ! -e node_modules/electron/dist

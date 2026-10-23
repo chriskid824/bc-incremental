@@ -1,10 +1,8 @@
-/// <reference types="vite/client" />
 /**
  * The build's flavor, `VITE_FLAVOR=demo|full` (docs/ARCHITECTURE.md §7; docs/v3 C9 design §1.6):
  * the demo's content cap (B2), its analytics default and the wishlist button (M3) will read FLAVOR;
  * C9 reads nothing from it. vite.config.ts parses the same variable, so a bad value fails the build
- * before any page could read it. (The reference above types import.meta.env for the tools'
- * tsconfig too, which compiles this module through vite.config.ts.)
+ * before any page could read it.
  */
 
 export type Flavor = 'demo' | 'full';

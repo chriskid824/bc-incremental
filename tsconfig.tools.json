@@ -2,7 +2,14 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2022"],
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
-  "include": ["tools", "tests", "src/**/*.test.ts", "vite.config.ts"]
+  "include": [
+    "tools",
+    "tests",
+    "electron",
+    "src/**/*.test.ts",
+    "vite.config.ts",
+    "vite.electron.config.ts"
+  ]
 }
