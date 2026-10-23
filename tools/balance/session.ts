@@ -100,6 +100,11 @@ export interface SessionConfig {
    * (src/app/hivePreset.json). The session plays on a copy and leaves the given state as it is.
    */
   readonly initialMeta?: Readonly<MetaState>;
+  /**
+   * Never set: a character session's config (tools/balance/v3/session.ts) names its character, so
+   * `config.character === undefined` tells the two apart (tools/balance/jobs.ts).
+   */
+  readonly character?: undefined;
 }
 
 /** Seed of one run: the same for every strategy, so strategies face the same spawns. */

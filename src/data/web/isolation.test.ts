@@ -7,7 +7,9 @@
  * tool) import none of them, so they keep running on the M1 web, and none of them imports the M1
  * web or its loader. The guard reads each listed module's own import specifiers (direct imports,
  * type-only and dynamic ones included), not what they load in turn: tools/content, which loads v3
- * content for the snapshots, the fuzz and calibration, is not listed.
+ * content for the snapshots, the fuzz and calibration, is not listed. The character sessions in
+ * tools/balance/v3/ run on the v3 webs (docs/v3 C10 design §1.1): they are the balance tools the
+ * guard leaves out, and none of them may read the M1 web's `.talents` instead.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -79,13 +81,19 @@ function target(file: string, specifier: string): string | null {
     .replace(/\.(ts|js)$/, '');
 }
 
-/** The import targets of `file` (relative to the repo root) that `matches` picks. */
-function importsOf(file: string, matches: (path: string) => boolean): string[] {
-  const source = readFileSync(resolve(ROOT, file), 'utf8');
+/** The import targets of `source`, the text of `file` (relative to the repo root), that `matches` picks. */
+function importsIn(file: string, source: string, matches: (path: string) => boolean): string[] {
   return specifiers(source).filter((specifier) => {
     const path = target(file, specifier);
     return path !== null && matches(path);
   });
+}
+
+const read = (file: string): string => readFileSync(resolve(ROOT, file), 'utf8');
+
+/** The import targets of `file` (relative to the repo root) that `matches` picks. */
+function importsOf(file: string, matches: (path: string) => boolean): string[] {
+  return importsIn(file, read(file), matches);
 }
 
 const inWeb = (path: string): boolean =>
@@ -100,8 +108,23 @@ const isM1Web = (path: string): boolean => M1_WEB.includes(path);
 const READS_TALENTS =
   /\.talents\b|\[\s*(['"])talents\1\s*\]|\{[^{}]*\btalents\b[^{}]*\}\s*(?:=(?![=>])|:|\)\s*=>)/;
 
+/** The character sessions' directory (docs/v3 C10 design §1.1), matched as a directory. */
+const V3_TOOLS = 'tools/balance/v3/';
+const isV3Tool = (path: string): boolean => path.startsWith(V3_TOOLS);
+
+/**
+ * What the guard finds in a balance tool: a v3 web module imported by one outside
+ * tools/balance/v3/, or a `.talents` read in one inside it.
+ */
+function balanceFindings(file: string, source: string): string[] {
+  if (isV3Tool(file)) return READS_TALENTS.test(stripComments(source)) ? ['.talents'] : [];
+  return importsIn(file, source, inWeb);
+}
+
 describe('web isolation (D1)', () => {
-  const balanceTools = filesUnder('tools/balance', /\.(ts|mjs)$/);
+  const allBalanceTools = filesUnder('tools/balance', /\.(ts|mjs)$/);
+  const balanceTools = allBalanceTools.filter((path) => !isV3Tool(path));
+  const v3Tools = allBalanceTools.filter(isV3Tool);
   const webModules = [
     ...V3_DIRS.flatMap((dir) => filesUnder(dir, /\.ts$/)),
     ...V3_FILES.map((file) => `${file}.ts`),
@@ -147,13 +170,54 @@ describe('web isolation (D1)', () => {
     expect(importsOf(file, inWeb)).toEqual([]);
   });
 
+  it('keeps the character sessions in tools/balance/v3/, out of the guarded list', () => {
+    expect(v3Tools).toEqual(
+      expect.arrayContaining(
+        ['content', 'session', 'visit', 'strategies', 'prestige', 'report'].map(
+          (name) => `${V3_TOOLS}${name}.ts`,
+        ),
+      ),
+    );
+    expect(balanceTools.length + v3Tools.length).toBe(allBalanceTools.length);
+    expect(balanceTools.some(isV3Tool)).toBe(false);
+  });
+
+  it.each(v3Tools)('%s reads no .talents', (file) => {
+    expect(balanceFindings(file, read(file))).toEqual([]);
+  });
+
+  it('keeps every balance tool outside tools/balance/v3/ guarded, the pool and the CLI too', () => {
+    expect(balanceTools).toEqual(
+      expect.arrayContaining([
+        'tools/balance/jobs.ts',
+        'tools/balance/pool.ts',
+        'tools/balance/worker.ts',
+        'tools/balance/cli.ts',
+      ]),
+    );
+    for (const file of balanceTools) expect(balanceFindings(file, read(file)), file).toEqual([]);
+  });
+
+  it('flags a web import outside tools/balance/v3/ and a .talents read inside it', () => {
+    const imports = "import { loadContent } from '../../src/data/web';";
+    expect(balanceFindings('tools/balance/stats.ts', imports)).toEqual(['../../src/data/web']);
+    expect(balanceFindings('tools/balance/v3x.ts', imports)).toEqual(['../../src/data/web']);
+    expect(
+      balanceFindings('tools/balance/v3/stats.ts', "import { x } from '../../../src/data/web';"),
+    ).toEqual([]);
+    expect(balanceFindings('tools/balance/v3/stats.ts', 'const n = data.talents.length;')).toEqual([
+      '.talents',
+    ]);
+    expect(balanceFindings('tools/balance/v3x.ts', 'const n = data.talents.length;')).toEqual([]);
+  });
+
   it('the v3 web imports neither the M1 web nor src/data/index.ts', () => {
     for (const file of webModules) expect(importsOf(file, isM1Web), file).toEqual([]);
   });
 
   it('nothing under src/sim reads .talents', () => {
     for (const file of simModules) {
-      const code = stripComments(readFileSync(resolve(ROOT, file), 'utf8'));
+      const code = stripComments(read(file));
       expect(READS_TALENTS.test(code), file).toBe(false);
     }
   });

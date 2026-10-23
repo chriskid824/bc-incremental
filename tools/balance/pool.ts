@@ -1,22 +1,23 @@
 /**
- * Runs sessions in parallel on worker_threads, one whole session per job, falling back to
- * in-process execution when workers cannot start. Results come back in job order, so the
- * output never depends on the worker count or scheduling.
+ * Runs balance jobs (tools/balance/jobs.ts) in parallel on worker_threads, one whole session per
+ * job, falling back to in-process execution when workers cannot start. Results come back in job
+ * order, so the output never depends on the worker count or scheduling.
  */
 
 import { Worker } from 'node:worker_threads';
+import type { BalanceJob, JobResult } from './jobs';
 import { runSession } from './session';
 import type { SessionConfig, SessionResult } from './session';
 
 /** Main → worker. */
 export type JobMessage =
-  | { readonly type: 'job'; readonly index: number; readonly config: SessionConfig }
+  | { readonly type: 'job'; readonly index: number; readonly job: BalanceJob }
   | { readonly type: 'stop' };
 
 /** Worker → main. */
 export type WorkerMessage =
   | { readonly type: 'ready' }
-  | { readonly type: 'result'; readonly index: number; readonly result: SessionResult }
+  | { readonly type: 'result'; readonly index: number; readonly result: JobResult }
   | { readonly type: 'failed'; readonly index: number; readonly message: string };
 
 /**
@@ -31,9 +32,9 @@ export class SessionError extends Error {
   override readonly name = 'SessionError';
 }
 
-export interface PoolRun {
-  /** Results in the order of the input configs. */
-  readonly results: SessionResult[];
+export interface PoolRun<T = SessionResult> {
+  /** Results in the order of the input jobs. */
+  readonly results: T[];
   readonly mode: 'workers' | 'in-process';
   readonly workers: number;
   /** Why the worker pool was abandoned, when it was. */
@@ -44,16 +45,14 @@ export function runInProcess(configs: readonly SessionConfig[]): SessionResult[]
   return configs.map((config) => runSession(config));
 }
 
-/** Rejects with SessionError when a session fails, with a plain Error when a worker does. */
+/** Rejects with SessionError when a job fails, with a plain Error when a worker does. */
 export function runInWorkers(
-  configs: readonly SessionConfig[],
+  jobs: readonly BalanceJob[],
   workerCount: number,
-): Promise<SessionResult[]> {
-  const count = Math.max(1, Math.min(workerCount, configs.length));
+): Promise<JobResult[]> {
+  const count = Math.max(1, Math.min(workerCount, jobs.length));
   return new Promise((resolve, reject) => {
-    const results: (SessionResult | undefined)[] = new Array<SessionResult | undefined>(
-      configs.length,
-    );
+    const results: (JobResult | undefined)[] = new Array<JobResult | undefined>(jobs.length);
     const workers: Worker[] = [];
     /** Workers told to stop because the queue is empty; they exit on their own. */
     const stopped = new Set<Worker>();
@@ -71,8 +70,8 @@ export function runInWorkers(
 
     const dispatch = (worker: Worker): void => {
       let message: JobMessage;
-      if (next < configs.length) {
-        message = { type: 'job', index: next, config: configs[next] as SessionConfig };
+      if (next < jobs.length) {
+        message = { type: 'job', index: next, job: jobs[next] as BalanceJob };
         next++;
       } else {
         message = { type: 'stop' };
@@ -103,12 +102,12 @@ export function runInWorkers(
         if (!stopped.has(worker)) {
           fail(new Error(`Balance worker exited with code ${code} before finishing its jobs`));
         } else if (exited === count) {
-          if (done !== configs.length) {
-            fail(new Error(`Balance workers returned ${done} of ${configs.length} sessions`));
+          if (done !== jobs.length) {
+            fail(new Error(`Balance workers returned ${done} of ${jobs.length} jobs`));
             return;
           }
           settled = true;
-          resolve(results as SessionResult[]);
+          resolve(results as JobResult[]);
         }
       });
     }
@@ -116,31 +115,57 @@ export function runInWorkers(
 }
 
 /**
- * Runs every session with up to `workerCount` workers, or in-process for one worker. If the
- * pool fails for a reason other than a session error, logs it and reruns everything
- * in-process.
+ * Runs every job with up to `workerCount` workers, or in-process (`inProcess`) for one worker,
+ * `fromWorkers` reading the workers' results. If the pool fails for a reason other than a job's
+ * error, logs it and reruns everything in-process.
  */
-export async function runSessions(
-  configs: readonly SessionConfig[],
+export async function runPool<T>(
+  jobs: readonly BalanceJob[],
   workerCount: number,
-  log: (message: string) => void = () => {},
-): Promise<PoolRun> {
-  const count = Math.min(workerCount, configs.length);
+  log: (message: string) => void,
+  inProcess: () => T[],
+  fromWorkers: (results: JobResult[]) => T[],
+): Promise<PoolRun<T>> {
+  const count = Math.min(workerCount, jobs.length);
   if (count <= 1) {
-    return { results: runInProcess(configs), mode: 'in-process', workers: 1, fallbackReason: null };
+    return { results: inProcess(), mode: 'in-process', workers: 1, fallbackReason: null };
   }
   try {
-    const results = await runInWorkers(configs, count);
+    const results = fromWorkers(await runInWorkers(jobs, count));
     return { results, mode: 'workers', workers: count, fallbackReason: null };
   } catch (error) {
     if (error instanceof SessionError) throw error;
     const reason = error instanceof Error ? error.message : String(error);
     log(`Worker pool failed (${reason}); running in-process instead.`);
     return {
-      results: runInProcess(configs),
+      results: inProcess(),
       mode: 'in-process',
       workers: 1,
       fallbackReason: reason,
     };
   }
+}
+
+/** An M1 job's session result; runSessions' jobs are M1 jobs only. */
+function m1Result(result: JobResult): SessionResult {
+  if (result.kind !== 'm1') throw new Error(`Expected an M1 session result, got '${result.kind}'`);
+  return result.result;
+}
+
+/**
+ * Runs every M1 session with up to `workerCount` workers, or in-process for one worker, each
+ * config as an `m1` job; as runPool, it falls back to in-process when the pool fails.
+ */
+export function runSessions(
+  configs: readonly SessionConfig[],
+  workerCount: number,
+  log: (message: string) => void = () => {},
+): Promise<PoolRun> {
+  return runPool(
+    configs.map((config): BalanceJob => ({ kind: 'm1', config })),
+    workerCount,
+    log,
+    () => runInProcess(configs),
+    (results) => results.map(m1Result),
+  );
 }

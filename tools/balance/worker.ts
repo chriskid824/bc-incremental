@@ -1,8 +1,11 @@
-/** Balance worker: runs whole sessions on request from pool.ts. Loaded via worker-boot.mjs. */
+/**
+ * Balance worker: runs whole jobs (tools/balance/jobs.ts) on request from pool.ts, each by its
+ * kind. Loaded via worker-boot.mjs.
+ */
 
 import { parentPort } from 'node:worker_threads';
+import { runJob } from './jobs';
 import type { JobMessage, WorkerMessage } from './pool';
-import { runSession } from './session';
 
 const port = parentPort;
 if (!port) throw new Error('tools/balance/worker.ts must run in a worker thread');
@@ -15,7 +18,7 @@ port.on('message', (message: JobMessage) => {
     return;
   }
   try {
-    send({ type: 'result', index: message.index, result: runSession(message.config) });
+    send({ type: 'result', index: message.index, result: runJob(message.job) });
   } catch (error) {
     const text = error instanceof Error ? describeError(error) : String(error);
     send({ type: 'failed', index: message.index, message: text });
