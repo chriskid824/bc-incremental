@@ -151,11 +151,21 @@ function playedSlot(
   };
 }
 
-/** One profile: each character empty or on one of its web's builds, with a random account. */
+/**
+ * M1's six enemy ids, written out: seenEnemies draws from this list rather than ENEMY_IDS, so the
+ * profiles a seed gives stay put when the content adds enemy types.
+ */
+const M1_ENEMY_IDS = ['triangle', 'square', 'pentagon', 'shard', 'hexagon', 'boss'] as const;
+
+/**
+ * One profile: each character empty or on one of its web's builds, with a random account; its
+ * enemy types met come from `seen`, a stream of their own, so no other draw moves.
+ */
 function randomProfile(
   rng: Rng,
   context: LoadContext,
   builds: ReadonlyMap<CharacterId, readonly Build[]>,
+  seen: Rng,
 ): SaveProfile {
   let thirdSlot = false;
   const characters = {} as Record<CharacterId, CharacterSlot>;
@@ -191,6 +201,7 @@ function randomProfile(
     pendingV1: rng.chance(0.3)
       ? { shards: randomAmount(rng), cores: randomCount(rng), maxWave: rng.int(41) }
       : null,
+    seenEnemies: M1_ENEMY_IDS.filter(() => seen.chance(0.5)).sort(),
   };
   return { account, characters };
 }
@@ -199,8 +210,9 @@ function randomProfile(
  * `count` random profiles, legal under `context` (fixProfile keeps them as they are): each
  * character with a web is empty or holds one of BUILDS_PER_WEB legal builds of it, drawn once per
  * call, under an account whose singularity flags open every third slot a build uses; wallets,
- * spent, counters, codex, settings, stats, pending and loadouts are random. Profile i draws from
- * deriveSeed(seed, 'profile:' + i), so a seed gives the same profiles in every test file.
+ * spent, counters, codex, settings, stats, pending, enemy types met and loadouts are random.
+ * Profile i draws from deriveSeed(seed, 'profile:' + i), its enemy types met from
+ * deriveSeed(seed, 'seenEnemies:' + i), so a seed gives the same profiles in every test file.
  */
 export function randomProfiles(context: LoadContext, count: number, seed: number): SaveProfile[] {
   const builds = new Map<CharacterId, Build[]>();
@@ -209,7 +221,12 @@ export function randomProfiles(context: LoadContext, count: number, seed: number
     if (web !== null) builds.set(c, buildsOf(web, seed));
   }
   return Array.from({ length: count }, (_, i) =>
-    randomProfile(createRng(deriveSeed(seed, `profile:${i}`)), context, builds),
+    randomProfile(
+      createRng(deriveSeed(seed, `profile:${i}`)),
+      context,
+      builds,
+      createRng(deriveSeed(seed, `seenEnemies:${i}`)),
+    ),
   );
 }
 

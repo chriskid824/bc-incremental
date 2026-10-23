@@ -1,8 +1,9 @@
 /**
- * Save v2's data (docs/v3 C8 design §1.2-§1.4; §2.1's T1-T3): the strict schema, the data form's
- * round trip and its fixed key order, freshProfile, CODEX_KEYS, profileContext, the import graph of
- * src/save (D1; the lead's ruling L4) and the stale v1 twin C8.2 builds (the lead's ruling L2).
- * Inputs are deep-frozen, so a mutation throws.
+ * Save v2's data (docs/v3 C8 design §1.2-§1.4; §2.1's T1-T3): the strict schema, the enemy types
+ * met among it (the lead's ruling K3), the data form's round trip and its fixed key order,
+ * freshProfile, CODEX_KEYS, profileContext, the import graph of src/save (D1; the lead's rulings
+ * L4 and K7) and the stale v1 twin C8.2 builds (the lead's ruling L2). Inputs are deep-frozen, so
+ * a mutation throws.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -56,6 +57,7 @@ const RICH: SaveProfile = deepFreeze({
     stats: { playSeconds: 1520.25, runs: 27 },
     lastCharacter: 'summon',
     pendingV1: { shards: num(2221.75), cores: 3, maxWave: 18 },
+    seenEnemies: ['boss', 'pentagon', 'triangle'],
   },
   characters: {
     fire: {
@@ -225,11 +227,36 @@ describe('ProfileDataSchema (T1, §1.4)', () => {
       [...SLOT, 'startWave'],
       [...SLOT, 'wallet', 'resonance'],
       ['account', 'pendingV1'],
+      ['account', 'seenEnemies'],
     ]) {
       expect(accepts(edited(path, REMOVE)), path.join('.')).toBe(false);
     }
     expect(accepts(edited(['account', 'pendingV1'], null))).toBe(true);
     expect(accepts(edited(['account', 'lastCharacter'], null))).toBe(true);
+  });
+
+  it('takes seenEnemies sorted by code unit and distinct, an unknown id included (K3)', () => {
+    const SEEN = ['account', 'seenEnemies'];
+    for (const ids of [
+      [],
+      ['boss'],
+      ['boss', 'square', 'triangle'],
+      ['gone', 'nope'],
+      ['Z', 'a'],
+    ]) {
+      expect(accepts(edited(SEEN, ids)), ids.join(',')).toBe(true);
+    }
+    for (const ids of [
+      ['square', 'boss'],
+      ['boss', 'boss'],
+      ['a', 'Z'],
+      ['boss', 'square', 'pentagon'],
+    ]) {
+      expect(accepts(edited(SEEN, ids)), ids.join(',')).toBe(false);
+    }
+    for (const value of [[''], [1], ['boss', null], 'boss', null, {}]) {
+      expect(accepts(edited(SEEN, value)), JSON.stringify(value)).toBe(false);
+    }
   });
 });
 
@@ -304,6 +331,7 @@ describe('the data form (T2, §1.4)', () => {
       'stats',
       'lastCharacter',
       'pendingV1',
+      'seenEnemies',
     ]);
     expect(Object.keys(data.account.singularity)).toEqual(CHARACTER_IDS);
     expect(Object.keys(data.account.stats)).toEqual(['playSeconds', 'runs']);
@@ -422,7 +450,7 @@ const FRESH_TEXT =
   '{"account":{"codex":{},' +
   '"singularity":{"fire":false,"ice":false,"lightning":false,"summon":false},' +
   '"settings":{"speed":1},"stats":{"playSeconds":0,"runs":0},' +
-  '"lastCharacter":null,"pendingV1":null},' +
+  '"lastCharacter":null,"pendingV1":null,"seenEnemies":[]},' +
   `"characters":{"fire":${FRESH_SLOT_TEXT},"ice":${FRESH_SLOT_TEXT},` +
   `"lightning":${FRESH_SLOT_TEXT},"summon":${FRESH_SLOT_TEXT}}}`;
 
@@ -438,6 +466,7 @@ describe('freshProfile (T3, §1.2-§1.3)', () => {
         stats: { playSeconds: 0, runs: 0 },
         lastCharacter: null,
         pendingV1: null,
+        seenEnemies: [],
       },
       characters: Object.fromEntries(
         CHARACTER_IDS.map((c) => [
@@ -555,10 +584,12 @@ function localImports(name: string, kind: 'value' | 'type'): string[] {
   return [...found].sort();
 }
 
-describe('src/save import graph (D1; the lead’s ruling L4)', () => {
+describe('src/save import graph (D1; the lead’s rulings L4 and K7)', () => {
   it('has profile.ts re-export account.ts and fixes.ts, which import it for types only', () => {
     expect(MODULES).toEqual(expect.arrayContaining(['account', 'fixes', 'profile', 'testing']));
-    expect(localImports('profile', 'value')).toEqual(['account', 'fixes']);
+    expect(localImports('profile', 'value')).toEqual(['account', 'fixes', 'format', 'migrations']);
+    expect(localImports('profile', 'type')).toEqual(['format']);
+    expect(localImports('migrations', 'value')).toEqual(['format']);
     expect(localImports('account', 'value')).toEqual([]);
     expect(localImports('account', 'type')).toEqual(['profile']);
     expect(localImports('fixes', 'value')).toEqual(['account']);
@@ -580,7 +611,7 @@ describe('src/save import graph (D1; the lead’s ruling L4)', () => {
     expect([...reached].sort()).toEqual(['format', 'index', 'migrations']);
   });
 
-  it.each(['account', 'fixes', 'profile'])(
+  it.each(['account', 'fixes', 'migrations', 'profile'])(
     'defines every export when %s is imported first',
     async (name) => {
       vi.resetModules();
@@ -589,12 +620,19 @@ describe('src/save import graph (D1; the lead’s ruling L4)', () => {
       const save = await import('./profile');
       expect(save.CODEX_KEYS).toHaveLength(44);
       expect(save.LEGACY_WAVES).toEqual([30, 60, 100]);
-      const fresh = save.freshProfile();
+      const fresh = deepFreeze(save.freshProfile());
       expect(save.selectCharacter(fresh, 'ice').profile.account.lastCharacter).toBe('ice');
       expect(save.accountProgress(fresh)).toEqual({ singularityBeaten: false });
       const context = save.profileContext(fixtureContent('B1'), FULL_SCOPE);
       expect(save.fixProfile(fresh, context)).toEqual({
         profile: fresh,
+        notices: [],
+        changed: false,
+      });
+      expect(save.parseProfile(save.serializeProfile(fresh, 'now'), context)).toEqual({
+        ok: true,
+        profile: fresh,
+        fromVersion: 2,
         notices: [],
         changed: false,
       });

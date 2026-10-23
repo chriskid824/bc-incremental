@@ -1,0 +1,45 @@
+{
+  "v": 1,
+  "savedAt": "2026-10-22T21:14:05.512Z",
+  "game": "bc-incremental",
+  "data": {
+    "meta": {
+      "shards": 202568.17015627018,
+      "cores": 224,
+      "allocated": [
+        "keenEye",
+        "kindling",
+        "spark",
+        "sharpen",
+        "fuel",
+        "conductor",
+        "quickDraw",
+        "slowBurn",
+        "charge",
+        "might",
+        "precision",
+        "deadlyAim",
+        "splitShot",
+        "assassin",
+        "inferno",
+        "stoke",
+        "scorch",
+        "heat",
+        "arcStorm",
+        "reach",
+        "fork",
+        "voltage",
+        "volley",
+        "pandemic",
+        "tempest"
+      ],
+      "ranks": { "might": 8 },
+      "maxWave": 31,
+      "runs": 35,
+      "spentShards": 800753.235207632,
+      "spentCores": 10
+    },
+    "playSeconds": 3593.7166666666667,
+    "speed": 2
+  }
+}

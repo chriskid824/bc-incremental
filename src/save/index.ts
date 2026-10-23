@@ -1,5 +1,8 @@
 /**
- * Save serialization and loading (docs/ARCHITECTURE.md §8). Pure: the caller provides the
+ * Save serialization and loading for the M1 page only (docs/ARCHITECTURE.md §8): M1's profile in
+ * the v1 format (M1_SAVE_VERSION), for the M1 page, `?hive`, `hivePreset` and the tools. The v3
+ * game reads and writes save v2 through src/save/profile.ts (parseProfile, serializeProfile),
+ * which this module does not re-export (docs/v3 C8 design D1). Pure: the caller provides the
  * timestamp and does the storage I/O (src/platform).
  */
 
@@ -7,7 +10,7 @@ import { fromJSON, toJSON } from '../core/num';
 import type { GameData } from '../data/types';
 import { refundAll } from '../meta/talents';
 import type { MetaState } from '../meta/types';
-import { EnvelopeSchema, SAVE_GAME_ID, SAVE_VERSION, SaveDataSchema } from './format';
+import { EnvelopeSchema, M1_SAVE_VERSION, SAVE_GAME_ID, SaveDataSchema } from './format';
 import type { Envelope, SaveData } from './format';
 import { MIGRATIONS } from './migrations';
 
@@ -65,10 +68,10 @@ function allocationFits(meta: Readonly<MetaState>, data: GameData): boolean {
   return reached.size === meta.allocated.size;
 }
 
-/** JSON text of the current-version envelope. `savedAt` is an ISO timestamp. */
+/** M1 page only: JSON text of the v1 envelope (M1_SAVE_VERSION); `savedAt` is an ISO timestamp. */
 export function serializeSave(profile: Readonly<Profile>, savedAt: string): string {
   const envelope: Envelope = {
-    v: SAVE_VERSION,
+    v: M1_SAVE_VERSION,
     savedAt,
     game: SAVE_GAME_ID,
     data: toSaveData(profile),
@@ -80,7 +83,7 @@ export type LoadResult =
   | {
       readonly ok: true;
       readonly profile: Profile;
-      /** Version the file was written with (≤ SAVE_VERSION). */
+      /** Version the file was written with: M1_SAVE_VERSION. */
       readonly fromVersion: number;
       /** Talents unknown to this build were found; everything was refunded. */
       readonly refunded: boolean;
@@ -88,9 +91,10 @@ export type LoadResult =
   | { readonly ok: false; readonly error: string };
 
 /**
- * Parses a save, migrates it to the current version and validates it. Talent ids the
- * current data does not know (renamed or removed nodes) trigger a full free refund, so a
- * player never loses currency to a content change.
+ * M1 page only: parses a v1 save and validates it. A newer version (save v2 included) is refused,
+ * so this never migrates: v2 is parseProfile's (src/save/profile.ts). Talent ids the current data
+ * does not know (renamed or removed nodes) trigger a full free refund, so a player never loses
+ * currency to a content change.
  */
 export function loadSave(text: string, data: GameData): LoadResult {
   let raw: unknown;
@@ -102,10 +106,13 @@ export function loadSave(text: string, data: GameData): LoadResult {
   const envelope = EnvelopeSchema.safeParse(raw);
   if (!envelope.success) return { ok: false, error: `bad envelope: ${envelope.error.message}` };
   const { v } = envelope.data;
-  if (v > SAVE_VERSION) return { ok: false, error: `save version ${v} is newer than this build` };
+  if (v > M1_SAVE_VERSION) {
+    return { ok: false, error: `save version ${v} is newer than this build` };
+  }
 
+  // Only up to M1_SAVE_VERSION, the first version: nothing migrates here.
   let body = envelope.data.data;
-  for (let version = v; version < SAVE_VERSION; version++) {
+  for (let version = v; version < M1_SAVE_VERSION; version++) {
     const migrate = MIGRATIONS[version];
     if (migrate === undefined) return { ok: false, error: `no migration from version ${version}` };
     body = migrate(body);

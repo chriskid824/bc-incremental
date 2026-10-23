@@ -5,11 +5,13 @@
  * everything, since what such an id cost cannot be priced and would sit unseen in spent; then
  * legalize drops what no longer fits and refunds exactly that; then the loadouts lose their removed
  * ids. A character without a web (「製作中」 or outside the scope) gets the renames and their
- * refunds only. profile.ts re-exports this module, which imports it for types only.
+ * refunds only. Then the account's enemy types met lose the ids ENEMY_IDS lacks. profile.ts
+ * re-exports this module, which imports it for types only.
  */
 
 import { CHARACTER_IDS } from '../data/sources';
 import type { CharacterId } from '../data/sources';
+import { ENEMY_IDS } from '../data/types';
 import type { AssembledWeb } from '../data/web/types';
 import { legalize, refundAll } from '../meta/web/rules';
 import type { AccountProgress, CharacterProgress, Wallet } from '../meta/web/types';
@@ -128,11 +130,15 @@ function fixedSlot(
   return { ...slot, progress, loadouts: loadoutsKept ? slot.loadouts : loadouts };
 }
 
+const KNOWN_ENEMIES: ReadonlySet<string> = new Set(ENEMY_IDS);
+
 /**
  * The profile a load keeps (§1.5): each character through the renames, the refunds of what its web
- * lacks, legalize and its loadouts' fixes, on accountProgress(p) and context.webOf(c). The notices
- * come in character order; `changed` is true when any step changed anything, and then `profile` is
- * a new object; otherwise it is `p` itself, so a clean load writes nothing.
+ * lacks, legalize and its loadouts' fixes, on accountProgress(p) and context.webOf(c); then the
+ * enemy types met without the ids ENEMY_IDS lacks (a type the content no longer has, or a dev
+ * save's), with no notice: nothing the player owns is lost, and a later meeting shows the banner
+ * again. The notices come in character order; `changed` is true when any step changed anything,
+ * and then `profile` is a new object; otherwise it is `p` itself, so a clean load writes nothing.
  */
 export function fixProfile(
   p: SaveProfile,
@@ -150,6 +156,12 @@ export function fixProfile(
     const fixed = fixedSlot(c, slot, context.webOf(c), account, context, notices);
     if (fixed !== slot) characters = { ...characters, [c]: fixed };
   }
-  const changed = characters !== p.characters;
-  return { profile: changed ? { ...p, characters } : p, notices, changed };
+  const seen = p.account.seenEnemies;
+  const seenEnemies = seen.every((id) => KNOWN_ENEMIES.has(id))
+    ? seen
+    : seen.filter((id) => KNOWN_ENEMIES.has(id));
+  const changed = characters !== p.characters || seenEnemies !== seen;
+  if (!changed) return { profile: p, notices, changed };
+  const saved = seenEnemies === seen ? p.account : { ...p.account, seenEnemies };
+  return { profile: { ...p, account: saved, characters }, notices, changed };
 }

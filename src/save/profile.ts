@@ -1,12 +1,13 @@
 /**
- * Save v2's data (docs/v3 C8 design §1.2–§1.5, §2.1): the profile as immutable values, an account
+ * Save v2 (docs/v3 C8 design §1.1–§1.5, §2.1, §2.2): the profile as immutable values, an account
  * and one slot per character; its strict zod schema; the data form it is written in, in a fixed key
- * order, so a load followed by a save gives the same text; a fresh profile; and the context the
- * load-time fixes read. SAVE_VERSION stays 1 until C8.2, which adds the envelope's parse and
- * serialize with the bump (§0.2 item 3). src/save/index.ts stays the M1 entry and re-exports none
- * of this (D1). B1 imports this module alone: it re-exports the account's operations (account.ts)
- * and the load-time fixes (fixes.ts), which import it for types only, so no value-import cycle
- * runs through src/save.
+ * order, so a load followed by a save gives the same text; a fresh profile; the context the
+ * load-time fixes read; and the v3 loader and serializer of the SAVE_VERSION envelope, parseProfile
+ * (§1.5's pipeline: v1 migrates, a newer version is refused as such) and serializeProfile, which
+ * never writes what this build cannot read (D2). src/save/index.ts stays the M1 entry and
+ * re-exports none of this (D1). B1 imports this module alone: it re-exports the account's
+ * operations (account.ts) and the load-time fixes (fixes.ts), which import it for types only, so
+ * no value-import cycle runs through src/save.
  */
 
 import { z } from 'zod';
@@ -20,6 +21,10 @@ import type { AssembledWeb, Content, FusionKey, WebScope } from '../data/web/typ
 import { DEFAULT_WEB_ECONOMY } from '../meta/web/price';
 import { emptyProgress } from '../meta/web/rules';
 import type { CharacterProgress, Wallet, WebEconomy } from '../meta/web/types';
+import { fixProfile } from './fixes';
+import { EnvelopeSchema, SAVE_GAME_ID, SAVE_VERSION } from './format';
+import type { Envelope } from './format';
+import { MIGRATIONS } from './migrations';
 
 export * from './account';
 export * from './fixes';
@@ -58,6 +63,11 @@ export interface AccountSave {
   /** Where the select screen's cursor starts (impl:502). */
   readonly lastCharacter: CharacterId | null;
   readonly pendingV1: PendingV1 | null;
+  /**
+   * The enemy types met on this profile (C7's ruling L7: the new-enemy banner shows once per
+   * profile), sorted and distinct: EnemyIds once a load's fixes have run.
+   */
+  readonly seenEnemies: readonly string[];
 }
 
 export interface SaveProfile {
@@ -76,6 +86,12 @@ export const CODEX_KEYS: readonly FusionKey[] = CHARACTER_IDS.flatMap((c) =>
 
 const count = z.number().int().nonnegative(); // zod 4: safe integers only
 const amount = z.number().nonnegative(); // zod 4: rejects ±Infinity and NaN
+/** Ids in strictly ascending order (the default sort's), so none twice; an unknown one is fine. */
+const SeenEnemiesSchema = z
+  .array(z.string().min(1))
+  .refine((ids) => ids.every((id, i) => i === 0 || (ids[i - 1] as string) < id), {
+    message: 'seenEnemies must be sorted and distinct',
+  });
 
 /** A strict object of one `schema` per character, in CHARACTER_IDS order. */
 function perCharacter<S extends z.ZodType>(schema: S) {
@@ -106,6 +122,7 @@ const AccountSchema = z.strictObject({
   stats: z.strictObject({ playSeconds: amount, runs: count }),
   lastCharacter: z.enum(CHARACTER_IDS).nullable(),
   pendingV1: z.strictObject({ shards: amount, cores: count, maxWave: count }).nullable(),
+  seenEnemies: SeenEnemiesSchema,
 });
 
 /** Save v2's data, the envelope's `data` from C8.2 (§1.4): every object strict. */
@@ -118,7 +135,10 @@ export type ProfileData = z.infer<typeof ProfileDataSchema>;
 type SlotData = ProfileData['characters'][CharacterId];
 type WalletData = SlotData['wallet'];
 
-/** What a load tells the player (§1.5); fixProfile makes the first two, C8.2 and C8.3 the rest. */
+/**
+ * What a load tells the player (§1.5): fixProfile makes the first two, parseProfile v1Waiting,
+ * B1 v1Claimed and C8.3's store the last three.
+ */
 export type SaveNotice =
   /** Step 4: ids renamed to null, merged or outside the web, or a lost ascendancy: all refunded. */
   | {
@@ -161,6 +181,7 @@ export function freshProfile(): SaveProfile {
       stats: { playSeconds: 0, runs: 0 },
       lastCharacter: null,
       pendingV1: null,
+      seenEnemies: [],
     },
     characters: byCharacter((c) => ({
       progress: emptyProgress(c),
@@ -216,6 +237,7 @@ export function toProfileData(profile: SaveProfile): ProfileData {
         pending === null
           ? null
           : { shards: toJSON(pending.shards), cores: pending.cores, maxWave: pending.maxWave },
+      seenEnemies: [...account.seenEnemies],
     },
     characters: byCharacter((c): SlotData => {
       const { progress, loadouts, startWave } = profile.characters[c];
@@ -254,6 +276,7 @@ export function fromProfileData(data: ProfileData): SaveProfile {
         pending === null
           ? null
           : { shards: fromJSON(pending.shards), cores: pending.cores, maxWave: pending.maxWave },
+      seenEnemies: [...account.seenEnemies],
     },
     characters: byCharacter((character): CharacterSlot => {
       const slot = data.characters[character];
@@ -305,5 +328,100 @@ export function profileContext(
     },
     economy,
     renames,
+  };
+}
+
+/** serializeProfile's refusal of a profile this build could not read back (D2). */
+export class SaveFormatError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'SaveFormatError';
+  }
+}
+
+/**
+ * The SAVE_VERSION envelope of `profile`, as JSON text; `savedAt` is an ISO timestamp. The data is
+ * toProfileData's as ProfileDataSchema reads it back; a profile the schema refuses (a fractional
+ * count, a non-finite amount, a rank of 0, an unsorted seenEnemies) throws SaveFormatError with
+ * the schema's issues, so nothing is written that this build cannot read (D2).
+ */
+export function serializeProfile(profile: SaveProfile, savedAt: string): string {
+  const parsed = ProfileDataSchema.safeParse(toProfileData(profile));
+  if (!parsed.success) {
+    throw new SaveFormatError(`the profile cannot be saved: ${parsed.error.message}`, {
+      cause: parsed.error,
+    });
+  }
+  const envelope: Envelope = { v: SAVE_VERSION, savedAt, game: SAVE_GAME_ID, data: parsed.data };
+  return JSON.stringify(envelope);
+}
+
+/** What parseProfile gives: a profile with its notices, or why there is none. */
+export type ProfileLoad =
+  | {
+      readonly ok: true;
+      readonly profile: SaveProfile;
+      /** The version the text was written with, 1 to SAVE_VERSION. */
+      readonly fromVersion: number;
+      readonly notices: readonly SaveNotice[];
+      /** The profile differs from the text (an older version, a load-time fix): save at once. */
+      readonly changed: boolean;
+    }
+  /** A version this build does not know: the text must not be overwritten (F12). */
+  | { readonly ok: false; readonly reason: 'newer'; readonly version: number }
+  | { readonly ok: false; readonly reason: 'invalid'; readonly error: string };
+
+const invalid = (error: string): ProfileLoad => ({ ok: false, reason: 'invalid', error });
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * The v3 loader (§1.5): JSON.parse, the envelope, a version above SAVE_VERSION refused as `newer`
+ * (never `invalid`, which the store's guard depends on), MIGRATIONS[v] to SAVE_VERSION in order
+ * (one that throws, as MIGRATIONS[1] does on bad v1 data, makes it `invalid`), ProfileDataSchema,
+ * fromProfileData, then fixProfile under `context`. A v1 save with progress waiting adds a
+ * v1Waiting notice after the fixes' (B1 builds v1Claimed from selectCharacter's `claimed`), and
+ * `changed` is true for a text of an older version as well as for any fix.
+ */
+export function parseProfile(text: string, context: LoadContext): ProfileLoad {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return invalid('not JSON');
+  }
+  const envelope = EnvelopeSchema.safeParse(raw);
+  if (!envelope.success) return invalid(`bad envelope: ${envelope.error.message}`);
+  const { v } = envelope.data;
+  if (v > SAVE_VERSION) return { ok: false, reason: 'newer', version: v };
+
+  let body = envelope.data.data;
+  for (let version = v; version < SAVE_VERSION; version++) {
+    const migrate = MIGRATIONS[version];
+    if (migrate === undefined) return invalid(`no migration from version ${version}`);
+    try {
+      body = migrate(body);
+    } catch (error) {
+      return invalid(`v${version} data: ${messageOf(error)}`);
+    }
+  }
+  const parsed = ProfileDataSchema.safeParse(body);
+  if (!parsed.success) return invalid(`bad data: ${parsed.error.message}`);
+  let profile: SaveProfile;
+  try {
+    profile = fromProfileData(parsed.data);
+  } catch (error) {
+    return invalid(`bad data: ${messageOf(error)}`);
+  }
+
+  const fixed = fixProfile(profile, context);
+  const pending = fixed.profile.account.pendingV1;
+  const waiting: SaveNotice[] = v === 1 && pending !== null ? [{ kind: 'v1Waiting', pending }] : [];
+  return {
+    ok: true,
+    profile: fixed.profile,
+    fromVersion: v,
+    notices: [...fixed.notices, ...waiting],
+    changed: fixed.changed || v < SAVE_VERSION,
   };
 }

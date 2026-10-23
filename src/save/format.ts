@@ -1,13 +1,22 @@
 /**
  * Save file format (docs/ARCHITECTURE.md §8): a versioned JSON envelope around the profile.
- * Changing SaveData means: bump SAVE_VERSION, add a migration from the previous version in
- * src/save/migrations.ts, and add a fixture under tests/fixtures.
+ * Version 2 is save v2 (docs/v3 C8 design §1), whose data is ProfileDataSchema
+ * (src/save/profile.ts); version 1 is M1's SaveData, which the M1 entry (src/save/index.ts) still
+ * writes and reads under M1_SAVE_VERSION. Changing the data means: bump SAVE_VERSION, add a
+ * migration from the previous version in src/save/migrations.ts, and add a fixture under
+ * tests/fixtures.
  */
 
 import { z } from 'zod';
 
 export const SAVE_GAME_ID = 'bc-incremental';
-export const SAVE_VERSION = 1;
+/** The version parseProfile and serializeProfile (src/save/profile.ts) read and write. */
+export const SAVE_VERSION = 2;
+/**
+ * M1's version: the M1 page, `?hive`, `hivePreset` and the tools until C6's D34 retires them;
+ * src/save/index.ts writes it and reads nothing newer.
+ */
+export const M1_SAVE_VERSION = 1;
 
 const finite = z.number();
 const count = z.number().int().nonnegative();
@@ -25,6 +34,7 @@ export const MetaSaveSchema = z.strictObject({
   spentCores: count,
 });
 
+/** Version 1's data (M1). */
 export const SaveDataSchema = z.strictObject({
   meta: MetaSaveSchema,
   /** Total time spent in runs and menus, in seconds. */

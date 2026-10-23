@@ -1,8 +1,9 @@
 /**
  * The account's operations and what it derives (docs/v3 C8 design §1.2, §2.1's T4-T7; F3-F5, F7):
- * the first pick's claim of v1's pending, the codex marks, a run's record, the checks, and the
- * purchase rules' account, the legacy milestones and the challenge unlocks. Everything is imported
- * from profile.ts, B1's one import. Inputs are deep-frozen, so a mutation throws.
+ * the first pick's claim of v1's pending, the codex marks, a run's record, the enemy types met (the
+ * lead's ruling K3), the checks, and the purchase rules' account, the legacy milestones and the
+ * challenge unlocks. Everything is imported from profile.ts, B1's one import. Inputs are
+ * deep-frozen, so a mutation throws.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -10,6 +11,7 @@ import { add, num, ZERO } from '../core/num';
 import { createRng, deriveSeed } from '../core/rng';
 import { CHARACTER_IDS } from '../data/sources';
 import type { CharacterId } from '../data/sources';
+import type { EnemyId } from '../data/types';
 import { emptyProgress, fusionSlots, refundAll } from '../meta/web/rules';
 import type { CharacterProgress, Wallet } from '../meta/web/types';
 import {
@@ -20,7 +22,9 @@ import {
   LEGACY_WAVES,
   legacyMilestones,
   recordRun,
+  recordSeenEnemies,
   selectCharacter,
+  serializeProfile,
   setProgress,
   setSpeed,
   setStartWave,
@@ -319,6 +323,47 @@ describe('recordRun (T6)', () => {
     expect(two.account.settings).toBe(played.account.settings);
     expect(two.account.pendingV1).toBe(played.account.pendingV1);
     expect(two.account.lastCharacter).toBe(played.account.lastCharacter);
+  });
+});
+
+// The lead's ruling K3 (C7's L7: the new-enemy banner shows once per profile).
+describe('recordSeenEnemies (the lead’s ruling K3)', () => {
+  const seen = (...ids: readonly string[]): SaveProfile => withAccount(FRESH, { seenEnemies: ids });
+
+  it('adds the ids not seen yet, keeping the list sorted and distinct', () => {
+    const first = recordSeenEnemies(FRESH, ['triangle', 'boss', 'triangle']);
+    expect(first.account).toEqual({ ...FRESH.account, seenEnemies: ['boss', 'triangle'] });
+    expect(first.characters).toBe(FRESH.characters);
+    const more = recordSeenEnemies(deepFreeze(first), ['square', 'boss', 'hexagon']);
+    expect(more.account.seenEnemies).toEqual(['boss', 'hexagon', 'square', 'triangle']);
+    expect(more.account.codex).toBe(FRESH.account.codex);
+  });
+
+  it('returns p itself when every id is seen already, or none is given', () => {
+    const p = seen('boss', 'square');
+    expect(recordSeenEnemies(p, ['square', 'boss', 'square'])).toBe(p);
+    expect(recordSeenEnemies(p, [])).toBe(p);
+    expect(recordSeenEnemies(FRESH, [])).toBe(FRESH);
+  });
+
+  it('never removes an id, one the content no longer has included', () => {
+    const p = seen('gone', 'square');
+    expect(recordSeenEnemies(p, ['boss']).account.seenEnemies).toEqual(['boss', 'gone', 'square']);
+    expect(recordSeenEnemies(p, ['square'])).toBe(p);
+  });
+
+  // localeCompare puts 'boss' before 'Gone'; the schema reads the list in code-unit order.
+  it('sorts by code unit, the order the schema reads, whatever ids the list already holds', () => {
+    const next = recordSeenEnemies(seen('Gone', 'square'), ['boss']);
+    expect(next.account.seenEnemies).toEqual(['Gone', 'boss', 'square']);
+    expect(() => serializeProfile(next, 'now')).not.toThrow();
+  });
+
+  it('throws a RangeError for an id outside ENEMY_IDS, changing nothing', () => {
+    for (const id of ['nope', '', 'Boss']) {
+      expect(() => recordSeenEnemies(FRESH, ['boss', id as EnemyId]), id).toThrow(RangeError);
+    }
+    expect(FRESH.account.seenEnemies).toEqual([]);
   });
 });
 

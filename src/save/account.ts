@@ -1,17 +1,19 @@
 /**
  * The account's operations on a SaveProfile and what it derives (docs/v3 C8 design §1.2, §2.1; F3,
  * F4, F5, F7): the first pick's claim of v1's pending progress, a character's progress with its
- * codex marks, a run's record, the start wave, speed and play time, and, never stored, the purchase
- * rules' AccountProgress, the legacy milestones and the challenge unlocks. Each operation returns a
- * new profile and changes nothing it is given (C6's D21): the parts it leaves are shared, and a
- * no-op returns the same object. The recorders live here, not in src/meta/web, so no C8 file is in
- * the run path (F4); the milestones' effects are B5's. profile.ts re-exports this module, which
- * imports it for types only.
+ * codex marks, a run's record, the enemy types met, the start wave, speed and play time, and,
+ * never stored, the purchase rules' AccountProgress, the legacy milestones and the challenge
+ * unlocks. Each operation returns a new profile and changes nothing it is given (C6's D21): the
+ * parts it leaves are shared, and a no-op returns the same object. The recorders live here, not in
+ * src/meta/web, so no C8 file is in the run path (F4); the milestones' effects are B5's.
+ * profile.ts re-exports this module, which imports it for types only.
  */
 
 import { add } from '../core/num';
 import { CHARACTER_IDS } from '../data/sources';
 import type { CharacterId } from '../data/sources';
+import { ENEMY_IDS } from '../data/types';
+import type { EnemyId } from '../data/types';
 import { parseNodeId } from '../data/web/ids';
 import type { FusionKey } from '../data/web/types';
 import type { AccountProgress, CharacterProgress } from '../meta/web/types';
@@ -138,6 +140,27 @@ export function recordRun(
       stats: { ...account.stats, runs: account.stats.runs + 1 },
     },
   };
+}
+
+const KNOWN_ENEMIES: ReadonlySet<string> = new Set(ENEMY_IDS);
+
+/**
+ * The enemy types `ids` met (C7's ruling L7: the new-enemy banner shows once per profile, so B1
+ * records each sighting): the ones not seen yet join seenEnemies, which stays sorted (the default
+ * sort's order) and distinct. An id is never removed, and the same profile comes back when none is
+ * new. Throws a RangeError for an id outside ENEMY_IDS.
+ */
+export function recordSeenEnemies(p: SaveProfile, ids: readonly EnemyId[]): SaveProfile {
+  for (const id of ids) {
+    if (!KNOWN_ENEMIES.has(id)) {
+      throw new RangeError(`recordSeenEnemies: '${String(id)}' is not an enemy id`);
+    }
+  }
+  const { account } = p;
+  const seen = new Set(account.seenEnemies);
+  if (ids.every((id) => seen.has(id))) return p;
+  for (const id of ids) seen.add(id);
+  return { ...p, account: { ...account, seenEnemies: [...seen].sort() } };
 }
 
 /** c's start wave as picked, a whole wave of at least 1 or null (B1 clamps it to webStartWave). */

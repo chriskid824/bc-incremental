@@ -1,8 +1,9 @@
 /**
  * The fixes a load applies (docs/v3 C8 design §1.5; §2.1's T8 and T9; §0.2 items 1-2): renames,
- * full refunds for what a web lacks, legalize's exact refunds, the loadouts, `changed`, and every
- * currency conserved over 500 damaged profiles. Fixture content in FULL_SCOPE unless a test says
- * otherwise; inputs are deep-frozen, so a mutation throws.
+ * full refunds for what a web lacks, legalize's exact refunds, the loadouts, the enemy types met
+ * (the lead's ruling K3), `changed`, and every currency conserved over 500 damaged profiles.
+ * Fixture content in FULL_SCOPE unless a test says otherwise; inputs are deep-frozen, so a
+ * mutation throws.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -508,6 +509,49 @@ describe('fixProfile (T8)', () => {
       without(three.ranks, 'fusion.fire.ice.core'),
     );
     expect(profile.characters.fire.progress.wallet.cores).toBe(WALLET.cores + 1);
+  });
+});
+
+// The lead's ruling K3: ids outside ENEMY_IDS leave seenEnemies, with no notice.
+describe('fixProfile: the enemy types met (the lead’s ruling K3)', () => {
+  /** profileOf(slots) with `seenEnemies`, frozen. */
+  const seeing = (
+    seenEnemies: readonly string[],
+    slots: Parameters<typeof profileOf>[0] = {},
+  ): SaveProfile => {
+    const p = profileOf(slots);
+    return deepFreeze({ ...p, account: { ...p.account, seenEnemies } });
+  };
+
+  it('drops the ids ENEMY_IDS lacks, with changed and no notice, keeping the rest in order', () => {
+    const p = seeing(['boss', 'gone', 'nope', 'square']);
+    const { profile, notices, changed } = fixProfile(p, context);
+    expect(profile.account).toEqual({ ...p.account, seenEnemies: ['boss', 'square'] });
+    expect([notices, changed]).toEqual([[], true]);
+    expect(profile.characters).toBe(p.characters);
+    expect(profile.account.codex).toBe(p.account.codex);
+    expect(fixProfile(deepFreeze(profile), context).profile).toBe(profile);
+    expect(fixProfile(seeing(['gone']), context).profile.account.seenEnemies).toEqual([]);
+  });
+
+  it('keeps a list of known ids as it is: the same list and the same profile', () => {
+    const p = seeing(['boss', 'hexagon', 'pentagon', 'shard', 'square', 'triangle']);
+    expect(fixProfile(p, context)).toEqual({ profile: p, notices: [], changed: false });
+    expect(fixProfile(p, context).profile).toBe(p);
+  });
+
+  it('drops them beside a character’s fix, and keeps the account when only a character changes', () => {
+    const OLD = `${C}.alpha.old-r2`;
+    const renamed = withRenames(context, { [OLD]: R2 });
+    const fire = { progress: { ...FIRE, ranks: storedAs(FIRE.ranks, R2, OLD) } };
+    const both = fixProfile(seeing(['gone', 'triangle'], { fire }), renamed);
+    expect(both.changed).toBe(true);
+    expect(both.profile.account.seenEnemies).toEqual(['triangle']);
+    expect(both.profile.characters.fire.progress.ranks).toEqual(FIRE.ranks);
+    const p = seeing(['triangle'], { fire });
+    const one = fixProfile(p, renamed);
+    expect(one.changed).toBe(true);
+    expect(one.profile.account).toBe(p.account);
   });
 });
 

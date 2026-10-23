@@ -1,0 +1,116 @@
+{
+  "v": 2,
+  "savedAt": "2026-10-22T00:00:00.000Z",
+  "game": "bc-incremental",
+  "data": {
+    "account": {
+      "codex": { "fire.poison": { "bestWave": 34 } },
+      "singularity": { "fire": false, "ice": false, "lightning": false, "summon": false },
+      "settings": { "speed": 2 },
+      "stats": { "playSeconds": 5432.1, "runs": 55 },
+      "lastCharacter": "fire",
+      "pendingV1": null,
+      "seenEnemies": ["boss", "hexagon", "pentagon", "shard", "square", "triangle"]
+    },
+    "characters": {
+      "fire": {
+        "ranks": {
+          "fire.center.alpha.r1": 1,
+          "fire.center.alpha.r2": 1,
+          "fire.center.alpha.alpha-one": 1,
+          "fire.center.alpha.r3": 1,
+          "fire.center.main.c1": 1,
+          "hub.defense.r1": 1,
+          "outer.poison.main.entry": 1,
+          "fire.center.alpha.r4": 1,
+          "fire.center.alpha.r5": 1,
+          "fire.center.beta.r1": 1,
+          "outer.poison.alpha.r1": 1,
+          "outer.poison.beta.r1": 1,
+          "outer.poison.alpha.r2": 1,
+          "outer.poison.beta.r2": 1,
+          "outer.poison.alpha.alpha-one": 1,
+          "fusion.fire.poison.core": 1
+        },
+        "wallet": { "shards": 4567.891, "cores": 2, "resonance": 0 },
+        "spent": { "shards": 43096.22822192067, "cores": 3, "resonance": 0 },
+        "bestWave": 34,
+        "cycleBest": 34,
+        "prestiges": 0,
+        "resonanceEarned": 0,
+        "ascendancy": null,
+        "runs": 21,
+        "loadouts": [
+          {
+            "fire.center.alpha.r1": 1,
+            "fire.center.alpha.r2": 1,
+            "fire.center.alpha.alpha-one": 1,
+            "fire.center.alpha.r3": 1,
+            "fire.center.main.c1": 1,
+            "hub.defense.r1": 1,
+            "outer.poison.main.entry": 1,
+            "fire.center.alpha.r4": 1,
+            "fire.center.alpha.r5": 1,
+            "fire.center.beta.r1": 1,
+            "outer.poison.alpha.r1": 1,
+            "outer.poison.beta.r1": 1,
+            "outer.poison.alpha.r2": 1,
+            "outer.poison.beta.r2": 1,
+            "outer.poison.alpha.alpha-one": 1,
+            "fusion.fire.poison.core": 1
+          },
+          null,
+          null
+        ],
+        "startWave": 15
+      },
+      "ice": {
+        "ranks": {},
+        "wallet": { "shards": 0, "cores": 0, "resonance": 0 },
+        "spent": { "shards": 0, "cores": 0, "resonance": 0 },
+        "bestWave": 0,
+        "cycleBest": 0,
+        "prestiges": 0,
+        "resonanceEarned": 0,
+        "ascendancy": null,
+        "runs": 0,
+        "loadouts": [null, null, null],
+        "startWave": null
+      },
+      "lightning": {
+        "ranks": {},
+        "wallet": { "shards": 0, "cores": 0, "resonance": 0 },
+        "spent": { "shards": 0, "cores": 0, "resonance": 0 },
+        "bestWave": 0,
+        "cycleBest": 0,
+        "prestiges": 0,
+        "resonanceEarned": 0,
+        "ascendancy": null,
+        "runs": 0,
+        "loadouts": [null, null, null],
+        "startWave": null
+      },
+      "summon": {
+        "ranks": {
+          "summon.center.gamma.r1": 1,
+          "summon.center.gamma.r2": 1,
+          "summon.center.gamma.gamma-one": 1,
+          "summon.center.gamma.r3": 1,
+          "summon.center.main.c5": 1,
+          "hub.echo.r2": 1,
+          "summon.asc.path-one.n1": 1
+        },
+        "wallet": { "shards": 87.3, "cores": 1, "resonance": 14 },
+        "spent": { "shards": 2353.885051518, "cores": 1, "resonance": 1 },
+        "bestWave": 41,
+        "cycleBest": 3,
+        "prestiges": 1,
+        "resonanceEarned": 15,
+        "ascendancy": "path-one",
+        "runs": 34,
+        "loadouts": [null, null, null],
+        "startWave": null
+      }
+    }
+  }
+}
