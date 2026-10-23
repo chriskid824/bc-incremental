@@ -136,6 +136,10 @@ export function createSimulation(
   validateConfig(config);
   const ctx = createRunContext(config, data, testModules);
   const { state, events } = ctx;
+  // The segment emitters are fixed with the run context. A stage with nothing to do is not
+  // called, since a call made every tick, even one that returns at once, takes from V8's
+  // inlining budget for step and leaves other stages out of it.
+  const segments = ctx.sys.segments.emitters.length !== 0;
 
   /**
    * Advances one tick. The systems run in the tick order of
@@ -174,7 +178,8 @@ export function createSimulation(
    * 13. waveControl: record cleared waves (waves.ts).
    * 14. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
-   * Steps 6–11 run only while the player is alive.
+   * Steps 6–11 run only while the player is alive; 6b only while there is a drone, 8 in a run
+   * with segment emitters and 9 while there is a zone (a run of M1's content has none of them).
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -191,8 +196,8 @@ export function createSimulation(
       runTickHooks(ctx);
       if (ctx.sys.drones.count !== 0) stepDrones(ctx);
       moveProjectiles(ctx);
-      stepSegments(ctx);
-      stepZones(ctx);
+      if (segments) stepSegments(ctx);
+      if (ctx.sys.zones.count !== 0) stepZones(ctx);
       updateAilments(ctx);
       runEffectQueue(ctx);
     }
