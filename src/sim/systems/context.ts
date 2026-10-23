@@ -109,6 +109,11 @@ export interface WaveRecord {
   /** Enemies of the wave in (shuffled) spawn order. */
   readonly queue: readonly EnemyDef[];
   released: number;
+  /**
+   * Where the queue's enemies counted in enemyCapDelayed end: the enemy cap has held back those
+   * before it that are not released yet (src/sim/systems/spawn.ts). 0 while none waited.
+   */
+  delayed: number;
   readonly startTick: number;
   /** Released enemies of this wave, split children included, that are still alive. */
   alive: number;
@@ -1002,7 +1007,7 @@ export function createRunContext(
       segments,
       chain: createChainState(chainRetention),
       drones,
-      enemyAi: createEnemyAiState(data.waves.v3 !== undefined),
+      enemyAi: createEnemyAiState(data.waves.v3 !== undefined, data.waves.v3?.enemyCap ?? Infinity),
       defence: createPlayerDefence(
         values,
         maxLife,

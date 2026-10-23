@@ -32,6 +32,9 @@ import {
   makeTestData,
   maskProbeMods,
   projectResult,
+  TEST_V3_WAVES,
+  TEST_WAVES,
+  v3TestData,
 } from './testing';
 import { COUNTER_IDS, NO_INPUT } from './types';
 import type { CounterId, RunConfig } from './types';
@@ -1529,6 +1532,30 @@ const DEFENCE_STATS = makeStats(
   },
 );
 
+/**
+ * C7.5's enemy cap (docs/v3 C7 design §2.3): a v3 table of M1's fixture types with a cap of 60
+ * and a wave every 2 s, and no elite, boss, affix or treasure (§1.9; TEST_V3_WAVES.v3 spread, as
+ * v3TestData's merge is shallow). Damage 500 on BASE_STATS' volley, with too much life to die,
+ * no longer holds the field from about wave 18: the cap delays releases, oldest wave first, skips
+ * the shards of pentagons that die at it, and leaves waves 18 to 21 open at the end.
+ */
+const CAP_STATS = makeStats({ damage: 500, maxLife: 1e6 });
+const capData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: TEST_WAVES.rules,
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      waveTimerSec: 2,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        enemyCap: 60,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1793,6 +1820,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'playerDefences',
     config: { stats: DEFENCE_STATS, rules: [], startWave: 18 },
     expected: ['aaa8ac053dc61595', '24d4554bfbb72122'],
+  },
+  {
+    name: 'enemyCap',
+    config: { stats: CAP_STATS, rules: [], startWave: 12 },
+    data: capData,
+    expected: ['424fdd97731eb9b8', 'edcf2e91fba84fbf'],
   },
 ];
 

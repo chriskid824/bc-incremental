@@ -538,6 +538,16 @@ export const COUNTER_IDS = [
    * ORB_MEMORY of them; each may be hit by that orb again before its cooldown ends.
    */
   'orbMemoryFull',
+  /**
+   * Wave enemies whose release a v3 run's enemy cap delayed, each counted once, at the first
+   * tick it waited (src/sim/systems/spawn.ts releaseEnemies).
+   */
+  'enemyCapDelayed',
+  /**
+   * Enemy-made spawns the enemy cap refused (spawnOrSkip, src/sim/systems/spawn.ts): split
+   * children, and from C7.4b, C7.6 and C7.7 summons, 增殖 children and onion bursts.
+   */
+  'enemySpawnsSkipped',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

@@ -28,6 +28,7 @@ export function startWave(ctx: RunContext, wave: number): void {
     wave,
     queue,
     released: 0,
+    delayed: 0,
     startTick: ctx.now,
     alive: 0,
     cleared: false,

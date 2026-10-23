@@ -89,6 +89,18 @@ describe('fingerprint cases', () => {
     expect(stats.scoped).toEqual(maskProbeMods());
   });
 
+  it('runs on tables without a v3 block, which the enemy cap never reaches (docs/v3 C7 design §2.3, OWN test 5)', () => {
+    // Every case's data has no cap, and a case of each profile and data set, from wave 25 with no
+    // rule, delays and skips nothing.
+    for (const c of cases) expect(c.data.waves.v3, c.id).toBeUndefined();
+    const sample = cases.filter((c) => /^(real|test)\/\w+\/none\/s1\/w25$/.test(c.id));
+    expect(sample).toHaveLength(12);
+    for (const c of sample) {
+      const { counters } = runCase(c).result;
+      expect([counters.enemyCapDelayed, counters.enemySpawnsSkipped], c.id).toEqual([0, 0]);
+    }
+  });
+
   it('runs a case to the same digest twice, and its line reads back', () => {
     const one = cases.find((c) => c.id === 'test/burn/pandemic/s2/w12');
     if (one === undefined) throw new Error('missing case');

@@ -809,6 +809,16 @@ describe('validateGameData: v3 enemies and waves (docs/v3 C7 design §1.2)', () 
       'waves.v3.treasure: every must be a positive integer (got 0)',
     ]);
   });
+
+  it('rejects an enemy cap below 1, which would hold every wave enemy back for good (C7.5), and takes 1', () => {
+    const capIssues = (enemyCap: number): string[] =>
+      v3IssuesAfter((_, v3) => {
+        v3.enemyCap = enemyCap;
+      });
+    expect(capIssues(0)).toEqual(['waves.v3: enemyCap must be a positive integer (got 0)']);
+    expect(capIssues(-1)).toEqual(['waves.v3: enemyCap must be a positive integer (got -1)']);
+    expect(capIssues(1)).toEqual([]);
+  });
 });
 
 describe('trigger validation', () => {

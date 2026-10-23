@@ -10,8 +10,8 @@
  * the peaks and where they were, the work done, the time against an in-process run of the bench's
  * normal scenario (tools/balance/bench.ts, timed first: its warm-up runs, then its runs; the only
  * reading of a character run's cost before C10, P2), a line per build with its µs a tick and its
- * ratio to normal's, the ten slowest builds, the fixed cases, the warnings, and each failure with
- * its repro line and the build's owned ids. Any failure exits non-zero. Writes nothing.
+ * ratio to normal's, the ten slowest builds, the fixed cases, and each failure with its repro
+ * line and the build's owned ids. Any failure exits non-zero. Writes nothing.
  *
  *   npm run fuzz:web -- [--fixture] [--builds N] [--ticks 3600] [--seed 1029] [--only <build>]
  *
@@ -28,7 +28,6 @@ import { loadContent } from '../../src/data/web';
 import type { Content } from '../../src/data/web';
 import { fixtureContent } from '../../src/data/web/testing';
 import {
-  ALIVE_WARNING,
   BUDGET_STREAK_LIMIT,
   FIXED_WEB_CASES,
   fuzzWebs,
@@ -55,7 +54,7 @@ import { formatTable } from '../balance/report';
 
 /** The start wave bench.ts times normal from (its DEFAULT_START_WAVE). */
 const NORMAL_START_WAVE = 30;
-/** Failures and warnings printed in full; the rest are counted. */
+/** Failures printed in full; the rest are counted. */
 const SHOWN = 20;
 const SLOWEST = 10;
 
@@ -154,8 +153,9 @@ export const BUILD_HEADER: readonly string[] = [
   '×normal',
 ];
 
+/** Each peak's line; {n} is the peak and {cap} the report's alive limit (aliveLimit). */
 const PEAK_LINES: readonly (readonly [keyof WebFuzzPeaks, string])[] = [
-  ['alive', `alive {n} of ALIVE_WARNING ${ALIVE_WARNING}`],
+  ['alive', 'alive {n} of the enemy cap {cap}'],
   ['summons', `summons {n} of SUMMON_CAP ${SUMMON_CAP}`],
   ['inFlight', `in flight {n} of PROJECTILE_CAP ${PROJECTILE_CAP}`],
   ['chainHits', `chain hits {n} of CHAIN_HIT_CAP ${CHAIN_HIT_CAP}`],
@@ -197,10 +197,11 @@ export function webFuzzLines(
     // No layout count: checkSummonTick has no layout check, only runSummonFuzz's own checks do.
     `failures: NaN/Infinity ${count('nonFinite')}, caps ${count('cap')}, threw ` +
       `${count('threw')}, hash mismatches ${count('hash')}, dropped ${count('dropped')}, budget ` +
-      `${count('budget')}, enemies ${count('enemies')} (a warning until C7, D31)`,
+      `${count('budget')}, enemies ${count('enemies')}`,
     `peaks: ${PEAK_LINES.map(([key, text]) => {
       const most = largest(all, (build) => build.peaks[key]);
-      return `${text.replace('{n}', String(report.peaks[key]))} (${where(most)})`;
+      const line = text.replace('{n}', String(report.peaks[key]));
+      return `${line.replace('{cap}', String(report.aliveLimit))} (${where(most)})`;
     }).join('; ')}`,
     `work: kills ${report.kills}, hits ${report.hits}, impacts ${report.impacts}; builds with ` +
       `no kill ${all.filter((build) => build.kills === 0).length}, with no hit ` +
@@ -234,13 +235,6 @@ export function webFuzzLines(
           )
           .join('; ')}`,
   ];
-  if (report.warnings.length > 0) {
-    lines.push('', `warnings: ${report.warnings.length}`);
-    for (const warning of report.warnings.slice(0, SHOWN)) {
-      lines.push(`WARN ${warning.text}`, `  repro: ${warning.repro}`);
-    }
-    if (report.warnings.length > SHOWN) lines.push(`… and ${report.warnings.length - SHOWN} more`);
-  }
   if (report.failures.length === 0) {
     lines.push('', `web fuzz, ${title}: passed`);
     return { ok: true, lines };

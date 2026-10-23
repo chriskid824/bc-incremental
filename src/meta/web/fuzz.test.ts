@@ -4,17 +4,19 @@
  * (F57); planted faults are found, each with its repro line (NaN hp, a summon cap breach, chain
  * hits past CHAIN_HIT_CAP, a throw, a non-deterministic rule or result, the end checks); a failing
  * run stops at its first failing tick and the next build runs, counted in "N runs stopped early";
- * more than 400 alive warns once a build, exactly 400 does not, and it never fails; a build's time
- * comes only from the caller's clock; --only reproduces a build of the full run; the draws are
- * §4.9's, from createRng(deriveSeed(seed, 'webFuzz:' + i)) in a fixed order, and sampleProgress
- * buys with them; a build that owns three fusion cores runs under the checks; FIXED_WEB_CASES is
- * empty until 熔核 has a center.
+ * more than 400 alive fails at that tick, exactly 400 does not, and a v3 table's runs are checked
+ * against its own enemyCap (D31; docs/v3 C7 design §2.3); a build's time comes only from the
+ * caller's clock; --only reproduces a build of the full run; the draws are §4.9's, from
+ * createRng(deriveSeed(seed, 'webFuzz:' + i)) in a fixed order, and sampleProgress buys with
+ * them; a build that owns three fusion cores runs under the checks; FIXED_WEB_CASES is empty until
+ * 熔核 has a center.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import { num } from '../../core/num';
 import { createRng, deriveSeed } from '../../core/rng';
 import { loadGameData } from '../../data';
+import type { GameData } from '../../data';
 import { coefRange } from '../../data/fusion/sensitivity';
 import { CHARACTER_IDS } from '../../data/sources';
 import { assembleWeb, loadContent } from '../../data/web';
@@ -23,8 +25,9 @@ import type { AssembledWeb, FusionKey } from '../../data/web/types';
 import type { TestModule } from '../../sim/rules';
 import type { RunContext } from '../../sim/systems/context';
 import { addEnemy } from '../../sim/systems/spawn';
+import { TEST_V3_WAVES } from '../../sim/testing';
 import {
-  ALIVE_WARNING,
+  ALIVE_LIMIT,
   FIXED_WEB_CASES,
   fuzzWebs,
   runWebFuzz,
@@ -205,29 +208,35 @@ describe('runWebFuzz (§4.9)', () => {
     expect(report.builds[2]?.peaks.budgetStreak).toBe(30);
   });
 
-  it('warns once a build above 400 alive and never fails on it, until C7 (D31, R7)', () => {
+  it('fails a build above 400 alive at that tick, stopping its run there (D31, F56; OWN test 7)', () => {
     const crowd = once(20, (ctx) => {
       const rec = ctx.current;
       if (rec === null) return false;
-      for (let k = 0; k <= ALIVE_WARNING; k++)
+      for (let k = 0; k <= ALIVE_LIMIT; k++)
         addEnemy(ctx, ctx.data.enemies.square, rec, 1, 0, 3000);
       return true;
     });
     const report = fuzz(3, 60, { modules: (draw) => (draw.index === 1 ? [crowd] : []) });
-    expect(report.failures).toEqual([]);
-    expect(report.warnings).toEqual([
+    const build = report.builds[1] as (typeof report.builds)[number];
+    expect(report.failures).toEqual([
       {
+        kind: 'enemies',
         text: expect.stringMatching(
-          /^fuzz build 1 \(character 'fire', scope 'demoA'\): tick 20: 4\d\d enemies alive, above 400 \(a failure once C7 exports ENEMY_CAP_ENFORCED; D31\)$/,
+          /^fuzz build 1 \(character 'fire', scope 'demoA'\): tick 20: 4\d\d enemies alive, past the cap 400$/,
         ) as string,
         repro: 'npm run fuzz:web -- --fixture --ticks 60 --only fire.demoA.1',
+        ids: build.ids,
       },
     ]);
-    expect(report.builds[1]?.peaks.alive).toBeGreaterThan(ALIVE_WARNING);
-    expect(report.peaks.alive).toBe(report.builds[1]?.peaks.alive);
+    // The run stops at the failing tick, without the end checks; the next build runs in full.
+    expect([build.ticks, build.stopped, build.runs]).toEqual([20, true, 1]);
+    expect(report.builds[2]?.stopped).toBe(false);
+    expect(report.stoppedEarly).toBe(1);
+    expect(build.peaks.alive).toBeGreaterThan(ALIVE_LIMIT);
+    expect(report.peaks.alive).toBe(build.peaks.alive);
   });
 
-  it('warns above 400 alive only: exactly 400 at a tick is no warning (R7)', () => {
+  it('fails above 400 alive only: exactly 400 after a tick is no failure (R7; OWN test 7)', () => {
     // At the run's last tick, after the emitters, the crowd is topped up far away to `alive` and
     // every enemy made too strong to die in what is left of the tick: the count after it.
     const crowd = (alive: number): TestModule =>
@@ -239,8 +248,8 @@ describe('runWebFuzz (§4.9)', () => {
         return true;
       });
     const planted: Readonly<Record<number, TestModule>> = {
-      1: crowd(ALIVE_WARNING),
-      2: crowd(ALIVE_WARNING + 1),
+      1: crowd(ALIVE_LIMIT),
+      2: crowd(ALIVE_LIMIT + 1),
     };
     const report = fuzz(3, 60, {
       modules: (draw) => {
@@ -249,10 +258,55 @@ describe('runWebFuzz (§4.9)', () => {
       },
     });
     expect(report.builds.map((line) => line.peaks.alive).slice(1)).toEqual([400, 401]);
-    expect(report.failures).toEqual([]);
-    expect(report.warnings.map((warning) => warning.text)).toEqual([
-      "fuzz build 2 (character 'fire', scope 'demoB'): tick 60: 401 enemies alive, above 400 " +
-        '(a failure once C7 exports ENEMY_CAP_ENFORCED; D31)',
+    expect(report.aliveLimit).toBe(ALIVE_LIMIT);
+    expect(report.failures.map(({ kind, text }) => [kind, text])).toEqual([
+      [
+        'enemies',
+        "fuzz build 2 (character 'fire', scope 'demoB'): tick 60: 401 enemies alive, past the cap 400",
+      ],
+    ]);
+  });
+
+  it("checks a v3 table's runs against its own enemyCap, not 400 (docs/v3 C7 design §2.3)", () => {
+    // The fixture's data with a v3 block of enemyCap 60 and no affix or treasure: the runs'
+    // releases stay within 60, so only a crowd added past the cap goes over it. At the last tick
+    // the crowd tops the living up to `alive`, too strong to die in what is left of the tick.
+    const capped: GameData = {
+      ...data,
+      waves: {
+        ...data.waves,
+        v3: {
+          ...TEST_V3_WAVES.v3,
+          enemyCap: 60,
+          affixes: [],
+          treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+        },
+      },
+    };
+    const living = (ctx: RunContext): number => ctx.enemies.filter((enemy) => enemy.alive).length;
+    const crowd = (alive: number): TestModule =>
+      once(60, (ctx) => {
+        const rec = ctx.current;
+        if (rec === null) return false;
+        while (living(ctx) < alive) addEnemy(ctx, ctx.data.enemies.square, rec, 1, 0, 3000);
+        for (const enemy of ctx.enemies) enemy.hp = num(1e200);
+        return true;
+      });
+    const planted: Readonly<Record<number, TestModule>> = { 1: crowd(60), 2: crowd(61) };
+    const report = fuzz(3, 60, {
+      data: capped,
+      modules: (draw) => {
+        const module = planted[draw.index];
+        return module === undefined ? [] : [module];
+      },
+    });
+    expect(report.aliveLimit).toBe(60);
+    expect(report.builds.map((line) => line.peaks.alive).slice(1)).toEqual([60, 61]);
+    expect(report.failures.map(({ kind, text }) => [kind, text])).toEqual([
+      [
+        'enemies',
+        "fuzz build 2 (character 'fire', scope 'demoB'): tick 60: 61 enemies alive, past the cap 60",
+      ],
     ]);
   });
 

@@ -22,6 +22,8 @@ import {
   placedEnemies,
   rngPositions,
   stationarySquares,
+  TEST_V3_WAVES,
+  v3TestData,
 } from '../testing';
 import type { PlacedEnemy } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, NO_INPUT } from '../types';
@@ -67,11 +69,12 @@ const toChildren = (share: number, extra: Partial<TriggerSpec> = {}): TriggerSpe
 
 function scene(
   triggers: readonly TriggerSpec[],
-  options: { rules?: readonly RuleSpec[]; placed?: readonly PlacedEnemy[] } = {},
+  options: { rules?: readonly RuleSpec[]; placed?: readonly PlacedEnemy[]; data?: GameData } = {},
 ): RunContext {
   return placedEnemies(options.placed ?? PLACED, {
     stats: makeStats(NO_ROLLS, [], centerTriggers(triggers)),
     rules: options.rules ?? [],
+    ...(options.data === undefined ? {} : { data: options.data }),
   });
 }
 
@@ -203,6 +206,48 @@ describe('toSplitChildren', () => {
     expect(ringsOf(ctx, enemy(ctx, 2)).map((ring) => ring.stacks)).toEqual([10, 3]);
     expect(ringsOf(ctx, enemy(ctx, 3))).toEqual([]);
     expect(ctx.sys.split.passedCount).toBe(0);
+  });
+
+  it('gives the children of a v3 run their share too, and none to a child the enemy cap skipped (C7.5)', () => {
+    // A v3 table of M1's types whose waves spawn nothing (TEST_V3_WAVES.v3 spread, as
+    // v3TestData's merge is shallow): the three placed enemies alone are alive.
+    const v3 = (enemyCap: number): GameData =>
+      v3TestData({
+        waves: {
+          rules: (['triangle', 'square', 'pentagon'] as const).map((type) => ({
+            enemy: type,
+            fromWave: 1,
+            base: 0,
+            perWave: 0,
+            maxCount: 0,
+          })),
+          eliteEvery: 1000,
+          bossEvery: 1000,
+          spawnDurationSec: 0,
+          waveTimerSec: 1000,
+          v3: {
+            ...TEST_V3_WAVES.v3,
+            enemyCap,
+            affixes: [],
+            treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+          },
+        },
+      });
+    // Under a cap of 4 the pentagon's death leaves 2 alive: two shards spawn, the third is skipped.
+    for (const [enemyCap, spawned] of [
+      [400, 3],
+      [4, 2],
+    ] as const) {
+      const ctx = scene([toChildren(0.5)], { data: v3(enemyCap) });
+      poison(ctx, enemy(ctx, 1));
+      toFirstStep(ctx);
+      const before = killPentagon(ctx);
+      const kids = children(ctx);
+      expect(kids.map((kid) => kid.type)).toEqual(Array(spawned).fill('shard'));
+      for (const kid of kids) expectShares(ctx, kid, before, [0.5]);
+      expect(ctx.counters.enemySpawnsSkipped).toBe(3 - spawned);
+      expect(ctx.sys.split.passedCount).toBe(0);
+    }
   });
 
   it.each([

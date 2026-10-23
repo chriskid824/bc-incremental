@@ -8,8 +8,9 @@
  * start wave 1, 15 or 30 within the scope's cap; sampleProgress makes the purchases (D25).
  *
  * After tick 0 and every tick: checkSummonTick against SUMMON_CAP, which only a test module
- * raises (finite hp and positions, summons, shots and chain hits within their caps), and the alive
- * count, which warns above 400 until C7 exports ENEMY_CAP_ENFORCED (D31; the lead's ruling R7).
+ * raises (finite hp and positions, summons, shots and chain hits within their caps). After every
+ * tick: the alive count, which ENEMY_CAP_ENFORCED makes a failure above the data's enemy cap
+ * (aliveLimit; D31).
  * At the end, effectsDropped 0 and effectBudgetStreakMax below 30 (F8). Every tenth build runs
  * twice and the two runs' hashes of every tick's events and of the result must match. A throw is
  * a failure at its tick. A run stops at its first failing tick (F56) and the next build runs; the
@@ -27,7 +28,7 @@ import type { GameData } from '../../data/types';
 import { assembleWeb, scopeHolds } from '../../data/web/assemble';
 import { FULL_SCOPE, SCOPES } from '../../data/web/scope';
 import type { AssembledWeb, Content, FusionKey, WebScope } from '../../data/web/types';
-import { SUMMON_CAP } from '../../sim/caps';
+import { ENEMY_CAP_ENFORCED, SUMMON_CAP } from '../../sim/caps';
 import type { TestModule } from '../../sim/rules';
 import { createSimulation } from '../../sim/simulation';
 import type { RunContext } from '../../sim/systems/context';
@@ -49,8 +50,11 @@ export const WEB_FUZZ_FIXTURE_BUILDS = 100;
 export const WEB_FUZZ_TICKS = 3600;
 /** The best waves (the reveal) and the start waves a build draws from. */
 export const WEB_FUZZ_WAVES = [1, 15, 30] as const;
-/** Alive enemies above this warn (D31, F47): C7's cap, not enforced before it. */
-export const ALIVE_WARNING = 400;
+/**
+ * Alive enemies above this fail a run of a table with no v3 block, which holds no cap of its own
+ * (D31, F47; docs/v3/implementation-plan-v3.md §3's 「敵人不超過 400」).
+ */
+export const ALIVE_LIMIT = 400;
 /** effectBudgetStreakMax must stay below this: half a second of carried-over effects (F8). */
 export const BUDGET_STREAK_LIMIT = 30;
 /** Every this-many-th build, build 0 first, runs twice and compares the runs' hashes. */
@@ -59,6 +63,12 @@ const PURCHASES = { min: 10, max: 140 } as const;
 const THIRD_SLOT_SHARE = 0.25;
 const PRESTIGE_SHARE = 0.3;
 const COEF_ENDS_SHARE = 1 / 3;
+
+/**
+ * The most enemies a run of `data` may have alive after a tick: the v3 block's enemyCap, which
+ * the run holds (src/sim/systems/spawn.ts), and ALIVE_LIMIT for a table without one.
+ */
+export const aliveLimit = (data: GameData): number => data.waves.v3?.enemyCap ?? ALIVE_LIMIT;
 
 export interface WebFuzzOptions {
   readonly content: Content;
@@ -87,12 +97,6 @@ export interface WebFuzzFailure {
   readonly repro: string;
   /** The build's owned nodes. */
   readonly ids: readonly string[];
-}
-
-/** More than ALIVE_WARNING enemies alive at once in a build: a warning until C7 (D31). */
-export interface WebFuzzWarning {
-  readonly text: string;
-  readonly repro: string;
 }
 
 /**
@@ -181,7 +185,8 @@ export interface WebFuzzReport {
   /** Runs that stopped at a failing tick or a throw. */
   readonly stoppedEarly: number;
   readonly failures: readonly WebFuzzFailure[];
-  readonly warnings: readonly WebFuzzWarning[];
+  /** The alive limit its runs were checked against (aliveLimit). */
+  readonly aliveLimit: number;
   readonly peaks: WebFuzzPeaks;
   readonly kills: number;
   readonly hits: number;
@@ -296,8 +301,6 @@ interface RunOutcome {
   readonly failures: readonly { readonly kind: WebFuzzFailure['kind']; readonly text: string }[];
   /** Stopped at a failing tick or a throw, not at its end (F56). */
   readonly stopped: boolean;
-  /** The first tick above ALIVE_WARNING enemies alive, and how many; null for none. */
-  readonly crowded: { readonly tick: number; readonly alive: number } | null;
   readonly hash: string;
   readonly ticks: number;
   readonly highestWaveCleared: number;
@@ -340,6 +343,10 @@ function runOnce(
 ): RunOutcome {
   const failures: SummonFuzzFailure[] = [];
   const ended: { kind: WebFuzzFailure['kind']; text: string }[] = [];
+  // More enemies alive after a tick than the limit: a failure at that tick, which stops the run
+  // as checkSummonTick's do (D31, F56).
+  const limit = aliveLimit(data);
+  let crowd: string | null = null;
   const hash = createRunHash();
   const seen: { ctx: RunContext | null } = { ctx: null };
   const watch: TestModule = (b) =>
@@ -348,7 +355,6 @@ function runOnce(
     });
   const run = { stepped: 0, created: false, cleared: 0, alive: 0, summons: 0, inFlight: 0 };
   const work = { kills: 0, hits: 0, impacts: 0 };
-  let crowded: RunOutcome['crowded'] = null;
   let counters: Readonly<Record<CounterId, number>> | null = null;
   try {
     const { web, progress, draw } = planned;
@@ -368,7 +374,7 @@ function runOnce(
     };
     observe();
     checkSummonTick(state, SUMMON_CAP, null, failures);
-    while (failures.length === 0 && !state.finished) {
+    while (failures.length === 0 && crowd === null && !state.finished) {
       const events = sim.step(NO_INPUT);
       run.stepped = state.tick;
       if (planned.hashed) hash.update(JSON.stringify(events));
@@ -379,10 +385,12 @@ function runOnce(
       }
       observe();
       const alive = state.enemies.length;
-      if (alive > ALIVE_WARNING && crowded === null) crowded = { tick: state.tick, alive };
+      if (ENEMY_CAP_ENFORCED && alive > limit) {
+        crowd = `tick ${state.tick}: ${alive} enemies alive, past the cap ${limit}`;
+      }
       checkSummonTick(state, SUMMON_CAP, seen.ctx?.counters ?? null, failures);
     }
-    if (failures.length === 0) {
+    if (failures.length === 0 && crowd === null) {
       const result = sim.result();
       if (planned.hashed) hash.update(JSON.stringify(result));
       counters = result.counters;
@@ -404,10 +412,10 @@ function runOnce(
     failures.push({ kind: 'threw', text: `tick ${tick}: threw ${text}` });
   }
   counters ??= seen.ctx?.counters ?? null;
+  const crowded = crowd === null ? [] : [{ kind: 'enemies' as const, text: crowd }];
   return {
-    failures: [...failures, ...ended],
-    stopped: failures.length > 0,
-    crowded,
+    failures: [...crowded, ...failures, ...ended],
+    stopped: failures.length > 0 || crowd !== null,
     hash: hash.digest(),
     ticks: run.stepped,
     highestWaveCleared: run.cleared,
@@ -429,13 +437,12 @@ interface Ran {
   readonly stopped: number;
 }
 
-/** The fuzz's checks over `planned`'s runs, as a line of the report, its failures and warning. */
+/** The fuzz's checks over `planned`'s runs, as a line of the report and its failures. */
 function runPlanned(
   planned: Planned,
   options: WebFuzzOptions,
   repro: string,
   failures: WebFuzzFailure[],
-  warnings: WebFuzzWarning[],
 ): Ran {
   const { draw } = planned;
   const { clock } = options;
@@ -471,15 +478,6 @@ function runPlanned(
       text: `${subject}: runs differ (${first.hash}, ${second.hash})`,
       repro,
       ids: draw.ids,
-    });
-  }
-  const crowded = runs.find((run) => run.crowded !== null)?.crowded ?? null;
-  if (crowded !== null) {
-    warnings.push({
-      text:
-        `${subject}: tick ${crowded.tick}: ${crowded.alive} enemies alive, above ` +
-        `${ALIVE_WARNING} (a failure once C7 exports ENEMY_CAP_ENFORCED; D31)`,
-      repro,
     });
   }
   const sum = (pick: (run: RunOutcome) => number): number =>
@@ -545,7 +543,6 @@ export function runWebFuzz(options: WebFuzzOptions): WebFuzzReport {
   const { ticks, content } = options;
   const webs = fuzzWebs(content);
   const failures: WebFuzzFailure[] = [];
-  const warnings: WebFuzzWarning[] = [];
   const cases = options.cases ?? [];
   const onlyCase = cases.find((at) => at.name === options.only);
   const plans: Planned[] = [];
@@ -562,7 +559,7 @@ export function runWebFuzz(options: WebFuzzOptions): WebFuzzReport {
     plans.push(drawBuild(content, webs[index % webs.length] as AssembledWeb, seed, index));
   }
   const run = (planned: Planned): Ran =>
-    runPlanned(planned, options, reproOf(options, seed, planned.draw.name), failures, warnings);
+    runPlanned(planned, options, reproOf(options, seed, planned.draw.name), failures);
   const ran = plans.map(run);
   const casesRan = casePlans.map(run);
   const all = [...ran, ...casesRan];
@@ -581,7 +578,7 @@ export function runWebFuzz(options: WebFuzzOptions): WebFuzzReport {
     ticks: sum((line) => line.ticks),
     stoppedEarly: all.reduce((total, { stopped }) => total + stopped, 0),
     failures,
-    warnings,
+    aliveLimit: aliveLimit(options.data),
     peaks: all.reduce((peaks, { line }) => maxPeaks(peaks, line.peaks), NO_PEAKS),
     kills: sum((line) => line.kills),
     hits: sum((line) => line.hits),

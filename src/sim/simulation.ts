@@ -148,7 +148,7 @@ export function createSimulation(
    * 1. input: ignored; the only control mode is 'auto'.
    * 2. spawn: start the due wave (waveControl's wave start, waves.ts) with its waveStart
    *    triggers, then release queued enemies (spawn.ts), so a new wave's first enemy appears on
-   *    its start tick.
+   *    its start tick; in a v3 run only while its enemy cap has room, oldest wave first.
    * 3. movement: every enemy walks towards the player (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
    * 5. contact: enemies that reached the player hit it, through its defences (damage taken,

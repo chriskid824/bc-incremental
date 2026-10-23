@@ -132,10 +132,10 @@ describe("the report's failures and peaks lines (R11)", () => {
     const { lines } = webFuzzLines('fixture', { ...report, failures }, 1, 1);
     expect(lines).toContain(
       'failures: NaN/Infinity 1, caps 2, threw 3, hash mismatches 4, dropped 5, budget 6, ' +
-        'enemies 7 (a warning until C7, D31)',
+        'enemies 7',
     );
     expect(lines.find((line) => line.startsWith('peaks: '))).toMatch(
-      /^peaks: alive \d+ of ALIVE_WARNING 400 \(fire\.(full|demoA)\.[01]\); summons \d+ of SUMMON_CAP 24 \(\S+\); in flight \d+ of PROJECTILE_CAP 512 \(\S+\); chain hits \d+ of CHAIN_HIT_CAP 32 \(\S+\); effect queue \d+ \(\S+\); budget streak \d+, below 30 \(\S+\)$/,
+      /^peaks: alive \d+ of the enemy cap 400 \(fire\.(full|demoA)\.[01]\); summons \d+ of SUMMON_CAP 24 \(\S+\); in flight \d+ of PROJECTILE_CAP 512 \(\S+\); chain hits \d+ of CHAIN_HIT_CAP 32 \(\S+\); effect queue \d+ \(\S+\); budget streak \d+, below 30 \(\S+\)$/,
     );
   });
 });

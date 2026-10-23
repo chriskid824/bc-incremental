@@ -1,7 +1,9 @@
 /**
  * Spawn system (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2.1): releases each
  * open wave's queued enemies over spawnDurationSec, and adds split children when a splitting
- * enemy dies.
+ * enemy dies. A v3 run holds at most its enemy cap alive (docs/v3 C7 design §2.3): wave enemies
+ * past it wait, oldest wave first, and enemy-made spawns past it are skipped; an M1 run's cap is
+ * Infinity.
  */
 
 import type { Num } from '../../core/num';
@@ -18,19 +20,49 @@ const TAU = Math.PI * 2;
 const HALF_WIDTH = ARENA_WIDTH / 2;
 const HALF_HEIGHT = ARENA_HEIGHT / 2;
 
-/** Releases each open wave's queue evenly over spawnDurationSec, the first enemy at once. */
+/** How many of `rec`'s queue are due by `now`: spread evenly over spawnTicks, the first at once. */
+function dueOf(rec: WaveRecord, now: number, spawnTicks: number): number {
+  const total = rec.queue.length;
+  return spawnTicks > 0
+    ? Math.min(total, Math.floor(((now - rec.startTick) * total) / spawnTicks) + 1)
+    : total;
+}
+
+/**
+ * The enemies alive in the run: each open wave's `alive`, which addEnemy raises and removeEnemy
+ * lowers, so it is exact at any point of a tick (an open record holds every live enemy's wave).
+ */
+export function aliveCount(ctx: RunContext): number {
+  const open = ctx.open;
+  let alive = 0;
+  for (let w = 0; w < open.length; w++) alive += (open[w] as WaveRecord).alive;
+  return alive;
+}
+
+/**
+ * Releases each open wave's queue evenly over spawnDurationSec, the first enemy at once, while
+ * the run's enemy cap has room: the room is the cap less the enemies alive, taken once a tick, so
+ * the oldest wave's due enemies go first, in queue order. Where the room runs out, the due
+ * enemies of that wave and of every later one wait for a later tick and draw their spawn angle
+ * when they are released (docs/v3 C7 design §2.3).
+ */
 export function releaseEnemies(ctx: RunContext): void {
   const open = ctx.open;
   const now = ctx.now;
   const spawnTicks = ctx.spawnTicks;
+  const cap = ctx.sys.enemyAi.cap;
+  // An M1 run has no cap: its room never runs out.
+  let room = cap === Infinity ? Infinity : cap - aliveCount(ctx);
   for (let w = 0; w < open.length; w++) {
     const rec = open[w] as WaveRecord;
-    const total = rec.queue.length;
-    if (rec.released >= total) continue;
-    const elapsed = now - rec.startTick;
-    const due =
-      spawnTicks > 0 ? Math.min(total, Math.floor((elapsed * total) / spawnTicks) + 1) : total;
+    if (rec.released >= rec.queue.length) continue;
+    const due = dueOf(rec, now, spawnTicks);
     while (rec.released < due) {
+      if (room <= 0) {
+        delayFrom(ctx, w, now, spawnTicks);
+        return;
+      }
+      room--;
       const def = rec.queue[rec.released] as EnemyDef;
       rec.released++;
       // Random direction from the center, placed just outside the arena rectangle.
@@ -44,6 +76,24 @@ export function releaseEnemies(ctx: RunContext): void {
       addEnemy(ctx, def, rec, ux, uy, dist);
     }
   }
+}
+
+/**
+ * The cap holds back the due enemies of open wave `from` and of every later one: each counts once
+ * in enemyCapDelayed, at the first tick it waits, however long it waits (`delayed` is where the
+ * counted ones end).
+ */
+function delayFrom(ctx: RunContext, from: number, now: number, spawnTicks: number): void {
+  const open = ctx.open;
+  let delayed = 0;
+  for (let w = from; w < open.length; w++) {
+    const rec = open[w] as WaveRecord;
+    if (rec.released >= rec.queue.length) continue;
+    const due = dueOf(rec, now, spawnTicks);
+    delayed += due - Math.max(rec.released, rec.delayed);
+    rec.delayed = due;
+  }
+  ctx.counters.enemyCapDelayed += delayed;
 }
 
 /**
@@ -138,10 +188,35 @@ export function addEnemy(
 }
 
 /**
+ * Adds an enemy-made spawn (a split child) of `def` as addEnemy does, unless the run's enemy cap
+ * is reached: then it adds nothing, counts it in enemySpawnsSkipped and returns false. Its caller
+ * has drawn the spawn's angle already, so no stream's position depends on how full the field is
+ * (docs/v3 C7 design §2.3; the lead's ruling L4).
+ */
+export function spawnOrSkip(
+  ctx: RunContext,
+  def: EnemyDef,
+  rec: WaveRecord,
+  ux: number,
+  uy: number,
+  dist: number,
+  origin?: SpawnOrigin,
+): boolean {
+  if (aliveCount(ctx) >= ctx.sys.enemyAi.cap) {
+    ctx.counters.enemySpawnsSkipped++;
+    return false;
+  }
+  addEnemy(ctx, def, rec, ux, uy, dist, origin);
+  return true;
+}
+
+/**
  * Children appear around the parent and belong to its wave. Their angles come from their
- * own stream: kills depend on combat, and must not shift later waves' spawns. Returns where the
- * children start in ctx.enemies: they are `ctx.enemies[start ..]` right after the call, an empty
- * range for an enemy that does not split (kill step 2, src/sim/systems/death.ts).
+ * own stream: kills depend on combat, and must not shift later waves' spawns. In a v3 run each
+ * child draws its angle, then goes through spawnOrSkip, so a child past the enemy cap is skipped.
+ * Returns where the children start in ctx.enemies: they are `ctx.enemies[start ..]` right after
+ * the call, an empty range for an enemy that does not split or whose children were all skipped
+ * (kill step 2, src/sim/systems/death.ts).
  */
 export function split(ctx: RunContext, parent: Enemy): number {
   const start = ctx.enemies.length;
@@ -149,13 +224,24 @@ export function split(ctx: RunContext, parent: Enemy): number {
   if (splitInto === undefined) return start;
   const def = ctx.data.enemies[splitInto.enemy];
   const player = ctx.player;
+  if (ctx.sys.enemyAi.cap === Infinity) {
+    for (let i = 0; i < splitInto.count; i++) {
+      const angle = ctx.splitRng.range(0, TAU);
+      const dx = parent.x + Math.cos(angle) * parent.radius - player.x;
+      const dy = parent.y + Math.sin(angle) * parent.radius - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 0) addEnemy(ctx, def, parent.rec, dx / dist, dy / dist, dist);
+      else addEnemy(ctx, def, parent.rec, 1, 0, 0);
+    }
+    return start;
+  }
   for (let i = 0; i < splitInto.count; i++) {
     const angle = ctx.splitRng.range(0, TAU);
     const dx = parent.x + Math.cos(angle) * parent.radius - player.x;
     const dy = parent.y + Math.sin(angle) * parent.radius - player.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > 0) addEnemy(ctx, def, parent.rec, dx / dist, dy / dist, dist);
-    else addEnemy(ctx, def, parent.rec, 1, 0, 0);
+    if (dist > 0) spawnOrSkip(ctx, def, parent.rec, dx / dist, dy / dist, dist);
+    else spawnOrSkip(ctx, def, parent.rec, 1, 0, 0);
   }
   return start;
 }

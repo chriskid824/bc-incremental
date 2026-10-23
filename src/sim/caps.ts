@@ -84,3 +84,10 @@ export const DRONE_COOLDOWN_MAX = 90;
  * before its cooldown ends.
  */
 export const ORB_MEMORY = 64;
+/**
+ * The enemy cap is enforced (docs/v3 C7 design §1.8; D31): a v3 run holds at most its data's
+ * enemyCap alive (src/sim/systems/spawn.ts), so the web fuzz fails a run that has more alive
+ * after a tick (src/meta/web/fuzz.ts). It refuses nothing itself: the cap's counters are
+ * enemyCapDelayed and enemySpawnsSkipped.
+ */
+export const ENEMY_CAP_ENFORCED = true;
