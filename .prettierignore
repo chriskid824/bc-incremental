@@ -1,4 +1,5 @@
 dist
+dist-steam
 out
 coverage
 package-lock.json

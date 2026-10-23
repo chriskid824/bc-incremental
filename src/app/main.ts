@@ -18,9 +18,10 @@ import {
   nodeRank,
   statBlockFor,
 } from '../meta';
+import { createPlatform, openKeyValueStore } from '../platform';
+import type { AnalyticsPolicy } from '../platform';
 import { FirestoreSink, PlaytestAnalytics } from '../platform/analytics';
-import type { Analytics, KeyValueStore } from '../platform/analytics';
-import { LocalSaveStorage, MemorySaveStorage } from '../platform/storage';
+import type { Analytics } from '../platform/analytics';
 import type { SaveStorage } from '../platform/storage';
 import { loadSave, serializeSave } from '../save';
 import type { Profile } from '../save';
@@ -81,18 +82,6 @@ const REAIM_DELAY_MS = 600;
 /** Playtest events are batched to Firestore at least this often (docs/ARCHITECTURE.md §9). */
 const ANALYTICS_FLUSH_MS = 5 * 60_000;
 
-/** The web playtest sends anonymous events unless the player turns it off (§9). */
-const SEND_BY_DEFAULT = true;
-
-/** Save slots under `prefix` (src/platform/storage.ts), or the player's own when omitted. */
-function openStorage(prefix?: string): SaveStorage {
-  try {
-    return new LocalSaveStorage(window.localStorage, prefix);
-  } catch {
-    return new MemorySaveStorage();
-  }
-}
-
 /** A random id; randomUUID needs a secure context, which a plain-http LAN address is not. */
 function newId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -100,21 +89,13 @@ function newId(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function openKeyValueStore(): KeyValueStore {
-  try {
-    return window.localStorage;
-  } catch {
-    const map = new Map<string, string>();
-    return { getItem: (key) => map.get(key) ?? null, setItem: (key, value) => map.set(key, value) };
-  }
-}
-
 /**
- * Playtest analytics. The dev server and `?hive` never send (playtestFirestore); every build
- * keeps the local log for the export fallback.
+ * Playtest analytics under the platform's policy (src/platform): a sink only where the build may
+ * send, sending by default only where its policy says so. The dev server and `?hive` never send
+ * (playtestFirestore); every build keeps the local log for the export fallback.
  */
-function openAnalytics(locale: Locale, hive: boolean): Analytics {
-  const firestore = playtestFirestore(FIREBASE, import.meta.env.DEV, hive);
+function openAnalytics(locale: Locale, hive: boolean, policy: AnalyticsPolicy): Analytics {
+  const firestore = policy.cloud ? playtestFirestore(FIREBASE, import.meta.env.DEV, hive) : null;
   const sink =
     firestore !== null ? new FirestoreSink(firestore, (url, init) => fetch(url, init)) : null;
   return new PlaytestAnalytics({
@@ -125,7 +106,7 @@ function openAnalytics(locale: Locale, hive: boolean): Analytics {
     newId,
     build: __BUILD_ID__,
     locale,
-    defaultSending: SEND_BY_DEFAULT,
+    defaultSending: policy.sendByDefault,
   });
 }
 
@@ -165,13 +146,18 @@ async function main(root: HTMLElement, locale: Locale, flags: DevFlags): Promise
   root.appendChild(app.canvas);
 
   const data = loadGameData();
-  const storage = openStorage(flags.hive ? HIVE_SAVE_PREFIX : undefined);
+  // The web build's or the Steam build's, chosen when the build was made (src/platform/index.ts).
+  const platform = createPlatform({
+    ...(flags.hive ? { savePrefix: HIVE_SAVE_PREFIX } : {}),
+    analytics: (policy) => openAnalytics(locale, flags.hive, policy),
+  });
+  const storage = platform.storage;
   // `?hive` opens on the committed preset until its own slots hold a save (src/app/devFlags.ts).
   if (flags.hive) seedEmptySlots(storage, JSON.stringify(HIVE_PRESET));
   const profile = loadProfile(storage, data);
   const meta = profile.meta;
   raiseShards(meta, flags.shards);
-  const analytics = openAnalytics(locale, flags.hive);
+  const analytics = platform.analytics;
   analytics.track(
     'session_start',
     sessionStartFields(meta, data, profile.playSeconds, {
