@@ -27,6 +27,7 @@ import {
   TARGET_KINDS,
   TARGET_ORDERS,
   TARGET_PICKS,
+  TARGET_STATES,
   TRIGGER_EVENTS,
 } from './triggers';
 import type {
@@ -148,6 +149,8 @@ export const TargetConditionSchema = exact<TargetCondition>()(
       })
       .readonly(),
     z.strictObject({ inZone: SourceSelectorSchema }).readonly(),
+    z.strictObject({ targetState: z.enum(TARGET_STATES) }).readonly(),
+    z.strictObject({ targetFrostAtLeast: finite }).readonly(),
   ]),
 );
 

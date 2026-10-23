@@ -348,6 +348,27 @@ describe('ConditionSchema', () => {
   ])('rejects %o', (condition) => {
     expect(ConditionSchema.safeParse(condition).success).toBe(false);
   });
+
+  it.each([
+    { targetState: 'dashing' },
+    { targetState: 'stopped' },
+    // Validation keeps targetFrostAtLeast in (0, 1].
+    { targetFrostAtLeast: 0.3 },
+    { targetFrostAtLeast: 1 },
+  ])('accepts the enemy state condition %o (docs/v3 C7 design §1.6)', (condition) => {
+    expect(ConditionSchema.parse(condition)).toEqual(condition);
+  });
+
+  it.each([
+    { targetState: 'charging' },
+    { targetState: 'orbiting' },
+    { targetState: 'dashing', targetFrostAtLeast: 0.3 },
+    { targetFrostAtLeast: '0.3' },
+    { targetFrostAtLeast: Infinity },
+    { targetFrostAtLeast: { ailment: 'frost' } },
+  ])('rejects the enemy state condition %o', (condition) => {
+    expect(ConditionSchema.safeParse(condition).success).toBe(false);
+  });
 });
 
 describe('EffectSpecSchema', () => {

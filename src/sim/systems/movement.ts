@@ -5,7 +5,9 @@
  * (enemySlow in src/sim/ailments/frost.ts: nothing while frozen; frost, a global slow or a
  * zone's). Once a bleed has been applied in the run (RunContext.bleedApplied), a bleeding enemy
  * that moves counts the tick for its bleed (src/sim/ailments/bleed.ts), so a frozen one bleeds
- * as if standing still.
+ * as if standing still. The enemy AI step (src/sim/systems/enemyAi.ts) sets a v3 behaviour's
+ * step before this stage: 0 for an enemy that stands, a dash's, or below 0 for a fleeing
+ * treasure, which walks out and counts its bleed too.
  */
 
 import { countBleedMove } from '../ailments/bleed';
@@ -55,6 +57,6 @@ function moveSlowedOrBleeding(ctx: RunContext): void {
     enemy.dist = dist > 0 ? dist : 0;
     enemy.x = px + enemy.ux * enemy.dist;
     enemy.y = py + enemy.uy * enemy.dist;
-    if (enemy.bleedUntil !== 0 && enemy.dist < before) countBleedMove(enemy, now);
+    if (enemy.bleedUntil !== 0 && enemy.dist !== before) countBleedMove(enemy, now);
   }
 }

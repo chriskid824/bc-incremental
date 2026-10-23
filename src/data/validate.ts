@@ -724,10 +724,19 @@ function ruleIssues(rule: RuleSpec): string[] {
 
 /**
  * Ranges of a modifier's conditions and scaling (src/data/triggers.ts); the simulation relies on
- * them.
+ * them. An enemyRegen modifier carries no tags, notTags or scope: the simulation reads it on the
+ * untagged center row (src/sim/systems/enemyAi.ts), which none of them would select as written.
  */
 function modifierIssues(mod: Modifier): string[] {
   const issues: string[] = [];
+  if (
+    mod.stat === 'enemyRegen' &&
+    ((mod.tags ?? []).length > 0 || (mod.notTags ?? []).length > 0 || mod.scope !== undefined)
+  ) {
+    issues.push(
+      'enemyRegen takes no tags, notTags or scope: it is read on the untagged center row',
+    );
+  }
   (mod.when ?? []).forEach((condition, i) => {
     for (const problem of conditionIssues(condition)) issues.push(`when[${i}] ${problem}`);
   });
@@ -771,6 +780,12 @@ function conditionIssues(condition: Condition): string[] {
     !(condition.targetHpBelow > 0 && condition.targetHpBelow <= 1)
   ) {
     issues.push(`targetHpBelow must be in (0, 1] (got ${condition.targetHpBelow})`);
+  }
+  if (
+    'targetFrostAtLeast' in condition &&
+    !(condition.targetFrostAtLeast > 0 && condition.targetFrostAtLeast <= 1)
+  ) {
+    issues.push(`targetFrostAtLeast must be in (0, 1] (got ${condition.targetFrostAtLeast})`);
   }
   if ('stacksAtLeast' in condition) {
     const { ailment, stacks } = condition.stacksAtLeast;

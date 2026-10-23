@@ -120,6 +120,16 @@ export const STAT_IDS = [
    * full still applies that ailment if it rolled it (src/sim/combat/defend.ts blockedHit).
    */
   'ailmentOnBlock',
+  /**
+   * Multiplier on an enemy's regeneration, read on the untagged center row against the
+   * regenerating enemy, so its conditions read that enemy (src/sim/systems/enemyAi.ts). Its
+   * modifiers carry no tags, notTags or scope.
+   */
+  'enemyRegen',
+  /** Multiplier on the drops of tough and boss kills, e.g. 2 = double. */
+  'toughDropMult',
+  /** Multiplier on the treasure schedule's rate (src/sim/systems/enemyAi.ts treasuresDue). */
+  'treasureRate',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -173,12 +183,17 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   ignoreShield: 0,
   ignoreArmour: 0,
   ailmentOnBlock: 0,
+  enemyRegen: 1,
+  toughDropMult: 1,
+  treasureRate: 1,
 };
 
 /**
  * Stats whose modifiers may carry tags, notTags, a scope, conditions and a scaling: their value
  * depends on the damage instance, so the simulation reads them from ModTable rows keyed by the
  * instance's tags and source (src/sim/build/modTable.ts). A row holds them in this order.
+ * enemyRegen's modifiers carry conditions and scalings only: it is read on the untagged center
+ * row (src/data/validate.ts).
  */
 export const SCOPED_STATS = [
   'damage',
@@ -197,6 +212,7 @@ export const SCOPED_STATS = [
   'ignoreShield',
   'ignoreArmour',
   'ailmentOnBlock',
+  'enemyRegen',
 ] as const satisfies readonly StatId[];
 export type ScopedStat = (typeof SCOPED_STATS)[number];
 

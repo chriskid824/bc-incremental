@@ -6,13 +6,14 @@ import type { EnemyDef, EnemyId, GameData } from '../../data/types';
 import { createSimulation } from '../simulation';
 import {
   makeConfig,
+  makeStats,
   makeTestData,
   placedEnemies,
   stressData,
   TEST_ENEMIES,
   v3TestData,
 } from '../testing';
-import { NO_INPUT, PLAYER_RADIUS } from '../types';
+import { DT, NO_INPUT, PLAYER_RADIUS } from '../types';
 import type { EnemyState } from '../types';
 import { createRunContext } from './context';
 import type { Enemy, RunContext, WaveRecord } from './context';
@@ -26,16 +27,23 @@ import {
   createEnemyV3,
   SHIELDED,
 } from './enemyRecord';
-import type { SpawnOrigin } from './enemyRecord';
+import type { EnemyV3, SpawnOrigin } from './enemyRecord';
 import { addEnemy } from './spawn';
 
-/** Every enemy a run of `data` from `startWave` has had by `ticks`, by id. */
+/**
+ * Every enemy a run of `data` from `startWave` has had by `ticks`, by id, its record as at the
+ * end of its spawn tick, before the enemy AI step changes a dasher's or a treasure's
+ * (src/sim/systems/enemyAi.ts): every spawn is further out than a charge or an orbit starts.
+ */
 function enemiesOf(data: GameData, startWave: number, ticks: number): EnemyState[] {
   const sim = createSimulation(makeConfig({ startWave }), data);
   const seen = new Map<number, EnemyState>();
   for (let t = 0; t < ticks && !sim.state.finished; t++) {
     sim.step(NO_INPUT);
-    for (const enemy of sim.state.enemies) seen.set(enemy.id, enemy);
+    for (const enemy of sim.state.enemies) {
+      if (seen.has(enemy.id)) continue;
+      seen.set(enemy.id, { ...enemy, v3: enemy.v3 === null ? null : { ...enemy.v3 } });
+    }
   }
   return [...seen.values()];
 }
@@ -62,7 +70,7 @@ const ORIGIN: SpawnOrigin = {
 describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
   it('gives each behaviour its AI kind, and a plain walker, a shield, regeneration and layers none', () => {
     const ai = Object.fromEntries(
-      Object.values(TEST_ENEMIES).map((def) => [def.id, createEnemyV3(def, undefined).ai]),
+      Object.values(TEST_ENEMIES).map((def) => [def.id, createEnemyV3(def, undefined, 1).ai]),
     );
     expect(ai).toEqual({
       triangle: AI_NONE,
@@ -84,87 +92,155 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
 
   it('holds `extra` from the origin, and true for the treasure whatever spawns it', () => {
     const { square, treasure } = TEST_ENEMIES;
-    expect(createEnemyV3(square, undefined)).toEqual({
+    expect(createEnemyV3(square, undefined, 1)).toEqual({
       ai: AI_NONE,
       extra: false,
       defence: 0,
       blockPct: 0,
       contactMult: 1,
+      state: 0,
+      stateUntil: 0,
+      baseStep: square.speed * DT,
+      escapeDist: 0,
+      regen: 0,
+      dropScale: 1,
     });
-    expect(createEnemyV3(square, ORIGIN)).toEqual({
+    expect(createEnemyV3(square, ORIGIN, 1)).toEqual({
       ai: AI_NONE,
       extra: true,
       defence: 0,
       blockPct: 0,
       contactMult: 1,
+      state: 0,
+      stateUntil: 0,
+      baseStep: square.speed * DT,
+      escapeDist: 0,
+      regen: 0,
+      dropScale: 0.25,
     });
-    expect(createEnemyV3(square, { ...ORIGIN, extra: false }).extra).toBe(false);
-    expect(createEnemyV3(treasure, undefined)).toEqual({
+    expect(createEnemyV3(square, { ...ORIGIN, extra: false }, 1).extra).toBe(false);
+    expect(createEnemyV3(treasure, undefined, 1)).toEqual({
       ai: AI_TREASURE,
       extra: true,
       defence: 0,
       blockPct: 0,
       contactMult: 1,
+      state: 0,
+      stateUntil: 0,
+      baseStep: treasure.speed * DT,
+      escapeDist: 0,
+      regen: 0,
+      dropScale: 1,
     });
-    expect(createEnemyV3(treasure, { ...ORIGIN, extra: false }).extra).toBe(true);
+    expect(createEnemyV3(treasure, { ...ORIGIN, extra: false }, 1).extra).toBe(true);
   });
 
   it('reads the AI kind and the treasure’s `extra` from the def’s behaviour, not its id', () => {
     const { square } = TEST_ENEMIES;
     // The four AI types' ids on a square's def, which has no behaviour: plain walkers.
     for (const id of ['dasher', 'shooter', 'summoner', 'treasure'] as const) {
-      expect(createEnemyV3({ ...square, id }, undefined), id).toEqual({
+      expect(createEnemyV3({ ...square, id }, undefined, 1), id).toEqual({
         ai: AI_NONE,
         extra: false,
         defence: 0,
         blockPct: 0,
         contactMult: 1,
+        state: 0,
+        stateUntil: 0,
+        baseStep: square.speed * DT,
+        escapeDist: 0,
+        regen: 0,
+        dropScale: 1,
       });
     }
-    // A square given each behaviour acts as the type that has it.
+    // A square given each behaviour acts as the type that has it, at the square's speed.
     const { dasher, shooter, summoner, treasure } = V3_ENEMIES;
     for (const def of [dasher, shooter, summoner, treasure]) {
       const behaving: EnemyDef = { ...square, behaviour: def.behaviour };
-      expect(createEnemyV3(behaving, undefined), def.id).toEqual(createEnemyV3(def, undefined));
+      expect(createEnemyV3(behaving, undefined, 1), def.id).toEqual({
+        ...createEnemyV3(def, undefined, 1),
+        baseStep: square.speed * DT,
+      });
     }
-    expect(createEnemyV3({ ...square, behaviour: treasure.behaviour }, undefined)).toEqual({
+    expect(createEnemyV3({ ...square, behaviour: treasure.behaviour }, undefined, 1)).toEqual({
       ai: AI_TREASURE,
       extra: true,
       defence: 0,
       blockPct: 0,
       contactMult: 1,
+      state: 0,
+      stateUntil: 0,
+      baseStep: square.speed * DT,
+      escapeDist: 0,
+      regen: 0,
+      dropScale: 1,
     });
   });
 
   it('gives a shield behaviour SHIELDED and its blockBelowPct, read from the behaviour, not the id', () => {
     const { square, shielder } = TEST_ENEMIES;
     expect([SHIELDED, ARMOURED]).toEqual([1, 2]);
-    expect(createEnemyV3(shielder, undefined)).toEqual({
+    expect(createEnemyV3(shielder, undefined, 1)).toEqual({
       ai: AI_NONE,
       extra: false,
       defence: SHIELDED,
       blockPct: 0.15,
       contactMult: 1,
+      state: 0,
+      stateUntil: 0,
+      baseStep: shielder.speed * DT,
+      escapeDist: 0,
+      regen: 0,
+      dropScale: 1,
     });
     // The shielder's id on a square's def, which has no behaviour: no defence.
-    expect(createEnemyV3({ ...square, id: 'shielder' }, undefined)).toMatchObject({
+    expect(createEnemyV3({ ...square, id: 'shielder' }, undefined, 1)).toMatchObject({
       defence: 0,
       blockPct: 0,
     });
     // A square given a shield of its own holds that shield's share, whatever spawned it.
     const shielded: EnemyDef = { ...square, behaviour: { kind: 'shield', blockBelowPct: 0.4 } };
-    expect(createEnemyV3(shielded, ORIGIN)).toEqual({
+    expect(createEnemyV3(shielded, ORIGIN, 1)).toEqual({
       ai: AI_NONE,
       extra: true,
       defence: SHIELDED,
       blockPct: 0.4,
       contactMult: 1,
+      state: 0,
+      stateUntil: 0,
+      baseStep: square.speed * DT,
+      escapeDist: 0,
+      regen: 0,
+      dropScale: 0.25,
     });
     // Every other v3 behaviour holds none.
     for (const def of Object.values(V3_ENEMIES)) {
       if (def.id === 'shielder') continue;
-      expect(createEnemyV3(def, undefined), def.id).toMatchObject({ defence: 0, blockPct: 0 });
+      expect(createEnemyV3(def, undefined, 1), def.id).toMatchObject({ defence: 0, blockPct: 0 });
     }
+  });
+
+  it('holds the regen behaviour’s rate, the def’s walk step, and toughDropMult for a tough def × the origin’s dropScale (C7.4a)', () => {
+    const { square, hexagon, boss, regenerator, onion, treasure } = TEST_ENEMIES;
+    // Regeneration from the behaviour, not the id.
+    expect(createEnemyV3(regenerator, undefined, 1).regen).toBe(0.08);
+    expect(createEnemyV3({ ...square, id: 'regenerator' }, undefined, 1).regen).toBe(0);
+    const regenerating: EnemyDef = { ...square, behaviour: { kind: 'regen', lifePctPerSec: 0.3 } };
+    expect(createEnemyV3(regenerating, undefined, 1).regen).toBe(0.3);
+    // The walk step: the def's speed × DT, as spawned.
+    expect(createEnemyV3({ ...square, speed: 60 }, undefined, 1).baseStep).toBe(1);
+    expect(createEnemyV3(treasure, undefined, 1).baseStep).toBe(2.5);
+    // The run's toughDropMult for a tough def, read from its flag, × the origin's dropScale.
+    expect(
+      [square, hexagon, boss, onion, treasure].map(
+        (def) => createEnemyV3(def, undefined, 2).dropScale,
+      ),
+    ).toEqual([1, 2, 2, 2, 1]);
+    expect([square, hexagon].map((def) => createEnemyV3(def, ORIGIN, 2).dropScale)).toEqual([
+      0.25, 0.5,
+    ]);
+    expect(createEnemyV3({ ...square, tough: true }, undefined, 3).dropScale).toBe(3);
+    expect(createEnemyV3({ ...hexagon, tough: false }, undefined, 3).dropScale).toBe(1);
   });
 });
 
@@ -182,9 +258,18 @@ describe('addEnemy: the v3 record (docs/v3 C7 design §1.3)', () => {
       );
       for (const enemy of enemies) {
         // Wave spawns and their splits: none is extra, and only the treasure would be.
-        expect(enemy.v3, enemy.type).toEqual(createEnemyV3(data.enemies[enemy.type], undefined));
+        expect(enemy.v3, enemy.type).toEqual(createEnemyV3(data.enemies[enemy.type], undefined, 1));
       }
     }
+  });
+
+  it('gives a v3 run’s records the run’s toughDropMult (values.toughDropMult)', () => {
+    const ctx = placedEnemies([], { data: v3TestData(), stats: makeStats({ toughDropMult: 2 }) });
+    expect(ctx.sys.enemyAi.toughDropMult).toBe(2);
+    const { square, hexagon } = ctx.data.enemies;
+    expect([square, hexagon].map((def) => (spawned(ctx, def).v3 as EnemyV3).dropScale)).toEqual([
+      1, 2,
+    ]);
   });
 
   it('adds the record as the literal’s 58th key in either run', () => {
@@ -212,7 +297,19 @@ describe('addEnemy: the v3 record (docs/v3 C7 design §1.3)', () => {
     ]);
     expect(child.radius).toBe(def.radius * 0.7);
     expect(child.contactDist).toBe(PLAYER_RADIUS + def.radius * 0.7);
-    expect(child.v3).toEqual({ ai: AI_NONE, extra: true, defence: 0, blockPct: 0, contactMult: 1 });
+    expect(child.v3).toEqual({
+      ai: AI_NONE,
+      extra: true,
+      defence: 0,
+      blockPct: 0,
+      contactMult: 1,
+      state: 0,
+      stateUntil: 0,
+      baseStep: def.speed * DT,
+      escapeDist: 0,
+      regen: 0,
+      dropScale: 0.25,
+    });
     expect([child.tough, child.boss, child.stepDist]).toEqual([true, false, plain.stepDist]);
   });
 

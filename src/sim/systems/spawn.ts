@@ -13,7 +13,7 @@ import { RING_SLOTS } from '../ailments/rings';
 import { MAX_DEPTH } from '../effects/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, PLAYER_RADIUS } from '../types';
 import type { Enemy, RunContext, WaveRecord } from './context';
-import { createEnemyV3 } from './enemyRecord';
+import { AI_NONE, createEnemyV3 } from './enemyRecord';
 import type { EnemyV3, SpawnOrigin } from './enemyRecord';
 
 const TAU = Math.PI * 2;
@@ -100,7 +100,8 @@ function delayFrom(ctx: RunContext, from: number, now: number, spawnTicks: numbe
  * Adds an enemy of `def` to wave `rec`, `dist` from the player along (ux, uy). Its def's flags
  * make it tough or a boss. In a v3 run (ctx.sys.enemyAi.enabled) it carries a record
  * (src/sim/systems/enemyRecord.ts) and takes `origin`'s hp and radius scales; an M1 run's
- * enemies take their def's and have none.
+ * enemies take their def's and have none. A v3 enemy with a behaviour or regeneration joins the
+ * enemy AI step's list (src/sim/systems/enemyAi.ts) last, which keeps the list in id order.
  */
 export function addEnemy(
   ctx: RunContext,
@@ -120,7 +121,7 @@ export function addEnemy(
   if (ctx.sys.enemyAi.enabled) {
     hp = mul(num(def.hpMult * (origin?.hpScale ?? 1)), rec.stdHp);
     radius = def.radius * (origin?.radiusScale ?? 1);
-    v3 = createEnemyV3(def, origin);
+    v3 = createEnemyV3(def, origin, ctx.sys.enemyAi.toughDropMult);
   } else hp = mul(num(def.hpMult), rec.stdHp);
   const enemy: Enemy = {
     id: ctx.nextEnemyId++,
@@ -185,6 +186,7 @@ export function addEnemy(
   ctx.enemies.push(enemy);
   rec.alive++;
   ctx.events.push({ type: 'enemySpawned', enemyId: enemy.id, enemy: def.id });
+  if (v3 !== null && (v3.ai !== AI_NONE || v3.regen > 0)) ctx.sys.enemyAi.list.push(enemy);
 }
 
 /**

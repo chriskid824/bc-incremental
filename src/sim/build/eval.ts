@@ -16,6 +16,7 @@ import type {
   ScalingSpec,
   ScalingVar,
   StackAilment,
+  TargetState,
   TriggerEventId,
 } from '../../data/triggers';
 import { holdsBleed } from '../ailments/bleed';
@@ -35,6 +36,7 @@ import {
   PRIMARY,
 } from '../effects/flags';
 import type { Enemy, RunContext } from '../systems/context';
+import { DASHING, STOPPED } from '../systems/enemyRecord';
 import type { CompiledMod, ModTable } from './modTable';
 import type { SourceTable } from './sources';
 
@@ -211,15 +213,22 @@ const FLAGS = 4;
  * Exported for createZonePool, which marks the sources these conditions name.
  */
 export const IN_ZONE = 5;
+/** The target's record (EnemyV3.state) has state bit `a`; an M1 enemy has no record. */
+const TARGET_STATE = 7;
+/** The target's chill meter (frostMeter) is at least `a`. */
+const TARGET_FROST_AT_LEAST = 8;
+
+/** The EnemyV3.state bit of each targetState (src/sim/systems/enemyRecord.ts). */
+const STATE_BITS: Readonly<Record<TargetState, number>> = { dashing: DASHING, stopped: STOPPED };
 
 /**
  * A condition compiled for checking: a code and two operands. Target conditions read the
  * target (held ailment ordinal; TARGET_KINDS ordinal; hp fraction; stack ailment ordinal and
- * stacks, or for 'max' that ordinal alone; zone source index); hitIs, victimHas and killedBy
- * read the event's flags.
+ * stacks, or for 'max' that ordinal alone; zone source index; state bit; chill fraction);
+ * hitIs, victimHas and killedBy read the event's flags.
  */
 export interface CompiledCondition {
-  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   readonly a: number;
   readonly b: number;
 }
@@ -262,6 +271,12 @@ export function compileCondition(
   }
   if ('inZone' in condition && sources !== undefined) {
     return { code: IN_ZONE, a: sources.index(condition.inZone), b: 0 };
+  }
+  if ('targetState' in condition) {
+    return { code: TARGET_STATE, a: STATE_BITS[condition.targetState], b: 0 };
+  }
+  if ('targetFrostAtLeast' in condition) {
+    return { code: TARGET_FROST_AT_LEAST, a: condition.targetFrostAtLeast, b: 0 };
   }
   if ('ailment' in condition) {
     if (on === 'ailmentApplied') {
@@ -335,6 +350,12 @@ export function conditionsMet(
         break;
       case IN_ZONE:
         if (target.zoneSource !== c.a || target.zoneUntil <= now) return false;
+        break;
+      case TARGET_STATE:
+        if (target.v3 === null || (target.v3.state & c.a) === 0) return false;
+        break;
+      case TARGET_FROST_AT_LEAST:
+        if (frostMeter(target, now) < c.a) return false;
         break;
       case STACKS_AT_MAX: {
         if (ctx === null) return false;

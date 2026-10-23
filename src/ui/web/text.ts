@@ -133,6 +133,8 @@ export const CONDITION_TEXT: Readonly<Record<ConditionKey, MessageKey>> = {
   targetHpBelow: 'web.cond.targetHpBelow',
   stacksAtLeast: 'web.cond.stacksAtLeast',
   inZone: 'web.cond.inZone',
+  targetState: 'web.cond.targetState',
+  targetFrostAtLeast: 'web.cond.targetFrostAtLeast',
   chance: 'web.cond.chance',
   cooldownSec: 'web.cond.cooldownSec',
   hitIs: 'web.cond.hitIs',
@@ -345,6 +347,9 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   ignoreShield: 'number',
   ignoreArmour: 'number',
   ailmentOnBlock: 'number',
+  enemyRegen: 'percent',
+  toughDropMult: 'percent',
+  treasureRate: 'percent',
 };
 
 /**
@@ -433,6 +438,8 @@ const ENEMY_CONDITIONS: ReadonlySet<ConditionKey> = new Set<ConditionKey>([
   'targetHpBelow',
   'stacksAtLeast',
   'inZone',
+  'targetState',
+  'targetFrostAtLeast',
 ]);
 
 /** One condition's text; a chance × `coef`, at most 100% (D10). */
@@ -454,6 +461,10 @@ function conditionText(lookup: TextLookup, condition: Condition, coef: number): 
   }
   if ('inZone' in condition)
     return say(lookup, key, { source: sourceName(lookup, condition.inZone) });
+  if ('targetState' in condition)
+    return say(lookup, key, { state: say(lookup, `web.state.${condition.targetState}`) });
+  if ('targetFrostAtLeast' in condition)
+    return say(lookup, key, { pct: percent(condition.targetFrostAtLeast) });
   if ('chance' in condition)
     return say(lookup, key, { pct: percent(Math.min(1, condition.chance * coef)) });
   if ('cooldownSec' in condition) return say(lookup, key, { s: trim(condition.cooldownSec) });
@@ -465,9 +476,9 @@ function conditionText(lookup: TextLookup, condition: Condition, coef: number): 
 }
 
 /**
- * The enemies `conditions` describe: the noun (敵人, or a target kind's), what they hold before
- * it (中毒的敵人) and the other conditions after it (敵人（生命低於 30%）); `afflicted` adds
- * 帶著異常狀態 when nothing says what they hold (diedWithAilment).
+ * The enemies `conditions` describe: the noun (敵人, or a target kind's), what they hold or do
+ * before it (中毒的敵人, 衝刺中的敵人) and the other conditions after it (敵人（生命低於 30%）);
+ * `afflicted` adds 帶著異常狀態 when nothing says what they hold (diedWithAilment).
  */
 function enemiesText(
   lookup: TextLookup,
@@ -479,7 +490,8 @@ function enemiesText(
   const other: string[] = [];
   for (const condition of conditions) {
     const text = conditionText(lookup, condition, 1);
-    if ('targetHas' in condition || 'victimHas' in condition) held.push(text);
+    if ('targetHas' in condition || 'victimHas' in condition || 'targetState' in condition)
+      held.push(text);
     else if ('targetKind' in condition) kinds.push(text);
     else other.push(text);
   }

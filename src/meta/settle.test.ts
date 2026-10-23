@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { num, toNumber, ZERO } from '../core/num';
+import { mul, num, toNumber, ZERO } from '../core/num';
+import type { Num } from '../core/num';
+import { loadGameData } from '../data';
+import { composeWave } from '../data/compose';
 import { shardsPerStdEnemy } from '../data/curve';
 import { NO_EXTRAS } from '../data/stats';
+import type { StatBlock } from '../data/stats';
 import { ENEMY_IDS } from '../data/types';
+import type { EnemyId, GameData } from '../data/types';
 import { COUNTER_IDS } from '../sim/types';
 import type { RunResult } from '../sim/types';
 import { allowedStartWave, expectedWaveDrops, settleRun, settleUnfinishedRun } from './settle';
@@ -95,6 +100,71 @@ describe('expectedWaveDrops', () => {
     const drops = expectedWaveDrops(10, data, boostedStats);
     expect(toNumber(drops.shards)).toBeCloseTo(2 * 14.75 * shardsPerStdEnemy(10), 9);
     expect(drops.cores).toBeCloseTo(7.5, 12);
+  });
+
+  it('leaves an M1 block’s drops bit-identical, its toughDropMult being 1, and scales only tough and boss units at 2 (docs/v3 C7 design §2.5, OWN test 14)', () => {
+    // Planted bug: multiplying non-tough units.
+    /** Drop units, the type's and its split children's (dropUnits). */
+    const unitsOf = (d: GameData, enemy: EnemyId): [number, number] => {
+      const def = d.enemies[enemy];
+      if (def.splitInto === undefined) return [def.dropMult, def.cores];
+      const [shardMult, cores] = unitsOf(d, def.splitInto.enemy);
+      return [
+        def.dropMult + def.splitInto.count * shardMult,
+        def.cores + def.splitInto.count * cores,
+      ];
+    };
+    /** expectedWaveDrops as it was before toughDropMult, operation for operation. */
+    const before = (
+      wave: number,
+      d: GameData,
+      stats: StatBlock,
+    ): { shards: Num; cores: number } => {
+      let shardMult = 0;
+      let cores = 0;
+      for (const entry of composeWave(wave, d.waves)) {
+        const units = unitsOf(d, entry.enemy);
+        shardMult += entry.count * units[0];
+        cores += entry.count * units[1];
+      }
+      return {
+        shards: mul(num(shardsPerStdEnemy(wave)), shardMult * stats.values.shardGain),
+        cores: cores * stats.values.coreGain,
+      };
+    };
+    for (const d of [data, loadGameData()]) {
+      for (const stats of [baseStats, boostedStats]) {
+        expect(stats.values.toughDropMult).toBe(1);
+        for (let wave = 1; wave <= 200; wave++) {
+          const drops = expectedWaveDrops(wave, d, stats);
+          const reference = before(wave, d, stats);
+          expect(
+            Object.is(toNumber(drops.shards), toNumber(reference.shards)),
+            `wave ${wave}`,
+          ).toBe(true);
+          expect(Object.is(drops.cores, reference.cores), `wave ${wave}`).toBe(true);
+        }
+      }
+    }
+    // 菁英賞金's ×2: wave 5's elite (3 units, a core) and wave 10's boss (6 units, 5 cores) double.
+    const bounty = computeStatBlock(
+      [{ stat: 'toughDropMult', kind: 'increased', value: 1 }],
+      NO_EXTRAS,
+    );
+    expect(bounty.values.toughDropMult).toBe(2);
+    for (const { wave, shardMult, cores } of [
+      { wave: 3, shardMult: 5 * 0.5 + 2, cores: 0 },
+      { wave: 5, shardMult: 6 * 0.5 + 2 + 2 * 3, cores: 2 },
+      { wave: 8, shardMult: 7 * 0.5 + 3 + 1.75, cores: 0 },
+      { wave: 10, shardMult: 8 * 0.5 + 3 + 1.75 + 2 * 6, cores: 10 },
+    ]) {
+      const drops = expectedWaveDrops(wave, data, bounty);
+      expect(toNumber(drops.shards), `wave ${wave}`).toBeCloseTo(
+        shardMult * shardsPerStdEnemy(wave),
+        9,
+      );
+      expect(drops.cores, `wave ${wave}`).toBe(cores);
+    }
   });
 
   it('rejects cyclic splits', () => {

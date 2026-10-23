@@ -49,8 +49,8 @@ export interface SystemState {
   /** The drones and their stage's scratch (src/sim/systems/drones.ts), also SimState.drones. */
   readonly drones: DronePool;
   /**
-   * The v3 enemies' state: whether the run is a v3 run, whose enemies carry a record, and its
-   * enemy cap.
+   * The v3 enemies' state: whether the run is a v3 run, whose enemies carry a record, its enemy
+   * cap, and the enemy AI step's list and inputs (src/sim/systems/enemyAi.ts).
    */
   readonly enemyAi: EnemyAiState;
   /** The player's defences (src/sim/systems/contact.ts damagePlayer); null in an M1 build. */
@@ -641,7 +641,8 @@ function isPicked(pool: DronePool, enemy: Enemy): boolean {
 /**
  * The v3 enemies' state (docs/v3 C7 design §1.4). `enabled` is the run's v3 gate,
  * data.waves.v3 !== undefined (§1.1): addEnemy tests it once per spawn, and an M1 run never
- * creates a record (Enemy.v3, src/sim/systems/enemyRecord.ts).
+ * creates a record (Enemy.v3, src/sim/systems/enemyRecord.ts), runs no enemy AI step
+ * (src/sim/systems/enemyAi.ts) and schedules no treasure.
  */
 export interface EnemyAiState {
   readonly enabled: boolean;
@@ -650,11 +651,47 @@ export interface EnemyAiState {
    * splits then take M1's statements (§2.3, src/sim/systems/spawn.ts).
    */
   readonly cap: number;
+  /**
+   * The enemies with work in the AI step (a behaviour, or regeneration), in id order: addEnemy
+   * appends each such spawn, and the step drops the dead ones.
+   */
+  readonly list: Enemy[];
+  /**
+   * The dashers that began charging this tick, in id order, filled before the drones' stage reads
+   * them (C5b's 攔截守衛): chargeStarts[0 .. chargeStartCount); past it, stale.
+   */
+  readonly chargeStarts: Enemy[];
+  chargeStartCount: number;
+  /** The ModTable row enemyRegen is read on: the untagged center row; −1 in an M1 run. */
+  readonly regenRow: number;
+  /** × on the drops of tough kills (values.toughDropMult), which each record's dropScale holds. */
+  readonly toughDropMult: number;
+  /** × on the treasure schedule's rate (values.treasureRate). */
+  readonly treasureRate: number;
 }
 
-/** The state of a run that is a v3 run when `enabled`, holding at most `cap` enemies alive. */
-export function createEnemyAiState(enabled: boolean, cap: number): EnemyAiState {
-  return { enabled, cap };
+/**
+ * The state of a run that is a v3 run when `enabled`, holding at most `cap` enemies alive, whose
+ * enemies read enemyRegen on row `regenRow` and drop × `toughDropMult` when tough, and whose
+ * treasures come at `treasureRate` × the schedule's rate.
+ */
+export function createEnemyAiState(
+  enabled: boolean,
+  cap: number,
+  regenRow: number,
+  toughDropMult: number,
+  treasureRate: number,
+): EnemyAiState {
+  return {
+    enabled,
+    cap,
+    list: [],
+    chargeStarts: [],
+    chargeStartCount: 0,
+    regenRow,
+    toughDropMult,
+    treasureRate,
+  };
 }
 
 /**

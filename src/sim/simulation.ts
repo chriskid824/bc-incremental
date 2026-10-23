@@ -37,6 +37,7 @@ import { createRunContext } from './systems/context';
 import type { TestModule } from './rules';
 import { compact } from './systems/death';
 import { stepDrones } from './systems/drones';
+import { stepEnemyAi } from './systems/enemyAi';
 import { runEmitters, runTickHooks } from './systems/emitters';
 import { rebuildGrid } from './systems/grid';
 import { moveEnemies } from './systems/movement';
@@ -136,10 +137,12 @@ export function createSimulation(
   validateConfig(config);
   const ctx = createRunContext(config, data, testModules);
   const { state, events } = ctx;
-  // The segment emitters are fixed with the run context. A stage with nothing to do is not
-  // called, since a call made every tick, even one that returns at once, takes from V8's
-  // inlining budget for step and leaves other stages out of it.
+  // The segment emitters are fixed with the run context, as is whether it is a v3 run, whose
+  // enemies the enemy AI step moves. A stage with nothing to do is not called, since a call made
+  // every tick, even one that returns at once, takes from V8's inlining budget for step and
+  // leaves other stages out of it.
   const segments = ctx.sys.segments.emitters.length !== 0;
+  const enemyAi = ctx.sys.enemyAi.enabled;
 
   /**
    * Advances one tick. The systems run in the tick order of
@@ -149,7 +152,11 @@ export function createSimulation(
    * 2. spawn: start the due wave (waveControl's wave start, waves.ts) with its waveStart
    *    triggers, then release queued enemies (spawn.ts), so a new wave's first enemy appears on
    *    its start tick; in a v3 run only while its enemy cap has room, oldest wave first.
-   * 3. movement: every enemy walks towards the player (movement.ts).
+   * 2b. enemyAI: in a v3 run, the enemies with work, in id order, regenerate and act: dashers
+   *    charge and dash, treasures circle and flee, and an escaped treasure leaves the field;
+   *    frozen ones pause their timers and only regenerate (enemyAi.ts).
+   * 3. movement: every enemy walks towards the player, or out for a fleeing treasure, by the
+   *    step the enemy AI left it (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
    * 5. contact: enemies that reached the player hit it, through its defences (damage taken,
    *    shield, extra lives), and leak, raising heroHit and contact; then the player regenerates
@@ -178,8 +185,9 @@ export function createSimulation(
    * 13. waveControl: record cleared waves (waves.ts).
    * 14. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
-   * Steps 6–11 run only while the player is alive; 6b only while there is a drone, 8 in a run
-   * with segment emitters and 9 while there is a zone (a run of M1's content has none of them).
+   * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 6b only while there is
+   * a drone, 8 in a run with segment emitters and 9 while there is a zone (a run of M1's content
+   * has none of them).
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -188,6 +196,7 @@ export function createSimulation(
 
     startDueWave(ctx);
     releaseEnemies(ctx);
+    if (enemyAi) stepEnemyAi(ctx);
     moveEnemies(ctx);
     rebuildGrid(ctx);
     resolveContacts(ctx);

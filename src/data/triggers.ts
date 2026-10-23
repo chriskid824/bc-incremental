@@ -181,6 +181,13 @@ export const HIT_KINDS = ['crit', 'nonCrit', 'primary', 'chainJump', 'signature'
 export type HitKind = (typeof HIT_KINDS)[number];
 
 /**
+ * What a v3 enemy is doing (targetState): dashing, a dasher's dash; stopped, a dasher charging
+ * its dash (src/sim/systems/enemyAi.ts), and from C7.4b shooters and summoners at their posts.
+ */
+export const TARGET_STATES = ['dashing', 'stopped'] as const;
+export type TargetState = (typeof TARGET_STATES)[number];
+
+/**
  * A condition on the enemy an event or a damage instance targets; never met without a target.
  * targetHas: the enemy holds the ailment (burn: one of its burn stacks has not ended yet;
  * poison: it has poison damage left to take; bleed: its bleed has not ended; shock: its shock
@@ -190,7 +197,9 @@ export type HitKind = (typeof HIT_KINDS)[number];
  * least 1, and 5 under eternalFlame, whose burns have no cap; shock: shockMaxStacks, at least 1;
  * poison has no cap, so it takes a number). inZone: it stands in a ground zone of this source,
  * one source id and never a class (a zone pulse marks the enemies within it for 16 ticks,
- * groundZone).
+ * groundZone). targetState: it is in that state (TARGET_STATES), never in an M1 run, whose
+ * enemies have no behaviours. targetFrostAtLeast: its chill meter is at least this fraction, in
+ * (0, 1] (a frozen enemy's meter reads full, frostMeter).
  */
 export type TargetCondition =
   | { readonly targetHas: HeldAilment }
@@ -199,7 +208,9 @@ export type TargetCondition =
   | {
       readonly stacksAtLeast: { readonly ailment: StackAilment; readonly stacks: number | 'max' };
     }
-  | { readonly inZone: SourceSelector };
+  | { readonly inZone: SourceSelector }
+  | { readonly targetState: TargetState }
+  | { readonly targetFrostAtLeast: number };
 
 /**
  * A condition of a trigger. chance: the trigger fires with this probability, rolled when the
@@ -253,6 +264,8 @@ export const CONDITION_CONTEXTS: Readonly<
   targetHpBelow: ['modifier', ...TARGETED],
   stacksAtLeast: ['modifier', ...TARGETED],
   inZone: ['modifier', ...TARGETED],
+  targetState: ['modifier', ...TARGETED],
+  targetFrostAtLeast: ['modifier', ...TARGETED],
   chance: TRIGGER_EVENTS,
   cooldownSec: TRIGGER_EVENTS,
   hitIs: ['hit', 'crit', ...KILLS],

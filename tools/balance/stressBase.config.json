@@ -47,7 +47,10 @@
       "extraLives": 0,
       "ignoreShield": 0,
       "ignoreArmour": 0,
-      "ailmentOnBlock": 0
+      "ailmentOnBlock": 0,
+      "enemyRegen": 1,
+      "toughDropMult": 1,
+      "treasureRate": 1
     },
     "values": {
       "damage": 450.22067097931824,
@@ -95,7 +98,10 @@
       "extraLives": 0,
       "ignoreShield": 0,
       "ignoreArmour": 0,
-      "ailmentOnBlock": 0
+      "ailmentOnBlock": 0,
+      "enemyRegen": 1,
+      "toughDropMult": 1,
+      "treasureRate": 1
     },
     "scoped": [
       {

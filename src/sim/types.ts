@@ -487,6 +487,23 @@ export type SimEvent =
       readonly y: number;
       readonly amount: Num;
       readonly crit: boolean;
+    }
+  /**
+   * A dasher began charging its dash (CHARGING | STOPPED, src/sim/systems/enemyAi.ts): it stands
+   * for its charge, then dashes. Never in an M1 run.
+   */
+  | { readonly type: 'dasherCharge'; readonly enemyId: number }
+  /** A dasher's charge ended and its dash began (DASHING). Never in an M1 run. */
+  | { readonly type: 'dasherDash'; readonly enemyId: number }
+  /**
+   * A fleeing treasure left the arena at (x, y): gone without a kill or drops, and without a leak.
+   * Never in an M1 run.
+   */
+  | {
+      readonly type: 'treasureEscaped';
+      readonly enemyId: number;
+      readonly x: number;
+      readonly y: number;
     };
 
 /**

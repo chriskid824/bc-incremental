@@ -19,12 +19,15 @@ import type { Modifier } from '../data/stats';
 import { TAG } from '../data/tags';
 import type { TriggerSpec } from '../data/triggers';
 import type { EnemyId, GameData } from '../data/types';
+import { frostMeter } from './ailments/frost';
+import { holdsBurn } from './ailments/records';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { createPayload, ROWS } from './emitters/types';
 import type { Payload } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
-import { ARMOURED } from './systems/enemyRecord';
+import type { RunContext } from './systems/context';
+import { ARMOURED, CHARGING, DASHING, FLEEING, ORBITING } from './systems/enemyRecord';
 import { MOTION_HOMING, MOTION_LOB, MOTION_STRAIGHT, spawnShot } from './systems/shots';
 import {
   GOLDEN_BUILDS,
@@ -37,7 +40,7 @@ import {
   TEST_WAVES,
   v3TestData,
 } from './testing';
-import { COUNTER_IDS, NO_INPUT } from './types';
+import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, NO_INPUT } from './types';
 import type { CounterId, RunConfig } from './types';
 
 const GOLDEN_C4_TICKS = 1200;
@@ -1605,6 +1608,38 @@ function armouredSquares(): TestModule {
     });
 }
 
+/**
+ * C7.4a's enemy behaviours (docs/v3 C7 design §2.5) on a v3 run of regenerators and dashers from
+ * wave 1 (TEST_V3_WAVES' rules, each from wave 1) and a treasure every wave from wave 12, with no
+ * affix, elite or boss (§1.9). frostOnHit chills what the volley hits, so 凍結生機 (enemyRegen
+ * −80 % on a target holding frost) slows a chilled regenerator's 8 %/s, and burns stop it; 迎擊
+ * (damage ×2 on a dashing target) doubles the hits on dashing dashers; bleedChance bleeds the
+ * treasure, whose orbit and flight count as moving. The treasure holds 8 × the standard hp, 4 ×
+ * its def's: at its def's 2 the volley kills every treasure before its flight in both seeds, and
+ * the entry pins the flight and the escape.
+ */
+const REGEN_DASH_STATS = makeStats({ frostOnHit: 0.1, bleedChance: 0.3 }, [
+  { stat: 'enemyRegen', kind: 'more', value: -0.8, when: [{ targetHas: 'frost' }] },
+  { stat: 'damage', kind: 'more', value: 1, when: [{ targetState: 'dashing' }] },
+]);
+const regenDasherTreasureData = (): GameData =>
+  v3TestData({
+    enemies: { treasure: { hpMult: 8 } },
+    waves: {
+      rules: [
+        { enemy: 'regenerator', fromWave: 1, base: 1, perWave: 0.2, maxCount: 8 },
+        { enemy: 'dasher', fromWave: 1, base: 1, perWave: 0.2, maxCount: 8 },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 12, every: 1 },
+      },
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1883,6 +1918,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [armouredSquares()],
     expected: ['8915e4088942086b', '3d3d5bdb7f1cc85c'],
   },
+  {
+    name: 'regenDasherTreasure',
+    config: { stats: REGEN_DASH_STATS, rules: [], startWave: 12 },
+    data: regenDasherTreasureData,
+    expected: ['4788017e5f438056', '1e13679b1acb27bd'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -2030,6 +2071,143 @@ describe('golden C4 runs', () => {
         'square takes 5',
       ]);
     }
+  });
+
+  it('regenerates, slower chilled and not while burning, charges and dashes, doubling the hits on dashing dashers, and lets a treasure circle, flee and escape in regenDasherTreasure (C7.4a)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'regenDasherTreasure') as GoldenC4Entry;
+    const bySeed: Record<number, string[]> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const seen = new Set<string>();
+      const watched: { ctx: RunContext | null } = { ctx: null };
+      // Each regenerator's hp at the end of the last tick; each dasher's charge tick and frozen
+      // ticks since; each treasure's ticks of orbit, frozen ones and last distance.
+      const lastHp = new Map<number, number>();
+      const charges = new Map<number, { at: number; frozen: number }>();
+      const orbits = new Map<number, { ticks: number; frozen: number; dist: number }>();
+      const fleeing = new Map<number, number>();
+      let dashing = new Set<number>();
+      const watch: TestModule = (b) =>
+        void b.hook('tick', (ctx) => {
+          // After the enemy AI step and movement, before this tick's hits.
+          watched.ctx = ctx;
+          const now = ctx.now;
+          dashing = new Set();
+          for (const e of ctx.enemies) {
+            const v = e.v3;
+            if (!e.alive || v === null) continue;
+            const frozen = e.frozenUntil > now;
+            if (e.type === 'regenerator') {
+              const before = lastHp.get(e.id);
+              const max = toNumber(e.maxHp);
+              if (before === undefined || before >= max) continue;
+              const gain = toNumber(e.hp) - before;
+              const rate = frostMeter(e, now) > 0 ? 0.08 * 0.2 : 0.08;
+              const full = max * rate * DT;
+              if (holdsBurn(e, now))
+                seen.add(gain === 0 ? 'no regen while burning' : 'regen burning');
+              else if (Math.abs(gain - full) <= 1e-9 * full) {
+                seen.add(rate === 0.08 ? 'regen 8 %/s' : 'regen 1.6 %/s chilled');
+              } else if (toNumber(e.hp) === max && gain < full) seen.add('regen up to max life');
+              else seen.add(`regen ${gain / (max * DT)}/s`);
+            } else if (e.type === 'dasher') {
+              if (v.state === DASHING) dashing.add(e.id);
+              const charge = charges.get(e.id);
+              if (charge !== undefined && (v.state & CHARGING) !== 0 && frozen) charge.frozen++;
+            } else if (e.type === 'treasure') {
+              const orbit = orbits.get(e.id) ?? { ticks: 0, frozen: 0, dist: e.dist };
+              if (v.state === ORBITING) {
+                orbits.set(e.id, {
+                  ...orbit,
+                  ticks: orbit.ticks + 1,
+                  frozen: orbit.frozen + (frozen ? 1 : 0),
+                });
+                if (e.dist <= 480 && e.dist > 480 - 2.5) seen.add('treasure circles at 480');
+                else seen.add(`treasure circles at ${e.dist}`);
+              } else if (v.state === FLEEING) {
+                const last = fleeing.get(e.id);
+                if (last !== undefined) {
+                  seen.add(
+                    e.dist > last
+                      ? 'treasure flees out'
+                      : frozen
+                        ? 'treasure frozen in flight'
+                        : 'treasure flees slowed to a stop',
+                  );
+                }
+                fleeing.set(e.id, e.dist);
+              }
+            }
+          }
+        });
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [watch]);
+      const types = new Map<number, EnemyId>();
+      while (!sim.state.finished) {
+        const now = sim.state.tick + 1;
+        for (const event of sim.step(NO_INPUT)) {
+          if (event.type === 'enemySpawned') types.set(event.enemyId, event.enemy);
+          else if (event.type === 'dasherCharge') {
+            const ctx = watched.ctx as RunContext;
+            const dasher = ctx.enemies.find((e) => e.id === event.enemyId);
+            seen.add(
+              dasher !== undefined && dasher.dist <= 420
+                ? 'dasher charges at 420 or closer'
+                : 'dasher charges far',
+            );
+            charges.set(event.enemyId, { at: now, frozen: 0 });
+          } else if (event.type === 'dasherDash') {
+            const charge = charges.get(event.enemyId);
+            seen.add(
+              charge !== undefined && now - charge.at - charge.frozen === 36
+                ? 'dasher dashes 36 unfrozen ticks after its charge'
+                : 'dasher dashes off time',
+            );
+          } else if (event.type === 'hit' && types.get(event.targetId) === 'dasher') {
+            const amount = toNumber(event.amount);
+            seen.add(`${dashing.has(event.targetId) ? 'dashing ' : ''}dasher takes ${amount}`);
+          } else if (event.type === 'treasureEscaped') {
+            const orbit = orbits.get(event.enemyId);
+            const r = 14;
+            const outside =
+              event.x <= -r ||
+              event.x >= ARENA_WIDTH + r ||
+              event.y <= -r ||
+              event.y >= ARENA_HEIGHT + r;
+            seen.add(outside ? 'treasure escapes past the edge' : 'treasure escapes inside');
+            seen.add(
+              `treasure escapes after ${orbit === undefined ? 0 : orbit.ticks - orbit.frozen} unfrozen ticks of orbit`,
+            );
+          } else if (event.type === 'enemyKilled' && event.enemy === 'treasure') {
+            seen.add(`treasure killed: ${event.cores} core`);
+          } else if (event.type === 'playerHit' && types.get(event.enemyId) === 'treasure') {
+            seen.add('treasure hits the player');
+          }
+        }
+        const ctx = watched.ctx;
+        if (ctx === null) continue;
+        for (const e of ctx.enemies) {
+          if (e.alive && e.type === 'regenerator') lastHp.set(e.id, toNumber(e.hp));
+        }
+      }
+      bySeed[seed] = [...seen].sort();
+    }
+    // Each seed regenerates at both rates and not while burning, charges and dashes on time,
+    // doubles the hits on dashing dashers (10 a hit, 15 a crit) and lets one treasure escape.
+    const pins = [
+      'dasher charges at 420 or closer',
+      'dasher dashes 36 unfrozen ticks after its charge',
+      'dasher takes 10',
+      'dasher takes 15',
+      'dashing dasher takes 20',
+      'no regen while burning',
+      'regen 1.6 %/s chilled',
+      'regen 8 %/s',
+      'treasure circles at 480',
+      'treasure escapes after 480 unfrozen ticks of orbit',
+      'treasure escapes past the edge',
+      'treasure flees out',
+    ];
+    expect(bySeed).toEqual({ 1: pins, 2: pins });
   });
 
   it.each(cases)('$id', ({ entry, seed, expected }) => {

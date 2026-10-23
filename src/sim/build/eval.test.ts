@@ -11,10 +11,19 @@ import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
 import { createRunContext } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
+import { CHARGING, DASHING, FLEEING, ORBITING, STOPPED } from '../systems/enemyRecord';
+import type { EnemyV3 } from '../systems/enemyRecord';
 import { rebuildGrid } from '../systems/grid';
 import { releaseEnemies } from '../systems/spawn';
 import { startDueWave } from '../systems/waves';
-import { makeConfig, makeStats, makeTestData, stationarySquares } from '../testing';
+import {
+  makeConfig,
+  makeStats,
+  makeTestData,
+  placedEnemies,
+  stationarySquares,
+  v3TestData,
+} from '../testing';
 import { NO_INPUT } from '../types';
 import {
   compileCondition,
@@ -510,6 +519,56 @@ describe('conditions', () => {
     expect(flagged({ killedBy: 'burn' }, burning | killKindFlag('burn'))).toBe(true);
     expect(flagged({ killedBy: 'burn' }, burning | killKindFlag('hit'))).toBe(false);
     expect(flagged({ killedBy: 'hit' }, crit | killKindFlag('hit'))).toBe(true);
+  });
+
+  it('reads targetState on the target’s record, which no M1 enemy has, and targetFrostAtLeast on its chill meter, a frozen one’s full (docs/v3 C7 design §2.5)', () => {
+    const dashing = { targetState: 'dashing' } as const;
+    const stopped = { targetState: 'stopped' } as const;
+    const third = { targetFrostAtLeast: 0.3 } as const;
+    expect([dashing, stopped, third].map((condition) => compileCondition(condition))).toEqual([
+      { code: 7, a: DASHING, b: 0 },
+      { code: 7, a: STOPPED, b: 0 },
+      { code: 8, a: 0.3, b: 0 },
+    ]);
+    const ctx = placedEnemies(
+      [
+        { x: 1300, y: 540, type: 'dasher' },
+        { x: 1300, y: 540, type: 'boss' },
+      ],
+      { data: v3TestData() },
+    );
+    const [dasher, boss] = ctx.enemies as [Enemy, Enemy];
+    const record = dasher.v3 as EnemyV3;
+    const states = (): boolean[] => [holds(dashing, dasher, 1), holds(stopped, dasher, 1)];
+    const seen = [0, CHARGING | STOPPED, DASHING, ORBITING, FLEEING].map((state) => {
+      record.state = state;
+      return states();
+    });
+    expect(seen).toEqual([
+      [false, false],
+      [false, true],
+      [true, false],
+      [false, false],
+      [false, false],
+    ]);
+    const m1 = placedEnemies([{ x: 1300, y: 540, type: 'square' }]);
+    const square = m1.enemies[0] as Enemy;
+    expect(square.v3).toBeNull();
+    expect([holds(dashing, square, 1), holds(stopped, square, 1)]).toEqual([false, false]);
+    // The chill meter: at least 0.3, a frozen enemy's full; a boss never freezes.
+    expect([0.29, 0.3, 1].map((frost) => holds(third, { ...dasher, frost }, 1))).toEqual([
+      false,
+      true,
+      true,
+    ]);
+    dasher.frost = 0;
+    dasher.frozenUntil = 10;
+    expect([holds(third, dasher, 9), holds(third, dasher, 10)]).toEqual([true, false]);
+    boss.frost = 0.2;
+    boss.frozenUntil = 10;
+    expect(holds(third, boss, 9)).toBe(false);
+    for (const condition of [dashing, stopped, third])
+      expect(holds(condition, null, 1)).toBe(false);
   });
 
   it('throws on the properties of a trigger itself', () => {

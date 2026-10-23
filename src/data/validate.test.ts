@@ -7,7 +7,7 @@ import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
 import type { ConversionSpec, ScalingSpec, SlashLineSpec, TriggerSpec } from './triggers';
 import type { GameData, TalentNode, V3WaveRules } from './types';
-import { MAX_KEYSTONES, starArchetypeIssues, validateGameData } from './validate';
+import { MAX_KEYSTONES, needsDescKey, starArchetypeIssues, validateGameData } from './validate';
 import { WAVES } from './waves';
 import { V3_WAVES } from './wavesV3';
 
@@ -1377,6 +1377,97 @@ describe('trigger validation', () => {
       ).toEqual([`talent 'vitality': modifiers[${index}] when[0] ${problem}`]);
     },
   );
+
+  it('takes targetState and targetFrostAtLeast in (0, 1] where a target is checked, on a trigger and on a modifier (docs/v3 C7 design §1.6)', () => {
+    expect(
+      triggerIssues(
+        { on: 'hit', when: [{ targetState: 'dashing' }], do: [heal] },
+        {
+          on: 'contact',
+          when: [{ targetState: 'stopped' }, { targetFrostAtLeast: 1 }],
+          do: [heal],
+        },
+        { on: 'freeze', when: [{ targetFrostAtLeast: 0.3 }], do: [heal] },
+      ),
+    ).toEqual([]);
+    expect(
+      triggerIssues({
+        on: 'hit',
+        when: [
+          { targetFrostAtLeast: 0 },
+          { targetFrostAtLeast: 1.2 },
+          { targetFrostAtLeast: -0.3 },
+        ],
+        do: [heal],
+      }),
+    ).toEqual([
+      `${at} when[0] targetFrostAtLeast must be in (0, 1] (got 0)`,
+      `${at} when[1] targetFrostAtLeast must be in (0, 1] (got 1.2)`,
+      `${at} when[2] targetFrostAtLeast must be in (0, 1] (got -0.3)`,
+    ]);
+    expect(
+      triggerIssues({
+        on: 'kill',
+        when: [{ targetState: 'dashing' }, { targetFrostAtLeast: 0.5 }],
+        do: [explode],
+      }),
+    ).toEqual([
+      `${at} when[0] targetState does not apply to 'kill' events`,
+      `${at} when[1] targetFrostAtLeast does not apply to 'kill' events`,
+    ]);
+    let index = -1;
+    expect(
+      issuesAfter((d) => {
+        const node = talent(d, 'vitality');
+        index = node.modifiers.length;
+        node.modifiers.push(
+          { stat: 'damage', kind: 'more', value: 1, when: [{ targetState: 'dashing' }] },
+          { stat: 'damage', kind: 'more', value: 1, when: [{ targetFrostAtLeast: 1.5 }] },
+        );
+        node.descKey = 'talent.vitality.desc';
+      }),
+    ).toEqual([
+      `talent 'vitality': modifiers[${index + 1}] when[0] targetFrostAtLeast must be in (0, 1] (got 1.5)`,
+    ]);
+  });
+
+  it('rejects an enemyRegen modifier with tags, notTags or a scope: it is read on the untagged center row (docs/v3 C7 design §1.6)', () => {
+    const problem =
+      'enemyRegen takes no tags, notTags or scope: it is read on the untagged center row';
+    const regen: Modifier = { stat: 'enemyRegen', kind: 'more', value: -0.8 };
+    let index = -1;
+    /** Issues of the real content with `mods` on 'vitality', with a descKey if it needs one. */
+    const modifierIssues = (...mods: Modifier[]): string[] =>
+      issuesAfter((d) => {
+        const node = talent(d, 'vitality');
+        index = node.modifiers.length;
+        node.modifiers.push(...(mods as Mutable<Modifier>[]));
+        if (needsDescKey(node)) node.descKey = 'talent.vitality.desc';
+      });
+    expect(
+      modifierIssues(
+        regen,
+        { ...regen, when: [{ targetHas: 'frost' }] },
+        { ...regen, kind: 'increased', scaling: { per: 'chainJump' } },
+        { ...regen, tags: [] },
+      ),
+    ).toEqual([]);
+    expect(
+      modifierIssues(
+        { ...regen, tags: ['hit'] },
+        { ...regen, notTags: ['crit'] },
+        { ...regen, scope: 'center' },
+        { ...regen, scope: 'outer' },
+      ),
+    ).toEqual([0, 1, 2, 3].map((k) => `talent 'vitality': modifiers[${index + k}] ${problem}`));
+    // The other scoped stats keep their tags and scopes.
+    expect(
+      modifierIssues(
+        { stat: 'damage', kind: 'more', value: 0.1, tags: ['hit'], scope: 'center' },
+        { stat: 'critChance', kind: 'flat', value: 0.1, notTags: ['crit'] },
+      ),
+    ).toEqual([]);
+  });
 
   it('accepts repeatAttack effects of 1 to 4 repeats, now or at the next attack, on any event', () => {
     expect(

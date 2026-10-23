@@ -22,7 +22,13 @@ import type { EvalInput } from '../build/eval';
 import type { ModTable } from '../build/modTable';
 import { SCOPED_INDEX } from '../build/modTable';
 import { countOf } from '../build/size';
-import { ailmentCredit, jumpCredit, MAX_SOURCES, SOURCE_CLASS_ORDINAL } from '../build/sources';
+import {
+  ailmentCredit,
+  jumpCredit,
+  MAX_SOURCES,
+  rowKey,
+  SOURCE_CLASS_ORDINAL,
+} from '../build/sources';
 import type { AttributionPolicy, SourceTable } from '../build/sources';
 import { SUMMON_CAP } from '../caps';
 import { createCenterEventState, FREEZE_PAYLOADS } from '../effects/centerEvents';
@@ -140,13 +146,19 @@ export interface BurnStack {
 export interface Enemy extends EnemyState {
   readonly def: EnemyDef;
   readonly rec: WaveRecord;
-  /** Unit vector from the player towards the enemy; the enemy walks it inwards. */
-  readonly ux: number;
-  readonly uy: number;
+  /**
+   * Unit vector from the player towards the enemy; the enemy walks it inwards. The enemy AI step
+   * turns an orbiting treasure's (src/sim/systems/enemyAi.ts).
+   */
+  ux: number;
+  uy: number;
   /** Distance from the player along (ux, uy). */
   dist: number;
-  /** Distance covered per tick. */
-  readonly stepDist: number;
+  /**
+   * Distance covered per tick, inwards; the enemy AI step sets a v3 behaviour's: 0 while it stands,
+   * a dash's, and below 0 for a fleeing treasure, which walks out.
+   */
+  stepDist: number;
   /** Player radius + enemy radius. */
   readonly contactDist: number;
   readonly burns: BurnStack[];
@@ -1007,7 +1019,14 @@ export function createRunContext(
       segments,
       chain: createChainState(chainRetention),
       drones,
-      enemyAi: createEnemyAiState(data.waves.v3 !== undefined, data.waves.v3?.enemyCap ?? Infinity),
+      // A v3 run reads enemyRegen on the untagged center row, filled once here.
+      enemyAi: createEnemyAiState(
+        data.waves.v3 !== undefined,
+        data.waves.v3?.enemyCap ?? Infinity,
+        data.waves.v3 !== undefined ? table.row(rowKey(0, 0)) : -1,
+        values.toughDropMult,
+        values.treasureRate,
+      ),
       defence: createPlayerDefence(
         values,
         maxLife,

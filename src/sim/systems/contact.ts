@@ -7,7 +7,8 @@
  * (src/sim/ailments/apply.ts). An enemy the thorns kill dies as any hit's victim does, with its
  * drops and split, and never reaches the player: no life loss, leak or heroHit, only its contact
  * triggers, which find its ailments already released. Runs after movement; every enemy is still
- * alive here, since compaction ran last tick. The enemies that exist when it starts are the ones
+ * alive here, since compaction ran last tick, but a treasure that escaped this tick, far outside
+ * the arena (src/sim/systems/enemyAi.ts). The enemies that exist when it starts are the ones
  * it resolves: one added during it, such as a thorns kill's split children, touches from the
  * next tick. A survivor's contact damage, × its v3 record's contactMult in a v3 run (Enemy.v3,
  * src/sim/systems/enemyRecord.ts), goes through damagePlayer, the player's defences

@@ -1,23 +1,31 @@
 /**
  * Wave control (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2.1): starts waves,
- * shuffling each wave's enemies into its spawn queue, and records cleared waves.
+ * shuffling each wave's enemies into its spawn queue, and records cleared waves. A v3 run's
+ * queue also holds the treasures its schedule makes due at the wave (treasuresDue,
+ * src/sim/systems/enemyAi.ts), outside composeWave's count.
  */
 
 import { ZERO } from '../../core/num';
 import { composeWave } from '../../data/compose';
 import { shardsPerStdEnemy, stdHp } from '../../data/curve';
-import type { EnemyDef } from '../../data/types';
+import type { EnemyDef, V3WaveRules } from '../../data/types';
 import { fire } from '../effects/dispatch';
 import { EVENT } from '../effects/types';
 import type { RunContext, WaveRecord } from './context';
+import { treasuresDue } from './enemyAi';
 
-/** Starts wave `wave`: its spawn queue, its record, and the waveStart triggers at the player. */
+/**
+ * Starts wave `wave`: its spawn queue, its record, and the waveStart triggers at the player. In a
+ * v3 run the treasures due join the queue before the shuffle, which draws on the spawn stream for
+ * them as for any enemy of the queue.
+ */
 export function startWave(ctx: RunContext, wave: number): void {
   const queue: EnemyDef[] = [];
   for (const entry of composeWave(wave, ctx.data.waves)) {
     const def = ctx.data.enemies[entry.enemy];
     for (let i = 0; i < entry.count; i++) queue.push(def);
   }
+  if (ctx.sys.enemyAi.enabled) queueTreasures(ctx, wave, queue);
   for (let i = queue.length - 1; i > 0; i--) {
     const j = ctx.spawnRng.int(i + 1);
     const swap = queue[i] as EnemyDef;
@@ -45,6 +53,15 @@ export function startWave(ctx: RunContext, wave: number): void {
   ctx.events.push({ type: 'waveStarted', wave });
   const player = ctx.player;
   fire(ctx, EVENT.waveStart, 0, -1, null, player.x, player.y, 0, ZERO);
+}
+
+/** Appends the treasures due at `wave` in a v3 run to its queue. */
+function queueTreasures(ctx: RunContext, wave: number, queue: EnemyDef[]): void {
+  const v3 = ctx.data.waves.v3 as V3WaveRules;
+  const due = treasuresDue(wave, v3, ctx.sys.enemyAi.treasureRate);
+  if (due <= 0) return;
+  const def = ctx.data.enemies[v3.treasure.enemy];
+  for (let i = 0; i < due; i++) queue.push(def);
 }
 
 /**

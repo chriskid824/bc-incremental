@@ -22,6 +22,7 @@ import {
   SCALING_VARS,
   TARGET_KINDS,
   TARGET_PICKS,
+  TARGET_STATES,
 } from '../../data/triggers';
 import type { EffectKind, TriggerSpec } from '../../data/triggers';
 import { assembleWeb, FULL_SCOPE } from '../../data/web';
@@ -183,6 +184,9 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'frozenDamageTaken',
       'contactDamageTaken',
       'lifeRegen',
+      'enemyRegen',
+      'toughDropMult',
+      'treasureRate',
     ]);
   });
 
@@ -402,6 +406,12 @@ function kitchenSink(): NodeEffects {
     ...KILL_KINDS.map((k): TriggerSpec => ({ on: 'kill', when: [{ killedBy: k }], do: [heal] })),
     ...HIT_KINDS.map((h): TriggerSpec => ({ on: 'hit', when: [{ hitIs: h }], do: [heal] })),
     ...TARGET_KINDS.map((k): TriggerSpec => ({ on: 'hit', when: [{ targetKind: k }], do: [heal] })),
+    ...TARGET_STATES.map((st): TriggerSpec => ({
+      on: 'hit',
+      when: [{ targetState: st }],
+      do: [heal],
+    })),
+    { on: 'hit', when: [{ targetFrostAtLeast: 0.3 }], do: [heal] },
     ...TARGET_PICKS.map((pick): TriggerSpec => ({ on: 'hit', target: { pick }, do: [heal] })),
     ...(['outward', 'nearest', 'eventTarget', 'along'] as const).map((toward): TriggerSpec => ({
       on: 'hit',
@@ -540,7 +550,7 @@ describe('every template, through one node (§4.7)', () => {
     }
     expect([...kinds].sort()).toEqual(Object.keys(KIND_TEXT).sort());
     const families =
-      /^web\.(?:kind|effect|word|ailment|applied|held|killedBy|toward|aim|extra|event|fanout|cond|hit|targetKind|enemies|how|trigger|conds|pick|scaling|curve|mod|qual|scope|tag|rank|conversion|ruleFallback|centerDamage|bonus|grant|ring|masteryName|coreName|answers|join)\b/;
+      /^web\.(?:kind|effect|word|ailment|applied|held|state|killedBy|toward|aim|extra|event|fanout|cond|hit|targetKind|enemies|how|trigger|conds|pick|scaling|curve|mod|qual|scope|tag|rank|conversion|ruleFallback|centerDamage|bonus|grant|ring|masteryName|coreName|answers|join)\b/;
     const unasked = Object.keys(MESSAGES.en).filter((key) => families.test(key) && !asked.has(key));
     // An ailment condition sits on ailmentApplied and ailmentTick only (CONDITION_CONTEXTS), whose
     // templates name the ailment themselves: its registry entry is never a line of its own.
@@ -585,6 +595,67 @@ describe('every template, through one node (§4.7)', () => {
   ] as const)('writes the lines of the node in %s', (locale, expected) => {
     expect(linesOf(sink, NOTABLE, locale)).toEqual(expect.arrayContaining([...expected]));
   });
+
+  it.each([
+    [
+      'en',
+      [
+        '60% less Enemy regeneration (against enemies with at least 30% chill)',
+        '100% more Damage (against dashing enemies)',
+        '+25% Chill on hit (against dashing enemies)',
+        '80% less Enemy regeneration (against chilled enemies)',
+        '100% more Elite and boss drops',
+        '50% increased Treasure appearance rate',
+        '100% more Damage (against stopped enemies below 50% life)',
+        'On hitting dashing enemies: heal 1% of max life',
+        'On hitting stopped enemies with at least 30% chill: heal 1% of max life',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '敵人回血總減 60%（對冰冷 ≥ 30% 的敵人）',
+        '傷害總增 100%（對衝刺中的敵人）',
+        '擊中冰冷 +25%（對衝刺中的敵人）',
+        '敵人回血總減 80%（對有冰冷的敵人）',
+        '菁英與 Boss 掉落總增 100%',
+        '寶藏怪出現率提高 50%',
+        '傷害總增 100%（對生命低於 50% 的停下來的敵人）',
+        '擊中衝刺中的敵人時：回復 1% 生命',
+        '擊中冰冷 ≥ 30% 的停下來的敵人時：回復 1% 生命',
+      ],
+    ],
+  ] as const)(
+    'writes the enemy states, the chill threshold and the enemy stats in %s (docs/v3 C7 design §1.7)',
+    (locale, expected) => {
+      const heal = { kind: 'heal', lifePct: 0.01 } as const;
+      const web = withEffects(fire, NOTABLE, {
+        modifiers: [
+          { stat: 'enemyRegen', kind: 'more', value: -0.6, when: [{ targetFrostAtLeast: 0.3 }] },
+          { stat: 'damage', kind: 'more', value: 1, when: [{ targetState: 'dashing' }] },
+          { stat: 'frostOnHit', kind: 'flat', value: 0.25, when: [{ targetState: 'dashing' }] },
+          { stat: 'enemyRegen', kind: 'more', value: -0.8, when: [{ targetHas: 'frost' }] },
+          { stat: 'toughDropMult', kind: 'more', value: 1 },
+          { stat: 'treasureRate', kind: 'increased', value: 0.5 },
+          {
+            stat: 'damage',
+            kind: 'more',
+            value: 1,
+            when: [{ targetState: 'stopped' }, { targetHpBelow: 0.5 }],
+          },
+        ],
+        triggers: [
+          { on: 'hit', when: [{ targetState: 'dashing' }], do: [heal] },
+          {
+            on: 'hit',
+            when: [{ targetState: 'stopped' }, { targetFrostAtLeast: 0.3 }],
+            do: [heal],
+          },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
 
   it("writes a ranked node's triggers and conversions once a rank, and the bonus forms", () => {
     expect(linesOf(ranked, 'fire.center.alpha.r1', 'zh-TW', 2)).toEqual([

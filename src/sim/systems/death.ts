@@ -35,7 +35,8 @@ export function removeEnemy(ctx: RunContext, enemy: Enemy): void {
  * Kills the enemy, whose killDepth and killKind the killing damage has set. `origin` is the
  * trigger whose damage killed it, −1 for emitter hits and DoT kills; `hitFlags` the killing
  * hit's flags, 0 for a DoT kill. Its transfer triggers and the onKill hooks run first, while the
- * enemy is still alive and burning.
+ * enemy is still alive and burning. A v3 enemy's shards and expected cores are × its record's
+ * dropScale (src/sim/systems/enemyRecord.ts), before the cores are floored and rolled.
  */
 export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlags: number): void {
   // The kill's flags: the killing hit's, what the victim held, and what killed it.
@@ -58,8 +59,13 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlag
   removeEnemy(ctx, enemy);
   ctx.kills++;
   const def = enemy.def;
-  const shards = mul(mul(num(def.dropMult), enemy.rec.shardsPerStd), ctx.shardGain);
-  const expectedCores = def.cores * ctx.coreGain;
+  let shards = mul(mul(num(def.dropMult), enemy.rec.shardsPerStd), ctx.shardGain);
+  let expectedCores = def.cores * ctx.coreGain;
+  const v3 = enemy.v3;
+  if (v3 !== null) {
+    shards = mul(shards, v3.dropScale);
+    expectedCores *= v3.dropScale;
+  }
   let cores = 0;
   if (expectedCores > 0) {
     cores = Math.floor(expectedCores);

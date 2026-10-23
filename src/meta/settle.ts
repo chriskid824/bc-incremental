@@ -49,7 +49,9 @@ function dropUnits(enemy: EnemyId, data: GameData, visiting: Set<EnemyId>): Drop
 
 /**
  * Expected drops for killing every enemy of a wave, including split children (which belong
- * to the same wave). Cores are an expected value and may be fractional.
+ * to the same wave). Cores are an expected value and may be fractional. A tough or boss type's
+ * units are × the build's toughDropMult, as its kills' drops are (src/sim/systems/death.ts); an
+ * M1 build's is 1, which leaves them exact.
  */
 export function expectedWaveDrops(
   wave: number,
@@ -60,8 +62,10 @@ export function expectedWaveDrops(
   let cores = 0;
   for (const entry of composeWave(wave, data.waves)) {
     const units = dropUnits(entry.enemy, data, new Set());
-    shardMult += entry.count * units.shardMult;
-    cores += entry.count * units.cores;
+    const def = data.enemies[entry.enemy];
+    const scale = def.tough || def.boss ? stats.values.toughDropMult : 1;
+    shardMult += entry.count * units.shardMult * scale;
+    cores += entry.count * units.cores * scale;
   }
   return {
     shards: mul(num(shardsPerStdEnemy(wave)), shardMult * stats.values.shardGain),
