@@ -47,6 +47,15 @@ describe('messages', () => {
     expect(MESSAGES['zh-TW']['app.prototype.hive']).toBe('蜂巢原型');
   });
 
+  it('asks for a restart when a save could not be read, in both locales (the lead’s ruling SR7)', () => {
+    expect(MESSAGES.en['save.notice.readFailed']).toBe(
+      'Your save could not be read just now. Progress is not saved until you restart the game.',
+    );
+    expect(MESSAGES['zh-TW']['save.notice.readFailed']).toBe(
+      '存檔暫時讀不到。重新啟動遊戲之前，進度不會存下來。',
+    );
+  });
+
   it.each(LOCALES)('%s names every stat', (id) => {
     for (const stat of STAT_IDS) {
       const key = `stat.${stat}`;

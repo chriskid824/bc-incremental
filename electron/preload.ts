@@ -17,7 +17,7 @@ import type {
   SaveWriteResult,
   ShellInfo,
 } from '../src/platform/steam/bridge';
-import type { SaveSlot } from '../src/platform/storage';
+import type { SaveReadResult, SaveSlot } from '../src/platform/storage';
 import { CHANNELS } from './channels';
 
 const check: CheckBridge = Object.freeze({
@@ -44,7 +44,7 @@ const bridge: NativeBridge = Object.freeze({
   version: BRIDGE_VERSION,
   steamInfo: (): ShellInfo => ipcRenderer.sendSync(CHANNELS.info),
   storage: Object.freeze({
-    read: (slot: SaveSlot): string | null => ipcRenderer.sendSync(CHANNELS.saveRead, slot),
+    read: (slot: SaveSlot): SaveReadResult => ipcRenderer.sendSync(CHANNELS.saveRead, slot),
     write: (slot: SaveSlot, text: string): SaveWriteResult =>
       ipcRenderer.sendSync(CHANNELS.saveWrite, slot, text),
   }),

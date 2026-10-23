@@ -245,5 +245,6 @@
   "save.notice.dropped": "{character} 有 {count} 個天賦不再符合天賦網的規則，已經退還。",
   "save.notice.newer": "這份存檔來自較新的版本（存檔版本 {version}）。請更新遊戲；這裡的進度不會存下來。",
   "save.notice.unreadable": "存檔讀不出來。重新開始之前，進度不會存下來。",
+  "save.notice.readFailed": "存檔暫時讀不到。重新啟動遊戲之前，進度不會存下來。",
   "save.action.startOver": "重新開始"
 }

@@ -4,11 +4,12 @@ import { MESSAGES, fill } from '../../i18n';
 import { ACHIEVEMENTS_KEY } from '../achievements';
 import type { Analytics } from '../analytics';
 import type { AnalyticsPolicy } from '../platform';
-import type { SaveSlot } from '../storage';
+import type { SaveReadResult, SaveSlot } from '../storage';
 import { BRIDGE_VERSION, NATIVE_BRIDGE_KEY } from './bridge';
 import type { CheckBridge, NativeBridge, SaveWriteResult, ShellInfo, SteamStatus } from './bridge';
 import type { CheckPanelBridge } from './checkPanel';
 import {
+  BridgeSaveStorage,
   MissingBridgeError,
   STEAM_ANALYTICS_POLICY,
   SteamAchievements,
@@ -50,7 +51,7 @@ const NO_STEAM: SteamStatus = { ok: false, stage: 'init', error: 'Steam is not r
 
 function shellInfo(steam: SteamStatus, checkMode = false): ShellInfo {
   return {
-    bridgeVersion: 1,
+    bridgeVersion: 2,
     checkMode,
     steam,
     overlaySwitches: steam.ok ? ['in-process-gpu', 'disable-direct-composition'] : [],
@@ -78,12 +79,12 @@ function fakeBridge(steam: SteamStatus = STEAM_OK, checkMode = false) {
   const calls: string[] = [];
   const state = { writeResult: { ok: true } as SaveWriteResult };
   const bridge = {
-    version: 1,
+    version: 2,
     steamInfo: vi.fn((): ShellInfo => shellInfo(steam, checkMode)),
     storage: {
-      read: vi.fn((slot: SaveSlot): string | null => {
+      read: vi.fn((slot: SaveSlot): SaveReadResult => {
         calls.push(`read ${slot}`);
-        return files.get(slot) ?? null;
+        return { ok: true, text: files.get(slot) ?? null };
       }),
       write: vi.fn((slot: SaveSlot, text: string): SaveWriteResult => {
         calls.push(`write ${slot}`);
@@ -137,6 +138,68 @@ function page(bridge?: unknown) {
   return { env, storage, analytics, mount };
 }
 
+/**
+ * What the shell's bridge may answer to a read: its name, the answer (a call that throws
+ * included), what tryRead() makes of it and what read() does, M1's answer as before version 2.
+ */
+const BRIDGE_READS: readonly (readonly [string, () => unknown, SaveReadResult, string | null])[] = [
+  ['a text', () => ({ ok: true, text: 'progress' }), { ok: true, text: 'progress' }, 'progress'],
+  ["an empty file's ''", () => ({ ok: true, text: '' }), { ok: true, text: '' }, null],
+  ['no file', () => ({ ok: true, text: null }), { ok: true, text: null }, null],
+  [
+    'a failed read',
+    () => ({ ok: false, error: 'EBUSY: resource busy or locked' }),
+    { ok: false, error: 'EBUSY: resource busy or locked' },
+    null,
+  ],
+  [
+    'a throw',
+    () => {
+      throw new Error('IPC failed');
+    },
+    { ok: false, error: "the bridge's read threw: IPC failed" },
+    null,
+  ],
+  ['null', () => null, { ok: false, error: 'the bridge answered null' }, null],
+  ['a bare string', () => 'progress', { ok: false, error: 'the bridge answered "progress"' }, null],
+  [
+    'ok without text',
+    () => ({ ok: true }),
+    { ok: false, error: 'the bridge answered {"ok":true}' },
+    null,
+  ],
+  [
+    'failed without error',
+    () => ({ ok: false }),
+    { ok: false, error: 'the bridge answered {"ok":false}' },
+    null,
+  ],
+  [
+    "ok: 'yes'",
+    () => ({ ok: 'yes', text: 'progress' }),
+    { ok: false, error: 'the bridge answered {"ok":"yes","text":"progress"}' },
+    null,
+  ],
+  [
+    'a text that is a number',
+    () => ({ ok: true, text: 42 }),
+    { ok: false, error: 'the bridge answered {"ok":true,"text":42}' },
+    null,
+  ],
+  [
+    'an error that is not text',
+    () => ({ ok: false, error: { code: 'EBUSY' } }),
+    { ok: false, error: 'the bridge answered {"ok":false,"error":{"code":"EBUSY"}}' },
+    null,
+  ],
+  [
+    'extra fields',
+    () => ({ ok: true, text: 'progress', error: 'ignored' }),
+    { ok: true, text: 'progress' },
+    'progress',
+  ],
+];
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -173,8 +236,67 @@ describe('createSteamPlatform', () => {
     });
     expect(storage.read('main')).toBeNull();
     for (const answer of [undefined, 42, { text: 'progress' }]) {
-      bridge.storage.read.mockReturnValue(answer as unknown as string);
+      bridge.storage.read.mockReturnValue(answer as unknown as SaveReadResult);
       expect(storage.read('main'), JSON.stringify(answer)).toBeNull();
+    }
+  });
+
+  // Catches a failed read, a throw or a malformed answer taken for an empty slot (the lead's
+  // ruling SR5), and read() changing M1's answers, '' above all (SR2).
+  it.each(BRIDGE_READS)(
+    'reads %s through tryRead as the store needs it, and through read() as M1 did',
+    (_name, answer, tried, read) => {
+      const { bridge } = fakeBridge();
+      bridge.storage.read.mockImplementation((): SaveReadResult => answer() as SaveReadResult);
+      const slots = new BridgeSaveStorage(bridge.storage);
+      expect(slots.tryRead('main')).toEqual(tried);
+      expect(slots.read('main')).toBe(read);
+      expect(bridge.storage.read.mock.calls).toEqual([['main'], ['main']]);
+    },
+  );
+
+  it('cuts a malformed answer short in the error, and names a value JSON cannot write by its type', () => {
+    const { bridge } = fakeBridge();
+    const slots = new BridgeSaveStorage(bridge.storage);
+    const save = `{"v":2,"data":"${'x'.repeat(5000)}"}`;
+    bridge.storage.read.mockReturnValue(save as unknown as SaveReadResult);
+    expect(slots.tryRead('backup')).toEqual({
+      ok: false,
+      error: `the bridge answered ${JSON.stringify(save).slice(0, 60)}…`,
+    });
+    for (const [answer, type] of [
+      [undefined, 'undefined'],
+      [10n, 'bigint'],
+      [() => 'progress', 'function'],
+    ] as const) {
+      bridge.storage.read.mockReturnValue(answer as unknown as SaveReadResult);
+      expect(slots.tryRead('main'), type).toEqual({
+        ok: false,
+        error: `the bridge answered ${type}`,
+      });
+    }
+  });
+
+  // Catches a throw that is not an Error escaping tryRead, which never throws (the lead's ruling
+  // SR1): a call that throws anything is a failed read (SR5), and read() answers null for it, as M1
+  // did (SR2).
+  it('reads a throw that is not an Error as a failed read too, never throwing', () => {
+    const { bridge } = fakeBridge();
+    const slots = new BridgeSaveStorage(bridge.storage);
+    const throws: readonly (readonly [unknown, string])[] = [
+      ['IPC failed', 'IPC failed'],
+      [null, 'null'],
+      [undefined, 'undefined'],
+    ];
+    for (const [thrown, text] of throws) {
+      bridge.storage.read.mockImplementation((): SaveReadResult => {
+        throw thrown;
+      });
+      expect(slots.tryRead('main'), text).toEqual({
+        ok: false,
+        error: `the bridge's read threw: ${text}`,
+      });
+      expect(slots.read('main'), text).toBeNull();
     }
   });
 
@@ -320,17 +442,19 @@ describe('createSteamPlatform', () => {
     expect(platform.analytics).toBe(ANALYTICS);
   });
 
+  // Catches a page that takes a version 1 bridge, whose read answers null for a failed read.
   it('throws MissingBridgeError without the bridge or with another version of it', () => {
     const { bridge } = fakeBridge();
     const cases: readonly (readonly [unknown, string])[] = [
       [undefined, 'no bcNative bridge on this page'],
       [null, 'no bcNative bridge on this page'],
-      [{ ...bridge, version: 2 }, 'needs bcNative bridge version 1 (this page has version 2)'],
-      [{ ...bridge, version: '1' }, 'version 1 (this page has an unversioned one)'],
-      [{ storage: bridge.storage }, 'version 1 (this page has an unversioned one)'],
-      ['bcNative', 'version 1 (this page has an unversioned one)'],
+      [{ ...bridge, version: 1 }, 'needs bcNative bridge version 2 (this page has version 1)'],
+      [{ ...bridge, version: 3 }, 'needs bcNative bridge version 2 (this page has version 3)'],
+      [{ ...bridge, version: '2' }, 'version 2 (this page has an unversioned one)'],
+      [{ storage: bridge.storage }, 'version 2 (this page has an unversioned one)'],
+      ['bcNative', 'version 2 (this page has an unversioned one)'],
     ];
-    expect(BRIDGE_VERSION).toBe(1);
+    expect(BRIDGE_VERSION).toBe(2);
     for (const [found, message] of cases) {
       const { env, storage, analytics } = page();
       Object.assign(env.global, { [NATIVE_BRIDGE_KEY]: found });

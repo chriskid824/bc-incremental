@@ -15,7 +15,7 @@ import { LocalAchievements, isAchievementId } from '../achievements';
 import type { Achievements } from '../achievements';
 import { openKeyValueStore, pageLocalStorage } from '../platform';
 import type { AnalyticsPolicy, Platform, PlatformSetup } from '../platform';
-import type { SaveSlot, SaveStorage } from '../storage';
+import type { SaveReadResult, SaveSlot, SaveStorage } from '../storage';
 import { BRIDGE_VERSION, NATIVE_BRIDGE_KEY } from './bridge';
 import type { NativeBridge, ShellInfo } from './bridge';
 import { mountCheckPanel } from './checkPanel';
@@ -44,18 +44,37 @@ function versionOf(found: unknown): string {
   return typeof version === 'number' ? `version ${version}` : 'an unversioned one';
 }
 
-/** The save slots as files in the main process (C9/F5), never in localStorage. */
+/**
+ * The save slots as files in the main process (C9/F5), never in localStorage. tryRead() keeps a
+ * file the shell could not read apart from a missing one (bridge version 2); read() keeps the M1
+ * page's answers.
+ */
 export class BridgeSaveStorage implements SaveStorage {
   constructor(private readonly files: NativeBridge['storage']) {}
 
-  /** The slot's text, or null when it holds nothing or the call fails. */
+  /**
+   * The M1 page's read, its answers as before bridge version 2: the slot's text, or null when the
+   * slot holds nothing, the read fails, or the file is empty ('' or a byte-order mark alone, which
+   * the shell answered as null then), so that M1's save() never copies an empty main over a good
+   * backup.
+   */
   read(slot: SaveSlot): string | null {
+    const read = this.tryRead(slot);
+    return read.ok && read.text !== '' ? read.text : null;
+  }
+
+  /**
+   * The shell's answer when it is a SaveReadResult, '' for an empty file included; a call that
+   * throws, or any other answer, is a failed read saying what came back, never an empty slot.
+   */
+  tryRead(slot: SaveSlot): SaveReadResult {
+    let answer: unknown;
     try {
-      const text = this.files.read(slot);
-      return typeof text === 'string' ? text : null;
-    } catch {
-      return null;
+      answer = this.files.read(slot);
+    } catch (error) {
+      return { ok: false, error: `the bridge's read threw: ${errorText(error)}` };
     }
+    return readResult(answer) ?? { ok: false, error: `the bridge answered ${shown(answer)}` };
   }
 
   /** A failed write warns, as LocalSaveStorage's does; the next save tries again. */
@@ -89,6 +108,37 @@ function answer(call: () => boolean): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * `answer` as a SaveReadResult, holding only its fields: `ok: true` with a string or null `text`,
+ * or `ok: false` with a string `error`. Anything else is null.
+ */
+function readResult(answer: unknown): SaveReadResult | null {
+  if (typeof answer !== 'object' || answer === null) return null;
+  const ok: unknown = Reflect.get(answer, 'ok');
+  if (ok === true) {
+    const text: unknown = Reflect.get(answer, 'text');
+    return typeof text === 'string' || text === null ? { ok: true, text } : null;
+  }
+  const error: unknown = Reflect.get(answer, 'error');
+  return ok === false && typeof error === 'string' ? { ok: false, error } : null;
+}
+
+/** A malformed answer for its error: as JSON, cut short (a whole save can come back), or its type. */
+function shown(answer: unknown): string {
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(answer);
+  } catch {
+    // A cycle or a BigInt: its type says enough.
+  }
+  if (json === undefined) return typeof answer;
+  return json.length > 60 ? `${json.slice(0, 60)}…` : json;
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** What the Steam platform takes from the page; the tests pass their own. */

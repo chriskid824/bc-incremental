@@ -4,7 +4,8 @@
  * are formatted before they are passed (src/i18n/index.ts): `format` names the character (B1:
  * t(def.nameKey), web.char.<c>.name) and formats shards (src/core/format.ts), and the whole
  * numbers (cores, a wave, a count, a version) go as they are, as the HUD passes cores. The errors
- * of `restored` and `unreadable` are for the log, not the player. DOM-free so tests can run it.
+ * of `restored`, `unreadable` and `readFailed` are for the log, not the player. DOM-free so tests
+ * can run it.
  */
 
 import type { Num } from '../core/num';
@@ -61,5 +62,8 @@ export function saveNoticeText(notice: SaveNotice, format: NoticeFormat): Notice
       return { key: 'save.notice.newer', values: { version: notice.version } };
     case 'unreadable':
       return { key: 'save.notice.unreadable', values: {} };
+    // No button: the restart is the player's, and 重新開始 stays unreadable's.
+    case 'readFailed':
+      return { key: 'save.notice.readFailed', values: {} };
   }
 }

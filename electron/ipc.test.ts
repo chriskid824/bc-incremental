@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SaveFileInfo, ShellInfo } from '../src/platform/steam/bridge';
+import type { SaveReadResult } from '../src/platform/storage';
 import { CHANNELS } from './channels';
 import type { Channel } from './channels';
 import {
@@ -46,7 +47,7 @@ function event(sender: unknown, url: string | null, parent: unknown = null): Syn
   return { sender, senderFrame: url === null ? null : { url, parent }, returnValue: UNSET };
 }
 
-const INFO = { bridgeVersion: 1, checkMode: false } as ShellInfo;
+const INFO = { bridgeVersion: 2, checkMode: false } as ShellInfo;
 const SAVE_FILES: readonly SaveFileInfo[] = [
   { name: 'main.json', bytes: 812, modified: '2026-10-23T09:00:00.000Z' },
 ];
@@ -58,7 +59,7 @@ function deps(checkMode = false) {
   return {
     info: vi.fn(() => INFO),
     saves: {
-      read: vi.fn((): string | null => 'progress'),
+      read: vi.fn((): SaveReadResult => ({ ok: true, text: 'progress' })),
       write: vi.fn(() => ({ ok: true }) as const),
       list: vi.fn(() => SAVE_FILES),
     },
@@ -115,12 +116,12 @@ function registered(given = deps()) {
 }
 
 /**
- * Each channel's fallback (§1.3): reads and void calls null, writes not-ok with an error, Steam
- * false, lists empty.
+ * Each channel's fallback (§1.3): the shell info and void calls null, a save's read and write
+ * not-ok with an error (bridge version 2's read), Steam false, lists empty.
  */
 const FALLBACKS: Readonly<Record<Channel, unknown>> = {
   [CHANNELS.info]: null,
-  [CHANNELS.saveRead]: null,
+  [CHANNELS.saveRead]: { ok: false, error: 'bc:save:read failed' },
   [CHANNELS.saveWrite]: { ok: false, error: 'bc:save:write failed' },
   [CHANNELS.achUnlock]: false,
   [CHANNELS.achIsUnlocked]: false,
@@ -162,8 +163,8 @@ describe('createHandlers', () => {
   it('passes valid calls through to the files, Steam and the shell info', () => {
     const { call, deps: given } = registered();
     expect(call(CHANNELS.info)).toBe(INFO);
-    expect(call(CHANNELS.saveRead, 'main')).toBe('progress');
-    expect(call(CHANNELS.saveRead, 'backup', 'extra')).toBe('progress');
+    expect(call(CHANNELS.saveRead, 'main')).toEqual({ ok: true, text: 'progress' });
+    expect(call(CHANNELS.saveRead, 'backup', 'extra')).toEqual({ ok: true, text: 'progress' });
     expect(given.saves.read.mock.calls).toEqual([['main'], ['backup']]);
     expect(call(CHANNELS.saveWrite, 'backup', '{"v":3}')).toEqual({ ok: true });
     expect(given.saves.write).toHaveBeenCalledWith('backup', '{"v":3}');
@@ -171,6 +172,22 @@ describe('createHandlers', () => {
     expect(call(CHANNELS.achIsUnlocked, 'ACH_WIN_ONE_GAME')).toBe(true);
     expect(given.steam.unlock).toHaveBeenCalledWith('ACH_WIN_ONE_GAME');
     expect(given.steam.isUnlocked).toHaveBeenCalledWith('ACH_WIN_ONE_GAME');
+  });
+
+  // Catches a read answer changed on its way: an empty file's '' or a failed read made null.
+  it("passes each of the files' read answers through as it came", () => {
+    const { call, deps: given } = registered();
+    const answers: readonly SaveReadResult[] = [
+      { ok: true, text: '{"v":2}' },
+      { ok: true, text: '' },
+      { ok: true, text: null },
+      { ok: false, error: "EBUSY: resource busy or locked, open 'main.json'" },
+    ];
+    for (const answer of answers) {
+      given.saves.read.mockReturnValueOnce(answer);
+      expect(call(CHANNELS.saveRead, 'main'), JSON.stringify(answer)).toBe(answer);
+    }
+    expect(given.saves.read).toHaveBeenCalledTimes(answers.length);
   });
 
   it('refuses a slot other than main and backup before the files see it', () => {
@@ -185,7 +202,10 @@ describe('createHandlers', () => {
       null,
       1,
     ]) {
-      expect(call(CHANNELS.saveRead, slot), String(slot)).toBeNull();
+      expect(call(CHANNELS.saveRead, slot), String(slot)).toEqual({
+        ok: false,
+        error: 'no such save slot',
+      });
       expect(call(CHANNELS.saveWrite, slot, 'x'), String(slot)).toEqual({
         ok: false,
         error: 'no such save slot',
@@ -332,7 +352,7 @@ describe('registerSync', () => {
     failing.recentErrors.mockImplementation(thrown);
     const { call, log } = registered(failing);
     expect(call(CHANNELS.info)).toBeNull();
-    expect(call(CHANNELS.saveRead, 'main')).toBeNull();
+    expect(call(CHANNELS.saveRead, 'main')).toEqual({ ok: false, error: 'bc:save:read failed' });
     expect(call(CHANNELS.saveWrite, 'main', 'x')).toEqual({
       ok: false,
       error: 'bc:save:write failed',
@@ -371,6 +391,24 @@ describe('registerSync', () => {
     expect(log).toHaveBeenCalledWith(`Refused bc:info from ${PAGE_URL}`);
     expect(log).toHaveBeenCalledWith(`Refused bc:check:report from ${PAGE_URL}`);
     expect(log).toHaveBeenCalledWith('Refused bc:info from a closed frame');
+  });
+
+  // Catches a fallback read as an empty slot ({ ok: true, text: null }) or as version 1's null:
+  // the page would take a file it never read for an empty slot and write over it.
+  it('answers a refused sender and a throwing read with a failed read, never an empty slot', () => {
+    const failing = deps();
+    failing.saves.read.mockImplementation(() => {
+      throw new Error('disk on fire');
+    });
+    const { call } = registered(failing);
+    const { ipc } = registered();
+    for (const answer of [
+      call(CHANNELS.saveRead, 'main'),
+      ipc.send(CHANNELS.saveRead, event(OTHER, PAGE_URL), 'main'),
+      ipc.send(CHANNELS.saveRead, event(GAME, 'https://example.com/index.html'), 'backup'),
+    ]) {
+      expect(answer).toEqual({ ok: false, error: 'bc:save:read failed' });
+    }
   });
 
   it('answers with the fallback when the trust check itself throws', () => {

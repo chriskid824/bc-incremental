@@ -6,7 +6,7 @@ import type { CheckLog, ReportMeta } from './report';
 const META: ReportMeta = { when: '2026-10-30T09:15:42.123Z', build: '0.0.1+e57606a' };
 
 const WINDOWS: ShellInfo = {
-  bridgeVersion: 1,
+  bridgeVersion: 2,
   checkMode: true,
   steam: { ok: true, appId: 480, language: 'tchinese', steamDeck: false, initMs: 137 },
   overlaySwitches: ['in-process-gpu', 'disable-direct-composition'],

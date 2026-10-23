@@ -137,7 +137,7 @@ type WalletData = SlotData['wallet'];
 
 /**
  * What a load tells the player (§1.5): fixProfile makes the first two, parseProfile v1Waiting,
- * B1 v1Claimed and C8.3's store the last three.
+ * B1 v1Claimed and the store (src/app/profileStore.ts) the last four.
  */
 export type SaveNotice =
   /** Step 4: ids renamed to null, merged or outside the web, or a lost ascendancy: all refunded. */
@@ -157,7 +157,9 @@ export type SaveNotice =
   /** The store: a slot is from a newer version, so nothing is written. */
   | { readonly kind: 'newer'; readonly version: number }
   /** The store: no slot loads; the errors are for the log. */
-  | { readonly kind: 'unreadable'; readonly errors: readonly string[] };
+  | { readonly kind: 'unreadable'; readonly errors: readonly string[] }
+  /** The store: a slot could not be read, so nothing is saved until a restart; errors for the log. */
+  | { readonly kind: 'readFailed'; readonly errors: readonly string[] };
 
 /** What fixProfile reads: each character's web, the economy legalize prices with, the renames. */
 export interface LoadContext {

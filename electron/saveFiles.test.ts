@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  RENAME_RETRY_MS,
+  BUSY_RETRY_MS,
   SAVE_SLOTS,
   TEMP_SUFFIX,
   openSaveFiles,
@@ -89,6 +89,18 @@ function failingRename(code: string, times: number): FileOps['renameSync'] {
   };
 }
 
+/** A read of `name` that fails `times` times with `code`, then reads; other files read as ever. */
+function failingRead(code: string, times: number, name = 'main.json'): FileOps['readFileSync'] {
+  let left = times;
+  return ((path: string, options: BufferEncoding) => {
+    if (basename(path) === name && left > 0) {
+      left -= 1;
+      throw fsError(code, `open '${name}'`);
+    }
+    return fs.readFileSync(path, options);
+  }) as FileOps['readFileSync'];
+}
+
 /**
  * A write that takes nothing (answers 0) on its first call and writes on later ones: a writer that
  * tried again would succeed and one that stopped would keep a short file, so neither passes, and
@@ -118,61 +130,172 @@ describe('openSaveFiles', () => {
     expect(fs.statSync(dir).isDirectory()).toBe(true);
     const save = `{"v":3,"game":"bc-incremental","data":{"name":"成就 ✓"}}\r\n  `;
     expect(files.write('main', save)).toEqual({ ok: true });
-    expect(files.read('main')).toBe(save);
+    expect(files.read('main')).toEqual({ ok: true, text: save });
     expect(text('main.json')).toBe(save);
     const large = 'x'.repeat(3 * 1024 * 1024);
     expect(files.write('backup', large)).toEqual({ ok: true });
-    expect(files.read('backup')).toBe(large);
+    expect(files.read('backup')).toEqual({ ok: true, text: large });
     expect(names()).toEqual(['backup.json', 'main.json']);
   });
 
-  it('reads null, never throwing, for a missing, empty, directory or unreadable file', () => {
+  // Catches a failed read answered as an empty slot (the lead's ruling SR3), and ENOENT as failed.
+  it('reads a missing file as empty, and fails a read of a directory or a denied file, never throwing', () => {
     const { files, log } = open();
-    expect(files.read('main')).toBeNull();
-    fs.writeFileSync(join(dir, 'backup.json'), '');
-    expect(files.read('backup')).toBeNull();
+    expect(files.read('main')).toEqual({ ok: true, text: null });
     fs.mkdirSync(join(dir, 'main.json'));
     expect(() => files.read('main')).not.toThrow();
-    expect(files.read('main')).toBeNull();
-    const denied = open({
-      fs: {
-        ...fs,
-        readFileSync: (() => {
-          throw fsError('EACCES', "open 'main.json'");
-        }) as FileOps['readFileSync'],
-      },
+    expect(files.read('main')).toEqual({
+      ok: false,
+      error: 'EISDIR: illegal operation on a directory, read',
     });
-    expect(denied.files.read('main')).toBeNull();
+    const denied = open({ fs: { ...fs, readFileSync: failingRead('EACCES', Infinity) } });
+    expect(denied.files.read('main')).toEqual({
+      ok: false,
+      error: "EACCES: failed, open 'main.json'",
+    });
     expect(denied.log).toHaveBeenCalledWith(
       "Could not read main.json: EACCES: failed, open 'main.json'",
     );
     expect(log.mock.calls.map(([line]) => line)).toEqual([
       'No main.json yet.',
-      'backup.json is empty.',
       'Could not read main.json: EISDIR: illegal operation on a directory, read',
     ]);
   });
 
-  it('logs each kind of unreadable slot once, however often it is read', () => {
+  // Catches '' or a lone byte-order mark read as an empty slot, and a mark left in the text.
+  it("reads an empty file and a byte-order mark alone as the text ''", () => {
+    const { files, log } = open();
+    fs.writeFileSync(join(dir, 'main.json'), '');
+    fs.writeFileSync(join(dir, 'backup.json'), '\uFEFF');
+    expect(files.read('main')).toEqual({ ok: true, text: '' });
+    expect(files.read('backup')).toEqual({ ok: true, text: '' });
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      'main.json is empty.',
+      'backup.json is empty.',
+    ]);
+  });
+
+  it('logs each kind of unreadable slot once per slot and code, however often it is read', () => {
     const { files, log } = open();
     for (let i = 0; i < 3; i += 1) {
       files.read('main');
       files.read('backup');
     }
+    fs.writeFileSync(join(dir, 'backup.json'), '');
+    const denied = open({ fs: { ...fs, readFileSync: failingRead('EACCES', Infinity) } });
+    for (let i = 0; i < 3; i += 1) {
+      files.read('backup');
+      denied.files.read('main');
+      denied.files.read('backup');
+    }
+    fs.mkdirSync(join(dir, 'main.json'));
+    for (let i = 0; i < 3; i += 1) files.read('main');
     expect(log.mock.calls.map(([line]) => line)).toEqual([
       'No main.json yet.',
       'No backup.json yet.',
+      'backup.json is empty.',
+      'Could not read main.json: EISDIR: illegal operation on a directory, read',
+    ]);
+    expect(denied.log.mock.calls.map(([line]) => line)).toEqual([
+      "Could not read main.json: EACCES: failed, open 'main.json'",
+      'backup.json is empty.',
     ]);
   });
 
   it('takes a byte-order mark off the start, and only there', () => {
     const { files } = open();
     fs.writeFileSync(join(dir, 'main.json'), '\uFEFF{"v":3}');
-    expect(files.read('main')).toBe('{"v":3}');
+    expect(files.read('main')).toEqual({ ok: true, text: '{"v":3}' });
     fs.writeFileSync(join(dir, 'main.json'), '{"v":3,"a":"\uFEFF"}');
-    expect(files.read('main')).toBe('{"v":3,"a":"\uFEFF"}');
-    fs.writeFileSync(join(dir, 'backup.json'), '\uFEFF');
-    expect(files.read('backup')).toBeNull();
+    expect(files.read('main')).toEqual({ ok: true, text: '{"v":3,"a":"\uFEFF"}' });
+  });
+
+  // Catches a read that fails at once on Windows while an antivirus or a cloud client holds it.
+  it('retries a read Windows refuses while another program holds the file, five times', () => {
+    fs.mkdirSync(dir);
+    fs.writeFileSync(join(dir, 'main.json'), 'progress');
+    for (const code of ['EBUSY', 'EPERM', 'EACCES']) {
+      for (const times of [1, 2, 5]) {
+        const { files, sleep, log } = open({
+          platform: 'win32',
+          fs: { ...fs, readFileSync: failingRead(code, times) },
+        });
+        expect(files.read('main'), `${code} ×${times}`).toEqual({ ok: true, text: 'progress' });
+        expect(sleep.mock.calls.map(([ms]) => ms)).toEqual(BUSY_RETRY_MS.slice(0, times));
+        expect(log).not.toHaveBeenCalled();
+      }
+      const { files, sleep, log } = open({
+        platform: 'win32',
+        fs: { ...fs, readFileSync: failingRead(code, 6) },
+      });
+      expect(files.read('main'), code).toEqual({
+        ok: false,
+        error: `${code}: failed, open 'main.json'`,
+      });
+      expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([10, 20, 40, 80, 160]);
+      expect(log.mock.calls).toEqual([
+        [`Could not read main.json: ${code}: failed, open 'main.json'`],
+      ]);
+    }
+    expect(BUSY_RETRY_MS).toEqual([10, 20, 40, 80, 160]);
+  });
+
+  // Catches the retry on every OS, and a missing file or a directory retried on Windows.
+  it('retries no read elsewhere, nor a missing file or a directory on Windows', () => {
+    for (const [code, platform] of [
+      ['EACCES', 'linux'],
+      ['EACCES', 'darwin'],
+      ['EBUSY', 'linux'],
+      ['EPERM', 'darwin'],
+    ] as const) {
+      const { files, sleep } = open({
+        platform,
+        fs: { ...fs, readFileSync: failingRead(code, 1) },
+      });
+      expect(files.read('main'), `${code} on ${platform}`).toEqual({
+        ok: false,
+        error: `${code}: failed, open 'main.json'`,
+      });
+      expect(sleep).not.toHaveBeenCalled();
+    }
+    const { files, sleep } = open({ platform: 'win32' });
+    expect(files.read('main')).toEqual({ ok: true, text: null });
+    fs.mkdirSync(join(dir, 'main.json'));
+    expect(files.read('main')).toEqual({
+      ok: false,
+      error: 'EISDIR: illegal operation on a directory, read',
+    });
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  // Catches another error read as an empty slot, which the store would write over, or a throw let
+  // through: only a missing file holds nothing, and the read never throws (the lead's ruling SR3),
+  // whether a folder on the path is a file (ENOTDIR), too many files are open (EMFILE), the disk
+  // fails (EIO), the error has no code or the throw is not an Error.
+  it('fails a read on every error but a missing file, on every OS, never as an empty slot', () => {
+    const throws: readonly (readonly [unknown, string])[] = [
+      [fsError('ENOTDIR', "open 'main.json'"), "ENOTDIR: failed, open 'main.json'"],
+      [fsError('EMFILE', "open 'main.json'"), "EMFILE: failed, open 'main.json'"],
+      [fsError('EIO', 'read'), 'EIO: failed, read'],
+      [new Error('no code'), 'no code'],
+      ['not an Error', 'not an Error'],
+      [null, 'null'],
+    ];
+    for (const platform of ['win32', 'linux', 'darwin'] as const) {
+      for (const [thrown, error] of throws) {
+        const { files, sleep } = open({
+          platform,
+          fs: {
+            ...fs,
+            readFileSync: (() => {
+              throw thrown;
+            }) as FileOps['readFileSync'],
+          },
+        });
+        expect(files.read('main'), `${error} on ${platform}`).toEqual({ ok: false, error });
+        expect(sleep).not.toHaveBeenCalled();
+      }
+    }
   });
 
   it('writes a temp, flushes it, closes it, renames it over the slot, then flushes the folder', () => {
@@ -232,7 +355,7 @@ describe('openSaveFiles', () => {
     });
     expect(text('main.json')).toBe('old progress');
     expect(names()).toEqual(['main.json']);
-    expect(files.read('main')).toBe('old progress');
+    expect(files.read('main')).toEqual({ ok: true, text: 'old progress' });
   });
 
   it('keeps the old file and leaves no temp when the OS writes nothing (writeSync answers 0)', () => {
@@ -244,7 +367,7 @@ describe('openSaveFiles', () => {
     });
     expect(text('main.json')).toBe('old progress');
     expect(names()).toEqual(['main.json']);
-    expect(files.read('main')).toBe('old progress');
+    expect(files.read('main')).toEqual({ ok: true, text: 'old progress' });
   });
 
   it('keeps the old file when the flush or the rename fails, and leaves no temp', () => {
@@ -279,8 +402,8 @@ describe('openSaveFiles', () => {
     fs.writeFileSync(join(dir, 'notes.tmp'), 'not a save');
     const { files } = open();
     expect(names()).toEqual(['main.json', 'notes.tmp']);
-    expect(files.read('main')).toBe('old progress');
-    expect(files.read('backup')).toBeNull();
+    expect(files.read('main')).toEqual({ ok: true, text: 'old progress' });
+    expect(files.read('backup')).toEqual({ ok: true, text: null });
   });
 
   it('retries a rename Windows refuses while another program holds the file, five times', () => {
@@ -295,7 +418,7 @@ describe('openSaveFiles', () => {
           ok: true,
         });
         expect(text('main.json')).toBe(`newer ${code} ${times}`);
-        expect(sleep.mock.calls.map(([ms]) => ms)).toEqual(RENAME_RETRY_MS.slice(0, times));
+        expect(sleep.mock.calls.map(([ms]) => ms)).toEqual(BUSY_RETRY_MS.slice(0, times));
         expect(names()).toEqual(['main.json']);
       }
       const { files, sleep } = open({
@@ -331,8 +454,8 @@ describe('openSaveFiles', () => {
     files.write('backup', 'backup 1');
     files.write('main', 'main 2');
     files.write('main', 'main 3');
-    expect(files.read('main')).toBe('main 3');
-    expect(files.read('backup')).toBe('backup 1');
+    expect(files.read('main')).toEqual({ ok: true, text: 'main 3' });
+    expect(files.read('backup')).toEqual({ ok: true, text: 'backup 1' });
     expect(names()).toEqual(['backup.json', 'main.json']);
     files.write('backup', 'backup 2');
     expect(text('main.json')).toBe('main 3');
@@ -361,7 +484,10 @@ describe('openSaveFiles', () => {
     const { files } = open();
     for (const slot of ['../main', 'main.json', 'Main', '', 'backup/../main']) {
       expect(files.write(slot as 'main', 'x').ok, slot).toBe(false);
-      expect(files.read(slot as 'main'), slot).toBeNull();
+      expect(files.read(slot as 'main'), slot).toEqual({
+        ok: false,
+        error: `no save slot ${JSON.stringify(slot)}`,
+      });
     }
     expect(fs.readdirSync(root)).toEqual(['saves']);
     expect(names()).toEqual([]);
@@ -400,7 +526,7 @@ describe('openSaveFiles', () => {
     const result = files.write('main', 'progress');
     expect(result.ok).toBe(false);
     expect(result.ok ? '' : result.error).toContain('ENOENT');
-    expect(files.read('main')).toBeNull();
+    expect(files.read('main')).toEqual({ ok: true, text: null });
     expect(files.list()).toEqual([]);
   });
 });

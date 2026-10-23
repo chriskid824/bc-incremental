@@ -19,6 +19,11 @@
  *    path redacted.
  * 3. Garbage in main.json beside run 1's save as backup.json: the page lands on the talent web
  *    from the backup, with a warning and no error.
+ *    3b. main.json a directory beside the same backup.json, so its read fails (EISDIR): the bridge
+ *    answers a failed read for main, never an empty slot, and the backup's text for backup; the
+ *    page lands on the talent web from the backup. After closing, backup.json is unchanged (the
+ *    M1 page copies nothing over it when main reads null, and its write of main fails on the
+ *    directory) and no temp is left. The shell's one line about the failed read is expected.
  * 4. `--bc-overlay-switches`: the intro without errors while in-process-gpu is set (weak, and
  *    Linux only).
  * 5. `--bc-replay`: `renderStress` reaches the page as `?replay=renderStress`; `a&b` reaches it as
@@ -28,9 +33,10 @@
  * run ends, so those from before Playwright attached count), the main process's ring buffer of
  * renderer errors (electron/ipc.ts), the main process's console errors and exceptions (its console
  * history, read through an inspector session in that process), and the main process's error lines
- * on stderr until it exits. Every run also checks the game window's security settings as Electron
- * applied them (getLastWebPreferences; design §1.3), and that the panel's `[data-check]` elements
- * exist only in the check mode. Each shell's process has exited before its folder is removed.
+ * on stderr until it exits; only the lines a run expects (finish()'s `lines`, run 3b's alone) are
+ * let through. Every run also checks the game window's security settings as Electron applied them
+ * (getLastWebPreferences; design §1.3), and that the panel's `[data-check]` elements exist only in
+ * the check mode. Each shell's process has exited before its folder is removed.
  *
  *   electron_config_cache=<folder> npm run electron:install   (once: Electron's binary)
  *   xvfb-run -a -s "-screen 0 1280x800x24" npm run smoke:electron [-- --out out/electron-smoke]
@@ -48,6 +54,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -96,6 +103,12 @@ const SECURE_PREFERENCES = {
   experimentalFeatures: false,
 };
 const GARBAGE = 'not a save {';
+/** Run 3b's failed read of main.json, a directory, as node:fs reports it on Linux. */
+const EISDIR_READ = 'EISDIR: illegal operation on a directory, read';
+/** The shell's line about it (electron/saveFiles.ts), once in its console and on stderr. */
+const READ_FAILED_LINE = `Could not read main.json: ${EISDIR_READ}`;
+/** The page's warning if the M1 page's save writes main.json, which the directory refuses. */
+const SAVE_FAILED_LINE = 'Save failed EISDIR: illegal operation on a directory, rename';
 const REPLAY = 'renderStress';
 const BAD_REPLAY = 'a&b';
 const BAD_REPLAY_LINE = `Ignoring --bc-replay=${JSON.stringify(BAD_REPLAY)}: a replay is letters, digits, ':' and '.'.`;
@@ -195,6 +208,18 @@ function check(ok: boolean, what: string): void {
 interface Logged {
   readonly type: string;
   readonly text: string;
+}
+
+/**
+ * A line finish() fails a run on that the run expects instead: a page warning, a main-process
+ * console line, or a line of the main process's output (stderr), starting with `text`. `times` is
+ * how often it must appear, or 'any' for a page warning that may come only as the window closes,
+ * after finish() has read the page's history.
+ */
+interface ExpectedLine {
+  readonly where: 'page' | 'main' | 'stderr';
+  readonly text: string;
+  readonly times: number | 'any';
 }
 
 /** One launch of the shell, with its own userData. */
@@ -351,7 +376,9 @@ async function shellView(page: Page): Promise<ShellView | null> {
 
 /**
  * Reads both processes' histories and the main process's facts, checks what every run must
- * hold, closes the shell and waits for it to exit. Returns the two histories.
+ * hold, closes the shell and waits for it to exit. Returns the two histories. A line that fails a
+ * run fails it unless the run expects it (`lines`, none by default), and each expected line must
+ * appear as often as it says.
  */
 async function finish(
   shell: Shell,
@@ -359,24 +386,33 @@ async function finish(
     readonly switches: readonly string[];
     readonly ignored: readonly string[];
     readonly checkMode: boolean;
+    readonly lines?: readonly ExpectedLine[];
   },
 ): Promise<{ page: Logged[]; main: Logged[] }> {
   const page = await pageHistory(shell.page);
   const main = await mainHistory(shell);
   const facts = await mainFacts(shell);
+  const lines = expect.lines ?? [];
+  const seen = new Map<ExpectedLine, number>();
+  /** Whether the run expects `text` in `where`; counted if so. */
+  const expected = (where: ExpectedLine['where'], text: string): boolean => {
+    const line = lines.find((entry) => entry.where === where && text.startsWith(entry.text));
+    if (line !== undefined) seen.set(line, (seen.get(line) ?? 0) + 1);
+    return line !== undefined;
+  };
   for (const line of page) {
     const failed =
       line.type === 'error' ||
       line.type === 'exception' ||
       (line.type === 'warning' && line.text.startsWith('Save failed'));
-    check(!failed, `page ${line.type}: ${line.text}`);
+    check(!failed || expected('page', line.text), `page ${line.type}: ${line.text}`);
   }
   for (const line of main) {
     const failed =
       line.type === 'error' ||
       line.type === 'exception' ||
       (line.type === 'warning' && line.text.startsWith('Could not'));
-    check(!failed, `main ${line.type}: ${line.text}`);
+    check(!failed || expected('main', line.text), `main ${line.type}: ${line.text}`);
   }
   check(facts.recentErrors !== null, `no ${RECENT_ERRORS_GLOBAL} in the main process`);
   for (const line of facts.recentErrors ?? []) check(false, `ring buffer: ${line}`);
@@ -426,7 +462,16 @@ async function finish(
   }
 
   await close(shell);
-  for (const line of shell.output) check(!MAIN_ERROR_LINE.test(line), `main stderr: ${line}`);
+  for (const line of shell.output) {
+    check(!MAIN_ERROR_LINE.test(line) || expected('stderr', line), `main stderr: ${line}`);
+  }
+  for (const line of lines) {
+    const times = seen.get(line) ?? 0;
+    check(
+      line.times === 'any' || times === line.times,
+      `${line.where} said ${JSON.stringify(line.text)} ${times} times, not ${line.times}`,
+    );
+  }
   console.log(`${current}: the terminal said`);
   for (const line of main) console.log(`  [${line.type}] ${line.text}`);
   for (const line of page.filter((entry) => entry.type === 'warning')) {
@@ -691,7 +736,10 @@ async function runGarbage(
   await shell.page.waitForSelector(TALENTS, { timeout: TIMEOUT_MS });
   await shell.page.screenshot({ path: join(out, 'run3-backup.png') });
   const read = await shell.page.evaluate("window.bcNative.storage.read('main')");
-  check(read === GARBAGE, `main.json reads as ${JSON.stringify(read)}`);
+  check(
+    JSON.stringify(read) === JSON.stringify({ ok: true, text: GARBAGE }),
+    `main.json reads as ${JSON.stringify(read)}`,
+  );
   const { page } = await finish(shell, { switches: [], ignored: [], checkMode: false });
   const warned = page.filter(
     (line) => line.type === 'warning' && line.text.startsWith('Ignoring main save:'),
@@ -701,6 +749,55 @@ async function runGarbage(
   const after = readFileSync(join(shell.saves, 'backup.json'), 'utf8');
   console.log(
     `${current}: after closing, backup.json ${after === GARBAGE ? 'holds the garbage main.json' : 'is a save'}`,
+  );
+}
+
+async function runReadFailed(
+  electron: Playwright['_electron'],
+  binary: string,
+  out: string,
+  backup: string,
+) {
+  current = 'run 3b (main.json unreadable)';
+  const shell = await launch(electron, binary, [], (saves) => {
+    mkdirSync(join(saves, 'main.json'), { recursive: true });
+    writeFileSync(join(saves, 'backup.json'), backup);
+  });
+  const { page } = shell;
+  await page.waitForSelector(TALENTS, { timeout: TIMEOUT_MS });
+  await page.screenshot({ path: join(out, 'run3b-read-failed.png') });
+  // A failed read, never an empty slot (the lead's ruling SR3): the M1 page reads it as null.
+  const main = await page.evaluate("window.bcNative.storage.read('main')");
+  check(
+    JSON.stringify(main) === JSON.stringify({ ok: false, error: EISDIR_READ }),
+    `main.json reads as ${JSON.stringify(main)}`,
+  );
+  const read = await page.evaluate("window.bcNative.storage.read('backup')");
+  check(
+    JSON.stringify(read) === JSON.stringify({ ok: true, text: backup }),
+    `backup.json reads as ${JSON.stringify(read)?.slice(0, 80)}`,
+  );
+  await finish(shell, {
+    switches: [],
+    ignored: [],
+    checkMode: false,
+    lines: [
+      { where: 'main', text: READ_FAILED_LINE, times: 1 },
+      { where: 'stderr', text: READ_FAILED_LINE, times: 1 },
+      { where: 'page', text: SAVE_FAILED_LINE, times: 'any' },
+    ],
+  });
+  const names = existsSync(shell.saves) ? readdirSync(shell.saves).sort() : [];
+  check(
+    JSON.stringify(names) === '["backup.json","main.json"]',
+    `saves/ holds ${JSON.stringify(names)}`,
+  );
+  check(statSync(join(shell.saves, 'main.json')).isDirectory(), 'main.json is not a directory');
+  const after = readFileSync(join(shell.saves, 'backup.json'));
+  check(after.equals(Buffer.from(backup, 'utf8')), 'backup.json changed');
+  console.log(
+    `${current}: after closing, saves/ holds ${names.join(', ')}; backup.json ` +
+      `${after.equals(Buffer.from(backup, 'utf8')) ? 'is unchanged' : 'changed'}`,
   );
 }
 
@@ -751,6 +848,7 @@ async function main(): Promise<void> {
     const save = await runNormal(electron, binary, out);
     await runCheck(electron, binary, out, save);
     await runGarbage(electron, binary, out, save);
+    await runReadFailed(electron, binary, out, save);
     await runOverlaySwitches(electron, binary, out);
     await runReplay(electron, binary, out);
     console.log(`screenshots in ${out}:`);

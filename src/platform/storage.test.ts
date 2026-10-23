@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { HIVE_SAVE_PREFIX } from '../app/devFlags';
 import { ACHIEVEMENTS_KEY } from './achievements';
 import { INSTALL_ID_KEY, LOG_KEY, SENDING_KEY } from './analytics';
-import { LocalSaveStorage, PROFILE_SAVE_PREFIX } from './storage';
+import { LocalSaveStorage, MemorySaveStorage, PROFILE_SAVE_PREFIX } from './storage';
 
 /** A Map-backed Storage, standing in for window.localStorage (the tests run in node). */
 class MapStorage implements Storage {
@@ -81,6 +81,60 @@ describe('LocalSaveStorage', () => {
       'v2 progress',
       'older v2 progress',
     ]);
+  });
+});
+
+/** A Storage whose getItem throws `thrown`, as a page's does when storage is blocked. */
+class BlockedStorage extends MapStorage {
+  constructor(private readonly thrown: unknown) {
+    super();
+  }
+
+  override getItem(_key: string): string | null {
+    throw this.thrown;
+  }
+}
+
+// Catches a read that throws, swallowed as an empty slot, which the v3 store would write over.
+describe('tryRead (the lead’s rulings SR1, SR8)', () => {
+  it("answers a slot's text, '' as a text, and null for a slot that holds nothing", () => {
+    const storage = new MapStorage();
+    const slots = new LocalSaveStorage(storage, PROFILE_SAVE_PREFIX);
+    slots.write('main', 'v2 progress');
+    slots.write('backup', '');
+    expect(slots.tryRead('main')).toEqual({ ok: true, text: 'v2 progress' });
+    expect(slots.tryRead('backup')).toEqual({ ok: true, text: '' });
+    expect(new LocalSaveStorage(storage).tryRead('main')).toEqual({ ok: true, text: null });
+    // read() answers as before: '' is '' on the web.
+    expect([slots.read('main'), slots.read('backup')]).toEqual(['v2 progress', '']);
+  });
+
+  it("fails with the error's message when getItem throws, which read() answers as null", () => {
+    const blocked = new LocalSaveStorage(
+      new BlockedStorage(new Error('SecurityError: The operation is insecure.')),
+    );
+    expect(blocked.tryRead('main')).toEqual({
+      ok: false,
+      error: 'SecurityError: The operation is insecure.',
+    });
+    expect(blocked.read('main')).toBeNull();
+    // A throw that is not an Error: its text.
+    const odd = new LocalSaveStorage(new BlockedStorage('storage gone'), PROFILE_SAVE_PREFIX);
+    expect(odd.tryRead('backup')).toEqual({ ok: false, error: 'storage gone' });
+    expect(odd.read('backup')).toBeNull();
+  });
+
+  it("never fails in memory: the text, '' and null, as read() gives them", () => {
+    const slots = new MemorySaveStorage();
+    expect([slots.tryRead('main'), slots.tryRead('backup')]).toEqual([
+      { ok: true, text: null },
+      { ok: true, text: null },
+    ]);
+    slots.write('main', 'progress');
+    slots.write('backup', '');
+    expect(slots.tryRead('main')).toEqual({ ok: true, text: 'progress' });
+    expect(slots.tryRead('backup')).toEqual({ ok: true, text: '' });
+    expect([slots.read('main'), slots.read('backup')]).toEqual(['progress', '']);
   });
 });
 

@@ -7,10 +7,15 @@
  * (./index.ts) and the preload both import this module.
  */
 
-import type { SaveSlot } from '../storage';
+import type { SaveReadResult, SaveSlot } from '../storage';
 
 export const NATIVE_BRIDGE_KEY = 'bcNative';
-export const BRIDGE_VERSION = 1;
+/**
+ * Version 2 reads a save slot as a SaveReadResult, so that a file the shell could not read never
+ * reaches the page as an empty slot (version 1 answered null for both). The shell and the page ship
+ * together, and a page refuses a bridge of another version (MissingBridgeError).
+ */
+export const BRIDGE_VERSION = 2;
 
 export type SteamStatus =
   | {
@@ -23,7 +28,7 @@ export type SteamStatus =
   | { readonly ok: false; readonly stage: 'load' | 'init'; readonly error: string };
 
 export interface ShellInfo {
-  readonly bridgeVersion: 1;
+  readonly bridgeVersion: 2;
   readonly checkMode: boolean;
   readonly steam: SteamStatus;
   /** Empty unless Steam started. */
@@ -64,10 +69,14 @@ export interface SaveFileInfo {
 }
 
 export interface NativeBridge {
-  readonly version: 1;
+  readonly version: 2;
   steamInfo(): ShellInfo;
   readonly storage: {
-    read(slot: SaveSlot): string | null;
+    /**
+     * The slot's file: its text ('' for an empty file), null when there is no file, or a failed
+     * read with the shell's reason (electron/saveFiles.ts).
+     */
+    read(slot: SaveSlot): SaveReadResult;
     write(slot: SaveSlot, text: string): SaveWriteResult;
   };
   readonly achievements: { unlock(id: string): boolean; isUnlocked(id: string): boolean };

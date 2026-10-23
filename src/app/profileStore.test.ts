@@ -2,10 +2,11 @@
  * The v3 profile store (docs/v3 C8 design §2.3): the slot order (T1), the rotation (T2), the newer
  * guard (T3), the one-time v1 import (T4) and a second load after it (T5), the claim end to end
  * (T6), the M1 page on the same localStorage (T7), the writes at open (T8), the refusals (T9), a
- * throw while loading (the lead's ruling P5), starting over (D3) and the store before open(). On
- * MemorySaveStorage and a Map-backed Storage, as src/platform/storage.test.ts; the loads run on the
- * four fixture webs (src/save/testing.ts), where save-v2.json loads with no notice. Profiles the
- * tests hand the store are deep-frozen, and M1's slots are given to it read-only: a write throws.
+ * throw while loading (the lead's ruling P5), a slot that fails to read (SR6) and an empty text
+ * (SR8), starting over (D3) and the store before open(). On MemorySaveStorage and a Map-backed
+ * Storage, as src/platform/storage.test.ts; the loads run on the four fixture webs
+ * (src/save/testing.ts), where save-v2.json loads with no notice. Profiles the tests hand the store
+ * are deep-frozen, and M1's slots are given to it read-only: a write throws.
  */
 
 import { readFileSync } from 'node:fs';
@@ -14,8 +15,10 @@ import { add, num } from '../core/num';
 import { loadGameData } from '../data';
 import type { CharacterId } from '../data/sources';
 import { createMetaState } from '../meta';
+import { BridgeSaveStorage } from '../platform/steam';
+import type { NativeBridge } from '../platform/steam/bridge';
 import { LocalSaveStorage, MemorySaveStorage, PROFILE_SAVE_PREFIX } from '../platform/storage';
-import type { SaveSlot, SaveStorage } from '../platform/storage';
+import type { SaveReadResult, SaveSlot, SaveStorage } from '../platform/storage';
 import { loadSave, serializeSave } from '../save';
 import type { Profile } from '../save';
 import { SAVE_VERSION } from '../save/format';
@@ -86,12 +89,33 @@ class LoggedSlots extends MemorySaveStorage {
   }
 }
 
+/** The error a busy slot's read fails with, as the shell gives it on Windows. */
+const busy = (slot: SaveSlot): string => `EBUSY: resource busy or locked, open '${slot}.json'`;
+
+/** LoggedSlots whose tryRead fails for the slots in `failing`, as a file another program holds. */
+class FailingSlots extends LoggedSlots {
+  readonly failing: Set<SaveSlot>;
+
+  constructor(main: string | null, backup: string | null, failing: readonly SaveSlot[] = []) {
+    super(main, backup);
+    this.failing = new Set(failing);
+  }
+
+  override tryRead(slot: SaveSlot): SaveReadResult {
+    return this.failing.has(slot) ? { ok: false, error: busy(slot) } : super.tryRead(slot);
+  }
+}
+
 /** M1's slots as the store must use them: read, never written (a write throws). */
 class ReadOnlySlots implements SaveStorage {
   constructor(private readonly slots: SaveStorage) {}
 
   read(slot: SaveSlot): string | null {
     return this.slots.read(slot);
+  }
+
+  tryRead(slot: SaveSlot): SaveReadResult {
+    return this.slots.tryRead(slot);
   }
 
   write(slot: SaveSlot): void {
@@ -754,6 +778,195 @@ describe('a throw while loading (the lead’s ruling P5)', () => {
       ['The backup save threw while loading', 'no web for ice'],
     ]);
     expect(slots.writes).toEqual([]);
+  });
+});
+
+/** The readFailed result `errors` give. */
+const readFailed = (errors: readonly string[]) => ({
+  status: 'readFailed',
+  notices: [{ kind: 'readFailed', errors }],
+});
+
+// The lead's ruling SR6 catches the original bug, a failed read taken for an empty slot (restored
+// from the older backup, or the fresh path), and each way around the new state: main loaded, newer
+// first, an import skipped for good, a write, a start over.
+describe('a slot that fails to read (the lead’s ruling SR6)', () => {
+  it('story 1, main busy beside a good backup: readFailed, a fresh profile, read-only, nothing written', () => {
+    const slots = new FailingSlots(V2, OTHER, ['main']);
+    const store = storeOn(slots, new LoggedSlots(V1));
+    expect(store.open()).toEqual(readFailed([`main: ${busy('main')}`]));
+    expect([store.status, store.writable]).toEqual(['readFailed', false]);
+    expect(store.profile).toEqual(freshProfile());
+    store.set(deepFreeze(setSpeed(store.profile, 4)));
+    expect(store.save()).toBe('readOnly');
+    expect(() => store.startOver()).toThrow(
+      'ProfileStore.startOver: the store is readFailed, not unreadable',
+    );
+    expect(store.status).toBe('readFailed');
+    expect(slots.writes).toEqual([]);
+    slots.failing.clear();
+    expect([slots.read('main'), slots.read('backup')]).toEqual([V2, OTHER]);
+  });
+
+  it('story 2, both slots busy: readFailed with both errors, nothing written', () => {
+    const slots = new FailingSlots(V2, OTHER, ['main', 'backup']);
+    const store = storeOn(slots, new LoggedSlots(V1));
+    expect(store.open()).toEqual(
+      readFailed([`main: ${busy('main')}`, `backup: ${busy('backup')}`]),
+    );
+    expect(store.save()).toBe('readOnly');
+    expect(slots.writes).toEqual([]);
+  });
+
+  it.each([
+    ['a good main beside a backup that fails, not loaded', V2, OTHER, ['backup']],
+    ['a main that fails beside a newer backup, not newer', V2, NEWER, ['main']],
+    ['a newer main beside a backup that fails, not newer', NEWER, OTHER, ['backup']],
+    ['an empty main beside a backup that fails, not the fresh path', null, OTHER, ['backup']],
+    ['a main that fails beside an empty backup, not the fresh path', V2, null, ['main']],
+    ["'' in main beside a backup that fails, not unreadable", '', OTHER, ['backup']],
+  ] as const)('is readFailed for %s, nothing written', (_name, main, backup, failing) => {
+    const slots = new FailingSlots(main, backup, failing);
+    const v1 = new FailingSlots(V1, V1);
+    const store = storeOn(slots, v1);
+    expect(store.open()).toEqual(readFailed(failing.map((slot) => `${slot}: ${busy(slot)}`)));
+    expect([store.writable, store.save()]).toEqual([false, 'readOnly']);
+    expect(store.profile).toEqual(freshProfile());
+    expect(slots.writes).toEqual([]);
+    expect(v1.writes).toEqual([]);
+  });
+
+  it('writes nothing at open for a load the renames change while the backup fails', () => {
+    const context = withRenames(CONTEXT, { 'fire.center.alpha.r1': null });
+    const slots = new FailingSlots(V2, OTHER, ['backup']);
+    expect(storeOn(slots, null, context).open()).toEqual(readFailed([`backup: ${busy('backup')}`]));
+    expect(slots.writes).toEqual([]);
+  });
+
+  it('is readFailed when the fresh path fails to read the M1 main: no import skipped, nothing written', () => {
+    const slots = new LoggedSlots();
+    const v1 = new FailingSlots(V1, V1, ['main']);
+    const store = storeOn(slots, v1);
+    expect(store.open()).toEqual(readFailed([`v1 main: ${busy('main')}`]));
+    expect([store.writable, store.save()]).toEqual([false, 'readOnly']);
+    expect(store.profile).toEqual(freshProfile());
+    expect(slots.writes).toEqual([]);
+    expect(v1.writes).toEqual([]);
+  });
+
+  it('is readFailed when the M1 backup fails after an M1 main that is empty or does not import', () => {
+    for (const main of [null, V2, '{']) {
+      const slots = new LoggedSlots();
+      const store = storeOn(slots, new FailingSlots(main, V1, ['backup']));
+      expect(store.open(), String(main)).toEqual(readFailed([`v1 backup: ${busy('backup')}`]));
+      expect(store.save()).toBe('readOnly');
+      expect(slots.writes).toEqual([]);
+    }
+  });
+
+  it('imports an M1 main without reading the M1 backup, which fails', () => {
+    const slots = new LoggedSlots();
+    const store = storeOn(slots, new FailingSlots(V1, V1, ['backup']));
+    expect(store.open()).toEqual({
+      status: 'imported',
+      notices: [{ kind: 'v1Waiting', pending: PENDING }],
+    });
+    expect(slots.written).toEqual(['main']);
+  });
+
+  it('is readFailed when starting over under unreadable fails to read the M1 main, nothing written', () => {
+    const slots = new LoggedSlots('{', 'garbage');
+    const v1 = new FailingSlots(V1, null, ['main']);
+    const store = storeOn(slots, v1);
+    expect(store.open().status).toBe('unreadable');
+    store.set(deepFreeze(setSpeed(store.profile, 4)));
+    const result = store.startOver();
+    expect(result).toEqual(readFailed([`v1 main: ${busy('main')}`]));
+    expect(store.open()).toBe(result);
+    expect([store.status, store.writable, store.save()]).toEqual(['readFailed', false, 'readOnly']);
+    expect(store.profile).toEqual(freshProfile());
+    expect(() => store.startOver()).toThrow(
+      'ProfileStore.startOver: the store is readFailed, not unreadable',
+    );
+    expect(slots.writes).toEqual([]);
+    expect(v1.writes).toEqual([]);
+  });
+
+  // Catches a read-back that takes a failed read for the text written, or for an empty main.
+  it('reports a save whose read-back fails as failed, and keeps the last good text for backup', () => {
+    const slots = new FailingSlots(V2, OTHER);
+    const store = storeOn(slots);
+    expect(store.open().status).toBe('loaded');
+    slots.failing.add('main');
+    store.set(deepFreeze(setSpeed(store.profile, 4)));
+    expect(store.save()).toBe('failed');
+    expect(slots.written).toEqual(['backup', 'main']);
+    slots.failing.clear();
+    expect(store.save()).toBe('saved');
+    expect(slots.read('backup')).toBe(V2);
+    expect(profileOf(slots.read('main'))).toEqual(store.profile);
+  });
+});
+
+/** The Steam bridge's storage over `files`, as the shell answers it (bridge version 2). */
+function bridgeFiles(files: Map<SaveSlot, string>): NativeBridge['storage'] {
+  return {
+    read: (slot) => ({ ok: true, text: files.get(slot) ?? null }),
+    write: (slot, text) => {
+      files.set(slot, text);
+      return { ok: true };
+    },
+  };
+}
+
+// The lead's ruling SR8 catches the platforms reading '' apart: Steam's shell answered an empty
+// file as null, which took the fresh path where the web's '' was restored or unreadable.
+describe('an empty text (the lead’s ruling SR8)', () => {
+  /** A store on the web's localStorage and one on Steam's bridge, `main` and `backup` in each. */
+  function bothPlatforms(main: string, backup: string | null) {
+    const local = new MapStorage();
+    const files = new Map<SaveSlot, string>([['main', main]]);
+    local.setItem(`${PROFILE_SAVE_PREFIX}main`, main);
+    if (backup !== null) {
+      local.setItem(`${PROFILE_SAVE_PREFIX}backup`, backup);
+      files.set('backup', backup);
+    }
+    return {
+      local,
+      files,
+      web: storeOn(new LocalSaveStorage(local, PROFILE_SAVE_PREFIX)),
+      steam: storeOn(new BridgeSaveStorage(bridgeFiles(files))),
+    };
+  }
+
+  it("restores '' in main from a good backup alike on the web and on Steam, losing nothing", () => {
+    const { local, files, web, steam } = bothPlatforms('', OTHER);
+    const restored = {
+      status: 'restored',
+      notices: [{ kind: 'restored', error: 'main: not JSON' }],
+    };
+    expect(web.open()).toEqual(restored);
+    expect(steam.open()).toEqual(restored);
+    expect(profileOf(local.getItem(`${PROFILE_SAVE_PREFIX}main`))).toEqual(profileOf(OTHER));
+    expect(profileOf(files.get('main') ?? null)).toEqual(profileOf(OTHER));
+    expect([local.getItem(`${PROFILE_SAVE_PREFIX}backup`), files.get('backup')]).toEqual([
+      OTHER,
+      OTHER,
+    ]);
+  });
+
+  it("is unreadable with '' beside an empty backup or one that does not load, on both", () => {
+    for (const [backup, errors] of [
+      [null, ['main: not JSON', 'backup: empty']],
+      ['{', ['main: not JSON', 'backup: not JSON']],
+    ] as const) {
+      const { local, files, web, steam } = bothPlatforms('', backup);
+      const unreadable = { status: 'unreadable', notices: [{ kind: 'unreadable', errors }] };
+      expect(web.open(), String(backup)).toEqual(unreadable);
+      expect(steam.open(), String(backup)).toEqual(unreadable);
+      expect(local.getItem(`${PROFILE_SAVE_PREFIX}main`)).toBe('');
+      expect(files.get('main')).toBe('');
+    }
   });
 });
 

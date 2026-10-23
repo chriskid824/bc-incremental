@@ -245,5 +245,6 @@
   "save.notice.dropped": "{character}: {count} talents no longer fit the web and were refunded.",
   "save.notice.newer": "This save is from a newer version (save version {version}). Update the game; progress here is not saved.",
   "save.notice.unreadable": "Your save could not be read. Progress is not saved until you start over.",
+  "save.notice.readFailed": "Your save could not be read just now. Progress is not saved until you restart the game.",
   "save.action.startOver": "Start over"
 }

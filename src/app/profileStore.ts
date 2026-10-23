@@ -15,6 +15,14 @@
  * once (D5). save() copies the last text loaded or written into `backup`, never what `main` holds
  * (D4), then writes `main` and reads it back.
  *
+ * Every read goes through SaveStorage.tryRead, which keeps a slot that failed to read apart from
+ * one that holds nothing; an empty text ('') is a save that does not load. A failed read of either
+ * slot comes before every other outcome (`readFailed`): that slot may hold the newest save, so the
+ * store writes nothing for the session, whatever the other slot holds (no restore at open, no
+ * fresh path, no rotation), and stays read-only with a fresh profile until the game restarts;
+ * 重新開始 is not offered. A failed read of an M1 slot the fresh path reads is `readFailed` too,
+ * since a fresh profile written then would skip the import for good.
+ *
  * B1 wires it on the page (the lead's ruling P3):
  * - storage: createPlatform({ savePrefix: PROFILE_SAVE_PREFIX, … }).storage, the slots in
  *   localStorage under that prefix on the web (in memory where the page may not use localStorage)
@@ -26,12 +34,17 @@
  * its own (C9.1's savePrefix note).
  */
 
-import type { SaveSlot, SaveStorage } from '../platform/storage';
+import type { SaveReadResult, SaveSlot, SaveStorage } from '../platform/storage';
 import { M1_SAVE_VERSION } from '../save/format';
 import { freshProfile, parseProfile, SaveFormatError, serializeProfile } from '../save/profile';
 import type { LoadContext, ProfileLoad, SaveNotice, SaveProfile } from '../save/profile';
 
-export type OpenStatus = 'fresh' | 'imported' | 'loaded' | 'restored' | 'newer' | 'unreadable';
+/**
+ * open()'s outcome (§2.3). Three are read-only: `newer` and `unreadable` (until startOver()), and
+ * `readFailed`, a slot that could not be read, for the rest of the session.
+ */
+export type OpenStatus =
+  'fresh' | 'imported' | 'loaded' | 'restored' | 'newer' | 'unreadable' | 'readFailed';
 
 export interface OpenResult {
   readonly status: OpenStatus;
@@ -55,6 +68,9 @@ type Loaded = Extract<ProfileLoad, { readonly ok: true }>;
 
 const SLOTS: readonly SaveSlot[] = ['main', 'backup'];
 
+/** What a missing M1 storage (Steam) reads: nothing. */
+const EMPTY: SaveReadResult = { ok: true, text: null };
+
 /**
  * parseProfile on the text of `slot`. A throw (the load-time fixes run unguarded: the lead's ruling
  * P5) is logged and counts as that slot's failure, so it never stops the page.
@@ -69,11 +85,15 @@ function load(text: string, slot: string, context: LoadContext): ProfileLoad {
   }
 }
 
-/** A slot that holds a text, as open() reads it: loaded, from a newer version, or failed. */
+/**
+ * A slot that is not empty, as open() reads it: loaded, from a newer version, failed to load, or
+ * unread (tryRead failed, so it may hold anything).
+ */
 type SlotRead =
   | { readonly kind: 'loaded'; readonly text: string; readonly loaded: Loaded }
   | { readonly kind: 'newer'; readonly version: number }
-  | { readonly kind: 'failed'; readonly error: string };
+  | { readonly kind: 'failed'; readonly error: string }
+  | { readonly kind: 'unread'; readonly error: string };
 
 /** Why `slot` gave no profile, for the log: it was empty, or parseProfile's error. */
 function failure(slot: SaveSlot, read: Extract<SlotRead, { kind: 'failed' }> | null): string {
@@ -96,7 +116,7 @@ export class ProfileStore {
     return this.result;
   }
 
-  /** The profile: freshProfile() before open(), and under `newer` and `unreadable`. */
+  /** The profile: freshProfile() before open(), and under `newer`, `unreadable` and `readFailed`. */
   get profile(): SaveProfile {
     return this.current;
   }
@@ -106,7 +126,7 @@ export class ProfileStore {
     return this.opened().status;
   }
 
-  /** False before open(), under `newer`, and under `unreadable` until startOver(). */
+  /** False before open(), under `newer` and `readFailed`, and under `unreadable` until startOver(). */
   get writable(): boolean {
     return this.canWrite;
   }
@@ -122,10 +142,10 @@ export class ProfileStore {
 
   /**
    * Writes the profile: `backup` ← the last text loaded or written (if any), then `main` ← the new
-   * text, then reads `main` back. `readOnly` while not writable; `invalid`, logged, when the
-   * profile cannot be saved (D2), nothing written; `failed` when `main` does not read back as
-   * written (LocalSaveStorage swallows quota and privacy errors), so the next save copies the same
-   * text into `backup` again.
+   * text, then reads `main` back. `readOnly` while not writable (`newer`, `unreadable` and
+   * `readFailed`); `invalid`, logged, when the profile cannot be saved (D2), nothing written;
+   * `failed` when `main` does not read back as written, or fails to read back (LocalSaveStorage
+   * swallows quota and privacy errors), so the next save copies the same text into `backup` again.
    */
   save(): SaveOutcome {
     if (!this.canWrite) return 'readOnly';
@@ -140,16 +160,18 @@ export class ProfileStore {
     const { storage } = this.options;
     if (this.lastGood !== null) storage.write('backup', this.lastGood);
     storage.write('main', text);
-    if (storage.read('main') !== text) return 'failed';
+    const written = storage.tryRead('main');
+    if (!written.ok || written.text !== text) return 'failed';
     this.lastGood = text;
     return 'saved';
   }
 
   /**
-   * The player's 「重新開始」 under `unreadable` (it throws in any other state): the store takes
-   * the fresh path again, the v1 import included, becomes writable and writes `main` at once;
-   * `backup` keeps the unreadable text until the next save. A v1 import the lost save had claimed
-   * comes back once, since that save is gone.
+   * The player's 「重新開始」 under `unreadable` (it throws in any other state, `readFailed`
+   * included, whose files are most likely fine): the store takes the fresh path again, the v1
+   * import included, becomes writable and writes `main` at once; `backup` keeps the unreadable text
+   * until the next save. A v1 import the lost save had claimed comes back once, since that save is
+   * gone. An M1 slot that fails to read there gives `readFailed`, nothing written.
    */
   startOver(): OpenResult {
     const { status } = this.opened();
@@ -157,6 +179,7 @@ export class ProfileStore {
       throw new Error(`ProfileStore.startOver: the store is ${status}, not unreadable`);
     }
     this.result = this.freshPath();
+    // readOnly under readFailed: nothing is written.
     this.save();
     return this.result;
   }
@@ -166,10 +189,19 @@ export class ProfileStore {
     return this.result;
   }
 
-  /** open()'s work (§2.3): the fresh path, or the first of newer, loaded, restored, unreadable. */
+  /**
+   * open()'s work (§2.3): readFailed when a slot failed to read, else the fresh path, or the first
+   * of newer, loaded, restored, unreadable.
+   */
   private read(): OpenResult {
     const main = this.readSlot('main');
     const backup = this.readSlot('backup');
+    if (main?.kind === 'unread' || backup?.kind === 'unread') {
+      return this.readFailed([
+        ...(main?.kind === 'unread' ? [`main: ${main.error}`] : []),
+        ...(backup?.kind === 'unread' ? [`backup: ${backup.error}`] : []),
+      ]);
+    }
     if (main === null && backup === null) {
       const result = this.freshPath();
       if (result.status === 'imported') this.save();
@@ -191,7 +223,9 @@ export class ProfileStore {
 
   /** What `slot` holds, loaded; null when it is empty. */
   private readSlot(slot: SaveSlot): SlotRead | null {
-    const text = this.options.storage.read(slot);
+    const read = this.options.storage.tryRead(slot);
+    if (!read.ok) return { kind: 'unread', error: read.error };
+    const { text } = read;
     if (text === null) return null;
     const loaded = load(text, slot, this.options.context);
     if (loaded.ok) return { kind: 'loaded', text, loaded };
@@ -219,21 +253,36 @@ export class ProfileStore {
    * reads them, becomes the profile with its notices (v1Waiting while progress waits for the first
    * pick); a text of any other version there is passed over, and M1's slots are never written.
    * Else a fresh profile. Writable either way, with no last good text: nothing was loaded or written
-   * before open(), nor under `unreadable`.
+   * before open(), nor under `unreadable`. An M1 slot read on the way that fails to read gives
+   * `readFailed` instead, read-only: a fresh profile written now would skip the import for good.
    */
   private freshPath(): OpenResult {
     const { v1, context } = this.options;
-    this.canWrite = true;
     for (const slot of SLOTS) {
-      const text = v1 === null ? null : v1.read(slot);
-      if (text === null) continue;
-      const loaded = load(text, `v1 ${slot}`, context);
+      const read = v1 === null ? EMPTY : v1.tryRead(slot);
+      if (!read.ok) return this.readFailed([`v1 ${slot}: ${read.error}`]);
+      if (read.text === null) continue;
+      const loaded = load(read.text, `v1 ${slot}`, context);
       if (loaded.ok && loaded.fromVersion === M1_SAVE_VERSION) {
         this.current = loaded.profile;
+        this.canWrite = true;
         return { status: 'imported', notices: loaded.notices };
       }
     }
     this.current = freshProfile();
+    this.canWrite = true;
     return { status: 'fresh', notices: [] };
+  }
+
+  /**
+   * A slot that failed to read may hold the newest save, so nothing is written for the session
+   * (no restore, no fresh path, no rotation): a fresh profile, read-only, with the reads' errors
+   * for the log. The player restarts the game; 重新開始 is not offered, the files being most likely
+   * fine.
+   */
+  private readFailed(errors: readonly string[]): OpenResult {
+    this.current = freshProfile();
+    this.canWrite = false;
+    return { status: 'readFailed', notices: [{ kind: 'readFailed', errors }] };
   }
 }

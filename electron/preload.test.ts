@@ -27,7 +27,7 @@ vi.mock('electron', () => electron);
 
 /** A ShellInfo, as far as the preload reads it. */
 function infoOf(checkMode: boolean): unknown {
-  return { bridgeVersion: 1, checkMode };
+  return { bridgeVersion: 2, checkMode };
 }
 
 /** Main's answer on each channel: `answer:<channel>`, and `info` on bc:info. */
@@ -100,7 +100,8 @@ describe('the preload', () => {
     expect(Object.keys(bridge.storage as object).sort()).toEqual(['read', 'write']);
     expect(Object.keys(bridge.achievements as object).sort()).toEqual(['isUnlocked', 'unlock']);
     expect(bridge.version).toBe(BRIDGE_VERSION);
-    expect(bridge.version).toBe(1);
+    // Version 2: a read answers a SaveReadResult (src/platform/storage.ts), the page refusing 1.
+    expect(bridge.version).toBe(2);
     expect(Object.isFrozen(bridge)).toBe(true);
     expect(Object.isFrozen(bridge.storage)).toBe(true);
     expect(Object.isFrozen(bridge.achievements)).toBe(true);
@@ -182,12 +183,13 @@ describe('the preload', () => {
     const { bridge } = await load(true);
     const shell = bridge as unknown as NativeBridge;
     const written = { ok: false, error: 'bc:save:write failed' };
+    const read = { ok: false, error: "EBUSY: resource busy or locked, open 'backup.json'" };
     const saved = { ok: true, where: '/home/hoshi/.config/bc-incremental/steam-check/r.txt' };
     const files = [{ name: 'main.json', bytes: 812, modified: '2026-10-23T09:00:00.000Z' }];
     const errors = ['console error: boom'];
     const answers: Readonly<Record<string, unknown>> = {
       [CHANNELS.saveWrite]: written,
-      [CHANNELS.saveRead]: null,
+      [CHANNELS.saveRead]: read,
       [CHANNELS.checkClear]: false,
       [CHANNELS.checkSaves]: files,
       [CHANNELS.checkReport]: saved,
@@ -197,7 +199,7 @@ describe('the preload', () => {
       Object.hasOwn(answers, channel) ? answers[channel] : true,
     );
     expect(shell.storage.write('main', '{"game":"bc-incremental"}')).toBe(written);
-    expect(shell.storage.read('backup')).toBeNull();
+    expect(shell.storage.read('backup')).toBe(read);
     expect(shell.achievements.unlock('ACH_WIN_ONE_GAME')).toBe(true);
     expect(shell.achievements.isUnlocked('ACH_WIN_ONE_GAME')).toBe(true);
     const check = shell.check;

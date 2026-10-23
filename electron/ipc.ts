@@ -15,6 +15,7 @@ import { posix, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isAchievementId } from '../src/platform/achievements';
 import type { SaveWriteResult, ShellInfo } from '../src/platform/steam/bridge';
+import type { SaveReadResult } from '../src/platform/storage';
 import { CHANNELS } from './channels';
 import type { Channel } from './channels';
 import { isSaveSlot } from './saveFiles';
@@ -49,6 +50,15 @@ export interface SyncHandler {
   readonly fallback: unknown;
 }
 
+/**
+ * A read's fallback is a failed read naming its channel, never null and never an empty slot: a
+ * page that took a refused or failed read for an empty slot could write over the newest save.
+ */
+const READ_FALLBACK: SaveReadResult = Object.freeze({
+  ok: false,
+  error: `${CHANNELS.saveRead} failed`,
+});
+
 /** A write's fallback names its channel, since the page logs the error it is given. */
 const WRITE_FALLBACK: SaveWriteResult = Object.freeze({
   ok: false,
@@ -65,8 +75,9 @@ const REPORT_FALLBACK: ReportResult = Object.freeze({
 const NONE: readonly never[] = Object.freeze([]);
 
 /**
- * Each channel's handler: reads and void calls fall back to null, writes to not-ok, Steam to
- * false, lists to an empty list. Outside the check mode a bc:check:* handler answers its fallback.
+ * Each channel's handler: the shell info and void calls fall back to null, a save's read and its
+ * write to a failed result naming the channel, Steam to false, lists to an empty list. Outside the
+ * check mode a bc:check:* handler answers its fallback.
  */
 export function createHandlers(deps: HandlerDeps): Readonly<Record<Channel, SyncHandler>> {
   const check = (handle: SyncHandler['handle'], fallback: unknown): SyncHandler => ({
@@ -76,8 +87,8 @@ export function createHandlers(deps: HandlerDeps): Readonly<Record<Channel, Sync
   return {
     [CHANNELS.info]: { handle: () => deps.info(), fallback: null },
     [CHANNELS.saveRead]: {
-      handle: (slot) => (isSaveSlot(slot) ? deps.saves.read(slot) : null),
-      fallback: null,
+      handle: (slot) => readSave(deps.saves, slot),
+      fallback: READ_FALLBACK,
     },
     [CHANNELS.saveWrite]: {
       handle: (slot, text) => writeSave(deps.saves, slot, text),
@@ -105,6 +116,11 @@ export function createHandlers(deps: HandlerDeps): Readonly<Record<Channel, Sync
     [CHANNELS.checkReport]: check((text) => saveReport(deps, text), REPORT_FALLBACK),
     [CHANNELS.checkErrors]: check(() => deps.recentErrors(), NONE),
   };
+}
+
+/** The files' answer as it came: its text, an empty slot, or a failed read. */
+function readSave(saves: HandlerDeps['saves'], slot: unknown): SaveReadResult {
+  return isSaveSlot(slot) ? saves.read(slot) : { ok: false, error: 'no such save slot' };
 }
 
 function writeSave(saves: HandlerDeps['saves'], slot: unknown, text: unknown): SaveWriteResult {

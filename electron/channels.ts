@@ -9,7 +9,7 @@
 export const CHANNELS = {
   /** The shell's ShellInfo (src/platform/steam/bridge.ts), behind bridge.steamInfo(). */
   info: 'bc:info',
-  /** A save slot's text, or null. */
+  /** A save slot's text, null for no file, or a failed read (SaveReadResult; bridge version 2). */
   saveRead: 'bc:save:read',
   /** A save slot's new text; answers a SaveWriteResult. */
   saveWrite: 'bc:save:write',

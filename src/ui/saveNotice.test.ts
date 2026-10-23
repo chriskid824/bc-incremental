@@ -1,8 +1,8 @@
 /**
  * The text of a save notice (docs/v3 C8 design §2.3, T10): every SaveNotice kind maps to a key
  * both locales define, its values fill every placeholder and t() leaves none, in the words §2.3
- * drafts (refundedAll's as the lead's ruling P6 has them). The format is B1's: shards as the HUD
- * shows them, a character by its name key.
+ * drafts (refundedAll's as the lead's ruling P6 has them, readFailed's as SR7 does). The format is
+ * B1's: shards as the HUD shows them, a character by its name key.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -36,6 +36,7 @@ const NOTICES: { readonly [K in Kind]: Extract<SaveNotice, { readonly kind: K }>
   dropped: { kind: 'dropped', character: 'summon', ids: ['summon.center.a', 'summon.center.b'] },
   newer: { kind: 'newer', version: 3 },
   unreadable: { kind: 'unreadable', errors: ['main: not JSON', 'backup: empty'] },
+  readFailed: { kind: 'readFailed', errors: ['main: EBUSY: resource busy or locked, read'] },
 };
 
 /** What each notice says in each locale. */
@@ -51,6 +52,8 @@ const TEXTS: Readonly<Record<Locale, Readonly<Record<Kind, string>>>> = {
     newer:
       'This save is from a newer version (save version 3). Update the game; progress here is not saved.',
     unreadable: 'Your save could not be read. Progress is not saved until you start over.',
+    readFailed:
+      'Your save could not be read just now. Progress is not saved until you restart the game.',
   },
   'zh-TW': {
     restored: '最新的存檔讀不出來，已改讀備份。',
@@ -60,6 +63,7 @@ const TEXTS: Readonly<Record<Locale, Readonly<Record<Kind, string>>>> = {
     dropped: '蜂巢 有 2 個天賦不再符合天賦網的規則，已經退還。',
     newer: '這份存檔來自較新的版本（存檔版本 3）。請更新遊戲；這裡的進度不會存下來。',
     unreadable: '存檔讀不出來。重新開始之前，進度不會存下來。',
+    readFailed: '存檔暫時讀不到。重新啟動遊戲之前，進度不會存下來。',
   },
 };
 
@@ -69,7 +73,8 @@ const placeholders = (template: string): string[] =>
 describe('saveNoticeText (T10)', () => {
   afterEach(() => setLocale('en'));
 
-  // T10 catches a missing zh-TW key.
+  // T10 catches a missing zh-TW key, and readFailed mapped to unreadable's key (which offers
+  // 重新開始).
   it.each(LOCALES)('%s: maps every kind to its key, each placeholder filled', (locale) => {
     setLocale(locale);
     for (const notice of Object.values(NOTICES)) {
@@ -90,13 +95,14 @@ describe('saveNoticeText (T10)', () => {
     }
   });
 
-  it('defines the eight save keys, the start-over button among them', () => {
+  it('defines the nine save keys, the start-over button among them', () => {
     for (const locale of LOCALES) {
       const keys = Object.keys(MESSAGES[locale]).filter((key) => key.startsWith('save.'));
       expect(keys.sort(), locale).toEqual([
         'save.action.startOver',
         'save.notice.dropped',
         'save.notice.newer',
+        'save.notice.readFailed',
         'save.notice.refundedAll',
         'save.notice.restored',
         'save.notice.unreadable',

@@ -640,7 +640,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 ```ts
 interface Platform {
   readonly id: 'web' | 'steam' | 'crazygames' | 'poki';
-  storage: SaveStorage;        // read(slot) / write(slot, data) / list()
+  storage: SaveStorage;        // read(slot) / tryRead(slot) / write(slot, data)
   achievements: Achievements;  // unlock(id) / isUnlocked(id)
   analytics: Analytics;        // track(event) / flush() / exportLocal()
   ads: Ads;                    // showRewarded() / showInterstitial()，非 portal 為 no-op
@@ -671,8 +671,9 @@ interface Platform {
   - 版本 2（`SAVE_VERSION`）是存檔 v2（docs/v3 C8 設計 §1）：帳號，加上每個角色一份進度。v3 遊戲用 `src/save/profile.ts` 的 `parseProfile`：解析 → 外層 → 版本高於 `SAVE_VERSION` 就是 `newer`，不讀資料 → 依 `v` 依序跑 `MIGRATIONS[v]` 到 `SAVE_VERSION` → zod 驗證 → 載入時的修正：改名照 `ID_RENAMES`；改名成 null（移除）或合併的節點、網上沒有的節點與不見的昇華，讓那個角色的天賦全部退還（`refundedAll`）；`legalize` 拿掉不合規則的配點，照價退還（`dropped`）；配置（`loadouts`）拿掉被移除的節點。全部退還與 `legalize` 的退還各留一則通知（`SaveNotice`），改名與配置的清理不留；版本 1 的存檔有待領取的進度時另有 `v1Waiting`。`serializeProfile` 寫出前用同一份 schema 檢查，這個 build 讀不回來的內容（例如小數的核心）丟 `SaveFormatError`，什麼都不寫。
 - 三組 key：M1 頁面的 `bc-incremental.save.main`、`.backup`；v3 遊戲的 `bc-incremental.profile.main`、`.backup`（`src/platform/storage.ts` 的 `PROFILE_SAVE_PREFIX`）；`?hive` 原型的 `bc-incremental.hive.save.*`（`src/app/devFlags.ts`）。三組互不寫入，前綴也不互為前綴；v3 遊戲只在兩個 v2 槽位都是空的時候與重新開始時讀 M1 的 key（見下），`?hive` 的 key 只有 `?hive` 讀。前綴不含版本號：之後的格式在原地遷移。Steam 版的存檔是檔案，不看前綴（§7），所以那裡要第二份存檔得另取檔名。
 - 兩個輪替槽位（`main`、`backup`），每局結束與選單中每 30 秒自動存檔。關分頁或重新整理（`pagehide`）時也存檔；當時如果在局中，先把這局到目前為止的碎片、核心與最遠波次計入（`Session.abandonRun`，沒有跳波補償），局數 +1，下次開啟回到天賦網。M1 頁面先讀 `main`，讀不出來改讀 `backup`，都不行就從頭開始；存檔時把 `main` 現在的內容抄進 `backup`，再寫 `main`。
-- v3 遊戲的槽位由 `src/app/profileStore.ts` 的 `ProfileStore` 讀寫（B1 接上頁面）。`open()` 讀兩個槽位，第一個成立的就是結果：任一槽位是較新的版本 → `newer`；`main` 讀得出來 → `loaded`；`backup` 讀得出來 → `restored`，用備份的內容重寫 `main`，`backup` 一字不變；都不行 → `unreadable`。`save()` 把上一份讀進或寫出的文字抄進 `backup`，不是 `main` 現在的內容，所以壞掉的 `main` 不會蓋掉好的備份；再寫 `main`，讀回來比對，不一樣就是 `failed`（localStorage 滿了或不能用時，寫入的錯誤被吞掉）。遷移過、修正過或從備份還原的存檔在開啟時馬上寫回，所以每則通知只出現一次。通知的文字是 `save.notice.*`，`src/ui/saveNotice.ts` 把通知轉成 i18n key 與格式化好的值。
-- 兩種唯讀：`newer` 時可以玩，但不存檔，請玩家更新遊戲；`unreadable` 時也不存檔，直到玩家按「重新開始」（`startOver()`，只在 `unreadable` 時可以按），所以修好的版本還讀得到這份存檔。重新開始時從新的存檔開始（M1 的存檔還在的話，再匯入一次），馬上寫 `main`；讀不出來的 `backup` 留到下一次存檔。
+- 讀取有三種結果（`src/platform/storage.ts` 的 `tryRead()` 回傳 `SaveReadResult`）：槽位的文字、空槽位（`null`，例如第一次啟動）、讀取失敗與原因。讀取失敗絕不當成空槽位，因為把讀不到的槽位當成空的再寫入，可能蓋掉最新的存檔。空的檔案或值是文字 `''`，不是空槽位，網頁版與 Steam 版都一樣（檔案開頭的 BOM 先拿掉）；Steam 版在 Windows 上遇到 `EBUSY`、`EPERM`、`EACCES`（防毒、索引或雲端同步程式暫時佔用檔案）會先重試 5 次，共等 310 ms。`read()` 保留 M1 的答案：空槽位與讀取失敗都是 `null`，Steam 版的空檔案也是，所以 M1 頁面與 `?hive` 照舊。
+- v3 遊戲的槽位由 `src/app/profileStore.ts` 的 `ProfileStore` 讀寫（B1 接上頁面），每次讀取都用 `tryRead()`。`open()` 讀兩個槽位，第一個成立的就是結果：任一槽位讀取失敗 → `readFailed`，排在所有結果之前（兩個槽位都空時的匯入與 `newer` 也是），因為讀不到的槽位可能放著最新的存檔；任一槽位是較新的版本 → `newer`；`main` 讀得出來 → `loaded`；`backup` 讀得出來 → `restored`，用備份的內容重寫 `main`，`backup` 一字不變；都不行 → `unreadable`。`save()` 把上一份讀進或寫出的文字抄進 `backup`，不是 `main` 現在的內容，所以壞掉的 `main` 不會蓋掉好的備份；再寫 `main`，讀回來比對，不一樣或讀不回來就是 `failed`（localStorage 滿了或不能用時，寫入的錯誤被吞掉）。`''` 是讀不出來的存檔：`main` 是 `''`、`backup` 讀得出來時是 `restored`（蓋掉空的檔案不會丟掉任何東西），`backup` 是空的或也讀不出來時是 `unreadable`。遷移過、修正過或從備份還原的存檔在開啟時馬上寫回，所以每則通知只出現一次。通知的文字是 `save.notice.*`，`src/ui/saveNotice.ts` 把通知轉成 i18n key 與格式化好的值。
+- 三種唯讀：`newer` 時可以玩，但不存檔，請玩家更新遊戲；`unreadable` 時也不存檔，直到玩家按「重新開始」（`startOver()`，只在 `unreadable` 時可以按），所以修好的版本還讀得到這份存檔；`readFailed` 時用新的存檔（`freshProfile()`）照常玩，但這次執行什麼都不寫（不還原、不匯入也不建立新存檔、不輪替），請玩家重新啟動遊戲，沒有「重新開始」，因為檔案多半沒壞，只是暫時讀不到。兩個 v2 槽位都空時，讀 M1 的槽位失敗也是 `readFailed`：這時寫進新存檔，匯入就永遠跳過了。重新開始時從新的存檔開始（M1 的存檔還在的話，再匯入一次；這裡讀 M1 的槽位失敗同樣是 `readFailed`，什麼都不寫），馬上寫 `main`；讀不出來的 `backup` 留到下一次存檔。
 - M1 進度的一次性匯入：兩個 v2 槽位都是空的時候，`ProfileStore` 先讀 M1 的 `main`，再讀 `backup`，第一份讀得出來的版本 1 存檔變成新的存檔，馬上寫進 v2 的 `main`：速度、遊戲時間與局數照舊，花掉與沒花的碎片、核心連同最遠波次變成帳號的待領取進度，給第一個選的角色。M1 的 key 只讀不寫，`?hive` 的 key 不讀；之後在 M1 頁面玩的進度不會再帶過來。Steam 版沒有 M1 的存檔，不匯入。
 - 設定頁提供匯出／匯入存檔字串（Base64），方便玩家回報問題（M3）。
 - 每個版本至少保留一份 fixture 存檔（`tests/fixtures/`），測試確保它能遷移到最新版並通過驗證：版本 1 是 `save-v1.json` 與約一小時 M1 試玩的 `save-v1-playtest.json`，版本 2 是 `save-v2.json`。後兩份由 `tools/save/playtestV1.ts` 與 `tools/save/fixtureV2.ts` 產生（`--write` 寫檔，`--check` 只比對），不要手改。`src/save/save.test.ts` 另外釘住一份每個欄位都有值的存檔的完整文字：格式一改就失敗，直到 `SAVE_VERSION` +1、寫好遷移、加上 fixture。
@@ -764,7 +765,7 @@ interface Platform {
 
 ## 11. Electron 與 Steam（M2 技術驗證）
 
-- `contextIsolation: true`，preload 只暴露最小 API（`storage`、`achievements`、`steamInfo`）。
+- `contextIsolation: true`，preload 只暴露最小 API（`storage`、`achievements`、`steamInfo`）。存檔的讀取以結果（`SaveReadResult`）傳回頁面，讀取失敗不會變成空槽位（bridge 版本 2）。
 - steamworks.js 在 main process 初始化；技術驗證先用測試 App ID 480（Spacewar），不必等 Steam 上架費。
 - Steam overlay 需要 steamworks.js 的 `electronEnableSteamOverlay()` 加上 Chromium 參數，這是 M2 最大的技術風險，第一週先驗證。
 

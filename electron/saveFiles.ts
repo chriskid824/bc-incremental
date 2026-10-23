@@ -1,17 +1,25 @@
 /**
  * The Steam build's save slots as files, written by the main process (docs/v3 C9 design §1.4,
  * C9/F5): `<dir>/main.json` and `<dir>/backup.json`, `dir` being userData's `saves/` folder
- * (./paths.ts). The page's caller rotates main into backup (src/app/main.ts' save()), so these
- * files never rotate on their own; the one writer is this process (the single-instance lock), and
- * every call is synchronous.
+ * (./paths.ts). These files never rotate on their own; the page's caller does. The M1 page
+ * (src/app/main.ts' save()) copies main into backup, then writes main, and reads null for an
+ * empty, missing or failed slot (BridgeSaveStorage.read). The v3 profile store
+ * (src/app/profileStore.ts, which B1 wires) copies the last text it loaded or wrote into backup,
+ * writes a restore from backup at open, and turns read-only for the session on a failed read. The
+ * one writer is this process (the single-instance lock), and every call is synchronous.
+ *
+ * A read never throws and answers one of three (SaveReadResult): a missing file is a slot that
+ * holds nothing (`text: null`, as at the first launch); a file is its text, a leading byte-order
+ * mark taken off, so an empty file is the text ''; any other error is a failed read, with its
+ * reason, logged once per slot and code. A failed read is never an empty slot, since a caller that
+ * wrote over a file it could not read could lose the newest save.
  *
  * A write goes to `<slot>.json.tmp`, is flushed to disk, and replaces the slot's file by a rename,
  * so the file is always either the old save or the new one, never a torn mix; the temp never ends
- * in `.json`, so Auto-Cloud's `*.json` sees only the slots. On Windows an antivirus, indexer or
- * cloud client holding the file makes the rename fail for a moment, so it is retried. A write that
- * fails keeps the old file and answers why; the page's next autosave tries again. A read never
- * throws: a missing, empty or unreadable file is null (logged once), which sends the page's loader
- * to the backup.
+ * in `.json`, so Auto-Cloud's `*.json` sees only the slots. A write that fails keeps the old file
+ * and answers why; the page's next autosave tries again. On Windows an antivirus, indexer or cloud
+ * client holding a file makes a read or a rename fail for a moment, so both are retried
+ * (BUSY_RETRY_MS) before they fail.
  *
  * Also the check mode's reports (writeReport, design §2.2): each a new file of its own, never a
  * save, so it needs neither the temp nor the rename.
@@ -20,11 +28,14 @@
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import type { CheckBridge, SaveFileInfo, SaveWriteResult } from '../src/platform/steam/bridge';
-import type { SaveSlot } from '../src/platform/storage';
+import type { SaveReadResult, SaveSlot } from '../src/platform/storage';
 
 export interface SaveFiles {
-  /** The slot's text, a byte-order mark taken off, or null. Never throws. */
-  read(slot: SaveSlot): string | null;
+  /**
+   * The slot's text, a byte-order mark taken off ('' for an empty file); `text: null` when there
+   * is no file; else a failed read. Never throws.
+   */
+  read(slot: SaveSlot): SaveReadResult;
   /** Replaces the slot's file as a whole, or keeps the old one and answers why. Never throws. */
   write(slot: SaveSlot, text: string): SaveWriteResult;
   /** The folder's `*.json` files, by name: what Auto-Cloud's pattern would sync. */
@@ -48,9 +59,9 @@ export type FileOps = Pick<
 
 export interface SaveFilesDeps {
   readonly fs?: FileOps;
-  /** Which OS's rules apply (the rename retries, the folder flush). */
+  /** Which OS's rules apply (the busy retries, the folder flush). */
   readonly platform?: NodeJS.Platform;
-  /** Blocks for `ms`; the writes are synchronous, so the retries wait in place. */
+  /** Blocks for `ms`; the calls are synchronous, so the retries wait in place. */
   readonly sleep?: (ms: number) => void;
   /** Where the files say what went wrong; the terminal by default. */
   readonly log?: (line: string) => void;
@@ -65,11 +76,11 @@ export function isSaveSlot(slot: unknown): slot is SaveSlot {
 /** Appended to a slot's file name while it is written: `main.json.tmp`. */
 export const TEMP_SUFFIX = '.tmp';
 
-/** The waits before each retry of a rename on Windows: five retries, 310 ms in all. */
-export const RENAME_RETRY_MS: readonly number[] = [10, 20, 40, 80, 160];
+/** The waits before each retry of a read or a rename on Windows: five retries, 310 ms in all. */
+export const BUSY_RETRY_MS: readonly number[] = [10, 20, 40, 80, 160];
 
 /** The errors Windows gives while another program holds the file. */
-const RENAME_RETRY_CODES: ReadonlySet<string> = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const BUSY_CODES: ReadonlySet<string> = new Set(['EPERM', 'EACCES', 'EBUSY']);
 
 /** The files in `dir`, which opening creates; it also deletes the temps a crash left there. */
 export function openSaveFiles(dir: string, deps: SaveFilesDeps = {}): SaveFiles {
@@ -113,17 +124,14 @@ export function openSaveFiles(dir: string, deps: SaveFilesDeps = {}): SaveFiles 
     }
   };
 
-  /** Renames `from` over `to`, retrying on Windows while another program holds the file. */
-  const rename = (from: string, to: string): void => {
+  /** `call`'s answer, retried on Windows while another program holds the file. */
+  const whileBusy = <T>(call: () => T): T => {
     for (let retry = 0; ; retry += 1) {
       try {
-        ops.renameSync(from, to);
-        return;
+        return call();
       } catch (error) {
         const wait =
-          platform === 'win32' && RENAME_RETRY_CODES.has(codeOf(error))
-            ? RENAME_RETRY_MS[retry]
-            : undefined;
+          platform === 'win32' && BUSY_CODES.has(codeOf(error)) ? BUSY_RETRY_MS[retry] : undefined;
         if (wait === undefined) throw error;
         sleep(wait);
       }
@@ -146,25 +154,24 @@ export function openSaveFiles(dir: string, deps: SaveFilesDeps = {}): SaveFiles 
 
   return {
     read(slot) {
-      if (!isSaveSlot(slot)) return null;
+      if (!isSaveSlot(slot)) return { ok: false, error: `no save slot ${JSON.stringify(slot)}` };
       const name = `${slot}.json`;
       let text: string;
       try {
-        text = ops.readFileSync(join(dir, name), 'utf8');
+        text = whileBusy(() => ops.readFileSync(join(dir, name), 'utf8'));
       } catch (error) {
         const code = codeOf(error);
-        logOnce(
-          `${slot} ${code}`,
-          code === 'ENOENT' ? `No ${name} yet.` : `Could not read ${name}: ${describe(error)}`,
-        );
-        return null;
+        if (code === 'ENOENT') {
+          logOnce(`${slot} ${code}`, `No ${name} yet.`);
+          return { ok: true, text: null };
+        }
+        logOnce(`${slot} ${code}`, `Could not read ${name}: ${describe(error)}`);
+        return { ok: false, error: describe(error) };
       }
       if (text.startsWith('\uFEFF')) text = text.slice(1);
-      if (text === '') {
-        logOnce(`${slot} empty`, `${name} is empty.`);
-        return null;
-      }
-      return text;
+      // '' too: the M1 page reads it as null, the v3 store as a save that does not load.
+      if (text === '') logOnce(`${slot} empty`, `${name} is empty.`);
+      return { ok: true, text };
     },
 
     write(slot, text) {
@@ -173,7 +180,7 @@ export function openSaveFiles(dir: string, deps: SaveFilesDeps = {}): SaveFiles 
       const temp = `${file}${TEMP_SUFFIX}`;
       try {
         writeTemp(temp, text);
-        rename(temp, file);
+        whileBusy(() => ops.renameSync(temp, file));
       } catch (error) {
         try {
           ops.unlinkSync(temp);
