@@ -85,6 +85,7 @@ import {
   createDronePool,
   createEnemyAiState,
   createLobState,
+  createPlayerDefence,
   createPulseAcc,
   createRepeatState,
   createSegmentState,
@@ -806,6 +807,7 @@ export function createRunContext(
     y: HALF_HEIGHT,
     life: maxLife,
     maxLife,
+    shield: 0,
   };
   const state: SimState = {
     tick: 0,
@@ -1001,6 +1003,11 @@ export function createRunContext(
       chain: createChainState(chainRetention),
       drones,
       enemyAi: createEnemyAiState(data.waves.v3 !== undefined),
+      defence: createPlayerDefence(
+        values,
+        maxLife,
+        effects.some((fx) => fx.kind === 'shield'),
+      ),
     },
 
     enemies,

@@ -513,6 +513,9 @@ export interface ChainBoltSpec {
  * - addFrost: adds `amount` to the chill meter of the event's enemy, or of up to `maxTargets`
  *   enemies within `radius` of the event (in `order`).
  * - heal: the player regains `lifePct` of max life.
+ * - shield: the player's shield gains `lifePct` of max life, up to `capPct` of max life in all
+ *   (without a limit when it is omitted); a shield already above the cap stays as it is. The
+ *   shield takes contact damage before life (src/sim/systems/contact.ts).
  * - gainShards: the dying enemy's shard drop again, × `fraction` (kill events only).
  * - groundZone: a zone of `radius` at the event's point for `durationSec`, pulsing four times a
  *   second (GroundZoneSpec).
@@ -564,6 +567,7 @@ export type EffectSpec =
       readonly order?: TargetOrder;
     }
   | { readonly kind: 'heal'; readonly lifePct: number }
+  | { readonly kind: 'shield'; readonly lifePct: number; readonly capPct?: number }
   | { readonly kind: 'gainShards'; readonly fraction: number }
   | GroundZoneSpec
   | RepeatAttackSpec
@@ -594,6 +598,7 @@ export const COEF_FIELDS: {
   push: [],
   addFrost: [],
   heal: [],
+  shield: [],
   gainShards: [],
   groundZone: ['damagePctPerSec', 'ailmentDamagePct'],
   // A share of the signature attack, whose damage the calibration does not scale.

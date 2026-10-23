@@ -9,11 +9,18 @@
  * triggers, which find its ailments already released. Runs after movement; every enemy is still
  * alive here, since compaction ran last tick. The enemies that exist when it starts are the ones
  * it resolves: one added during it, such as a thorns kill's split children, touches from the
- * next tick. Once every contact is resolved, the player's life fraction is set for this tick's
- * reads (lifeLostPct).
+ * next tick. A survivor's contact damage, × its v3 record's contactMult in a v3 run (Enemy.v3,
+ * src/sim/systems/enemyRecord.ts), goes through damagePlayer, the player's defences
+ * (ctx.sys.defence, docs/v3 C7 design §2.2): contactDamageTaken scales it, the shield
+ * (PlayerState.shield) takes it before life, and an extra life revives the player at
+ * REVIVE_LIFE_FRAC of max life where the hit would end the run. Once every contact is resolved,
+ * the player, if alive, regains a tick's share of lifeRegen (lifeRegen × max life × DT, up to
+ * max life), and its life fraction is set for this tick's reads (lifeLostPct). A build with none
+ * of these defences has a null ctx.sys.defence, and damagePlayer then runs M1's life loss alone.
  */
 
 import { ZERO } from '../../core/num';
+import type { EnemyId } from '../../data/types';
 import { releaseAilments } from '../ailments/apply';
 import { hitWithPayload } from '../combat/hit';
 import { fire } from '../effects/dispatch';
@@ -21,6 +28,63 @@ import { EVENT } from '../effects/types';
 import type { EmitterRuntime } from '../emitters/types';
 import type { Enemy, RunContext } from './context';
 import { removeEnemy } from './death';
+
+/** The share of max life an extra life restores (gd:265 「死時回 50% 生命」; 初始值). */
+export const REVIVE_LIFE_FRAC = 0.5;
+
+/**
+ * The enemy `enemyId` of type `type` deals `amount` of contact damage to the player, who is
+ * alive. With no defence (ctx.sys.defence null, an M1 build) this is M1's life loss: life drops
+ * by `amount`, ctx.taken tallies it, a hit that brings life to 0 sets killedBy, and playerHit is
+ * pushed. With defences, in order: × contactTaken; the shield absorbs what it can, pushing
+ * shieldAbsorbed; life loses the rest, which the tally and playerHit carry; a hit that brings
+ * life to 0 with an extra life left revives the player at REVIVE_LIFE_FRAC of max life instead
+ * of setting killedBy, so checkRunEnd sees it alive, and pushes revive after its playerHit, whose
+ * lifeLeft stays 0. A fully absorbed contact still pushes playerHit, with damage 0: it leaks.
+ */
+export function damagePlayer(
+  ctx: RunContext,
+  enemyId: number,
+  type: EnemyId,
+  amount: number,
+): void {
+  const player = ctx.player;
+  const tally = ctx.taken[type];
+  const defence = ctx.sys.defence;
+  // C7.4b's bullets add a `cause` and a `bulletId`: in both paths a bullet tallies in
+  // sys.bullets.takenBy and pushes bulletHit in playerHit's place, and in the full path it skips
+  // contactTaken (docs/v3 C7 design §2.6).
+  if (defence === null) {
+    player.life = Math.max(0, player.life - amount);
+    tally.hits++;
+    tally.damage += amount;
+    if (player.life <= 0) ctx.killedBy = type;
+    ctx.events.push({ type: 'playerHit', enemyId, damage: amount, lifeLeft: player.life });
+    return;
+  }
+  let rest = amount * defence.contactTaken;
+  const absorbed = Math.min(player.shield, rest);
+  if (absorbed > 0) {
+    player.shield -= absorbed;
+    rest -= absorbed;
+    ctx.events.push({ type: 'shieldAbsorbed', amount: absorbed, shieldLeft: player.shield });
+  }
+  player.life = Math.max(0, player.life - rest);
+  tally.hits++;
+  tally.damage += rest;
+  const lifeLeft = player.life;
+  const revives = lifeLeft <= 0 && defence.livesLeft > 0;
+  if (revives) {
+    defence.livesLeft--;
+    player.life = REVIVE_LIFE_FRAC * player.maxLife;
+  } else if (lifeLeft <= 0) {
+    ctx.killedBy = type;
+  }
+  ctx.events.push({ type: 'playerHit', enemyId, damage: rest, lifeLeft });
+  if (revives) {
+    ctx.events.push({ type: 'revive', lifeLeft: player.life, livesLeft: defence.livesLeft });
+  }
+}
 
 export function resolveContacts(ctx: RunContext): void {
   const enemies = ctx.enemies;
@@ -40,26 +104,25 @@ export function resolveContacts(ctx: RunContext): void {
         fire(ctx, EVENT.contact, 0, -1, enemy, enemy.x, enemy.y, 0, ZERO);
         continue;
       }
-      // The life loss, until the player can block or reduce it (C7).
-      const damageTaken = enemy.def.contactDamage;
-      player.life = Math.max(0, player.life - damageTaken);
-      const tally = ctx.taken[enemy.type];
-      tally.hits++;
-      tally.damage += damageTaken;
-      if (player.life <= 0) ctx.killedBy = enemy.type;
+      // Its contact damage, × its v3 record's contactMult (1 until C7.6's 狂暴; an M1 run's
+      // enemies have no record), then the leak: removeEnemy pushes no event, so playerHit keeps
+      // its place in M1's event order.
+      const damage = enemy.def.contactDamage;
+      const v3 = enemy.v3;
+      damagePlayer(ctx, enemy.id, enemy.type, v3 === null ? damage : damage * v3.contactMult);
       enemy.rec.leaked = true;
       removeEnemy(ctx, enemy);
-      ctx.events.push({
-        type: 'playerHit',
-        enemyId: enemy.id,
-        damage: damageTaken,
-        lifeLeft: player.life,
-      });
       fire(ctx, EVENT.heroHit, 0, -1, null, player.x, player.y, 0, ZERO);
       fire(ctx, EVENT.contact, 0, -1, enemy, enemy.x, enemy.y, 0, ZERO);
       // After its contact triggers, whose conditions see what it held as it touched.
       releaseAilments(ctx, enemy);
     }
+  }
+  // Regeneration, after every contact and only while alive: a death without an extra life
+  // stays at 0 for checkRunEnd.
+  const defence = ctx.sys.defence;
+  if (defence !== null && player.life > 0) {
+    player.life = Math.min(player.maxLife, player.life + defence.regenPerTick);
   }
   ctx.evalInput.playerLifeFrac = player.life / player.maxLife;
 }

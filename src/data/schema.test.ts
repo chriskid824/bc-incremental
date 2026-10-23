@@ -393,6 +393,8 @@ describe('EffectSpecSchema', () => {
       order: 'nearest',
     },
     { kind: 'heal', lifePct: 0.05 },
+    { kind: 'shield', lifePct: 0.02, capPct: 0.3 },
+    { kind: 'shield', lifePct: 0.2 },
     { kind: 'gainShards', fraction: 0.5 },
     { kind: 'groundZone', radius: 60, durationSec: 2, damagePctPerSec: 0.2 },
     {
@@ -490,6 +492,9 @@ describe('EffectSpecSchema', () => {
     ['nova at an unknown point', { kind: 'nova', radius: 100, damagePct: 1, at: 'target' }],
     ['an element that is not one', { kind: 'nova', radius: 100, damagePct: 1, element: 'fire' }],
     ['an unknown key', { kind: 'heal', lifePct: 0.1, amount: 1 }],
+    ['shield without lifePct', { kind: 'shield', capPct: 0.2 }],
+    ['shield with an unknown key', { kind: 'shield', lifePct: 0.2, cap: 0.2 }],
+    ['shield with capPct undefined', { kind: 'shield', lifePct: 0.2, capPct: undefined }],
     ['an unknown order', { kind: 'explode', radius: 90, damagePct: 1, order: 'farthest' }],
     ['order on a nova', { kind: 'nova', radius: 90, damagePct: 1, order: 'nearest' }],
     ['order on push', { kind: 'push', distance: 60, radius: 150, order: 'nearest' }],

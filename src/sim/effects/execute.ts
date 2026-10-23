@@ -513,6 +513,16 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const player = ctx.player;
     player.life = Math.min(player.maxLife, player.life + spec.lifePct * player.maxLife);
   },
+  // The shield gains lifePct of max life, up to capPct of max life in all (none without it); a
+  // shield already above the cap keeps what it has (C3D:1752). Contact spends it before life.
+  shield(ctx, spec) {
+    const player = ctx.player;
+    const cap = spec.capPct === undefined ? Infinity : spec.capPct * player.maxLife;
+    player.shield = Math.max(
+      player.shield,
+      Math.min(player.shield + spec.lifePct * player.maxLife, cap),
+    );
+  },
   gainShards(ctx, spec, _fx, entry) {
     const state = ctx.state;
     state.shards = add(state.shards, mul(num(entry.value), spec.fraction));

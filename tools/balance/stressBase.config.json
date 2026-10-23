@@ -41,7 +41,10 @@
       "shatterRadius": 90,
       "frozenDamageTaken": 0.3,
       "auraRadius": 160,
-      "orbitCount": 0
+      "orbitCount": 0,
+      "contactDamageTaken": 1,
+      "lifeRegen": 0,
+      "extraLives": 0
     },
     "values": {
       "damage": 450.22067097931824,
@@ -83,7 +86,10 @@
       "shatterRadius": 90,
       "frozenDamageTaken": 0.3,
       "auraRadius": 160,
-      "orbitCount": 0
+      "orbitCount": 0,
+      "contactDamageTaken": 1,
+      "lifeRegen": 0,
+      "extraLives": 0
     },
     "scoped": [
       {

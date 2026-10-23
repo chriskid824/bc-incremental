@@ -297,6 +297,13 @@ export const EffectSpecSchema = exact<EffectSpec>()(
       })
       .readonly(),
     z.strictObject({ kind: z.literal('heal'), lifePct: finite }).readonly(),
+    z
+      .strictObject({
+        kind: z.literal('shield'),
+        lifePct: finite,
+        capPct: finite.exactOptional(),
+      })
+      .readonly(),
     z.strictObject({ kind: z.literal('gainShards'), fraction: finite }).readonly(),
     z
       .strictObject({

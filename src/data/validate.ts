@@ -1135,6 +1135,10 @@ function effectIssues(
     case 'heal':
       positive('lifePct', effect.lifePct);
       break;
+    case 'shield':
+      positive('lifePct', effect.lifePct);
+      positive('capPct', effect.capPct);
+      break;
     case 'gainShards':
       positive('fraction', effect.fraction);
       // It reads the dying enemy's drop.

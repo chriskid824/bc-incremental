@@ -5,7 +5,7 @@ import { HiveCoreView } from './core';
 import type { CoreView } from './core';
 import { PlayerView } from './player';
 
-const player = { x: 960, y: 540, life: 100, maxLife: 100 };
+const player = { x: 960, y: 540, life: 100, maxLife: 100, shield: 0 };
 
 /** The drawn alpha of the hive's six outer comb cells. */
 function cellAlphas(core: HiveCoreView): number[] {

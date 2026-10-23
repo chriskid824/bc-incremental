@@ -25,7 +25,7 @@ import { MAX_SOURCES } from '../build/sources';
 import type { CompiledEffect } from '../effects/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import type { GridPoint, SpatialGrid } from '../grid';
-import { DRONE_DOCKED, DRONE_FIXED, DRONE_KIND_TURRET } from '../types';
+import { DRONE_DOCKED, DRONE_FIXED, DRONE_KIND_TURRET, DT } from '../types';
 import type { DroneViewState, SegmentLinesState, SegmentViewState, ZonePoolState } from '../types';
 import type { Enemy } from './context';
 import { createEnemyGrid } from './grid';
@@ -50,6 +50,8 @@ export interface SystemState {
   readonly drones: DronePool;
   /** The v3 enemies' state: whether the run is a v3 run, whose enemies carry a record. */
   readonly enemyAi: EnemyAiState;
+  /** The player's defences (src/sim/systems/contact.ts damagePlayer); null in an M1 build. */
+  readonly defence: PlayerDefenceState;
 }
 
 /**
@@ -645,4 +647,42 @@ export interface EnemyAiState {
 /** The state of a run that is a v3 run when `enabled`. */
 export function createEnemyAiState(enabled: boolean): EnemyAiState {
   return { enabled };
+}
+
+/**
+ * The player's defences against contact damage (docs/v3 C7 design §1.4, §2.2): damagePlayer in
+ * src/sim/systems/contact.ts reads them, and its shield lives on PlayerState.shield.
+ */
+export interface PlayerDefence {
+  /** × on the contact damage the player takes, before the shield: values.contactDamageTaken. */
+  readonly contactTaken: number;
+  /** Life regained at the end of each contact stage while alive: lifeRegen × maxLife × DT. */
+  readonly regenPerTick: number;
+  /** Revives left this run: floor(values.extraLives) at its start. */
+  livesLeft: number;
+}
+
+/** sys.defence: null is M1's fast path, where damagePlayer runs the life loss alone. */
+export type PlayerDefenceState = PlayerDefence | null;
+
+/**
+ * The defences of a build whose final stat values are `values`, for a player of `maxLife` (after
+ * flags.maxLife). Null exactly when no defence stat moved from its base and `hasShieldEffect`, the
+ * compiled build holding an effect of kind 'shield', is false: then nothing can block, reduce,
+ * regain or revive, and contact keeps M1's statements.
+ */
+export function createPlayerDefence(
+  values: CompiledBuild['values'],
+  maxLife: number,
+  hasShieldEffect: boolean,
+): PlayerDefenceState {
+  const { contactDamageTaken, lifeRegen, extraLives } = values;
+  if (contactDamageTaken === 1 && lifeRegen === 0 && extraLives === 0 && !hasShieldEffect) {
+    return null;
+  }
+  return {
+    contactTaken: contactDamageTaken,
+    regenPerTick: lifeRegen * maxLife * DT,
+    livesLeft: Math.floor(extraLives),
+  };
 }

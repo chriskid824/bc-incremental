@@ -17,6 +17,7 @@
   "web.effect.push": "把半徑 {radius} 內的敵人往外推 {distance}",
   "web.effect.addFrost": "冰冷 +{amount}{extra}",
   "web.effect.heal": "回復 {pct} 生命",
+  "web.effect.shield": "得到 {pct} 最大生命的護盾",
   "web.effect.gainShards": "再掉落 {pct} 的碎片",
   "web.effect.groundZone": "留下 {duration} 秒脈衝區（半徑 {radius}）{extra}",
   "web.effect.repeatAttack": "重複招牌攻擊 {n} {times}，每次 {damage} 傷害{extra}",

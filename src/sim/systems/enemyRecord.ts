@@ -24,6 +24,8 @@ export interface EnemyV3 {
    * calibration's φ leaves out (C7/F12).
    */
   readonly extra: boolean;
+  /** × on its contact damage (src/sim/systems/contact.ts); 1 until C7.6: 狂暴's ×2. */
+  contactMult: number;
 }
 
 /**
@@ -61,5 +63,6 @@ export function createEnemyV3(def: EnemyDef, origin: SpawnOrigin | undefined): E
     ai: aiOf(def),
     // The treasure comes from its schedule, never from composeWave, whatever spawns it.
     extra: (origin?.extra ?? false) || def.behaviour?.kind === 'treasure',
+    contactMult: 1,
   };
 }

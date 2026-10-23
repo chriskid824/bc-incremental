@@ -1412,6 +1412,34 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('accepts a shield with and without its cap, and rejects a gain or cap that is not > 0', () => {
+    expect(
+      triggerIssues(
+        { on: 'waveStart', do: [{ kind: 'shield', lifePct: 0.2, capPct: 0.2 }] },
+        { on: 'freeze', do: [{ kind: 'shield', lifePct: 0.02, capPct: 0.3 }] },
+        { on: 'periodic', every: 5, do: [{ kind: 'shield', lifePct: 0.1 }] },
+      ),
+    ).toEqual([]);
+    expect(
+      triggerIssues({
+        on: 'waveStart',
+        do: [
+          { kind: 'shield', lifePct: 0, capPct: 0 },
+          { kind: 'shield', lifePct: -0.2, capPct: -1 },
+          { kind: 'shield', lifePct: Number.NaN, capPct: Number.NaN },
+          { kind: 'shield', lifePct: 0.2, capPct: 0.1 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] lifePct must be > 0 (got 0)`,
+      `${at} do[0] capPct must be > 0 (got 0)`,
+      `${at} do[1] lifePct must be > 0 (got -0.2)`,
+      `${at} do[1] capPct must be > 0 (got -1)`,
+      `${at} do[2] lifePct must be > 0 (got NaN)`,
+      `${at} do[2] capPct must be > 0 (got NaN)`,
+    ]);
+  });
+
   it('accepts detonates on a live target, and on a dead one with a radius and its victimHas', () => {
     const burn = { kind: 'detonate', ailment: 'burn' } as const;
     expect(

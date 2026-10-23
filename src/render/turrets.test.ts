@@ -53,7 +53,7 @@ const CENTER = { x: 960, y: 540 };
 function frame(tick: number, slots: readonly Slot[]): DroneFrame {
   return {
     tick,
-    player: { x: CENTER.x, y: CENTER.y, life: 100, maxLife: 100 },
+    player: { x: CENTER.x, y: CENTER.y, life: 100, maxLife: 100, shield: 0 },
     drones: pool(slots),
     droneCount: slots.length,
   };

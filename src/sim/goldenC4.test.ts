@@ -1505,6 +1505,30 @@ const V3_SUMMON_STATS = makeStats(
   },
 );
 
+/**
+ * C7.2's player defences (docs/v3 C7 design §2.2) on M1's test data, which they need no v3 data
+ * for: contact damage ×0.8, 1% of max life regained a second, one extra life, and ◆波次護盾's
+ * shield at each wave start, 20% of max life refreshed to at most 20% (lead ruling L3), on 40 of
+ * max life. The damage, about half of wave 18's standard hp, lets enemies through yet holds the
+ * run past two wave starts: at the second, in both seeds, the first shield is still whole and
+ * the cap keeps it at 8. Each seed's run absorbs, regenerates, revives once at 20 of life and
+ * ends in the final death with its killer.
+ */
+const DEFENCE_STATS = makeStats(
+  { damage: 225, maxLife: 40, lifeRegen: 0.01, contactDamageTaken: 0.8, extraLives: 1 },
+  [],
+  {
+    triggers: [
+      {
+        source: 'center',
+        spec: { on: 'waveStart', do: [{ kind: 'shield', lifePct: 0.2, capPct: 0.2 }] },
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1764,6 +1788,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
       startWave: 12,
     },
     expected: ['355df9aee23cbec2', '84d7dbc4c3567175'],
+  },
+  {
+    name: 'playerDefences',
+    config: { stats: DEFENCE_STATS, rules: [], startWave: 18 },
+    expected: ['aaa8ac053dc61595', '24d4554bfbb72122'],
   },
 ];
 

@@ -147,7 +147,8 @@ export function createSimulation(
    *    its start tick.
    * 3. movement: every enemy walks towards the player (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
-   * 5. contact: enemies that reached the player hit it and leak, raising heroHit and contact
+   * 5. contact: enemies that reached the player hit it, through its defences (damage taken,
+   *    shield, extra lives), and leak, raising heroHit and contact; then the player regenerates
    *    (contact.ts).
    * 6. emitters: each emitter's due attacks are counted, with the onAttack hooks and the
    *    nthAttack triggers, and fire projectiles; then the rule modules' tick hooks run

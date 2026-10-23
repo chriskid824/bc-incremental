@@ -75,10 +75,14 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
 
   it('holds `extra` from the origin, and true for the treasure whatever spawns it', () => {
     const { square, treasure } = TEST_ENEMIES;
-    expect(createEnemyV3(square, undefined)).toEqual({ ai: AI_NONE, extra: false });
-    expect(createEnemyV3(square, ORIGIN)).toEqual({ ai: AI_NONE, extra: true });
+    expect(createEnemyV3(square, undefined)).toEqual({ ai: AI_NONE, extra: false, contactMult: 1 });
+    expect(createEnemyV3(square, ORIGIN)).toEqual({ ai: AI_NONE, extra: true, contactMult: 1 });
     expect(createEnemyV3(square, { ...ORIGIN, extra: false }).extra).toBe(false);
-    expect(createEnemyV3(treasure, undefined)).toEqual({ ai: AI_TREASURE, extra: true });
+    expect(createEnemyV3(treasure, undefined)).toEqual({
+      ai: AI_TREASURE,
+      extra: true,
+      contactMult: 1,
+    });
     expect(createEnemyV3(treasure, { ...ORIGIN, extra: false }).extra).toBe(true);
   });
 
@@ -89,6 +93,7 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       expect(createEnemyV3({ ...square, id }, undefined), id).toEqual({
         ai: AI_NONE,
         extra: false,
+        contactMult: 1,
       });
     }
     // A square given each behaviour acts as the type that has it.
@@ -100,6 +105,7 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
     expect(createEnemyV3({ ...square, behaviour: treasure.behaviour }, undefined)).toEqual({
       ai: AI_TREASURE,
       extra: true,
+      contactMult: 1,
     });
   });
 });
@@ -148,7 +154,7 @@ describe('addEnemy: the v3 record (docs/v3 C7 design §1.3)', () => {
     ]);
     expect(child.radius).toBe(def.radius * 0.7);
     expect(child.contactDist).toBe(PLAYER_RADIUS + def.radius * 0.7);
-    expect(child.v3).toEqual({ ai: AI_NONE, extra: true });
+    expect(child.v3).toEqual({ ai: AI_NONE, extra: true, contactMult: 1 });
     expect([child.tough, child.boss, child.stepDist]).toEqual([true, false, plain.stepDist]);
   });
 

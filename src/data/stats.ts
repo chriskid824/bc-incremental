@@ -96,6 +96,18 @@ export const STAT_IDS = [
   'auraRadius',
   /** Orbs every orbit grant adds to its own count; its whole part counts. */
   'orbitCount',
+  /**
+   * Multiplier on the contact damage the player takes, applied before its shield, e.g. 0.8 =
+   * 80% (src/sim/systems/contact.ts damagePlayer).
+   */
+  'contactDamageTaken',
+  /** Life regained per second while alive, as a fraction of max life, e.g. 0.01 = 1%. */
+  'lifeRegen',
+  /**
+   * Revives per run; its whole part counts. A death with one left restores half of max life
+   * instead of ending the run (REVIVE_LIFE_FRAC, src/sim/systems/contact.ts).
+   */
+  'extraLives',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -143,6 +155,9 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   frozenDamageTaken: 0.3,
   auraRadius: 160,
   orbitCount: 0,
+  contactDamageTaken: 1,
+  lifeRegen: 0,
+  extraLives: 0,
 };
 
 /**

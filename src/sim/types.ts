@@ -213,6 +213,11 @@ export interface PlayerState {
   readonly y: number;
   life: number;
   readonly maxLife: number;
+  /**
+   * Life-like points that take contact damage before life (src/sim/systems/contact.ts
+   * damagePlayer); the `shield` effect grants them. 0 unless the build has one.
+   */
+  shield: number;
 }
 
 export interface SimState {
@@ -458,7 +463,18 @@ export type SimEvent =
       readonly damage: number;
       readonly lifeLeft: number;
     }
-  | { readonly type: 'runEnded'; readonly reason: EndReason };
+  | { readonly type: 'runEnded'; readonly reason: EndReason }
+  /**
+   * The player's shield took `amount` of a contact's damage, before life (and before that
+   * contact's playerHit); `shieldLeft` remains. Never in an M1 run.
+   */
+  | { readonly type: 'shieldAbsorbed'; readonly amount: number; readonly shieldLeft: number }
+  /**
+   * A contact brought life to 0 with an extra life left: life is back at `lifeLeft`
+   * (REVIVE_LIFE_FRAC of max life) with `livesLeft` remaining. It follows that contact's
+   * playerHit, whose lifeLeft is 0. Never in an M1 run.
+   */
+  | { readonly type: 'revive'; readonly lifeLeft: number; readonly livesLeft: number };
 
 /**
  * Damage totals by kind of instance, for balance reporting: burn, poison and bleed by their
@@ -564,13 +580,17 @@ export interface RunResult {
   /** Enemies that reached the player (one playerHit event each). */
   readonly leaks: number;
   /**
-   * Their total contact damage, as in the playerHit events: the hit that brings life to 0
-   * counts in full, so this can exceed max life.
+   * Their total contact damage, as in the playerHit events (what reached life past
+   * contactDamageTaken and the shield): the hit that brings life to 0 counts in full, so this
+   * can exceed max life.
    */
   readonly damageTaken: number;
   /** leaks and damageTaken by enemy type; every type is present, zero if it never got through. */
   readonly damageTakenBy: Readonly<Record<EnemyId, ContactTally>>;
-  /** Type of the enemy whose contact brought life to 0; null unless endReason is 'death'. */
+  /**
+   * Type of the enemy whose contact brought life to 0 with no extra life left; null unless
+   * endReason is 'death'.
+   */
   readonly killedBy: EnemyId | null;
 }
 

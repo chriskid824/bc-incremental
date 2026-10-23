@@ -111,6 +111,16 @@ describe('rule descriptions', () => {
         ],
       }),
     ).toEqual([['8'], ['150%'], ['5%']]);
+    // A shield's gain, then its cap when it has one.
+    expect(
+      triggerNumbers({
+        on: 'freeze',
+        do: [
+          { kind: 'shield', lifePct: 0.02, capPct: 0.3 },
+          { kind: 'shield', lifePct: 0.2 },
+        ],
+      }),
+    ).toEqual([['2%'], ['30%'], ['20%']]);
   });
 
   it('matches whole numbers only', () => {

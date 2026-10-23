@@ -17,6 +17,7 @@
   "web.effect.push": "push the enemies within {radius} back {distance}",
   "web.effect.addFrost": "+{amount} chill{extra}",
   "web.effect.heal": "heal {pct} of max life",
+  "web.effect.shield": "gain a shield of {pct} of max life",
   "web.effect.gainShards": "the enemy drops {pct} of its shards again",
   "web.effect.groundZone": "a {duration} s pulse zone (radius {radius}){extra}",
   "web.effect.repeatAttack": "repeat the signature attack {n} {times} at {damage} damage{extra}",

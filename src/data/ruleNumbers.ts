@@ -109,6 +109,11 @@ export function effectNumbers(effect: EffectSpec): string[][] {
       ];
     case 'heal':
       return [[percent(effect.lifePct)]];
+    case 'shield':
+      return [
+        [percent(effect.lifePct)],
+        ...(effect.capPct === undefined ? [] : [[percent(effect.capPct)]]),
+      ];
     case 'gainShards':
       return [[percent(effect.fraction)]];
     case 'groundZone':

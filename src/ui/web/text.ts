@@ -116,6 +116,7 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   push: 'web.effect.push',
   addFrost: 'web.effect.addFrost',
   heal: 'web.effect.heal',
+  shield: 'web.effect.shield',
   gainShards: 'web.effect.gainShards',
   groundZone: 'web.effect.groundZone',
   repeatAttack: 'web.effect.repeatAttack',
@@ -338,6 +339,9 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   frozenDamageTaken: 'percent',
   auraRadius: 'number',
   orbitCount: 'number',
+  contactDamageTaken: 'percent',
+  lifeRegen: 'percent',
+  extraLives: 'number',
 };
 
 /**
@@ -357,6 +361,7 @@ export const COEF_FORMAT: {
   push: {},
   addFrost: {},
   heal: {},
+  shield: {},
   gainShards: {},
   groundZone: { damagePctPerSec: 'pct', ailmentDamagePct: 'mult' },
   repeatAttack: {},
@@ -573,6 +578,10 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
       return text({ amount: percent(spec.amount) });
     case 'heal':
       return text({ pct: percent(spec.lifePct) });
+    // As gd's 波次護盾 reads: the gain alone. capPct has no template of its own (docs/v3 C7
+    // design §1.7 gives the shield one key); its node's hand text quotes it (ruleNumbers.ts).
+    case 'shield':
+      return text({ pct: percent(spec.lifePct) });
     case 'gainShards':
       return text({ pct: percent(spec.fraction) });
     case 'groundZone': {
@@ -676,7 +685,7 @@ const fansOut = (effect: EffectSpec): boolean =>
   (effect.kind === 'applyAilment' || effect.kind === 'addFrost' || effect.kind === 'detonate') &&
   effect.radius === undefined;
 const onPlayer = (effect: EffectSpec): boolean =>
-  effect.kind === 'repeatAttack' || effect.kind === 'heal';
+  effect.kind === 'repeatAttack' || effect.kind === 'heal' || effect.kind === 'shield';
 
 /**
  * How a center event's trigger without a selector places its effects, for FANOUT_TEXT: every

@@ -181,6 +181,8 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'frostSlowCap',
       'shatterDamage',
       'frozenDamageTaken',
+      'contactDamageTaken',
+      'lifeRegen',
     ]);
   });
 
@@ -308,6 +310,10 @@ function kitchenSink(): NodeEffects {
       on: 'heroHit',
       do: [{ kind: 'repeatAttack', count: 2, damagePct: 0.5, timing: 'nextAttack' }],
     },
+    // ◆波次護盾 as B1 writes it (lead ruling L3), and 霜甲 (gd:110) on a center event: the
+    // player's, not the target's.
+    { on: 'waveStart', do: [{ kind: 'shield', lifePct: 0.2, capPct: 0.2 }] },
+    { on: 'freeze', do: [{ kind: 'shield', lifePct: 0.02, capPct: 0.3 }] },
     {
       on: 'contact',
       when: [{ targetKind: 'boss' }, { inZone: 'outer.aura' }],
@@ -554,6 +560,8 @@ describe('every template, through one node (§4.7)', () => {
         'Each explosion (50% chance), where it lands: a nova of radius 50 for 20% damage',
         'On each freeze: 2 poison stacks on the target and the enemies within 90, at most 5',
         '+2 drones: 80% damage an impact, +1 turret: 40% damage a shot',
+        'At the start of each wave: gain a shield of 20% of max life',
+        'On each freeze: gain a shield of 2% of max life',
         'Special rule (glassCannon)',
       ],
     ],
@@ -569,6 +577,8 @@ describe('every template, through one node (§4.7)', () => {
         '每次爆炸（50% 機率），在落點：放出半徑 50 的新星，20% 傷害',
         '凍結時，對目標與半徑 90 內最多 5 隻敵人：毒 2 層',
         '擊中 Boss 時：回復 1% 生命',
+        '每波開始時：得到 20% 最大生命的護盾',
+        '凍結時：得到 2% 最大生命的護盾',
         '特殊規則（glassCannon）',
       ],
     ],
