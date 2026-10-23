@@ -9,11 +9,88 @@ import type { Modifier } from './stats';
 import type { RuleSpec } from './rules';
 import type { ConversionSpec, TriggerSpec } from './triggers';
 
-export const ENEMY_IDS = ['triangle', 'square', 'pentagon', 'shard', 'hexagon', 'boss'] as const;
-/** `shard` is the small triangle a pentagon splits into. */
+/**
+ * M1's six types, then v3's (docs/v3 C7 design §1.2): ROW_ENEMIES' six spellings and the onion,
+ * the v3 boss. Appended, so M1's order (mainThreat's ties, RunResult.damageTakenBy) stays.
+ */
+export const ENEMY_IDS = [
+  'triangle',
+  'square',
+  'pentagon',
+  'shard',
+  'hexagon',
+  'boss',
+  'shielder',
+  'regenerator',
+  'dasher',
+  'shooter',
+  'summoner',
+  'treasure',
+  'onion',
+] as const;
+/** `shard` is the small triangle a pentagon splits into; `boss` is M1's octagon. */
 export type EnemyId = (typeof ENEMY_IDS)[number];
 
-export type EnemyShape = 'triangle' | 'square' | 'pentagon' | 'hexagon' | 'octagon';
+export type EnemyShape =
+  | 'triangle'
+  | 'square'
+  | 'pentagon'
+  | 'hexagon'
+  | 'octagon'
+  | 'circle'
+  | 'cross'
+  | 'rhombus'
+  | 'trapezoid'
+  | 'ring'
+  | 'diamond'
+  | 'onion';
+
+/**
+ * What a v3 type does beyond walking in (docs/v3 C7 design §1.2). Data only: each kind's numbers
+ * are read by the commit that builds its mechanic, and a run of this commit spawns every type as
+ * a plain walker.
+ */
+export type EnemyBehaviour =
+  /** Hits below this fraction of its max life are blocked (盾兵). */
+  | { readonly kind: 'shield'; readonly blockBelowPct: number }
+  /** Regains this fraction of its max life a second (再生者). */
+  | { readonly kind: 'regen'; readonly lifePctPerSec: number }
+  /** Charges for chargeSec at chargeDist from the player, then runs at dashMult × speed (衝刺者). */
+  | {
+      readonly kind: 'dash';
+      readonly chargeDist: number;
+      readonly chargeSec: number;
+      readonly dashMult: number;
+    }
+  /** Stops at stopDist and fires a bullet at the player every periodSec (射手). */
+  | {
+      readonly kind: 'shoot';
+      readonly stopDist: number;
+      readonly periodSec: number;
+      readonly bulletSpeed: number;
+      readonly bulletDamage: number;
+    }
+  /** Stops at stopDist and spawns `count` of `enemy` around itself every periodSec (召喚者). */
+  | {
+      readonly kind: 'summon';
+      readonly stopDist: number;
+      readonly periodSec: number;
+      readonly enemy: EnemyId;
+      readonly count: number;
+    }
+  /** Circles at orbitDist for orbitSec, then flees at fleeMult × its speed (寶藏怪). */
+  | {
+      readonly kind: 'treasure';
+      readonly orbitDist: number;
+      readonly orbitSec: number;
+      readonly fleeMult: number;
+    }
+  /** Its hpMult split over `layers` shells, each spraying `burst` when it breaks (洋蔥). */
+  | {
+      readonly kind: 'layers';
+      readonly layers: number;
+      readonly burst: { readonly enemy: EnemyId; readonly count: number };
+    };
 
 export interface EnemyDef {
   readonly id: EnemyId;
@@ -34,6 +111,12 @@ export interface EnemyDef {
   readonly splitInto?: { readonly enemy: EnemyId; readonly count: number };
   /** Fill color as 0xRRGGBB, used by the renderer only. */
   readonly color: number;
+  /** An elite or a boss (Enemy.tough): a focus target, and the shots' tough pass. */
+  readonly tough: boolean;
+  /** A boss (Enemy.boss): targetKind 'boss' and the boss frost cap; always tough as well. */
+  readonly boss: boolean;
+  /** A v3 type's behaviour; none for M1's six. */
+  readonly behaviour?: EnemyBehaviour;
 }
 
 /** A recurring group of enemies inside normal waves. */
@@ -62,6 +145,26 @@ export interface WaveTable {
   readonly spawnDurationSec: number;
   /** The next wave starts when the field is clear or after this many seconds. */
   readonly waveTimerSec: number;
+  /**
+   * The v3 rules: present only in the data character runs receive (characterGameData) and in v3
+   * test data, and a run whose table has them is a v3 run (docs/v3 C7 design §1.1).
+   */
+  readonly v3?: V3WaveRules;
+}
+
+/**
+ * A v3 run's wave rules beyond M1's (docs/v3 C7 design §1.2). The whole block is fixed here for
+ * the content and the simulator; each field is read from the commit that builds its mechanic.
+ */
+export interface V3WaveRules {
+  /** Enemies alive at once at most (the enemy cap). */
+  readonly enemyCap: number;
+  /** The boss of each boss wave in turn, from the first: boss-flagged types. */
+  readonly bossRotation: readonly EnemyId[];
+  /** Affixes on each elite from `fromWave` on: strictly ascending in fromWave. */
+  readonly affixes: readonly { readonly fromWave: number; readonly count: number }[];
+  /** The treasure's schedule: `enemy` from `fromWave` on, one every `every` waves. */
+  readonly treasure: { readonly enemy: EnemyId; readonly fromWave: number; readonly every: number };
 }
 
 export type TalentKind = 'start' | 'small' | 'notable' | 'keystone' | 'repeatable';

@@ -9,13 +9,14 @@ import { createRng, deriveSeed } from '../core/rng';
 import type { Rng, RngStreamName } from '../core/rng';
 import { targetDamage } from '../data/curve';
 import type { SourcedEmitter } from '../data/emitters';
+import { V3_ENEMIES } from '../data/enemiesV3';
 import type { RuleSpec, SignatureSpec } from '../data/rules';
 import { BASE_STATS, NO_EXTRAS } from '../data/stats';
 import type { Modifier, SourcedTrigger, StatBlock, StatExtras, StatId } from '../data/stats';
 import type { TagMask } from '../data/tags';
 import type { TriggerSpec } from '../data/triggers';
 import { ENEMY_IDS } from '../data/types';
-import type { EnemyDef, EnemyId, GameData, WaveTable } from '../data/types';
+import type { EnemyDef, EnemyId, GameData, V3WaveRules, WaveTable } from '../data/types';
 import { centerDamage, compileBuild } from './build/compile';
 import { CHAIN_HIT_CAP, PROJECTILE_CAP, SUMMON_CAP } from './caps';
 import type { GridItem } from './grid';
@@ -29,7 +30,10 @@ import { startDueWave } from './systems/waves';
 import { DRONE_KIND_TURRET, NO_INPUT } from './types';
 import type { CounterId, InputFrame, RunConfig, RunResult, SimEvent, SimState } from './types';
 
-/** Enemy stats following docs/GDD.md §2.4. */
+/**
+ * Enemy stats following docs/GDD.md §2.4, then the v3 types of src/data/enemiesV3.ts unchanged
+ * (docs/v3 C7 design §1.2), which only TEST_V3_WAVES spawns.
+ */
 export const TEST_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
   triangle: {
     id: 'triangle',
@@ -41,6 +45,8 @@ export const TEST_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
     dropMult: 0.5,
     cores: 0,
     color: 0xff4fd8,
+    tough: false,
+    boss: false,
   },
   square: {
     id: 'square',
@@ -52,6 +58,8 @@ export const TEST_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
     dropMult: 1,
     cores: 0,
     color: 0x5b6cff,
+    tough: false,
+    boss: false,
   },
   pentagon: {
     id: 'pentagon',
@@ -64,6 +72,8 @@ export const TEST_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
     cores: 0,
     splitInto: { enemy: 'shard', count: 3 },
     color: 0x3fe07a,
+    tough: false,
+    boss: false,
   },
   shard: {
     id: 'shard',
@@ -75,6 +85,8 @@ export const TEST_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
     dropMult: 0.25,
     cores: 0,
     color: 0xa6f7bf,
+    tough: false,
+    boss: false,
   },
   hexagon: {
     id: 'hexagon',
@@ -86,6 +98,8 @@ export const TEST_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
     dropMult: 3.5,
     cores: 1,
     color: 0xa45cff,
+    tough: true,
+    boss: false,
   },
   boss: {
     id: 'boss',
@@ -97,7 +111,10 @@ export const TEST_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
     dropMult: 6,
     cores: 3,
     color: 0xff3d8b,
+    tough: true,
+    boss: true,
   },
+  ...V3_ENEMIES,
 };
 
 export const TEST_WAVES: WaveTable = {
@@ -112,6 +129,33 @@ export const TEST_WAVES: WaveTable = {
   waveTimerSec: 8,
 };
 
+/**
+ * TEST_WAVES as a v3 run's (docs/v3 C7 design §1.2): the v3 types' rules at src/data/wavesV3.ts's
+ * first waves with fixture counts, and its `v3` block, copied so that tuning the content moves
+ * no fixture.
+ */
+export const TEST_V3_WAVES: WaveTable & { readonly v3: V3WaveRules } = {
+  ...TEST_WAVES,
+  rules: [
+    ...TEST_WAVES.rules,
+    { enemy: 'shielder', fromWave: 12, base: 1, perWave: 0.2, maxCount: 8 },
+    { enemy: 'regenerator', fromWave: 16, base: 1, perWave: 0.2, maxCount: 8 },
+    { enemy: 'dasher', fromWave: 22, base: 1, perWave: 0.2, maxCount: 8 },
+    { enemy: 'shooter', fromWave: 32, base: 1, perWave: 0.2, maxCount: 8 },
+    { enemy: 'summoner', fromWave: 42, base: 1, perWave: 0.2, maxCount: 8 },
+  ],
+  v3: {
+    enemyCap: 400,
+    bossRotation: ['onion'],
+    affixes: [
+      { fromWave: 5, count: 1 },
+      { fromWave: 25, count: 2 },
+      { fromWave: 60, count: 3 },
+    ],
+    treasure: { enemy: 'treasure', fromWave: 15, every: 5 },
+  },
+};
+
 export interface TestDataOverrides {
   readonly enemies?: Partial<Record<EnemyId, Partial<EnemyDef>>>;
   readonly waves?: Partial<WaveTable>;
@@ -122,6 +166,11 @@ export function makeTestData(overrides: TestDataOverrides = {}): GameData {
   const enemies = {} as Record<EnemyId, EnemyDef>;
   for (const id of ENEMY_IDS) enemies[id] = { ...TEST_ENEMIES[id], ...overrides.enemies?.[id] };
   return { enemies, waves: { ...TEST_WAVES, ...overrides.waves }, talents: [] };
+}
+
+/** makeTestData of a v3 run: the wave overrides are merged into TEST_V3_WAVES. */
+export function v3TestData(overrides: TestDataOverrides = {}): GameData {
+  return makeTestData({ ...overrides, waves: { ...TEST_V3_WAVES, ...overrides.waves } });
 }
 
 /**
@@ -201,11 +250,19 @@ export interface PlacedOptions {
   readonly data?: GameData;
 }
 
-/** Fixture data whose first wave has no enemies and whose next one is far away. */
+/**
+ * Fixture data whose first wave has no enemies and whose next one is far away. Its rules name
+ * M1's wave types at a count of 0: none spawns, but the run can spawn them (reachableEnemies),
+ * so ctx.shotPad covers the placed enemies as in a run of the fixture's waves.
+ */
 const noWaves = (): GameData =>
   makeTestData({
     waves: {
-      rules: [],
+      rules: [
+        { enemy: 'triangle', fromWave: 1, base: 0, perWave: 0, maxCount: 0 },
+        { enemy: 'square', fromWave: 1, base: 0, perWave: 0, maxCount: 0 },
+        { enemy: 'pentagon', fromWave: 1, base: 0, perWave: 0, maxCount: 0 },
+      ],
       eliteEvery: 1000,
       bossEvery: 1000,
       spawnDurationSec: 0,

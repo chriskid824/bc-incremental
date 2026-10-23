@@ -425,10 +425,10 @@ describe('orbit: its emitter', () => {
     ]);
   });
 
-  it('adds no member to the enemy: addEnemy’s literal keeps its 57, none for an orbit', () => {
+  it('adds no member to the enemy: addEnemy’s literal keeps its 58, none for an orbit', () => {
     const ctx = fixture([at(RING_0, 0)]);
     const keys = Object.keys(enemy(ctx, 1));
-    expect(keys).toHaveLength(57);
+    expect(keys).toHaveLength(58);
     expect(keys.filter((key) => /orb/i.test(key))).toEqual([]);
   });
 });

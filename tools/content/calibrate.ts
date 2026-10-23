@@ -19,7 +19,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { loadGameData } from '../../src/data';
+import { characterGameData } from '../../src/data';
 import { CHARACTER_IDS } from '../../src/data/sources';
 import { assembleWeb, FULL_SCOPE, loadContent } from '../../src/data/web';
 import type { CalibrationEntry, Content, FusionKey } from '../../src/data/web';
@@ -150,7 +150,7 @@ function main(): void {
       'npm run calibrate: every entry is fresh, so no fusion is calibrated (--all redoes each)',
     );
   }
-  const data = loadGameData();
+  const data = characterGameData();
   const entries: Partial<Record<FusionKey, CalibrationEntry>> = { ...content.calibrated };
   const failed: FusionKey[] = [];
   for (const key of keys) {

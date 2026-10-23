@@ -168,6 +168,13 @@ describe('M1 projection', () => {
         shard: tally,
         hexagon: tally,
         boss: tally,
+        shielder: tally,
+        regenerator: tally,
+        dasher: tally,
+        shooter: tally,
+        summoner: tally,
+        treasure: tally,
+        onion: tally,
       },
       killedBy: 'triangle',
     } satisfies RunResult;

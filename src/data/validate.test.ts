@@ -6,9 +6,10 @@ import { TALENTS } from './talents';
 import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
 import type { ConversionSpec, ScalingSpec, SlashLineSpec, TriggerSpec } from './triggers';
-import type { GameData, TalentNode } from './types';
+import type { GameData, TalentNode, V3WaveRules } from './types';
 import { MAX_KEYSTONES, starArchetypeIssues, validateGameData } from './validate';
 import { WAVES } from './waves';
+import { V3_WAVES } from './wavesV3';
 
 type Mutable<T> = T extends readonly (infer U)[]
   ? Mutable<U>[]
@@ -84,9 +85,16 @@ describe('real content', () => {
     }
   });
 
-  it('uses distinct enemy colors', () => {
-    const colors = Object.values(loadGameData().enemies).map((def) => def.color);
+  it('uses distinct colors for M1’s enemy types and a shape of its own for each v3 type', () => {
+    const defs = Object.values(loadGameData().enemies);
+    const colors = defs.filter((def) => def.behaviour === undefined).map((def) => def.color);
+    expect(colors).toHaveLength(6);
     expect(new Set(colors).size).toBe(colors.length);
+    // The v3 types share one neutral outline (game-design-v3 §6), the treasure's gold aside:
+    // their shapes tell them apart.
+    for (const def of defs.filter((d) => d.behaviour !== undefined)) {
+      expect(defs.filter((other) => other.shape === def.shape).map((d) => d.id)).toEqual([def.id]);
+    }
   });
 });
 
@@ -605,6 +613,200 @@ describe('validateGameData: waves', () => {
       'waves: bossEvery must be a positive integer (got 2.5)',
       'waves: spawnDurationSec must be > 0 (got 0)',
       'waves: waveTimerSec must be > 0 (got -8)',
+    ]);
+  });
+});
+
+describe('validateGameData: v3 enemies and waves (docs/v3 C7 design §1.2)', () => {
+  /** A copy of the content character runs receive, with the v3 wave table, after `mutate`. */
+  function v3IssuesAfter(mutate: (data: Mutable<GameData>, v3: Mutable<V3WaveRules>) => void) {
+    const data = structuredClone({
+      enemies: ENEMIES,
+      waves: V3_WAVES,
+      talents: TALENTS,
+    }) as Mutable<GameData>;
+    mutate(data, data.waves.v3 as Mutable<V3WaveRules>);
+    return validateGameData(data);
+  }
+
+  it('accepts the v3 content, and an affix table left empty', () => {
+    expect(v3IssuesAfter(() => {})).toEqual([]);
+    expect(
+      v3IssuesAfter((_, v3) => {
+        v3.affixes = [];
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects a hexagon or the onion in rules, a non-boss id in the rotation, and a summon enemy with a behaviour', () => {
+    const issues = v3IssuesAfter((d, v3) => {
+      d.waves.rules.push({ enemy: 'hexagon', fromWave: 1, base: 1, perWave: 0, maxCount: 1 });
+      d.waves.rules.push({ enemy: 'onion', fromWave: 1, base: 1, perWave: 0, maxCount: 1 });
+      v3.bossRotation = ['onion', 'square', 'hexagon'];
+      d.enemies.summoner.behaviour = {
+        kind: 'summon',
+        stopDist: 480,
+        periodSec: 3,
+        enemy: 'shooter',
+        count: 2,
+      };
+    });
+    expect(issues).toEqual([
+      "enemies.summoner: behaviour.enemy 'shooter' must have no behaviour",
+      "waves.rules[8] (hexagon): 'hexagon' is added by eliteEvery/bossEvery, not spawn rules",
+      "waves.rules[9] (onion): 'onion' is added by eliteEvery/bossEvery, not spawn rules",
+      "waves.v3.bossRotation[1]: 'square' must be a boss-flagged enemy",
+      "waves.v3.bossRotation[2]: 'hexagon' must be a boss-flagged enemy",
+    ]);
+  });
+
+  it('judges spawn rules by the flags, not the ids: a tough square is out, a plain hexagon and the treasure are in', () => {
+    const issues = issuesAfter((d) => {
+      d.enemies.square.tough = true;
+      d.enemies.hexagon.tough = false;
+      d.waves.rules.push({ enemy: 'hexagon', fromWave: 1, base: 1, perWave: 0, maxCount: 1 });
+      d.waves.rules.push({ enemy: 'treasure', fromWave: 1, base: 1, perWave: 0, maxCount: 1 });
+    });
+    expect(issues).toEqual([
+      "waves.rules[1] (square): 'square' is added by eliteEvery/bossEvery, not spawn rules",
+    ]);
+  });
+
+  it('rejects a boss that is not tough', () => {
+    const issues = v3IssuesAfter((d) => {
+      d.enemies.onion.tough = false;
+      d.enemies.boss.tough = false;
+    });
+    expect(issues).toEqual([
+      'enemies.boss: a boss must be tough as well',
+      'enemies.onion: a boss must be tough as well',
+    ]);
+  });
+
+  it('rejects behaviour numbers that are not above 0, a shield of 1 and fractional layers or counts', () => {
+    const issues = v3IssuesAfter((d) => {
+      d.enemies.shielder.behaviour = { kind: 'shield', blockBelowPct: 1 };
+      d.enemies.regenerator.behaviour = { kind: 'regen', lifePctPerSec: 0 };
+      d.enemies.dasher.behaviour = { kind: 'dash', chargeDist: -1, chargeSec: 0, dashMult: 0 };
+      d.enemies.shooter.behaviour = {
+        kind: 'shoot',
+        stopDist: 0,
+        periodSec: -2,
+        bulletSpeed: 0,
+        bulletDamage: 0,
+      };
+      d.enemies.summoner.behaviour = {
+        kind: 'summon',
+        stopDist: 0,
+        periodSec: 0,
+        enemy: 'triangle',
+        count: 1.5,
+      };
+      d.enemies.treasure.behaviour = { kind: 'treasure', orbitDist: 0, orbitSec: 0, fleeMult: 0 };
+      d.enemies.onion.behaviour = {
+        kind: 'layers',
+        layers: 2.5,
+        burst: { enemy: 'triangle', count: 0 },
+      };
+    });
+    expect(issues).toEqual([
+      'enemies.shielder: behaviour.blockBelowPct must be in (0, 1) (got 1)',
+      'enemies.regenerator: behaviour.lifePctPerSec must be > 0 (got 0)',
+      'enemies.dasher: behaviour.chargeDist must be > 0 (got -1)',
+      'enemies.dasher: behaviour.chargeSec must be > 0 (got 0)',
+      'enemies.dasher: behaviour.dashMult must be > 0 (got 0)',
+      'enemies.shooter: behaviour.stopDist must be > 0 (got 0)',
+      'enemies.shooter: behaviour.periodSec must be > 0 (got -2)',
+      'enemies.shooter: behaviour.bulletSpeed must be > 0 (got 0)',
+      'enemies.shooter: behaviour.bulletDamage must be > 0 (got 0)',
+      'enemies.summoner: behaviour.stopDist must be > 0 (got 0)',
+      'enemies.summoner: behaviour.periodSec must be > 0 (got 0)',
+      'enemies.summoner: behaviour.count must be a positive integer (got 1.5)',
+      'enemies.treasure: behaviour.orbitDist must be > 0 (got 0)',
+      'enemies.treasure: behaviour.orbitSec must be > 0 (got 0)',
+      'enemies.treasure: behaviour.fleeMult must be > 0 (got 0)',
+      'enemies.onion: behaviour.layers must be a positive integer (got 2.5)',
+      'enemies.onion: behaviour.burst.count must be a positive integer (got 0)',
+    ]);
+    expect(
+      v3IssuesAfter((d) => {
+        d.enemies.shielder.behaviour = { kind: 'shield', blockBelowPct: 0 };
+      }),
+    ).toEqual(['enemies.shielder: behaviour.blockBelowPct must be in (0, 1) (got 0)']);
+  });
+
+  it('rejects summons and bursts of a tough, boss, behaving or unknown type, so that spawns never recurse', () => {
+    const issues = v3IssuesAfter((d) => {
+      Reflect.deleteProperty(d.enemies, 'shard');
+      d.enemies.summoner.behaviour = {
+        kind: 'summon',
+        stopDist: 480,
+        periodSec: 3,
+        enemy: 'hexagon',
+        count: 2,
+      };
+      d.enemies.onion.behaviour = {
+        kind: 'layers',
+        layers: 3,
+        burst: { enemy: 'onion', count: 12 },
+      };
+      d.enemies.dasher.behaviour = {
+        kind: 'layers',
+        layers: 1,
+        burst: { enemy: 'shard', count: 1 },
+      };
+      d.enemies.regenerator.behaviour = {
+        kind: 'summon',
+        stopDist: 480,
+        periodSec: 3,
+        enemy: 'regenerator',
+        count: 1,
+      };
+    });
+    expect(issues).toEqual([
+      "enemies: missing definition for 'shard'",
+      "enemies.pentagon: splitInto references unknown enemy 'shard'",
+      "enemies.regenerator: behaviour.enemy 'regenerator' must have no behaviour",
+      "enemies.dasher: behaviour.burst.enemy references unknown enemy 'shard'",
+      "enemies.summoner: behaviour.enemy 'hexagon' must be neither tough nor a boss",
+      "enemies.onion: behaviour.burst.enemy 'onion' must be neither tough nor a boss",
+    ]);
+  });
+
+  it('checks the v3 block: a whole cap, a rotation of bosses, ascending affixes of 1 to 8, the treasure’s schedule', () => {
+    const issues = v3IssuesAfter((_, v3) => {
+      v3.enemyCap = 0;
+      v3.bossRotation = [];
+      v3.affixes = [
+        { fromWave: 0, count: 1 },
+        { fromWave: 5, count: 1 },
+        { fromWave: 5, count: 2 },
+        { fromWave: 3, count: 9 },
+        { fromWave: 60, count: 0 },
+        { fromWave: 61, count: 8 },
+      ];
+      v3.treasure = { enemy: 'square', fromWave: 0, every: 2.5 };
+    });
+    expect(issues).toEqual([
+      'waves.v3: enemyCap must be a positive integer (got 0)',
+      'waves.v3: bossRotation must name a boss',
+      'waves.v3.affixes[0]: fromWave must be a positive integer (got 0)',
+      "waves.v3.affixes[2]: fromWave must be above the previous entry's (got 5)",
+      "waves.v3.affixes[3]: fromWave must be above the previous entry's (got 3)",
+      'waves.v3.affixes[3]: count must be an integer in 1..8 (got 9)',
+      'waves.v3.affixes[4]: count must be an integer in 1..8 (got 0)',
+      "waves.v3.treasure: 'square' must have the treasure behaviour",
+      'waves.v3.treasure: fromWave must be a positive integer (got 0)',
+      'waves.v3.treasure: every must be a positive integer (got 2.5)',
+    ]);
+    expect(
+      v3IssuesAfter((_, v3) => {
+        v3.enemyCap = 400.5;
+        v3.treasure = { enemy: 'treasure', fromWave: 15, every: 0 };
+      }),
+    ).toEqual([
+      'waves.v3: enemyCap must be a positive integer (got 400.5)',
+      'waves.v3.treasure: every must be a positive integer (got 0)',
     ]);
   });
 });

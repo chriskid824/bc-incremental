@@ -17,12 +17,20 @@ import type { EnemySpot } from './drones';
 import { packColor } from './fx';
 import { COLORS, mixColor } from './palette';
 
+/** Polygon sides per shape; the v3 shapes' are placeholders until their own drawings. */
 const SIDES: Readonly<Record<EnemyShape, number>> = {
   triangle: 3,
   square: 4,
   pentagon: 5,
   hexagon: 6,
   octagon: 8,
+  circle: 24,
+  cross: 4,
+  rhombus: 4,
+  trapezoid: 4,
+  ring: 24,
+  diamond: 4,
+  onion: 8,
 };
 
 const FLASH_MS = 100;
@@ -71,7 +79,7 @@ class EnemyView {
       .fill({ color: 0xffffff, alpha: 0.28 })
       .stroke({ width: Math.max(3, r * 0.14), color: 0xffffff, alpha: 1 });
     this.body.addChild(hull);
-    if (def.id === 'boss') {
+    if (def.boss) {
       // Layered polygon (docs/GDD.md §2.4): an inner ring counter-rotates.
       this.inner = new Graphics()
         .regularPoly(0, 0, r * 0.6, sides, Math.PI / sides)
@@ -86,7 +94,7 @@ class EnemyView {
     }
     this.root.addChild(this.body);
 
-    if (def.id === 'hexagon' || def.id === 'boss') {
+    if (def.tough) {
       const width = r * 1.8;
       this.hpBack = new Sprite(Texture.WHITE);
       this.hpBack.tint = COLORS.hpBack;

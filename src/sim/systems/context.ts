@@ -9,6 +9,7 @@ import type { Num } from '../../core/num';
 import { mul, toNumber, ZERO } from '../../core/num';
 import type { Rng } from '../../core/rng';
 import { createStreams } from '../../core/rng';
+import { reachableEnemies } from '../../data/compose';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
 import { doomed } from '../ailments/apply';
@@ -74,14 +75,15 @@ import type {
   SimEvent,
   SimState,
 } from '../types';
+import type { EnemyV3 } from './enemyRecord';
 import { createEnemyGrid } from './grid';
 import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
-import { isToughType } from './spawn';
 import {
   compilePolicy,
   createChainState,
   createDronePool,
+  createEnemyAiState,
   createLobState,
   createPulseAcc,
   createRepeatState,
@@ -236,6 +238,8 @@ export interface Enemy extends EnemyState {
   killDepth: number;
   /** What killed it (killedBy): a KILL_KINDS ordinal (src/sim/effects/flags.ts). */
   killKind: number;
+  /** Its v3 record (src/sim/systems/enemyRecord.ts): on every enemy of a v3 run, else null. */
+  readonly v3: EnemyV3 | null;
 }
 
 export interface Projectile extends ProjectileState {
@@ -467,9 +471,9 @@ export interface RunContext {
   /** The effect executors' scratch list for area targets (src/sim/effects/execute.ts). */
   readonly effectTargets: Enemy[];
   /**
-   * The largest radius of an enemy type that is not tough: a straight shot looks for the enemies
-   * it can reach in its path's box padded by this (src/sim/systems/shots.ts), and for the tough
-   * ones apart.
+   * The largest radius of an enemy type the run can spawn (reachableEnemies) that is not tough: a
+   * straight shot looks for the enemies it can reach in its path's box padded by this
+   * (src/sim/systems/shots.ts), and for the tough ones apart.
    */
   readonly shotPad: number;
   /**
@@ -792,8 +796,9 @@ export function createRunContext(
   // Its turrets' targets go through ctx.shootable, read once ctx exists.
   const drones = createDronePool(layout, (enemy) => ctx.shootable(enemy));
   let shotPad = 0;
-  for (const id of ENEMY_IDS) {
-    if (!isToughType(id)) shotPad = Math.max(shotPad, data.enemies[id].radius);
+  for (const id of reachableEnemies(data)) {
+    const def = data.enemies[id];
+    if (!def.tough) shotPad = Math.max(shotPad, def.radius);
   }
   const maxLife = flags.maxLife ?? values.maxLife;
   const player = {
@@ -995,6 +1000,7 @@ export function createRunContext(
       segments,
       chain: createChainState(chainRetention),
       drones,
+      enemyAi: createEnemyAiState(data.waves.v3 !== undefined),
     },
 
     enemies,

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { createRng } from '../core/rng';
+import { characterGameData, loadGameData, parseGameData } from '../data';
 import { targetDamage } from '../data/curve';
+import { ENEMIES } from '../data/enemies';
+import { V3_ENEMIES } from '../data/enemiesV3';
 import type { Modifier } from '../data/stats';
+import { TALENTS } from '../data/talents';
+import { ENEMY_IDS } from '../data/types';
+import { V3_WAVES } from '../data/wavesV3';
 import type { Enemy } from './systems/context';
 import {
   makeStats,
@@ -12,6 +18,10 @@ import {
   STRESS_START_WAVE,
   stressData,
   stressStats,
+  TEST_ENEMIES,
+  TEST_V3_WAVES,
+  TEST_WAVES,
+  v3TestData,
   withinRef,
 } from './testing';
 import { DT, PLAYER_RADIUS } from './types';
@@ -179,5 +189,62 @@ describe('stress fixture', () => {
     expect(data.waves.waveTimerSec).toBe(1);
     expect(data.enemies.triangle.speed).toBe(110);
     expect(data.enemies.boss.speed).toBe(makeTestData().enemies.boss.speed);
+  });
+});
+
+describe('fixture enemies and v3 waves (docs/v3 C7 design §1.2)', () => {
+  it('parses M1, v3 and test data, each with a def for every one of the 13 ids', () => {
+    const datas = {
+      m1: loadGameData(),
+      v3: characterGameData(),
+      test: parseGameData({ ...makeTestData(), talents: TALENTS }),
+      v3Test: parseGameData({ ...v3TestData(), talents: TALENTS }),
+    };
+    expect(ENEMY_IDS).toHaveLength(13);
+    for (const [name, data] of Object.entries(datas)) {
+      expect(Object.keys(data.enemies).sort(), name).toEqual([...ENEMY_IDS].sort());
+      for (const id of ENEMY_IDS) expect(data.enemies[id].id, `${name} ${id}`).toBe(id);
+    }
+  });
+
+  it('gives TEST_ENEMIES the content’s flags, and the v3 types unchanged', () => {
+    for (const id of ENEMY_IDS) {
+      expect([TEST_ENEMIES[id].tough, TEST_ENEMIES[id].boss], id).toEqual([
+        ENEMIES[id].tough,
+        ENEMIES[id].boss,
+      ]);
+    }
+    for (const def of Object.values(V3_ENEMIES)) expect(TEST_ENEMIES[def.id]).toEqual(def);
+  });
+
+  it('makes TEST_V3_WAVES TEST_WAVES plus the v3 rules at the content’s first waves, and its v3 block', () => {
+    const m1 = TEST_WAVES.rules.length;
+    expect(TEST_V3_WAVES.rules.slice(0, m1)).toEqual(TEST_WAVES.rules);
+    expect(TEST_V3_WAVES.rules.slice(m1).map((r) => [r.enemy, r.fromWave])).toEqual(
+      V3_WAVES.rules.slice(V3_WAVES.rules.length - 5).map((r) => [r.enemy, r.fromWave]),
+    );
+    for (const rule of TEST_V3_WAVES.rules.slice(m1)) {
+      expect([rule.base, rule.perWave, rule.maxCount], rule.enemy).toEqual([1, 0.2, 8]);
+    }
+    const { rules, v3, ...settings } = TEST_V3_WAVES;
+    const { rules: m1Rules, ...m1Settings } = TEST_WAVES;
+    expect([rules.length - m1Rules.length, settings]).toEqual([5, m1Settings]);
+    expect(v3).toEqual(V3_WAVES.v3);
+  });
+
+  it('merges v3TestData’s overrides into TEST_V3_WAVES, and leaves makeTestData an M1 table', () => {
+    expect(makeTestData().waves.v3).toBeUndefined();
+    expect(v3TestData().waves).toEqual(TEST_V3_WAVES);
+    const data = v3TestData({
+      waves: { eliteEvery: 1000, v3: { ...TEST_V3_WAVES.v3, affixes: [] } },
+      enemies: { square: { speed: 0 } },
+    });
+    expect(data.waves).toEqual({
+      ...TEST_V3_WAVES,
+      eliteEvery: 1000,
+      v3: { ...TEST_V3_WAVES.v3, affixes: [] },
+    });
+    expect(data.enemies.square).toEqual({ ...TEST_ENEMIES.square, speed: 0 });
+    expect(data.enemies.shielder).toEqual(TEST_ENEMIES.shielder);
   });
 });

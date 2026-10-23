@@ -16,8 +16,9 @@ import {
   TriggerSpecSchema,
 } from './schema';
 import { TALENTS } from './talents';
-import type { GameData, TalentNode } from './types';
+import type { GameData, TalentNode, V3WaveRules } from './types';
 import { WAVES } from './waves';
+import { V3_WAVES } from './wavesV3';
 
 type Mutable<T> = T extends readonly (infer U)[]
   ? Mutable<U>[]
@@ -943,6 +944,72 @@ describe('GameDataSchema', () => {
     const archetype = content();
     Object.assign(talentAt(archetype, 'vitality')[1], { archetype: 'summon' });
     expect(GameDataSchema.safeParse(archetype).success).toBe(false);
+  });
+});
+
+describe('enemy defs and the v3 wave block (docs/v3 C7 design §1.2)', () => {
+  /** The content character runs receive: the enemies with the v3 wave table. */
+  const v3Content = (): Mutable<GameData> =>
+    structuredClone({ enemies: ENEMIES, waves: V3_WAVES, talents: TALENTS }) as Mutable<GameData>;
+  const V3_IDS = [
+    'shielder',
+    'regenerator',
+    'dasher',
+    'shooter',
+    'summoner',
+    'treasure',
+    'onion',
+  ] as const;
+
+  it('parses the v3 content unchanged and freezes its behaviours and v3 block', () => {
+    const data = GameDataSchema.parse(v3Content());
+    expect(data).toEqual(v3Content());
+    expect(Object.isFrozen(data.enemies.onion.behaviour)).toBe(true);
+    expect(Object.isFrozen(data.waves.v3?.treasure)).toBe(true);
+    expect(Object.isFrozen(data.waves.v3?.affixes[0])).toBe(true);
+  });
+
+  it('requires tough and boss on every def, so that no default can leak', () => {
+    for (const flag of ['tough', 'boss'] as const) {
+      for (const id of ['square', 'hexagon', 'boss', 'shielder', 'onion'] as const) {
+        const data = v3Content();
+        Reflect.deleteProperty(data.enemies[id], flag);
+        expect(GameDataSchema.safeParse(data).success, `${id} without ${flag}`).toBe(false);
+      }
+    }
+  });
+
+  it('rejects an unknown key in every behaviour and in the burst, and an unknown kind', () => {
+    for (const id of V3_IDS) {
+      const data = v3Content();
+      const behaviour = data.enemies[id].behaviour;
+      if (behaviour === undefined) throw new Error(`${id} has no behaviour`);
+      Object.assign(behaviour, { extra: 1 });
+      expect(GameDataSchema.safeParse(data).success, id).toBe(false);
+    }
+    const burst = v3Content();
+    const layers = burst.enemies.onion.behaviour;
+    if (layers?.kind !== 'layers') throw new Error('the onion has no layers');
+    Object.assign(layers.burst, { extra: 1 });
+    expect(GameDataSchema.safeParse(burst).success).toBe(false);
+    const kind = v3Content();
+    Object.assign(kind.enemies.dasher, { behaviour: { kind: 'teleport', dist: 100 } });
+    expect(GameDataSchema.safeParse(kind).success).toBe(false);
+  });
+
+  it('rejects an unknown key in the v3 block, an affix entry and the treasure schedule', () => {
+    const parts: ((v3: Mutable<V3WaveRules>) => object)[] = [
+      (v3) => v3,
+      (v3) => v3.affixes[0] as object,
+      (v3) => v3.treasure,
+    ];
+    for (const [i, part] of parts.entries()) {
+      const data = v3Content();
+      const v3 = data.waves.v3;
+      if (v3 === undefined) throw new Error('no v3 block');
+      Object.assign(part(v3), { extra: 1 });
+      expect(GameDataSchema.safeParse(data).success, `part ${i}`).toBe(false);
+    }
   });
 });
 

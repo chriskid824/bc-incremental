@@ -11,6 +11,7 @@ import type { EmitterGrant } from '../emitters';
 import type { SignatureSpec, RuleSpec } from '../rules';
 import type { CharacterId, OuterId } from '../sources';
 import type { Modifier } from '../stats';
+import type { EnemyId } from '../types';
 import type {
   CenterEvent,
   ConversionSpec,
@@ -70,6 +71,30 @@ export const ROW_ENEMIES = [
   'boss',
 ] as const;
 export type RowEnemy = (typeof ROW_ENEMIES)[number];
+
+/**
+ * The column each enemy type counts in (docs/v3 C7 design §1.7): its own; a shard its
+ * pentagon's; every boss-flagged type, the onion and the bosses after it, the Boss column. The
+ * elite has none.
+ */
+const ROW_OF: Readonly<Record<EnemyId, RowEnemy | null>> = {
+  triangle: 'triangle',
+  square: 'square',
+  pentagon: 'pentagon',
+  shard: 'pentagon',
+  hexagon: null,
+  boss: 'boss',
+  shielder: 'shielder',
+  regenerator: 'regenerator',
+  dasher: 'dasher',
+  shooter: 'shooter',
+  summoner: 'summoner',
+  treasure: 'treasure',
+  onion: 'boss',
+};
+
+/** The gd §6.4 column enemy type `id` counts in, null for the elite (ROW_OF). */
+export const rowEnemyOf = (id: EnemyId): RowEnemy | null => ROW_OF[id];
 
 export type RankCount = 3 | 4 | 5;
 export type Ranks = 1 | RankCount | 'unlimited';

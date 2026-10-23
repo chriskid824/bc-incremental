@@ -22,7 +22,7 @@
 
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { loadGameData } from '../../src/data';
+import { characterGameData, loadGameData } from '../../src/data';
 import type { GameData } from '../../src/data/types';
 import { loadContent } from '../../src/data/web';
 import type { Content } from '../../src/data/web';
@@ -296,7 +296,8 @@ function main(): void {
   const seed = intFlag('seed', values.seed, 0) ?? WEB_FUZZ_SEED;
   const { only } = values;
   const started = performance.now();
-  const data = loadGameData();
+  // Character builds run on the content character runs receive (X13); normal stays bench's.
+  const data = characterGameData();
   const sets: FuzzSet[] = [];
   if (!values.fixture) {
     const content = loadContent();
@@ -324,7 +325,7 @@ function main(): void {
       cases: [],
     });
   }
-  const normalMicros = normalMicrosPerTick(data);
+  const normalMicros = normalMicrosPerTick(loadGameData());
   let ok = true;
   for (const set of sets) {
     const from = performance.now();

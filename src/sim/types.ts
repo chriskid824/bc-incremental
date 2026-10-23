@@ -10,6 +10,7 @@ import type { EnemyId } from '../data/types';
 import type { RuleSpec, SignatureSpec } from '../data/rules';
 import type { CharacterId } from '../data/sources';
 import type { SourcedRule, StatBlock } from '../data/stats';
+import type { EnemyV3 } from './systems/enemyRecord';
 
 export const TICK_RATE = 60;
 export const DT = 1 / TICK_RATE;
@@ -82,7 +83,12 @@ export interface EnemyState {
   /** Number of active burn stacks. */
   burnStacks: number;
   alive: boolean;
+  /** Its v3 record, which the renderer and calibration read; null on every enemy of an M1 run. */
+  readonly v3: EnemyV3View | null;
 }
+
+/** The read-only view of an enemy's v3 record (src/sim/systems/enemyRecord.ts). */
+export type EnemyV3View = Readonly<EnemyV3>;
 
 export interface ProjectileState {
   readonly id: number;

@@ -40,12 +40,14 @@ import type {
 } from './triggers';
 import { ENEMY_IDS } from './types';
 import type {
+  EnemyBehaviour,
   EnemyDef,
   EnemyShape,
   GameData,
   SpawnRule,
   TalentKind,
   TalentNode,
+  V3WaveRules,
   WaveTable,
 } from './types';
 
@@ -76,6 +78,13 @@ export const ENEMY_SHAPES = [
   'pentagon',
   'hexagon',
   'octagon',
+  'circle',
+  'cross',
+  'rhombus',
+  'trapezoid',
+  'ring',
+  'diamond',
+  'onion',
 ] as const satisfies EnemyShape[];
 export const TALENT_KINDS = [
   'start',
@@ -543,6 +552,54 @@ export const EmitterGrantSchema = exact<EmitterGrant>()(
   ]),
 );
 
+export const EnemyBehaviourSchema = exact<EnemyBehaviour>()(
+  z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('shield'), blockBelowPct: finite }).readonly(),
+    z.strictObject({ kind: z.literal('regen'), lifePctPerSec: finite }).readonly(),
+    z
+      .strictObject({
+        kind: z.literal('dash'),
+        chargeDist: finite,
+        chargeSec: finite,
+        dashMult: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('shoot'),
+        stopDist: finite,
+        periodSec: finite,
+        bulletSpeed: finite,
+        bulletDamage: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('summon'),
+        stopDist: finite,
+        periodSec: finite,
+        enemy: z.enum(ENEMY_IDS),
+        count: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('treasure'),
+        orbitDist: finite,
+        orbitSec: finite,
+        fleeMult: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('layers'),
+        layers: finite,
+        burst: z.strictObject({ enemy: z.enum(ENEMY_IDS), count: finite }).readonly(),
+      })
+      .readonly(),
+  ]),
+);
+
 export const EnemyDefSchema = exact<EnemyDef>()(
   z
     .strictObject({
@@ -559,6 +616,9 @@ export const EnemyDefSchema = exact<EnemyDef>()(
         .readonly()
         .exactOptional(),
       color: finite,
+      tough: z.boolean(),
+      boss: z.boolean(),
+      behaviour: EnemyBehaviourSchema.exactOptional(),
     })
     .readonly(),
 );
@@ -576,6 +636,19 @@ export const SpawnRuleSchema = exact<SpawnRule>()(
     .readonly(),
 );
 
+export const V3WaveRulesSchema = exact<V3WaveRules>()(
+  z
+    .strictObject({
+      enemyCap: finite,
+      bossRotation: z.array(z.enum(ENEMY_IDS)).readonly(),
+      affixes: z.array(z.strictObject({ fromWave: finite, count: finite }).readonly()).readonly(),
+      treasure: z
+        .strictObject({ enemy: z.enum(ENEMY_IDS), fromWave: finite, every: finite })
+        .readonly(),
+    })
+    .readonly(),
+);
+
 export const WaveTableSchema = exact<WaveTable>()(
   z
     .strictObject({
@@ -584,6 +657,7 @@ export const WaveTableSchema = exact<WaveTable>()(
       bossEvery: finite,
       spawnDurationSec: finite,
       waveTimerSec: finite,
+      v3: V3WaveRulesSchema.exactOptional(),
     })
     .readonly(),
 );

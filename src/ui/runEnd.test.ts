@@ -6,7 +6,7 @@ import type { ContactTally } from '../sim/types';
 import { describeRunEnd, enemyName, enemyPlural, FAST_SPEED, mainThreat } from './runEnd';
 import type { EnemySpeeds, RunEndFacts } from './runEnd';
 
-/** Fixture speeds: triangles and splinters are fast, the rest slow. */
+/** Fixture speeds: triangles, splinters and the treasure are fast, the rest slow. */
 const SPEEDS: EnemySpeeds = {
   triangle: { speed: 160 },
   square: { speed: 110 },
@@ -14,6 +14,13 @@ const SPEEDS: EnemySpeeds = {
   shard: { speed: 200 },
   hexagon: { speed: 90 },
   boss: { speed: 60 },
+  shielder: { speed: 100 },
+  regenerator: { speed: 110 },
+  dasher: { speed: 110 },
+  shooter: { speed: 120 },
+  summoner: { speed: 90 },
+  treasure: { speed: 150 },
+  onion: { speed: 45 },
 };
 
 function tallies(hits: Partial<Record<EnemyId, readonly [number, number]>> = {}) {
@@ -187,5 +194,17 @@ describe('enemy names', () => {
     expect(enemyName('shard')).toBe('Splinter');
     setLocale('zh-TW');
     expect(enemyName('shard')).toBe('小三角');
+  });
+
+  it('names the v3 types in zh-TW as the C7 design gives them, and every type apart', () => {
+    const v3 = ['shielder', 'regenerator', 'dasher', 'shooter', 'summoner', 'treasure', 'onion'];
+    const zh = ['盾兵', '再生者', '衝刺者', '射手', '召喚者', '寶藏怪', '洋蔥'];
+    for (const locale of ['en', 'zh-TW'] as const) {
+      setLocale(locale);
+      expect(new Set(ENEMY_IDS.map((id) => enemyName(id))).size, locale).toBe(ENEMY_IDS.length);
+      expect(new Set(ENEMY_IDS.map((id) => enemyPlural(id))).size, locale).toBe(ENEMY_IDS.length);
+    }
+    expect(v3.map((id) => enemyName(id as EnemyId))).toEqual(zh);
+    expect(v3.map((id) => enemyPlural(id as EnemyId))).toEqual(zh);
   });
 });

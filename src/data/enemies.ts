@@ -1,8 +1,11 @@
 /**
  * Enemy definitions (docs/GDD.md §2.4). Colors avoid the effect palette reserved for the
- * archetypes (crit yellow/white, burn orange-red, chain cyan), so hits stay readable.
+ * archetypes (crit yellow/white, burn orange-red, chain cyan), so hits stay readable. M1's six
+ * types come first; the v3 types (src/data/enemiesV3.ts) follow, since the data's record covers
+ * every EnemyId, but only v3 waves (src/data/wavesV3.ts) spawn them.
  */
 
+import { V3_ENEMIES } from './enemiesV3';
 import type { EnemyDef, EnemyId } from './types';
 
 export const ENEMIES = {
@@ -16,6 +19,8 @@ export const ENEMIES = {
     dropMult: 0.5,
     cores: 0,
     color: 0xff4fd8,
+    tough: false,
+    boss: false,
   },
   square: {
     id: 'square',
@@ -27,6 +32,8 @@ export const ENEMIES = {
     dropMult: 1,
     cores: 0,
     color: 0x5b6cff,
+    tough: false,
+    boss: false,
   },
   pentagon: {
     id: 'pentagon',
@@ -39,6 +46,8 @@ export const ENEMIES = {
     cores: 0,
     splitInto: { enemy: 'shard', count: 3 },
     color: 0x3fe07a,
+    tough: false,
+    boss: false,
   },
   /** Small triangle a pentagon splits into. */
   shard: {
@@ -51,6 +60,8 @@ export const ENEMIES = {
     dropMult: 0.25,
     cores: 0,
     color: 0xa6f7bf,
+    tough: false,
+    boss: false,
   },
   /** Elite, every eliteEvery waves. */
   hexagon: {
@@ -63,8 +74,10 @@ export const ENEMIES = {
     dropMult: 14,
     cores: 1,
     color: 0xa45cff,
+    tough: true,
+    boss: false,
   },
-  /** Every bossEvery waves. */
+  /** Every bossEvery waves of an M1 run; a v3 run's boss waves take its bossRotation. */
   boss: {
     id: 'boss',
     shape: 'octagon',
@@ -75,5 +88,8 @@ export const ENEMIES = {
     dropMult: 16,
     cores: 3,
     color: 0xff3d8b,
+    tough: true,
+    boss: true,
   },
+  ...V3_ENEMIES,
 } satisfies Readonly<Record<EnemyId, EnemyDef>>;

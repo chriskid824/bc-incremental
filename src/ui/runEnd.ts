@@ -62,6 +62,13 @@ const NAMES: Readonly<Record<EnemyId, { readonly one: MessageKey; readonly many:
   shard: { one: 'enemy.shard.name', many: 'enemy.shard.plural' },
   hexagon: { one: 'enemy.hexagon.name', many: 'enemy.hexagon.plural' },
   boss: { one: 'enemy.boss.name', many: 'enemy.boss.plural' },
+  shielder: { one: 'enemy.shielder.name', many: 'enemy.shielder.plural' },
+  regenerator: { one: 'enemy.regenerator.name', many: 'enemy.regenerator.plural' },
+  dasher: { one: 'enemy.dasher.name', many: 'enemy.dasher.plural' },
+  shooter: { one: 'enemy.shooter.name', many: 'enemy.shooter.plural' },
+  summoner: { one: 'enemy.summoner.name', many: 'enemy.summoner.plural' },
+  treasure: { one: 'enemy.treasure.name', many: 'enemy.treasure.plural' },
+  onion: { one: 'enemy.onion.name', many: 'enemy.onion.plural' },
 };
 
 export const enemyName = (id: EnemyId): string => t(NAMES[id].one);

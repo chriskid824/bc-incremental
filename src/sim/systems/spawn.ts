@@ -4,12 +4,15 @@
  * enemy dies.
  */
 
+import type { Num } from '../../core/num';
 import { mul, num, ZERO } from '../../core/num';
-import type { EnemyDef, EnemyId } from '../../data/types';
+import type { EnemyDef } from '../../data/types';
 import { RING_SLOTS } from '../ailments/rings';
 import { MAX_DEPTH } from '../effects/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, PLAYER_RADIUS } from '../types';
 import type { Enemy, RunContext, WaveRecord } from './context';
+import { createEnemyV3 } from './enemyRecord';
+import type { EnemyV3, SpawnOrigin } from './enemyRecord';
 
 const TAU = Math.PI * 2;
 const HALF_WIDTH = ARENA_WIDTH / 2;
@@ -43,9 +46,12 @@ export function releaseEnemies(ctx: RunContext): void {
   }
 }
 
-/** Enemies of these types are tough (Enemy.tough): the elites (hexagons) and the bosses. */
-export const isToughType = (id: EnemyId): boolean => id === 'hexagon' || id === 'boss';
-
+/**
+ * Adds an enemy of `def` to wave `rec`, `dist` from the player along (ux, uy). Its def's flags
+ * make it tough or a boss. In a v3 run (ctx.sys.enemyAi.enabled) it carries a record
+ * (src/sim/systems/enemyRecord.ts) and takes `origin`'s hp and radius scales; an M1 run's
+ * enemies take their def's and have none.
+ */
 export function addEnemy(
   ctx: RunContext,
   def: EnemyDef,
@@ -53,11 +59,19 @@ export function addEnemy(
   ux: number,
   uy: number,
   dist: number,
+  origin?: SpawnOrigin,
 ): void {
   const player = ctx.player;
   const x = player.x + ux * dist;
   const y = player.y + uy * dist;
-  const hp = mul(num(def.hpMult), rec.stdHp);
+  let hp: Num;
+  let radius = def.radius;
+  let v3: EnemyV3 | null = null;
+  if (ctx.sys.enemyAi.enabled) {
+    hp = mul(num(def.hpMult * (origin?.hpScale ?? 1)), rec.stdHp);
+    radius = def.radius * (origin?.radiusScale ?? 1);
+    v3 = createEnemyV3(def, origin);
+  } else hp = mul(num(def.hpMult), rec.stdHp);
   const enemy: Enemy = {
     id: ctx.nextEnemyId++,
     type: def.id,
@@ -68,7 +82,7 @@ export function addEnemy(
     prevY: y,
     hp,
     maxHp: hp,
-    radius: def.radius,
+    radius,
     burnStacks: 0,
     alive: true,
     def,
@@ -77,7 +91,7 @@ export function addEnemy(
     uy,
     dist,
     stepDist: def.speed * DT,
-    contactDist: PLAYER_RADIUS + def.radius,
+    contactDist: PLAYER_RADIUS + radius,
     burns: [],
     burnPending: ZERO,
     burnPendC: ZERO,
@@ -111,11 +125,12 @@ export function addEnemy(
     segMark: 0,
     inbound: 0,
     volleyMark: 0,
-    tough: isToughType(def.id),
-    boss: def.id === 'boss',
+    tough: def.tough,
+    boss: def.boss,
     ailDepth: MAX_DEPTH,
     killDepth: 0,
     killKind: 0,
+    v3,
   };
   ctx.enemies.push(enemy);
   rec.alive++;

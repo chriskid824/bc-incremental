@@ -96,17 +96,27 @@ function enemy(
     dropMult,
     cores,
     color: 0xffffff,
+    tough: false,
+    boss: false,
     ...extras,
   };
 }
 
+/** M1's types, then the v3 types, which the fixture's waves never spawn. */
 export const FIXTURE_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
   triangle: enemy('triangle', 0.5, 0),
   square: enemy('square', 1, 0),
   pentagon: enemy('pentagon', 1, 0, { splitInto: { enemy: 'shard', count: 3 } }),
   shard: enemy('shard', 0.25, 0),
-  hexagon: enemy('hexagon', 3, 1),
-  boss: enemy('boss', 6, 5),
+  hexagon: enemy('hexagon', 3, 1, { tough: true }),
+  boss: enemy('boss', 6, 5, { tough: true, boss: true }),
+  shielder: enemy('shielder', 1.5, 0),
+  regenerator: enemy('regenerator', 1.5, 0),
+  dasher: enemy('dasher', 1, 0),
+  shooter: enemy('shooter', 1, 0),
+  summoner: enemy('summoner', 3, 0),
+  treasure: enemy('treasure', 20, 1),
+  onion: enemy('onion', 16, 3, { tough: true, boss: true }),
 };
 
 export function fixtureData(overrides: Partial<GameData> = {}): GameData {

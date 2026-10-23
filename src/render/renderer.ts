@@ -277,8 +277,7 @@ export class Renderer {
   private onKill(event: Extract<SimEvent, { type: 'enemyKilled' }>): void {
     this.burnTally.flush(event.enemyId, this.showBurn);
     const def = this.data.enemies[event.enemy];
-    const tier =
-      event.enemy === 'boss' ? TIER_BOSS : event.enemy === 'hexagon' ? TIER_ELITE : TIER_NORMAL;
+    const tier = def.boss ? TIER_BOSS : def.tough ? TIER_ELITE : TIER_NORMAL;
     this.killsThisFrame++;
     const crowd = 1 / (1 + Math.max(0, this.killsThisFrame - 1) / CROWD_KILLS);
     this.bursts.kill(event.x, event.y, def.color, def.radius, tier, crowd);

@@ -29,13 +29,21 @@ import type {
   TriggerSpec,
 } from './triggers';
 import { ENEMY_IDS } from './types';
-import type { EnemyDef, EnemyId, GameData, TalentNode, WaveTable } from './types';
+import type {
+  EnemyBehaviour,
+  EnemyDef,
+  EnemyId,
+  GameData,
+  TalentNode,
+  V3WaveRules,
+  WaveTable,
+} from './types';
 
 /** Upper bound on keystones in the web (docs/GDD.md §4.1: 4–6 in the MVP). */
 export const MAX_KEYSTONES = 6;
 
-/** Enemies added by eliteEvery/bossEvery; spawn rules must not use them. */
-const SPECIAL_ENEMIES: readonly EnemyId[] = ['hexagon', 'boss'];
+/** Affixes an elite can carry at most: every affix of game-design-v3 §6.2 once. */
+const AFFIX_COUNT_MAX = 8;
 
 const isPositiveInt = (n: number): boolean => Number.isInteger(n) && n > 0;
 const isNonNegativeInt = (n: number): boolean => Number.isInteger(n) && n >= 0;
@@ -98,6 +106,10 @@ function validateEnemies(data: GameData): string[] {
         issues.push(`${at}: splitInto.count must be a positive integer (got ${count})`);
       }
     }
+    if (def.boss && !def.tough) issues.push(`${at}: a boss must be tough as well`);
+    if (def.behaviour !== undefined) {
+      for (const issue of behaviourIssues(def.behaviour, enemies)) issues.push(`${at}: ${issue}`);
+    }
   }
 
   // A split chain that loops back (a → b → a) would spawn forever. Every enemy on the loop
@@ -116,15 +128,84 @@ function validateEnemies(data: GameData): string[] {
   return issues;
 }
 
+/**
+ * Issues of a v3 type's behaviour (docs/v3 C7 design §1.2): its numbers > 0, the shield's
+ * fraction below 1, layers and counts whole, and what it spawns a plain type, neither tough nor
+ * a boss and with no behaviour of its own, so that spawns never recurse.
+ */
+function behaviourIssues(
+  behaviour: EnemyBehaviour,
+  enemies: Readonly<Record<string, EnemyDef | undefined>>,
+): string[] {
+  const issues: string[] = [];
+  const positive = (name: string, value: number): void => {
+    if (!(value > 0)) issues.push(`behaviour.${name} must be > 0 (got ${value})`);
+  };
+  const whole = (name: string, value: number): void => {
+    if (!isPositiveInt(value)) {
+      issues.push(`behaviour.${name} must be a positive integer (got ${value})`);
+    }
+  };
+  const plain = (name: string, enemy: EnemyId): void => {
+    const def = enemies[enemy];
+    if (def === undefined) issues.push(`behaviour.${name} references unknown enemy '${enemy}'`);
+    else if (def.tough || def.boss) {
+      issues.push(`behaviour.${name} '${enemy}' must be neither tough nor a boss`);
+    } else if (def.behaviour !== undefined) {
+      issues.push(`behaviour.${name} '${enemy}' must have no behaviour`);
+    }
+  };
+  switch (behaviour.kind) {
+    case 'shield':
+      if (!(behaviour.blockBelowPct > 0 && behaviour.blockBelowPct < 1)) {
+        issues.push(`behaviour.blockBelowPct must be in (0, 1) (got ${behaviour.blockBelowPct})`);
+      }
+      break;
+    case 'regen':
+      positive('lifePctPerSec', behaviour.lifePctPerSec);
+      break;
+    case 'dash':
+      positive('chargeDist', behaviour.chargeDist);
+      positive('chargeSec', behaviour.chargeSec);
+      positive('dashMult', behaviour.dashMult);
+      break;
+    case 'shoot':
+      positive('stopDist', behaviour.stopDist);
+      positive('periodSec', behaviour.periodSec);
+      positive('bulletSpeed', behaviour.bulletSpeed);
+      positive('bulletDamage', behaviour.bulletDamage);
+      break;
+    case 'summon':
+      positive('stopDist', behaviour.stopDist);
+      positive('periodSec', behaviour.periodSec);
+      plain('enemy', behaviour.enemy);
+      whole('count', behaviour.count);
+      break;
+    case 'treasure':
+      positive('orbitDist', behaviour.orbitDist);
+      positive('orbitSec', behaviour.orbitSec);
+      positive('fleeMult', behaviour.fleeMult);
+      break;
+    case 'layers':
+      whole('layers', behaviour.layers);
+      plain('burst.enemy', behaviour.burst.enemy);
+      whole('burst.count', behaviour.burst.count);
+      break;
+  }
+  return issues;
+}
+
 function validateWaves(data: GameData): string[] {
   const issues: string[] = [];
   const waves: WaveTable = data.waves;
-  const enemies: Readonly<Record<string, unknown>> = data.enemies;
+  const enemies: Readonly<Record<string, EnemyDef | undefined>> = data.enemies;
 
   waves.rules.forEach((rule, i) => {
     const at = `waves.rules[${i}] (${rule.enemy})`;
-    if (enemies[rule.enemy] === undefined) issues.push(`${at}: unknown enemy`);
-    if (SPECIAL_ENEMIES.includes(rule.enemy)) {
+    const def = enemies[rule.enemy];
+    if (def === undefined) issues.push(`${at}: unknown enemy`);
+    // Elites and bosses come from eliteEvery and bossEvery (a v3 run's bossRotation), by flag.
+    else if (def.tough || def.boss) {
       issues.push(`${at}: '${rule.enemy}' is added by eliteEvery/bossEvery, not spawn rules`);
     }
     if (!isPositiveInt(rule.fromWave)) {
@@ -149,7 +230,47 @@ function validateWaves(data: GameData): string[] {
   for (const key of ['spawnDurationSec', 'waveTimerSec'] as const) {
     if (!(waves[key] > 0)) issues.push(`waves: ${key} must be > 0 (got ${waves[key]})`);
   }
+  if (waves.v3 !== undefined) issues.push(...v3WaveIssues(waves.v3, enemies));
 
+  return issues;
+}
+
+/** Issues of a v3 run's wave rules (docs/v3 C7 design §1.2). */
+function v3WaveIssues(
+  v3: V3WaveRules,
+  enemies: Readonly<Record<string, EnemyDef | undefined>>,
+): string[] {
+  const issues: string[] = [];
+  if (!isPositiveInt(v3.enemyCap)) {
+    issues.push(`waves.v3: enemyCap must be a positive integer (got ${v3.enemyCap})`);
+  }
+  if (v3.bossRotation.length === 0) issues.push('waves.v3: bossRotation must name a boss');
+  v3.bossRotation.forEach((id, i) => {
+    if (enemies[id]?.boss !== true) {
+      issues.push(`waves.v3.bossRotation[${i}]: '${id}' must be a boss-flagged enemy`);
+    }
+  });
+  v3.affixes.forEach(({ fromWave, count }, i) => {
+    const at = `waves.v3.affixes[${i}]`;
+    if (!isPositiveInt(fromWave)) {
+      issues.push(`${at}: fromWave must be a positive integer (got ${fromWave})`);
+    } else if (i > 0 && !(fromWave > (v3.affixes[i - 1]?.fromWave ?? 0))) {
+      issues.push(`${at}: fromWave must be above the previous entry's (got ${fromWave})`);
+    }
+    if (!(Number.isInteger(count) && count >= 1 && count <= AFFIX_COUNT_MAX)) {
+      issues.push(`${at}: count must be an integer in 1..${AFFIX_COUNT_MAX} (got ${count})`);
+    }
+  });
+  const { enemy, fromWave, every } = v3.treasure;
+  if (enemies[enemy]?.behaviour?.kind !== 'treasure') {
+    issues.push(`waves.v3.treasure: '${enemy}' must have the treasure behaviour`);
+  }
+  if (!isPositiveInt(fromWave)) {
+    issues.push(`waves.v3.treasure: fromWave must be a positive integer (got ${fromWave})`);
+  }
+  if (!isPositiveInt(every)) {
+    issues.push(`waves.v3.treasure: every must be a positive integer (got ${every})`);
+  }
   return issues;
 }
 

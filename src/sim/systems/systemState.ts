@@ -48,6 +48,8 @@ export interface SystemState {
   readonly chain: ChainState;
   /** The drones and their stage's scratch (src/sim/systems/drones.ts), also SimState.drones. */
   readonly drones: DronePool;
+  /** The v3 enemies' state: whether the run is a v3 run, whose enemies carry a record. */
+  readonly enemyAi: EnemyAiState;
 }
 
 /**
@@ -629,4 +631,18 @@ function isPicked(pool: DronePool, enemy: Enemy): boolean {
   const picked = pool.picked;
   for (let k = 0; k < pool.pickedCount; k++) if (picked[k] === enemy) return true;
   return false;
+}
+
+/**
+ * The v3 enemies' state (docs/v3 C7 design §1.4). `enabled` is the run's v3 gate,
+ * data.waves.v3 !== undefined (§1.1): addEnemy tests it once per spawn, and an M1 run never
+ * creates a record (Enemy.v3, src/sim/systems/enemyRecord.ts).
+ */
+export interface EnemyAiState {
+  readonly enabled: boolean;
+}
+
+/** The state of a run that is a v3 run when `enabled`. */
+export function createEnemyAiState(enabled: boolean): EnemyAiState {
+  return { enabled };
 }
