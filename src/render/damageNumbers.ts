@@ -24,6 +24,8 @@ import {
 } from './numberLayout';
 import type { NumberStyle, Point, SafeArea } from './numberLayout';
 import { COLORS, mixColor } from './palette';
+import { defaultRandom } from './random';
+import type { RenderRandom } from './random';
 import { ageStep } from './timing';
 
 export type DamageKind = 'hit' | 'crit' | 'burn' | 'chain';
@@ -151,6 +153,8 @@ class NumberPool {
   readonly layer = new Container();
   readonly live: FloatingNumber[] = [];
   private readonly free: FloatingNumber[] = [];
+  /** Every slot made, in the order made: the layer's order, bottom first. */
+  private readonly slots: FloatingNumber[] = [];
   private created = 0;
 
   constructor(
@@ -210,6 +214,19 @@ class NumberPool {
     this.live.length = 0;
   }
 
+  /**
+   * clear(), then every slot handed out first-made first, as a new pool makes them: the numbers
+   * that follow stack as they would on a new pool (Renderer.restart).
+   */
+  rewind(): void {
+    this.clear();
+    // acquire() pops: the first-made slot goes in last.
+    this.free.length = 0;
+    for (let i = this.slots.length - 1; i >= 0; i--) {
+      this.free.push(this.slots[i] as FloatingNumber);
+    }
+  }
+
   private create(): FloatingNumber {
     this.created++;
     const text = new BitmapText({
@@ -218,7 +235,7 @@ class NumberPool {
       anchor: 0.5,
     });
     this.layer.addChild(text);
-    return {
+    const slot: FloatingNumber = {
       text,
       style: 'hit',
       kind: 'hit',
@@ -238,6 +255,8 @@ class NumberPool {
       bumpMs: 0,
       fresh: true,
     };
+    this.slots.push(slot);
+    return slot;
   }
 }
 
@@ -261,7 +280,7 @@ export class DamageNumbers {
   private area: SafeArea = { width: ARENA_WIDTH, height: ARENA_HEIGHT, zones: [] };
   private typicalHit = 1;
 
-  constructor() {
+  constructor(private readonly random: RenderRandom = defaultRandom) {
     installFonts();
     // Crits draw above everything else.
     this.view.addChild(this.normal.layer, this.crits.layer);
@@ -308,8 +327,8 @@ export class DamageNumbers {
     const halfH = halfHeight(size);
     const lifeMs = lifeUnderLoad(look.lifeMs, pool.live.length, pool.max);
     const rise = RISE_PER_MS * lifeMs;
-    const jx = x + (Math.random() * 2 - 1) * JITTER_X;
-    const jy = y - 10 + (Math.random() * 2 - 1) * JITTER_Y;
+    const jx = x + (this.random() * 2 - 1) * JITTER_X;
+    const jy = y - 10 + (this.random() * 2 - 1) * JITTER_Y;
     // A number that would cover another one is left out, crits included (their flare stays).
     if (!findSpot(this.spot, this.area, this.onScreen, jx, jy, halfW, halfH, rise)) {
       return 'dropped';
@@ -323,7 +342,7 @@ export class DamageNumbers {
     text.text = label;
     text.tint = tintOf(style, this.decades(amount));
     text.alpha = 1;
-    text.rotation = style === 'crit' ? (Math.random() * 2 - 1) * 0.06 : 0;
+    text.rotation = style === 'crit' ? (this.random() * 2 - 1) * 0.06 : 0;
     slot.style = style;
     slot.kind = kind;
     slot.targetId = targetId;
@@ -349,6 +368,13 @@ export class DamageNumbers {
     this.normal.clear();
     this.crits.clear();
     for (const style of Object.keys(this.counts) as NumberStyle[]) this.counts[style] = 0;
+  }
+
+  /** clear(), with both pools' slots handed out as a new DamageNumbers makes them. */
+  rewind(): void {
+    this.clear();
+    this.normal.rewind();
+    this.crits.rewind();
   }
 
   update(dtMs: number): void {

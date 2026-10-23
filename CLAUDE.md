@@ -97,4 +97,7 @@
 | `npm run checks` | 平衡檢查的 PR 子集（`docs/v3/implementation-plan-v3.md` §4），pass／FAIL 報告輸出到 `out/checks/`；有未接受的 FAIL 時結束碼為 1（參數見 `tools/balance/v3/checks/cli.ts`） |
 | `npm run bench` | 模擬核心效能量測 |
 | `npm run fingerprint` | 行為指紋；加 `-- --check` 和 `tools/balance/fingerprint.baseline.txt` 逐行比對，重構必須完全相同 |
+| `npm run readings` | 機器讀數：依序跑 `bench -- --share` 與 `bench -- --check`（各加 `--json`），印出 `bc-incremental readings v1` 區塊並寫到 `out/readings/readings.txt` |
+| `npm run fps:web` | build 網頁版並用 `vite preview` 開在 port 4173；瀏覽器開 `/?replay=renderStress` 量畫面時間，量完面板給 `bc-incremental fps v1` 區塊 |
+| `npm run fps:steam` | build Steam 版後用 Electron 開同一個量測畫面（`--bc-replay=renderStress`） |
 | `npm run format` | Prettier 自動排版 |

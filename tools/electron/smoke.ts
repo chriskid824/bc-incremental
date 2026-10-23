@@ -812,7 +812,8 @@ async function runOverlaySwitches(electron: Playwright['_electron'], binary: str
 async function runReplay(electron: Playwright['_electron'], binary: string, out: string) {
   current = `run 5a (--bc-replay=${REPLAY})`;
   const taken = await launch(electron, binary, [`--bc-replay=${REPLAY}`]);
-  await taken.page.waitForSelector(INTRO, { timeout: TIMEOUT_MS });
+  // C10.5a: ?replay= opens the replay page, a canvas of its own, instead of the game.
+  await taken.page.waitForSelector('canvas', { timeout: TIMEOUT_MS });
   await taken.page.screenshot({ path: join(out, 'run5-replay.png') });
   const search = await taken.page.evaluate('location.search');
   check(search === `?replay=${REPLAY}`, `location.search is ${JSON.stringify(search)}`);

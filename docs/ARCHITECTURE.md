@@ -39,6 +39,7 @@ src/
     web/       v3 天賦網的產生文字、融合名稱、預覽卡、天賦網 SVG 與文字檢查
   i18n/        en.json、zh-TW.json，v3 天賦網的 web.en.json、web.zh-TW.json，型別化的 key
   app/         啟動、場景切換、遊戲主迴圈、平台注入
+    replay/    回放（`?replay=`）：用遊戲的 renderer 畫一局 seeded 的局，給融合牆、選角卡、PR GIF 與畫面時間量測
 tools/
   balance/     平衡模擬器 CLI 與 build 策略
     v3/        v3 天賦網的角色工作階段（`--character`）：配點策略、局間的迴圈與 v3 的 CSV
@@ -590,7 +591,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
   - `combat/`：`hit.ts`、`chain.ts`、`policy.ts`、`defend.ts`
   - `effects/`：`centerEvents.ts`、`dispatch.ts`、`execute.ts`
   - `emitters/`：`volley.ts`、`lob.ts`、`fan.ts`、`arc.ts`
-- 成員之間只靠呼叫連起來（例：`shots.ts` 呼叫 `land`；`REPEAT_STEPS` 指向 `fireVolleyRepeat`、`fireLobRepeat`、`fireFanRepeat`、`fireArcRepeat` 與 `drones.ts` 的 `swarmRepeat`），除了 `REPEAT_STEPS` 在 `execute.ts` 頂層引用的這五個函式宣告，沒有一個在頂層讀同一個循環的值。從外面走到它、沒有被成員 import 回去的，`src/` 有 28 個（C7.4a 在 270d22b 上重量：加上呼叫 `death.ts` 的 `removeEnemy` 的 `enemyAi.ts`，也補上之前漏列的 `meta/web/` 兩個）：`sim/` 的 `simulation.ts`、`index.ts`、`testing.ts`，`systems/` 的 `ailments.ts`、`contact.ts`、`emitters.ts`、`enemyAi.ts`、`projectiles.ts`、`segments.ts`、`waves.ts`，`emitters/` 的 `strike.ts`、`aura.ts`、`orbit.ts`，`app/` 的 `input.ts`、`loop.ts`、`main.ts`、`playtest.ts`、`session.ts`，`meta/` 的 `index.ts`、`startWave.ts`、`web/calibrate.ts`、`web/fuzz.ts`，`render/` 的 `backdrop.ts`、`damageNumbers.ts`、`drones.ts`、`index.ts`、`player.ts`、`renderer.ts`；`tools/` 另有 32 個（`tools/balance/` 29 個，含 `v3/` 5 個與 `v3/checks/` 8 個；`tools/content/` 2 個；`tools/save/` 1 個）。
+- 成員之間只靠呼叫連起來（例：`shots.ts` 呼叫 `land`；`REPEAT_STEPS` 指向 `fireVolleyRepeat`、`fireLobRepeat`、`fireFanRepeat`、`fireArcRepeat` 與 `drones.ts` 的 `swarmRepeat`），除了 `REPEAT_STEPS` 在 `execute.ts` 頂層引用的這五個函式宣告，沒有一個在頂層讀同一個循環的值。從外面走到它、沒有被成員 import 回去的，`src/` 有 34 個（C10.5a 在 13fd5a1 上重量：加上回放的 `app/replay/` 五個與 `app/typicalHit.ts`；C7.4a 加上呼叫 `death.ts` 的 `removeEnemy` 的 `enemyAi.ts`，也補上之前漏列的 `meta/web/` 兩個）：`sim/` 的 `simulation.ts`、`index.ts`、`testing.ts`，`systems/` 的 `ailments.ts`、`contact.ts`、`emitters.ts`、`enemyAi.ts`、`projectiles.ts`、`segments.ts`、`waves.ts`，`emitters/` 的 `strike.ts`、`aura.ts`、`orbit.ts`，`app/` 的 `input.ts`、`loop.ts`、`main.ts`、`playtest.ts`、`session.ts`、`typicalHit.ts` 與 `replay/` 的 `build.ts`、`presets.ts`、`replay.ts`、`route.ts`、`specs.ts`，`meta/` 的 `index.ts`、`startWave.ts`、`web/calibrate.ts`、`web/fuzz.ts`，`render/` 的 `backdrop.ts`、`damageNumbers.ts`、`drones.ts`、`index.ts`、`player.ts`、`renderer.ts`；`tools/` 另有 34 個（`tools/balance/` 30 個，含 `v3/` 5 個與 `v3/checks/` 8 個；`tools/content/` 2 個；`tools/save/` 1 個；`tools/sheets/` 1 個）。
 - `src/sim` 在每個循環之外、也走不到它的有 44 個：葉模組與它的閉包、`emitters/types.ts`、`emitters/drone.ts`、`effects/` 的 `types.ts`、`select.ts`、`flags.ts`、`queue.ts`，所有 `build/` 與 `ailments/` 模組（含 `remaining.ts`），`rules/` 的 15 個模組（招牌攻擊、形態、規則模組、`index.ts`、`api.ts`、`module.ts`），以及 `movement.ts`、`spawn.ts`、`runEnd.ts`、`targeting.ts` 等。其中幾個在頂層讀彼此的 `const`（`modTable.ts` 的 `ESTIMATE = staticInput()`、`apply.ts` 的 `DAMAGE = SCOPED_INDEX.damage`、`records.ts` 的 `BURN_TICK_INTERVAL = DOT_STEP_TICKS`），只因為它們在循環之外才合規；C4.10 把層數上限的讀取放在 `records.ts` 與 `shock.ts`，就是為了不讓它們進入循環。
 
 ### 4.8 C6 的角色局
@@ -745,7 +746,7 @@ interface Platform {
 
 ### 10.2 傷害數字
 
-- **字級**：依「這筆傷害 ÷ 本局一般擊中」的 `log10` 放大（本局一般擊中 = 招牌攻擊的基礎傷害 × 擊中類傷害倍率，由 `src/app/session.ts` 傳進來；基礎傷害和招牌攻擊的酬載算得一樣，是 `values.damage` × 第 0 個發射器的 `damagePct`，雷塔的三相雷再乘 `ArcParams.damageMult`），每種數字都有低上限（arena 單位，一般擊中的基準是 22）：
+- **字級**：依「這筆傷害 ÷ 本局一般擊中」的 `log10` 放大（本局一般擊中 = 招牌攻擊的基礎傷害 × 擊中類傷害倍率，由 `src/app/typicalHit.ts` 的 `typicalHitOf` 算，session 與回放（§10.4）傳進來，角色局連角色的規則一起編譯；基礎傷害和招牌攻擊的酬載算得一樣，是 `values.damage` × 第 0 個發射器的 `damagePct`，雷塔的三相雷再乘 `ArcParams.damageMult`），每種數字都有低上限（arena 單位，一般擊中的基準是 22）：
 
 | 數字 | 基準字高 | 每 10 倍 | 上限 |
 | --- | --- | --- | --- |
@@ -774,6 +775,14 @@ interface Platform {
   - 暴擊（`src/render/critStop.ts`）：要同時符合三個條件——至少是一般擊中的 20 倍；至少是本局「平常暴擊」的 2 倍（平常暴擊是對數空間的移動平均，每次暴擊權重 0.25，開局從一般擊中算起）；距離上次暴擊 hit-stop 至少 2.5 秒。長度 30 ms，每多 10 倍加 30 ms，最多 60 ms。
 - **為什麼這麼少**：GDD §3.2 原本寫「暴擊帶短暫 hit-stop」（已改成和這裡一致）。冷靜狙擊每第 3 次攻擊整波必定暴擊，試玩用的暴擊 build（冷靜狙擊＋刺客等）每發暴擊約是一般擊中的 25 倍，原本的門檻（約 4 倍、冷卻 0.7 秒）讓每波暴擊都停一下，任何速度下每 0.7 秒卡一次。現在暴擊 hit-stop 是稀有的強調：同一局的暴擊大小幾乎固定，實際上只有開局第一個夠大的暴擊會停一下，之後只有遠大於平常的暴擊才會；暴擊的手感改由數字彈出、閃光與震動負責。
 - 減少動態（`reducedMotion`）會同時關掉震動與 hit-stop；目前是 `src/app/main.ts` 的常數，設定頁之後再接。
+
+### 10.4 回放與它的可決定性（C10 設計 §1.7、§2.5）
+
+- `src/app/replay/`：把一局 seeded 的局（build、seed、起始波次）用遊戲的 renderer 畫在自己的畫布上，給融合牆與 PR GIF（C10.5b）、B1 的選角卡、B5 的開發用開局選項與畫面時間量測。`createReplay(host, spec, options)` 回傳 `ReplayHandle`（`play`、`pause`、`step`、`seek`、`frameStats`、`destroy`）；`resolveReplayBuild` 把 build（照順序的購買、`defaultOrder` 的前幾個、融合的解鎖投入加上核心，或預設的工作量 `renderStress`）解成天賦網、進度與一局的設定，B5 的開發用開局選項也用它。
+- **頁面**：`?replay=` 的值是 `renderStress`、`preview:<角色>`、`gif:<角色>` 或 `clip:<角色>.<外盤>`（空的 `?replay=` 和沒有一樣，開的是遊戲），可以再加 `&seed=`、`&wave=`、`&width=`、`&fixture`（`fixtureContent('B5')`，B1 登記內容之前用）、`&step=1`（把 handle 掛在 `window.__replay`，給擷取用）與 `&readout=0|1`（`renderStress` 預設 1，其他預設 0）。`main.ts` 讀到 `?replay=` 就 lazy import `./replay/route`，不呼叫 `main()`：回放是自己的 chunk，M1 頁面與 `?hive` 不會載入它。回放頁不寫 storage、不送試玩事件、不呼叫平台 API，所以 Steam 殼可以用 `--bc-replay=renderStress` 開它（`npm run fps:steam`）；`tools/sheets/replaySmoke.ts` 在頁面上檢查這些，`src/app/replay/isolation.test.ts` 檢查回放載入的模組。
+- **可決定性**：step 模式的每一格只由 build、seed、起始波次與 tick 決定。模擬本來就 seeded、固定 timestep；renderer 的特效從自己的 `RenderRandom`（`src/render/random.ts`）抽亂數；一個回放只用一個 renderer，每次（重新）開始給它一串用 `renderSeed`（預設 `deriveSeed(seed, 'render')`）播種的新亂數，再呼叫 `Renderer.restart`：`beginRun` 之外，把動畫時鐘（玩家旋轉、敵人旋轉與閃爍）歸零，傷害數字的格子照建立的順序發，畫出來和新建的 renderer 一樣，又不必每次重做材質（M1 頁面與 `?hive` 只呼叫 `beginRun`）；每格的特效時間是 `frameTicks × 1000 / TICK_RATE`、alpha 1，hit-stop 不作用；`Application` 不自己 render（`autoStart: false`），第一格等 `document.fonts.ready`。暖身的 tick 只模擬、不畫。`seek(t)` 重建整局、暖身、再走到 t，和從頭一格一格走一樣。play 模式走同樣的 tick，特效用畫面時間；循環的片段每次重來都是同一局、同一串亂數。M1 頁面與 `?hive` 不給 `random`，renderer 照舊用 `Math.random`；`src/render` 除了 `random.ts` 的預設值以外不讀 `Math.random`、`performance.now` 與 `Date.now`（`src/render/random.test.ts` 用 grep 擋）。
+- **renderStress**（`presets.ts`）：impl §6 的畫面壓力場景，壓力 v4 的工作量（`stressData()`、`stressStats()`，從第 30 波起；24 架無人機與 8 座砲台、熔核的區域來源、雷網全開）加上 `grants` 的光環（`auraRadius` 160、每第 4 次脈衝 × 4）、兩圈各 4 顆的環繞球，與一隻不動、不死、身上約 500 層毒的 Boss。它在 `src/app` 用 `src/sim/testing.ts` 的 export 與本地的授予組出來，不 import bench.ts；`tools/balance/bench.test.ts` 把它釘在 bench 的 stress v4 上。暖身 300 tick、片長 1,500 tick、循環。B1 接上構造體之前 renderer 畫的是 M1 的中心：召喚物、環繞球與光環只計數、不畫。
+- **畫面時間量測**（`readout.ts`，`renderStress` 預設打開）：play 模式的 rAF 間隔，暖身 5 秒後量 30 秒；量的時候面板顯示 `measuring <秒> / 30 s`，改視窗大小、切換全螢幕或頁面隱藏再顯示都從頭量；量完留下 `bc-incremental fps v1` 到 `end fps` 的區塊（「Copy」按鈕與唯讀文字框）。判定：p95 ≤ 20 ms，而且超過 25 ms 的格 ≤ 1 %。`page` 在 `file:`（Steam 殼的 `loadFile`）是 `steam`，其他是 `web`。面板是英文的開發用文字，不走 i18n（和 viewer.html 一樣）。Hoshi 在 C9 的 Steam 檢查用 `npm run fps:web`（`vite build` 再 `vite preview --port 4173 --strictPort`，開 `http://localhost:4173/?replay=renderStress`）與 `npm run fps:steam` 量自己的電腦；container 的 SwiftShader 不是 GPU，量不到真的 60 fps。
 
 ## 11. Electron 與 Steam（M2 技術驗證）
 
@@ -842,6 +851,8 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
   | `grants` | C4.21：M1 的攻擊加上光環（`auraRadius` 160，聚能脈衝每第 4 次 × 4）、兩圈各 4 顆的環繞球（半徑 110 與 180）與荊棘 | CI |
 
 - `npm run bench -- --check`（CI，§14）：照 impl §6，參考是同一個 job 裡這一版的 `normal`。每個場景的計時和 `normal` 交替跑，各自取中位數；場景 ÷ `normal` 的比值超過 `tools/balance/bench.baseline.json` 記錄值的 1.5 倍就失敗。整個模擬一起變慢時比值不會動，所以 `normal` 自己的中位數超過 50 ms 也算失敗（本機在 `--check` 裡約 20–25 ms）。比值在本機記錄；效能特性刻意改變（新場景、取捨）或 CI 的機器穩定地不同時，用 `npm run bench -- --check --write` 重新記錄，PR 寫明原因。`--scenario` 只檢查一個場景。
+- `--json <檔案>`（C10.5a）：`--share` 與 `--check` 印完報告後，把報告的數字與每一行寫成 JSON（`ShareRecord`、`CheckRecord`）；`--share` 的另外記下每個程序計時的每一輪，暖身輪分開記。印出來的報告不變。
+- **機器讀數**（`npm run readings`，`tools/balance/readings.ts`，C10 設計 §2.5）：用子程序（`process.execPath` 加上 tsx 的 loader，macOS 與 Windows 都能跑）依序跑 `bench -- --share --json` 與 `bench -- --check --json`，印出 `bc-incremental readings v1` 到 `end readings` 的區塊並寫到 `out/readings/readings.txt`（兩份 JSON 留在同一個資料夾）。區塊有這台機器（commit、作業系統、CPU、node）；share 的 v4 比值、`stressBase`、占比、`normal` 的中位數、是不是閘門跑與兩個存活數；`--check` 每個場景一行（和它一起計時的 `normal` 中位數，與比值對記錄值）；`implied`：v4 跑 30 秒要幾毫秒，以及 impl §6 的 50 ms 換成這台機器 `normal` 的比值（50 ÷ `normal`）；倒數第二行 `rerun: yes` 表示 `normal` 超過 25 ms（`NORMAL_PRECONDITION_MS`）或不是閘門跑。上限只印出來，readings 不判定（C10 的裁定 L8）：4.5、3.5 與 25 ms 是 bench 的常數，`check` 行的 50 ms 是 `NORMAL_BUDGET_MS`，`implied` 的 50 ms 是 impl §6 給一局 30 秒壓力場景的預算（`STRESS_RUN_BUDGET_MS`）。Hoshi 在 C9 的 Steam 檢查用它量自己的電腦。
 - **BENCH**（引擎開發期間，C4 設計 §0.4）：每個改到 `src/sim`、`src/data` 或 `src/meta` 的 commit，用 `npx tsx tools/balance/benchAB.ts --inproc <treeA> <treeB> <normal|hits>` 比 `normal` 與 `hits`。treeA 是參考（前一個 commit，累計時是 0f9dcc5），用 `git archive` 匯出、`node_modules` 用 symlink（`git worktree add` 會寫進 repo 自己的 `.git`）；treeB 是候選。預設 7 個子程序依序跑：每個 import 兩棵樹的 `src/data`、`src/sim`、`src/sim/testing`，各暖身 5 次，再交替各跑 40 次（每輪換先後），印出 treeB 的中位數 ÷ treeA 的中位數；偶數程序先 import treeA、奇數先 import treeB（固定順序時，同一個 commit 的兩份拷貝量到差約 2%）。父程序印出每個程序的比值、兩種 import 順序各自的中位數與全部的中位數。
   - 每個 session 第一次 BENCH 之前先跑 A/A：treeA 對同一個 commit 的另一份 `git archive`（7 個程序、兩個場景），記下中位數。
   - 上限：對前一個 commit 的中位數 ≤ **1.03**；對 0f9dcc5（C4 開始前）的累計中位數 ≤ **1.05**，在每一層的結尾（C4.15、C4.19、C4.21）與最後一個改程式的 commit 量。中位數超過上限**而且**超過這個 session 的 A/A 中位數 + 0.02 才算失敗。

@@ -18,6 +18,8 @@ export interface CoreView {
   pulse(): void;
   /** Back to rest, as at the start of a run. */
   reset(): void;
+  /** The animation clocks back at zero, as a new view has them (Renderer.restart). */
+  rewind(): void;
 }
 
 /** What HiveCoreView reads every frame: the share of the run's drones docked (DroneLayer). */
@@ -63,5 +65,9 @@ export class HiveCoreView implements CoreView {
   reset(): void {
     this.pulseMs = 0;
     this.hive.reset();
+  }
+
+  rewind(): void {
+    this.hive.rewind();
   }
 }

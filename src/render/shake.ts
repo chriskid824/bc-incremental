@@ -4,6 +4,9 @@
  * while rare big ones (boss kills) can shake hard; trauma never sits high for long.
  */
 
+import { defaultRandom } from './random';
+import type { RenderRandom } from './random';
+
 /** Largest offset in arena units, at trauma 1. */
 export const SHAKE_MAX_OFFSET = 14;
 /** Trauma lost per second. */
@@ -14,7 +17,10 @@ export class ScreenShake {
   offsetX = 0;
   offsetY = 0;
 
-  constructor(private readonly reducedMotion: boolean) {}
+  constructor(
+    private readonly reducedMotion: boolean,
+    private readonly random: RenderRandom = defaultRandom,
+  ) {}
 
   /** Current trauma in [0, 1]; the offset grows with its square. */
   get level(): number {
@@ -36,7 +42,7 @@ export class ScreenShake {
   update(dtMs: number): void {
     this.trauma = Math.max(0, this.trauma - (DECAY * dtMs) / 1000);
     const magnitude = SHAKE_MAX_OFFSET * this.trauma * this.trauma;
-    this.offsetX = magnitude === 0 ? 0 : (Math.random() * 2 - 1) * magnitude;
-    this.offsetY = magnitude === 0 ? 0 : (Math.random() * 2 - 1) * magnitude;
+    this.offsetX = magnitude === 0 ? 0 : (this.random() * 2 - 1) * magnitude;
+    this.offsetY = magnitude === 0 ? 0 : (this.random() * 2 - 1) * magnitude;
   }
 }

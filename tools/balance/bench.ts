@@ -89,8 +89,8 @@
  *       stressBase|grants|v3fire]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
- *   npm run bench -- --check [--write] [--scenario <id>]
- *   npm run bench -- --share [--procs N] [--rounds R]
+ *   npm run bench -- --check [--write] [--scenario <id>] [--json <file>]
+ *   npm run bench -- --share [--procs N] [--rounds R] [--json <file>]
  *
  * --runs and --warmup default to the scenario's own counts.
  *
@@ -123,11 +123,16 @@
  * NOT A GATE RUN. It exits 0 only for a gate run whose alive band holds, whose normal median meets
  * the precondition and whose total is within the limit; a total within NEAR_LIMIT of the limit
  * prints the rerun rule: two more runs, and the gate is the median of the three.
+ *
+ * --json <file> (docs/v3 C10 design §2.5) writes a --share or --check run's report to <file> once
+ * it is printed: the numbers it printed and its lines (ShareRecord, CheckRecord); --share's also
+ * holds every round its processes timed, their warm-up rounds apart. npm run readings
+ * (tools/balance/readings.ts) runs both with it.
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { relative } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { loadGameData, targetDamage } from '../../src/data';
@@ -174,7 +179,7 @@ import {
   NORMAL_BUDGET_MS,
   parseBaseline,
 } from './benchCheck';
-import type { BenchTimings, EntryTimings } from './benchCheck';
+import type { BenchBaseline, BenchCheck, BenchTimings, EntryTimings } from './benchCheck';
 import { quantile } from './report';
 
 export const SCENARIO_IDS = [
@@ -1681,7 +1686,7 @@ export const CHECK_ENTRIES: readonly string[] = SCENARIO_IDS.filter(
  * A timed check, with the workload of each stress-family entry and the summon workload of each
  * summon entry by entry name.
  */
-interface CheckTimings {
+export interface CheckTimings {
   readonly timings: BenchTimings;
   readonly workloads: ReadonlyMap<string, Workload>;
   readonly summons: ReadonlyMap<string, SummonWorkload>;
@@ -1755,20 +1760,18 @@ function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
   return { timings: { reference, entries }, workloads, summons };
 }
 
-/** --check: times scenarios `ids` against normal and checks or, with `write`, records them. */
-function check(ids: readonly ScenarioId[], write: boolean): void {
-  const file = relative(process.cwd(), BASELINE_FILE);
-  const recorded = existsSync(BASELINE_FILE)
-    ? parseBaseline(readFileSync(BASELINE_FILE, 'utf8'))
-    : null;
-  const { timings, workloads, summons } = timeCheck(ids);
-  const result = checkBench(timings, recorded, CHECK_ENTRIES, write);
-  console.log(`bench check: ratio to normal's median run, against ${file}`);
-  for (const line of result.lines) console.log(line);
+/**
+ * --check's report against the baseline `file`: the check `result` of `checked`'s timings, then
+ * each stress-family entry's stress report line, each summon entry's summon report line and,
+ * when it timed both, stress − stressBase.
+ */
+export function checkLines(file: string, checked: CheckTimings, result: BenchCheck): string[] {
+  const { timings, workloads, summons } = checked;
+  const lines = [`bench check: ratio to normal's median run, against ${file}`, ...result.lines];
   for (const entry of timings.entries) {
     const workload = workloads.get(entry.id);
     if (workload === undefined) continue;
-    console.log(
+    lines.push(
       `stress report ${entry.id}: median ${median(entry.ms).toFixed(2)} ms, ` +
         `ratio ${entryRatio(entry).toFixed(3)}, ` +
         `normal median ${median(entry.referenceMs).toFixed(2)} ms, ` +
@@ -1778,7 +1781,7 @@ function check(ids: readonly ScenarioId[], write: boolean): void {
   for (const entry of timings.entries) {
     const workload = summons.get(entry.id);
     if (workload === undefined) continue;
-    console.log(
+    lines.push(
       `summon report ${entry.id}: ${budgetText(median(entry.ms))}, ` +
         `ratio ${entryRatio(entry).toFixed(3)}, ` +
         `normal median ${median(entry.referenceMs).toFixed(2)} ms; seed 1: ${summonText(workload)}`,
@@ -1787,15 +1790,93 @@ function check(ids: readonly ScenarioId[], write: boolean): void {
   const v4 = timings.entries.find((entry) => entry.id === 'stress');
   const v3 = timings.entries.find((entry) => entry.id === 'stressBase');
   if (v4 !== undefined && v3 !== undefined) {
-    console.log(
+    lines.push(
       `stress − stressBase: ${(entryRatio(v4) - entryRatio(v3)).toFixed(3)} (stress v4 ` +
         `${entryRatio(v4).toFixed(3)}, stressBase ${entryRatio(v3).toFixed(3)}: C5's share on ` +
         `this check's scale, docs/v3 C5 design §7.3; --share measures the gate)`,
     );
   }
+  return lines;
+}
+
+/** A --check entry as --json records it: the numbers its check line prints. */
+export interface CheckEntryRecord {
+  readonly id: string;
+  /** Its median run, the median of the normal runs timed with it (ms) and their ratio. */
+  readonly medianMs: number;
+  readonly referenceMs: number;
+  readonly ratio: number;
+  /** A stress-family entry's seed-1 average alive. */
+  readonly alive?: number;
+  /** The ratio bench.baseline.json records for it, if any. */
+  readonly recorded?: number;
+}
+
+/**
+ * What `--check --json <file>` writes (docs/v3 C10 design §2.5; tools/balance/readings.ts reads
+ * it): each entry's numbers, the reference's median over all its runs (the budget's), whether
+ * the check passed, whether it wrote the baseline, and the lines the run printed.
+ */
+export interface CheckRecord {
+  readonly kind: 'check';
+  readonly baseline: string;
+  readonly entries: readonly CheckEntryRecord[];
+  readonly normal: { readonly medianMs: number; readonly runs: number };
+  readonly ok: boolean;
+  readonly written: boolean;
+  readonly lines: readonly string[];
+}
+
+/** The --json record of a check of `timings` against `recorded` that printed `lines`. */
+export function checkRecord(
+  file: string,
+  timings: BenchTimings,
+  recorded: BenchBaseline | null,
+  result: BenchCheck,
+  lines: readonly string[],
+  written: boolean,
+): CheckRecord {
+  return {
+    kind: 'check',
+    baseline: file,
+    entries: timings.entries.map((entry) => {
+      const was = recorded?.ratios[entry.id];
+      return {
+        id: entry.id,
+        medianMs: median(entry.ms),
+        referenceMs: median(entry.referenceMs),
+        ratio: entryRatio(entry),
+        ...(entry.alive === undefined ? {} : { alive: entry.alive }),
+        ...(was === undefined ? {} : { recorded: was }),
+      };
+    }),
+    normal: { medianMs: median(timings.reference), runs: timings.reference.length },
+    ok: result.ok,
+    written,
+    lines,
+  };
+}
+
+/**
+ * --check: times scenarios `ids` against normal and checks or, with `write`, records them; `json`,
+ * when given, records the report (checkRecord).
+ */
+function check(ids: readonly ScenarioId[], write: boolean, json: string | undefined): void {
+  const file = relative(process.cwd(), BASELINE_FILE);
+  const recorded = existsSync(BASELINE_FILE)
+    ? parseBaseline(readFileSync(BASELINE_FILE, 'utf8'))
+    : null;
+  const checked = timeCheck(ids);
+  const result = checkBench(checked.timings, recorded, CHECK_ENTRIES, write);
+  const lines = checkLines(file, checked, result);
+  for (const line of lines) console.log(line);
   if (write) {
     writeFileSync(BASELINE_FILE, formatBaseline(result.baseline));
+    lines.push(`wrote ${file}`);
     console.log(`wrote ${file}`);
+  }
+  if (json !== undefined) {
+    writeRecord(json, checkRecord(file, checked.timings, recorded, result, lines, write));
   }
   if (!result.ok) process.exitCode = 1;
 }
@@ -1863,6 +1944,8 @@ export interface ShareRound {
 export interface ShareProcess {
   readonly gate: readonly ShareRound[];
   readonly print: readonly ShareRound[];
+  /** Each phase's warm-up rounds, which the report leaves out and --json records. */
+  readonly warmup?: { readonly gate: readonly ShareRound[]; readonly print: readonly ShareRound[] };
 }
 
 /** `entries` rotated left by `by` places. */
@@ -1874,7 +1957,8 @@ const rotate = <T>(entries: readonly T[], by: number): T[] =>
  * print-only one, each SHARE_WARMUP_ROUNDS warm-up rounds and then its measured rounds of one run
  * of each of its entries. Measured round r is round g = proc × rounds + r of the whole run: seed
  * 1 + g, its entries rotated by g places, so over the processes each entry takes each place about
- * equally often; the warm-up rounds take the seeds after every measured round's.
+ * equally often; the warm-up rounds take the seeds after every measured round's, and come back
+ * apart (ShareProcess.warmup).
  */
 function shareChild(proc: number, procs: number, rounds: number): ShareProcess {
   const realData = loadGameData();
@@ -1891,22 +1975,33 @@ function shareChild(proc: number, procs: number, rounds: number): ShareProcess {
   }
   const time = (name: ShareEntry, seed: number): number =>
     (timers.get(name) as (seed: number) => number)(seed);
-  const phase = (entries: readonly ShareEntry[]): ShareRound[] => {
+  const round = (entries: readonly ShareEntry[], seed: number, by: number): ShareRound => {
+    const order = rotate(entries, by);
+    const ms: Partial<Record<ShareEntry, number>> = {};
+    for (const name of order) ms[name] = time(name, seed);
+    return { seed, order, ms };
+  };
+  const phase = (
+    entries: readonly ShareEntry[],
+  ): { warmup: ShareRound[]; measured: ShareRound[] } => {
+    const warmup: ShareRound[] = [];
     for (let w = 0; w < SHARE_WARMUP_ROUNDS; w++) {
-      const seed = 1 + procs * rounds + proc * SHARE_WARMUP_ROUNDS + w;
-      for (const name of rotate(entries, w)) time(name, seed);
+      warmup.push(round(entries, 1 + procs * rounds + proc * SHARE_WARMUP_ROUNDS + w, w));
     }
     const measured: ShareRound[] = [];
     for (let r = 0; r < rounds; r++) {
       const g = proc * rounds + r;
-      const order = rotate(entries, g);
-      const ms: Partial<Record<ShareEntry, number>> = {};
-      for (const name of order) ms[name] = time(name, 1 + g);
-      measured.push({ seed: 1 + g, order, ms });
+      measured.push(round(entries, 1 + g, g));
     }
-    return measured;
+    return { warmup, measured };
   };
-  return { gate: phase(SHARE_GATE), print: phase(SHARE_PRINT) };
+  const gate = phase(SHARE_GATE);
+  const print = phase(SHARE_PRINT);
+  return {
+    gate: gate.measured,
+    print: print.measured,
+    warmup: { gate: gate.warmup, print: print.warmup },
+  };
 }
 
 /** A round's run time of `name`, ms. */
@@ -1998,17 +2093,19 @@ export function shareHead(
  * the summons' report rows, the decomposition, and the verdict on the median total against
  * STRESS_TOTAL_LIMIT. It passes only a gate run (SHARE_GATE_PROCS processes and SHARE_GATE_ROUNDS
  * rounds in all, counted from `processes`) whose alive band holds (aliveTwin), whose normal
- * median meets the precondition and whose median total is within the limit.
+ * median meets the precondition and whose median total is within the limit. Its summary holds the
+ * numbers the lines print, for --json.
  */
 export function shareBody(
   processes: readonly ShareProcess[],
   work: ShareWork,
-): { readonly lines: readonly string[]; readonly pass: boolean } {
+): { readonly lines: readonly string[]; readonly pass: boolean; readonly summary: ShareSummary } {
   const lines: string[] = [];
   const shares: number[] = [];
   const totals: number[] = [];
   const bases: number[] = [];
   const normals: number[] = [];
+  const processMedians: { total: number; share: number }[] = [];
   processes.forEach((proc, p) => {
     const procTotals: number[] = [];
     const procShares: number[] = [];
@@ -2030,6 +2127,7 @@ export function shareBody(
           `share ${s.toFixed(3)}`,
       );
     }
+    processMedians.push({ total: median(procTotals), share: median(procShares) });
     lines.push(
       `process ${p + 1}: median total ${median(procTotals).toFixed(3)}, median share ` +
         `${median(procShares).toFixed(3)}`,
@@ -2131,7 +2229,24 @@ export function shareBody(
           'run the same command twice more, and the gate is the median of the three totals'
         : ''),
   );
-  return { lines, pass };
+  const summary: ShareSummary = {
+    processMedians,
+    rounds: totals.length,
+    share: shareSpread,
+    total: totalSpread,
+    stressBase: baseSpread,
+    normalMs: normal,
+    hiveStress: { medianMs: hiveMs, ratio: hive, alive: work.hive.averageAlive },
+    ailmentsOff: { share: offShare, total: offTotal, alive: work.off.averageAlive },
+    printRounds: prints.length,
+    printNormalMs: printNormal,
+    gateRun,
+    valid,
+    precondition,
+    near,
+    pass,
+  };
+  return { lines, pass, summary };
 }
 
 /**
@@ -2145,12 +2260,90 @@ export function shareReport(processes: readonly ShareProcess[], work: ShareWork)
   return pass;
 }
 
+/** A median and its quartiles, as spread() gives them. */
+export type Spread = ReturnType<typeof spread>;
+
+/** The numbers shareBody's lines print (docs/v3 C10 design §2.5), which --json records. */
+export interface ShareSummary {
+  /** Each process's median total and median share, in process order. */
+  readonly processMedians: readonly { readonly total: number; readonly share: number }[];
+  /** The gate rounds in all, and their share, total and stressBase ÷ normal and normal median, ms. */
+  readonly rounds: number;
+  readonly share: Spread;
+  readonly total: Spread;
+  readonly stressBase: Spread;
+  readonly normalMs: number;
+  /** The print-only rounds': hiveStress's median, ms, and × normal; the ailments-off share and total. */
+  readonly hiveStress: {
+    readonly medianMs: number;
+    readonly ratio: Spread;
+    readonly alive: number;
+  };
+  readonly ailmentsOff: { readonly share: Spread; readonly total: number; readonly alive: number };
+  readonly printRounds: number;
+  readonly printNormalMs: number;
+  /** The verdict's terms: a gate run, the alive band, the normal precondition, near the limit. */
+  readonly gateRun: boolean;
+  readonly valid: boolean;
+  readonly precondition: boolean;
+  readonly near: boolean;
+  readonly pass: boolean;
+}
+
+/**
+ * What `--share --json <file>` writes (docs/v3 C10 design §2.5; tools/balance/readings.ts reads
+ * it): the run's counts and seed-1 alive (shareHead's), shareBody's numbers, every round its
+ * processes timed, their warm-up rounds included, and the lines the run printed.
+ */
+export interface ShareRecord extends ShareSummary {
+  readonly kind: 'share';
+  /** --procs, and --rounds: measured rounds a process, after SHARE_WARMUP_ROUNDS warm-up rounds. */
+  readonly procs: number;
+  readonly measuredRounds: number;
+  readonly warmupRounds: number;
+  /** A stress run's simulated seconds. */
+  readonly seconds: number;
+  /** stress v4's and stressBase's seed-1 average alive. */
+  readonly alive: { readonly v4: number; readonly stressBase: number };
+  readonly processes: readonly ShareProcess[];
+  readonly lines: readonly string[];
+}
+
+/** The --json record of a --share run of `procs` processes of `rounds` rounds. */
+export function shareRecord(
+  procs: number,
+  rounds: number,
+  processes: readonly ShareProcess[],
+  work: ShareWork,
+): ShareRecord {
+  const v4 = work.v4.averageAlive;
+  const base = work.base.averageAlive;
+  const { lines, summary } = shareBody(processes, work);
+  return {
+    kind: 'share',
+    procs,
+    measuredRounds: rounds,
+    warmupRounds: SHARE_WARMUP_ROUNDS,
+    seconds: SCENARIOS.stress.seconds,
+    alive: { v4, stressBase: base },
+    ...summary,
+    processes,
+    lines: [...shareHead(procs, rounds, v4, base), ...lines],
+  };
+}
+
+/** Writes --json's `record` to `file`, its folder made first. */
+function writeRecord(file: string, record: ShareRecord | CheckRecord): void {
+  mkdirSync(dirname(resolve(file)), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+}
+
 /**
  * --share (docs/v3 C5 design §7.3; see the header): stress v4's and stressBase's seed-1 alive,
  * then `procs` processes of `rounds` measured rounds, one after another, then the report
- * (shareReport).
+ * (shareReport), which `json`, when given, records (shareRecord).
  */
-function share(procs: number, rounds: number): void {
+function share(procs: number, rounds: number, json: string | undefined): void {
   const v4 = measureWorkload(...seedOne(SCENARIOS.stress));
   const base = measureWorkload(...seedOne(SCENARIOS.stressBase));
   for (const line of shareHead(procs, rounds, v4.averageAlive, base.averageAlive)) {
@@ -2170,7 +2363,9 @@ function share(procs: number, rounds: number): void {
     }
     processes.push(JSON.parse(line) as ShareProcess);
   }
-  shareReport(processes, shareWork(v4, base));
+  const work = shareWork(v4, base);
+  shareReport(processes, work);
+  if (json !== undefined) writeRecord(json, shareRecord(procs, rounds, processes, work));
 }
 
 function main(): void {
@@ -2199,6 +2394,7 @@ function main(): void {
       share: { type: 'boolean', default: false },
       procs: { type: 'string' },
       rounds: { type: 'string' },
+      json: { type: 'string' },
     },
   });
   if (values.share) {
@@ -2211,8 +2407,12 @@ function main(): void {
     share(
       positiveInt('procs', values.procs ?? String(SHARE_PROCS)),
       positiveInt('rounds', values.rounds ?? String(SHARE_ROUNDS)),
+      values.json,
     );
     return;
+  }
+  if (values.json !== undefined && !values.check) {
+    throw new Error('--json records a --share or --check run; add one of them');
   }
   for (const name of ['procs', 'rounds'] as const) {
     if (values[name] !== undefined) throw new Error(`--${name} goes with --share; add --share`);
@@ -2227,7 +2427,7 @@ function main(): void {
         throw new Error(`--${name} does not go with --check, whose workloads are fixed`);
       }
     }
-    check(values.scenario === undefined ? SCENARIO_IDS : [id], values.write);
+    check(values.scenario === undefined ? SCENARIO_IDS : [id], values.write, values.json);
     return;
   }
   if (values.write) throw new Error('--write records the ratios of --check; add --check');

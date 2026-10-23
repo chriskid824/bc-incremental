@@ -10,6 +10,8 @@ import type { FxGroup, FxParticles } from './fx';
 import { FX_DEBRIS, FX_EMBER, FX_FLAME, FX_FLASH, FX_SPARK, THEN_FLAME_PUFF } from './fx';
 import type { FxTextures } from './fxTextures';
 import { COLORS, mixColor } from './palette';
+import { defaultRandom } from './random';
+import type { RenderRandom } from './random';
 import type { RingLayer } from './rings';
 
 /** Enemy tier for kill explosions. */
@@ -24,8 +26,6 @@ const FLAME_HEIGHT = 60;
 const NOVA_DRAG = 3;
 const TAU = Math.PI * 2;
 
-const rand = (min: number, max: number): number => min + Math.random() * (max - min);
-
 /** Root color of enemy flames: orange with a little yellow, so stacked flames stay orange. */
 const FLAME_ROOT = mixColor(COLORS.burn, COLORS.burnHot, 0.35);
 
@@ -39,6 +39,7 @@ export class Bursts {
     private readonly under: FxParticles,
     private readonly tex: FxTextures,
     private readonly rings: RingLayer,
+    private readonly random: RenderRandom = defaultRandom,
   ) {}
 
   /**
@@ -63,16 +64,16 @@ export class Bursts {
     const debris = Math.max(2, Math.round((6 + radius / 2.2) * big * big * crowd));
     const speedScale = Math.sqrt(big);
     for (let i = 0; i < debris; i++) {
-      const p = this.fx.spawn(FX_DEBRIS, this.tex.shard, x, y, rand(420, 760) * speedScale);
+      const p = this.fx.spawn(FX_DEBRIS, this.tex.shard, x, y, this.rand(420, 760) * speedScale);
       if (p === null) break;
-      const angle = Math.random() * TAU;
-      const speed = rand(240, 640) * speedScale;
+      const angle = this.random() * TAU;
+      const speed = this.rand(240, 640) * speedScale;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.drag = 3.4;
-      p.spin = rand(-14, 14);
+      p.spin = this.rand(-14, 14);
       p.sprite.rotation = angle;
-      const s = rand(0.5, 1) * Math.sqrt(radius / 18);
+      const s = this.rand(0.5, 1) * Math.sqrt(radius / 18);
       p.scale0 = s;
       p.scale1 = s * 0.5;
       p.color0 = light;
@@ -121,18 +122,18 @@ export class Bursts {
    * crowd); `heat` in [0, 1] grows it with the stack count.
    */
   flame(x: number, y: number, radius: number, heat: number): void {
-    const p = this.under.spawn(FX_FLAME, this.tex.flame, x, y, rand(300, 440));
+    const p = this.under.spawn(FX_FLAME, this.tex.flame, x, y, this.rand(300, 440));
     if (p === null) return;
     // Rooted on the upper half, so the tongues rise out from behind the body.
-    p.sprite.x += rand(-0.65, 0.65) * radius;
-    p.sprite.y += rand(-0.55, 0.05) * radius;
-    p.sprite.rotation = rand(-0.25, 0.25);
-    p.spin = rand(-0.6, 0.6);
-    p.vx = rand(-15, 15);
-    p.vy = -rand(30, 70) * (1 + 0.4 * heat);
+    p.sprite.x += this.rand(-0.65, 0.65) * radius;
+    p.sprite.y += this.rand(-0.55, 0.05) * radius;
+    p.sprite.rotation = this.rand(-0.25, 0.25);
+    p.spin = this.rand(-0.6, 0.6);
+    p.vx = this.rand(-15, 15);
+    p.vy = -this.rand(30, 70) * (1 + 0.4 * heat);
     p.gravity = -100;
     p.drag = 1.5;
-    const height = radius * 2.5 * (0.8 + 0.35 * heat) * rand(0.75, 1.2);
+    const height = radius * 2.5 * (0.8 + 0.35 * heat) * this.rand(0.75, 1.2);
     const s = height / FLAME_HEIGHT;
     p.scale0 = s;
     p.scale1 = s * 0.35;
@@ -153,19 +154,19 @@ export class Bursts {
     this.glow(FX_FLASH, x, y, 84, COLORS.burnHot, COLORS.burn, 0.7, 180);
     const count = full ? 26 : 10;
     for (let i = 0; i < count; i++) {
-      const lifeMs = rand(380, 480);
+      const lifeMs = this.rand(380, 480);
       const p = this.fx.spawn(FX_FLAME, this.tex.flame, x, y, lifeMs);
       if (p === null) break;
-      const angle = (i / count) * TAU + rand(-0.1, 0.1);
+      const angle = (i / count) * TAU + this.rand(-0.1, 0.1);
       // Launch speed that coasts (under drag) to about the spread radius by the end of life.
-      const travel = radius * rand(0.85, 1);
+      const travel = radius * this.rand(0.85, 1);
       const speed = (travel * NOVA_DRAG) / (1 - Math.exp((-NOVA_DRAG * lifeMs) / 1000));
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.drag = NOVA_DRAG;
       // Tongues point outward.
       p.sprite.rotation = angle + Math.PI / 2;
-      const s = rand(44, 60) / FLAME_HEIGHT;
+      const s = this.rand(44, 60) / FLAME_HEIGHT;
       p.scale0 = s;
       p.scale1 = s * 0.6;
       // The tongues all start on the same spot and add up: orange and part-transparent, so
@@ -179,7 +180,7 @@ export class Bursts {
 
   /** pandemic: a burning ember flying from a dying enemy to one it sets alight. */
   ember(fromX: number, fromY: number, toX: number, toY: number): void {
-    const lifeMs = rand(200, 260);
+    const lifeMs = this.rand(200, 260);
     const vx = ((toX - fromX) * 1000) / lifeMs;
     const vy = ((toY - fromY) * 1000) / lifeMs;
     const head = this.fx.spawn(FX_EMBER, this.tex.streak, fromX, fromY, lifeMs);
@@ -241,8 +242,8 @@ export class Bursts {
   ): void {
     const p = this.fx.spawn(FX_FLASH, this.tex.star, x, y, lifeMs);
     if (p === null) return;
-    p.sprite.rotation = rand(-0.4, 0.4);
-    p.spin = rand(-1.5, 1.5);
+    p.sprite.rotation = this.rand(-0.4, 0.4);
+    p.spin = this.rand(-1.5, 1.5);
     p.scale0 = scale;
     p.scale1 = scale * 1.35;
     p.color0 = color0;
@@ -267,10 +268,10 @@ export class Bursts {
     const aimed = dirX !== 0 || dirY !== 0;
     const base = aimed ? Math.atan2(dirY, dirX) : 0;
     for (let i = 0; i < count; i++) {
-      const p = this.fx.spawn(FX_SPARK, this.tex.streak, x, y, rand(130, 240) * power);
+      const p = this.fx.spawn(FX_SPARK, this.tex.streak, x, y, this.rand(130, 240) * power);
       if (p === null) return;
-      const angle = aimed ? base + rand(-0.9, 0.9) : Math.random() * TAU;
-      const speed = rand(380, 820) * power;
+      const angle = aimed ? base + this.rand(-0.9, 0.9) : this.random() * TAU;
+      const speed = this.rand(380, 820) * power;
       p.vx = Math.cos(angle) * speed;
       p.vy = Math.sin(angle) * speed;
       p.drag = 6;
@@ -281,5 +282,10 @@ export class Bursts {
       p.color0 = color0;
       p.color1 = color1;
     }
+  }
+
+  /** A uniform number in [min, max). */
+  private rand(min: number, max: number): number {
+    return min + this.random() * (max - min);
   }
 }

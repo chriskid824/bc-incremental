@@ -17,7 +17,7 @@ import type { SessionOptions } from './session';
 
 const data = loadGameData();
 const WAVE_CAP = 40;
-const NONE = { hive: false, wave: null, shards: null };
+const NONE = { hive: false, wave: null, shards: null, replay: null };
 
 const flags = (search: string) => readDevFlags(search, WAVE_CAP);
 
@@ -34,9 +34,14 @@ describe('readDevFlags', () => {
 
   it('turns the prototype on with ?hive, with or without a value', () => {
     for (const search of ['?hive', 'hive', '?hive=1', '?hive=', '?lang=zh-TW&hive']) {
-      expect(flags(search), search).toEqual({ hive: true, wave: null, shards: null });
+      expect(flags(search), search).toEqual({ hive: true, wave: null, shards: null, replay: null });
     }
-    expect(flags('?hive&wave=30&shards=500')).toEqual({ hive: true, wave: 30, shards: 500 });
+    expect(flags('?hive&wave=30&shards=500')).toEqual({
+      hive: true,
+      wave: 30,
+      shards: 500,
+      replay: null,
+    });
   });
 
   it('clamps &wave= to 1 .. the wave cap', () => {
@@ -63,10 +68,32 @@ describe('readDevFlags', () => {
     for (const junk of JUNK) {
       const query = encodeURIComponent(junk);
       const read = flags(`?hive&wave=${query}&shards=${query}`);
-      expect(read, JSON.stringify(junk)).toEqual({ hive: true, wave: null, shards: null });
+      expect(read, JSON.stringify(junk)).toEqual({
+        hive: true,
+        wave: null,
+        shards: null,
+        replay: null,
+      });
     }
     // Digits too long for a number are not a whole number either.
     expect(flags(`?hive&shards=${'9'.repeat(400)}`).shards).toBeNull();
+  });
+
+  it('reads ?replay= as the replay route with or without ?hive, and an empty one as none', () => {
+    expect(flags('?replay=renderStress')).toEqual({ ...NONE, replay: 'renderStress' });
+    expect(flags('?replay=clip:fire.ice&seed=3').replay).toBe('clip:fire.ice');
+    expect(flags('?replay=gif%3Afire').replay).toBe('gif:fire');
+    expect(flags('?hive&replay=preview:fire')).toEqual({
+      hive: true,
+      wave: null,
+      shards: null,
+      replay: 'preview:fire',
+    });
+    // Without ?replay, or with an empty one, the page is the game, as before.
+    expect(flags('?replay=')).toEqual(NONE);
+    expect(flags('?replay')).toEqual(NONE);
+    expect(flags('?hive&replay=').replay).toBeNull();
+    expect(flags('?lang=zh-TW&replays=1').replay).toBeNull();
   });
 });
 

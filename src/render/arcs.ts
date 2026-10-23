@@ -7,6 +7,8 @@
 
 import { Graphics } from 'pixi.js';
 import { COLORS } from './palette';
+import { defaultRandom } from './random';
+import type { RenderRandom } from './random';
 import { ageStep } from './timing';
 
 const ARC_MS = 180;
@@ -48,7 +50,7 @@ export class ArcLayer {
   private readonly arcs: Arc[] = [];
   private readonly pool: Arc[] = [];
 
-  constructor() {
+  constructor(private readonly random: RenderRandom = defaultRandom) {
     this.view.blendMode = 'add';
   }
 
@@ -64,7 +66,7 @@ export class ArcLayer {
     arc.width = Math.max(MIN_WIDTH, 1 - WIDTH_PER_JUMP * (chainIndex - 1));
     arc.ageMs = 0;
     arc.fresh = true;
-    reroll(arc);
+    reroll(arc, this.random);
     this.arcs.push(arc);
   }
 
@@ -89,7 +91,7 @@ export class ArcLayer {
       }
       this.arcs[kept++] = arc;
       arc.rejitterMs -= stepMs;
-      if (arc.rejitterMs <= 0) reroll(arc);
+      if (arc.rejitterMs <= 0) reroll(arc, this.random);
       const t = arc.ageMs / ARC_MS;
       // Full strength for the first half, then a quick fade.
       const fade = (t < 0.5 ? 1 : 1 - (t - 0.5) / 0.5) * arc.flicker;
@@ -125,9 +127,9 @@ function drawBolt(g: Graphics, points: number[], width: number, alpha: number): 
 }
 
 /** Rebuilds the zigzag (and maybe a fork) with fresh random kinks; the ends stay pinned. */
-function reroll(arc: Arc): void {
+function reroll(arc: Arc, random: RenderRandom): void {
   arc.rejitterMs = REJITTER_MS;
-  arc.flicker = 0.7 + 0.3 * Math.random();
+  arc.flicker = 0.7 + 0.3 * random();
   const { fromX, fromY, toX, toY } = arc;
   const dx = toX - fromX;
   const dy = toY - fromY;
@@ -143,24 +145,24 @@ function reroll(arc: Arc): void {
     const t = s / segments;
     // Kinks are largest mid-bolt.
     const envelope = Math.sin(Math.PI * t);
-    const offset = (Math.random() * 2 - 1) * jitter * (0.4 + 0.6 * envelope);
+    const offset = (random() * 2 - 1) * jitter * (0.4 + 0.6 * envelope);
     points.push(fromX + dx * t + nx * offset, fromY + dy * t + ny * offset);
   }
   points.push(toX, toY);
 
   const fork = arc.fork;
   fork.length = 0;
-  if (len < 60 || Math.random() < 0.4) return;
+  if (len < 60 || random() < 0.4) return;
   // Fork off one of the kinks, angled away from the bolt.
-  const at = 1 + Math.floor(Math.random() * (segments - 1));
+  const at = 1 + Math.floor(random() * (segments - 1));
   let x = points[at * 2] ?? fromX;
   let y = points[at * 2 + 1] ?? fromY;
-  const side = Math.random() < 0.5 ? -1 : 1;
-  const angle = Math.atan2(dy, dx) + side * (0.5 + Math.random() * 0.5);
-  const step = len * (0.08 + Math.random() * 0.06);
+  const side = random() < 0.5 ? -1 : 1;
+  const angle = Math.atan2(dy, dx) + side * (0.5 + random() * 0.5);
+  const step = len * (0.08 + random() * 0.06);
   fork.push(x, y);
   for (let k = 0; k < 3; k++) {
-    const a = angle + (Math.random() * 2 - 1) * 0.6;
+    const a = angle + (random() * 2 - 1) * 0.6;
     x += Math.cos(a) * step;
     y += Math.sin(a) * step;
     fork.push(x, y);

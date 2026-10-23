@@ -3,8 +3,9 @@
  * prototype: runs play the swarm signature, the profile lives under its own save keys and starts
  * from a preset save, the center is the hive with its drones, and no playtest events are sent.
  * Under it, `&wave=N` starts the first run at wave N and `&shards=N` tops the shards up to at
- * least N; without `?hive` neither does anything. Like `?lang=`, these are not player text.
- * Everything main.ts does with them is here, pure, so the tests reach it.
+ * least N; without `?hive` neither does anything. `?replay=<spec>` opens the replay route instead
+ * of the game (src/app/replay/route.ts, docs/v3 C10 design §1.7). Like `?lang=`, these are not
+ * player text. Everything main.ts does with them is here, pure, so the tests reach it.
  */
 
 import { max, num } from '../core/num';
@@ -20,6 +21,11 @@ export interface DevFlags {
   readonly wave: number | null;
   /** `&shards=N` under `?hive`, a whole number ≥ 0; null when absent, negative or not a number. */
   readonly shards: number | null;
+  /**
+   * `?replay=<spec>`, with or without `?hive`: the page is the replay route, which reads the spec
+   * itself (parseReplayParam). null when absent or empty: the page is the game, as without it.
+   */
+  readonly replay: string | null;
 }
 
 /** Save keys of the `?hive` profile (`…main`, `…backup`), apart from the player's own save. */
@@ -34,13 +40,17 @@ const WHOLE = /^-?\d+$/;
 /** The flags in a page's query string (location.search); `&wave=` is clamped to `waveCap`. */
 export function readDevFlags(search: string, waveCap: number): DevFlags {
   const params = new URLSearchParams(search);
-  if (!params.has('hive')) return { hive: false, wave: null, shards: null };
+  const spec = params.get('replay');
+  // An empty `?replay=` names no replay (docs/v3 C10 design §2.5's test 5): the game, as before.
+  const replay = spec === null || spec === '' ? null : spec;
+  if (!params.has('hive')) return { hive: false, wave: null, shards: null, replay };
   const wave = wholeNumber(params.get('wave'));
   const shards = wholeNumber(params.get('shards'));
   return {
     hive: true,
     wave: wave === null ? null : Math.min(Math.max(1, wave), Math.max(1, waveCap)),
     shards: shards === null || shards < 0 ? null : shards,
+    replay,
   };
 }
 

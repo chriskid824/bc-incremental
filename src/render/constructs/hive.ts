@@ -278,6 +278,11 @@ export class HiveView implements ConstructView {
     this.update(0);
   }
 
+  /** The orbit, bob and pulse clock back at zero, as a new view has it (Renderer.restart). */
+  rewind(): void {
+    this.timeMs = 0;
+  }
+
   update(dtMs: number): void {
     this.timeMs += dtMs;
     const orbit = this.orbit();

@@ -1,5 +1,13 @@
-import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  RENDER_STRESS_AURA_RADIUS,
+  renderStressSetup,
+  stressV4Setup,
+} from '../../src/app/replay/presets';
 import { loadGameData, parseGameData, validateGameData } from '../../src/data';
 import type { GameData, TalentNode } from '../../src/data';
 import type { DroneGrant } from '../../src/data/emitters';
@@ -9,11 +17,20 @@ import { SUMMON_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../../src/sim/caps';
 import { BASE_ATTACK_SPEED } from '../../src/sim/emitters/types';
 import type { TestModule } from '../../src/sim/rules';
 import type { RunContext } from '../../src/sim/systems/context';
-import { makeStats, makeTestData, maskProbeMods, stressData } from '../../src/sim/testing';
+import {
+  createRunHash,
+  makeStats,
+  makeTestData,
+  maskProbeMods,
+  STRESS_START_WAVE,
+  stressData,
+} from '../../src/sim/testing';
 import {
   aliveTwin,
   ALIVE_TWIN_DELTA,
   CHECK_ENTRIES,
+  checkLines,
+  checkRecord,
   HIVE_DRONES,
   HIVE_TURRETS,
   hiveListened,
@@ -23,6 +40,7 @@ import {
   SCENARIOS,
   shareBody,
   shareHead,
+  shareRecord,
   shareReport,
   STRESS_DRONE_DAMAGE_PCT,
   STRESS_DRONES,
@@ -35,14 +53,20 @@ import {
   summonWorkload,
 } from './bench';
 import type {
+  CheckEntryRecord,
+  CheckRecord,
+  CheckTimings,
   Scenario,
   ShareEntry,
   ShareProcess,
+  ShareRecord,
+  ShareRound,
   ShareWork,
   SummonWorkload,
   Workload,
 } from './bench';
-import { ALIVE_MAX, ALIVE_MIN } from './benchCheck';
+import { ALIVE_MAX, ALIVE_MIN, checkBench } from './benchCheck';
+import type { BenchTimings } from './benchCheck';
 
 const hive = SCENARIOS.hive;
 const data = loadGameData();
@@ -853,5 +877,289 @@ describe('v3fire (docs/v3 C6 design §5.4, §8 C6.6)', () => {
         },
       ),
     );
+  });
+});
+
+/** Round g's normal is 20 + 0.1 g ms, its total 3.3 + 0.02 g and its stressBase 3 × normal. */
+const risingRounds = (g: number) => {
+  const normal = 20 + 0.1 * g;
+  return { stress: normal * (3.3 + 0.02 * g), stressBase: normal * 3, normal };
+};
+
+/**
+ * `processes` with two warm-up rounds a phase, every run 10 ms: --json records them, and a median
+ * that took them in would move.
+ */
+function withWarmup(processes: readonly ShareProcess[]): ShareProcess[] {
+  const warm = (entries: readonly ShareEntry[], p: number, w: number): ShareRound => ({
+    seed: 100 + 2 * p + w,
+    order: rotated(entries, w),
+    ms: Object.fromEntries(entries.map((name) => [name, 10])),
+  });
+  return processes.map((proc, p) => ({
+    ...proc,
+    warmup: {
+      gate: [0, 1].map((w) => warm(GATE, p, w)),
+      print: [0, 1].map((w) => warm(PRINT, p, w)),
+    },
+  }));
+}
+
+/** The line of `lines` that starts with `head`; fails the test when none does. */
+function lineOf(lines: readonly string[], head: string): string {
+  const line = lines.find((text) => text.startsWith(head));
+  expect(line, head).toBeDefined();
+  return line as string;
+}
+
+describe('--json (docs/v3 C10 design §2.5, OWN test 9)', () => {
+  it('records what --share prints: its lines and their numbers, medians of the measured rounds only', () => {
+    const processes = withWarmup(fixedProcesses(3, 7, risingRounds));
+    const record = shareRecord(3, 7, processes, WORK);
+    const head = shareHead(3, 7, WORK.v4.averageAlive, WORK.base.averageAlive);
+    const { lines } = shareBody(processes, WORK);
+    expect(record.lines).toEqual([...head, ...lines]);
+    // The warm-up rounds' 10 ms runs are recorded, and no median reads them.
+    expect(record.processes).toEqual(processes);
+    expect([record.procs, record.measuredRounds, record.warmupRounds, record.seconds]).toEqual([
+      3, 7, 2, 30,
+    ]);
+    expect(record.normalMs).toBeCloseTo(21, 9);
+    expect([record.total.median, record.share.median, record.rounds]).toEqual([
+      expect.closeTo(3.5, 9),
+      expect.closeTo(0.5, 9),
+      21,
+    ]);
+    // Every number is the one its line prints.
+    const range = (s: { q1: number; q3: number }): string =>
+      `${s.q1.toFixed(3)}–${s.q3.toFixed(3)}`;
+    expect(head[1]).toContain(
+      `stress (v4) ${record.alive.v4.toFixed(3)}, stressBase ${record.alive.stressBase.toFixed(3)}`,
+    );
+    record.processMedians.forEach((m, p) =>
+      expect(lines).toContain(
+        `process ${p + 1}: median total ${m.total.toFixed(3)}, median share ${m.share.toFixed(3)}`,
+      ),
+    );
+    expect(lineOf(lines, 'share (stress − stressBase) ÷ normal: ')).toContain(
+      `median ${record.share.median.toFixed(3)}, IQR ${range(record.share)} over ${record.rounds} rounds`,
+    );
+    expect(lineOf(lines, 'total stress ÷ normal: ')).toContain(
+      `median ${record.total.median.toFixed(3)}, IQR ${range(record.total)} over ${record.rounds} rounds`,
+    );
+    expect(lineOf(lines, 'stressBase ÷ normal: ')).toContain(
+      `median ${record.stressBase.median.toFixed(3)}, IQR ${range(record.stressBase)}, against`,
+    );
+    expect(lineOf(lines, 'normal: ')).toContain(
+      `median ${record.normalMs.toFixed(2)} ms over the ${record.rounds} rounds (precondition ≤ 25 ms: ok)`,
+    );
+    const { hiveStress, ailmentsOff } = record;
+    expect(lineOf(lines, 'hiveStress ')).toContain(
+      `median ${hiveStress.medianMs.toFixed(2)} ms, median ${hiveStress.ratio.median.toFixed(3)} × ` +
+        `normal (IQR ${range(hiveStress.ratio)})`,
+    );
+    expect(lineOf(lines, 'hiveStress ')).toContain(
+      `seed-1 average alive ${hiveStress.alive.toFixed(1)}; ${record.printRounds} rounds, normal ` +
+        `median ${record.printNormalMs.toFixed(2)} ms`,
+    );
+    expect(lineOf(lines, 'ailments-off diagnostic ')).toContain(
+      `share median ${ailmentsOff.share.median.toFixed(3)} (IQR ${range(ailmentsOff.share)}), total ` +
+        `median ${ailmentsOff.total.toFixed(3)}, seed-1 average alive ${ailmentsOff.alive.toFixed(1)}`,
+    );
+    expect([record.gateRun, record.valid, record.precondition, record.near, record.pass]).toEqual([
+      true,
+      true,
+      true,
+      false,
+      true,
+    ]);
+    expect(lines.at(-1)).toBe(
+      `STRESS v4 (docs/v3 C5 design §7.3): median total ${record.total.median.toFixed(3)} against ` +
+        `${LIMIT}: pass`,
+    );
+    expect(JSON.parse(JSON.stringify(record))).toEqual(record);
+  });
+
+  it('records a run below the gate as one: NOT A GATE RUN in its head and gateRun false', () => {
+    const record = shareRecord(1, 21, fixedProcesses(1, 21, shareRounds()), WORK);
+    expect([record.gateRun, record.pass, record.rounds]).toEqual([false, false, 21]);
+    expect(record.lines[0]).toContain('NOT A GATE RUN');
+  });
+
+  it('records what --check prints: each entry’s median, reference and ratio, and the reference’s', () => {
+    const timings: BenchTimings = {
+      reference: [20, 22, 21, 18, 19, 20.5],
+      entries: [
+        { id: 'hits', ms: [10, 12, 11], referenceMs: [20, 22, 21] },
+        { id: 'stress', ms: [80, 84, 82], referenceMs: [18, 19, 20.5], alive: 281.25 },
+      ],
+    };
+    const checked: CheckTimings = {
+      timings,
+      workloads: new Map([['stress', WORK.v4]]),
+      summons: new Map(),
+    };
+    const recorded = { ratios: { hits: 0.5, stress: 4.2 } };
+    const result = checkBench(timings, recorded, CHECK_ENTRIES, false);
+    const file = 'tools/balance/bench.baseline.json';
+    const lines = checkLines(file, checked, result);
+    const record = checkRecord(file, timings, recorded, result, lines, false);
+    expect(
+      record.entries.map((e) => [e.id, e.medianMs, e.referenceMs, e.ratio, e.alive, e.recorded]),
+    ).toEqual([
+      ['hits', 11, 21, 11 / 21, undefined, 0.5],
+      ['stress', 82, 19, 82 / 19, 281.25, 4.2],
+    ]);
+    expect(record.normal).toEqual({ medianMs: 20.25, runs: 6 });
+    expect([record.kind, record.baseline, record.ok, record.written]).toEqual([
+      'check',
+      file,
+      true,
+      false,
+    ]);
+    expect(record.lines).toEqual(lines);
+    expect(lines[0]).toBe(`bench check: ratio to normal's median run, against ${file}`);
+    for (const e of record.entries) {
+      const line = lineOf(lines, `${e.id}: `);
+      expect(line).toContain(
+        `median ${e.medianMs.toFixed(1)} ms, reference ${e.referenceMs.toFixed(1)} ms, ratio ` +
+          `${e.ratio.toFixed(3)}`,
+      );
+      expect(line).toContain(`(recorded ${e.recorded}, limit`);
+      if (e.alive !== undefined) expect(line).toContain(`average alive ${e.alive.toFixed(1)}`);
+    }
+    const v4 = record.entries.find((e) => e.id === 'stress') as CheckEntryRecord;
+    expect(lineOf(lines, 'stress report stress: ')).toContain(
+      `median ${v4.medianMs.toFixed(2)} ms, ratio ${v4.ratio.toFixed(3)}, normal median ` +
+        `${v4.referenceMs.toFixed(2)} ms`,
+    );
+    expect(lineOf(lines, 'normal (reference): ')).toBe(
+      `normal (reference): median ${record.normal.medianMs.toFixed(1)} ms over ` +
+        `${record.normal.runs} runs (budget 50 ms): ok`,
+    );
+    expect(JSON.parse(JSON.stringify(record))).toEqual(record);
+  });
+});
+
+// Real runs: --share's seed-1 workloads and --check's timed rounds take seconds on a busy machine.
+describe(
+  '--json on a run of bench.ts (docs/v3 C10 design §2.5, OWN test 9)',
+  { timeout: 30_000 },
+  () => {
+    let root = '';
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), 'bc-bench-json-'));
+    });
+    afterEach(() => {
+      rmSync(root, { recursive: true, force: true });
+    });
+
+    /**
+     * bench.ts run as npm runs it with `args`, --share's process p answering `children[p]` without
+     * running: the lines it printed.
+     */
+    async function npmRunBench(
+      args: readonly string[],
+      children: readonly ShareProcess[] = [],
+    ): Promise<readonly string[]> {
+      const { argv, exitCode } = process;
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      vi.doMock('node:child_process', async (importOriginal) => ({
+        ...(await importOriginal<Record<string, unknown>>()),
+        spawnSync: (_command: string, childArgs: readonly string[]) => {
+          const p = Number(childArgs[childArgs.indexOf('--share-child') + 1]);
+          return { status: 0, stdout: `${JSON.stringify(children[p])}\n` };
+        },
+      }));
+      try {
+        process.argv = [
+          argv[0] as string,
+          fileURLToPath(new URL('./bench.ts', import.meta.url)),
+          ...args,
+        ];
+        vi.resetModules();
+        await import('./bench');
+        return log.mock.calls.map(([text]) => String(text));
+      } finally {
+        process.argv = argv;
+        process.exitCode = exitCode;
+        log.mockRestore();
+        vi.doUnmock('node:child_process');
+      }
+    }
+
+    it('--share --json records the processes the run read and every line it printed', async () => {
+      const children = withWarmup(fixedProcesses(3, 7, risingRounds));
+      const file = join(root, 'share.json');
+      const printed = await npmRunBench(['--share', '--json', file], children);
+      const record = JSON.parse(readFileSync(file, 'utf8')) as ShareRecord;
+      expect(record.processes).toEqual(children);
+      expect(record.lines).toEqual(printed);
+    });
+
+    it('--check --json records every line the run printed', async () => {
+      const file = join(root, 'check.json');
+      const printed = await npmRunBench(['--check', '--scenario', 'v3fire', '--json', file]);
+      const record = JSON.parse(readFileSync(file, 'utf8')) as CheckRecord;
+      expect(record.entries.map((entry) => entry.id)).toEqual(['v3fire']);
+      expect(record.lines).toEqual(printed);
+    });
+  },
+);
+
+/** The hash of every tick's events of a run (createRunHash), as GOLDEN-C4 hashes a run. */
+function runHash(config: RunConfig, runData: GameData, modules: readonly TestModule[]): string {
+  const hash = createRunHash();
+  const sim = createSimulation(config, runData, modules);
+  while (!sim.state.finished) hash.update(JSON.stringify(sim.step(NO_INPUT)));
+  return hash.digest();
+}
+
+describe('renderStress’s workload (src/app/replay/presets.ts, docs/v3 C10 design §2.5)', () => {
+  const stress = SCENARIOS.stress;
+  const benchConfig = stress.config(1, STRESS_START_WAVE, '');
+
+  it('composes stress v4 as bench.ts times it: its seed-1 config but maxTicks, data and run', () => {
+    const v4 = stressV4Setup();
+    const config = v4.config(1, STRESS_START_WAVE);
+    // The replay loops its own window, so the preset sets no maxTicks.
+    expect(config.maxTicks).toBeUndefined();
+    expect({ ...config, maxTicks: benchConfig.maxTicks }).toEqual(benchConfig);
+    expect(v4.data).toEqual(stressData());
+    expect(v4.testModules.map((m) => m.summonCap)).toEqual([
+      undefined,
+      STRESS_SUMMON_CAP,
+      undefined,
+    ]);
+    expect(runHash({ ...config, maxTicks: 1800 }, v4.data, v4.testModules)).toBe(
+      runHash(benchConfig, stressData(), stress.testModules ?? []),
+    );
+  });
+
+  it('adds the grants scenario’s aura and two orbit rings at its aura radius, and a poisoned boss', () => {
+    const v4 = stressV4Setup();
+    const preset = renderStressSetup();
+    const v4Config = v4.config(1, STRESS_START_WAVE);
+    const config = preset.config(1, STRESS_START_WAVE);
+    const { stats } = config;
+    const grants = SCENARIOS.grants.config(1, STRESS_START_WAVE, '').stats;
+    expect({ ...config, stats: v4Config.stats }).toEqual(v4Config);
+    // Its thorns are not impl §6's.
+    expect(stats.emitters).toEqual([
+      ...v4Config.stats.emitters,
+      ...grants.emitters.filter((em) => em.grant.kind !== 'thorns'),
+    ]);
+    expect(RENDER_STRESS_AURA_RADIUS).toBe(grants.values.auraRadius);
+    expect(stats.values).toEqual({
+      ...v4Config.stats.values,
+      auraRadius: RENDER_STRESS_AURA_RADIUS,
+    });
+    expect({ ...stats, emitters: [], values: {} }).toEqual({
+      ...v4Config.stats,
+      emitters: [],
+      values: {},
+    });
+    expect(preset.testModules.slice(0, 3)).toEqual(v4.testModules);
+    expect(preset.testModules).toHaveLength(4);
   });
 });

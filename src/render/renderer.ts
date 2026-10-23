@@ -34,6 +34,8 @@ import { ShardParticles } from './particles';
 import { PlayerView } from './player';
 import { PoolShotLayer } from './poolShots';
 import { ProjectileLayer } from './projectiles';
+import { defaultRandom } from './random';
+import type { RenderRandom } from './random';
 import { RingLayer } from './rings';
 import { ScreenShake } from './shake';
 
@@ -48,6 +50,11 @@ export interface RendererOptions {
    * center is M1's hexagon and none of them is drawn.
    */
   readonly construct?: 'hive';
+  /**
+   * Where the effects draw their randomness (src/render/random.ts). The M1 page passes none, so
+   * they draw Math.random; a replay (src/app/replay) passes a seeded one for repeatable frames.
+   */
+  readonly random?: RenderRandom;
 }
 
 /** Crits at least this many decades above the typical hit shake the screen (2× ≈ 0.3). */
@@ -79,7 +86,7 @@ export class Renderer {
   private readonly letterbox = new Graphics({ label: 'letterbox' });
   private readonly enemies: EnemyLayer;
   private readonly projectiles: ProjectileLayer;
-  private readonly arcs = new ArcLayer();
+  private readonly arcs: ArcLayer;
   private readonly rings = new RingLayer();
   private readonly fx: FxParticles;
   /** Flames of burning enemies, drawn under the crowd. */
@@ -92,7 +99,7 @@ export class Renderer {
   /** The shot pool's homing shots, the turrets'; only with the hive construct. */
   private readonly poolShots: PoolShotLayer | null;
   private readonly shards: ShardParticles;
-  private readonly numbers = new DamageNumbers();
+  private readonly numbers: DamageNumbers;
   private readonly burnTally = new BurnTally();
   private readonly shake: ScreenShake;
   private readonly hitStop: (ms: number) => void;
@@ -116,18 +123,21 @@ export class Renderer {
     private readonly data: GameData,
     options: RendererOptions,
   ) {
+    const random = options.random ?? defaultRandom;
+    this.arcs = new ArcLayer(random);
+    this.numbers = new DamageNumbers(random);
     const textures = createFxTextures();
-    this.enemies = new EnemyLayer(data, textures.glow);
+    this.enemies = new EnemyLayer(data, textures.glow, random);
     this.projectiles = new ProjectileLayer(textures);
     this.fx = new FxParticles(textures);
     this.flames = new FxParticles(textures);
-    this.bursts = new Bursts(this.fx, this.flames, textures, this.rings);
-    this.shards = new ShardParticles(app.renderer);
+    this.bursts = new Bursts(this.fx, this.flames, textures, this.rings, random);
+    this.shards = new ShardParticles(app.renderer, random);
     this.drones =
       options.construct === 'hive' ? new DroneLayer(app.renderer, textures.streak) : null;
     this.poolShots = this.drones === null ? null : new PoolShotLayer(textures);
     this.core = this.drones === null ? new PlayerView() : new HiveCoreView(this.drones);
-    this.shake = new ScreenShake(options.reducedMotion);
+    this.shake = new ScreenShake(options.reducedMotion, random);
     this.hitStop = options.hitStop ?? ((): void => undefined);
     // Static: one cached quad instead of grid lines, light pool and vignette every frame.
     const backdrop = createBackdrop();
@@ -172,6 +182,19 @@ export class Renderer {
     this.killsThisFrame = 0;
     this.pendingNovaCount = 0;
     this.numbers.setTypicalHit(typicalHit);
+  }
+
+  /**
+   * beginRun, then the animation clocks back at zero and the number slots handed out in the
+   * order a new Renderer makes them: from here it draws what a new Renderer would, without the
+   * textures a new one makes (a replay's seek and loop, src/app/replay). The M1 page and `?hive`
+   * call beginRun alone.
+   */
+  restart(typicalHit: number): void {
+    this.beginRun(typicalHit);
+    this.core.rewind();
+    this.enemies.rewind();
+    this.numbers.rewind();
   }
 
   /** Turns one tick's events into effects. Call after every sim step. */

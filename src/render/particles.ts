@@ -5,6 +5,8 @@
 
 import { Graphics, Particle, ParticleContainer } from 'pixi.js';
 import type { Renderer, Texture } from 'pixi.js';
+import { defaultRandom } from './random';
+import type { RenderRandom } from './random';
 
 const MAX_PARTICLES = 600;
 const LIFE_MS = 1400;
@@ -27,7 +29,10 @@ export class ShardParticles {
   private readonly pool: Shard[] = [];
   private readonly texture: Texture;
 
-  constructor(renderer: Renderer) {
+  constructor(
+    renderer: Renderer,
+    private readonly random: RenderRandom = defaultRandom,
+  ) {
     const shape = new Graphics().poly([0, -6, 3.5, 0, 0, 6, -3.5, 0]).fill(0xffffff);
     this.texture = renderer.generateTexture({ target: shape, resolution: 2, antialias: true });
     shape.destroy();
@@ -43,11 +48,11 @@ export class ShardParticles {
   burst(x: number, y: number, color: number, count: number, scale: number): void {
     for (let i = 0; i < count && this.live.length < MAX_PARTICLES; i++) {
       const shard = this.pool.pop() ?? this.createShard();
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 160 + Math.random() * 280;
+      const angle = this.random() * Math.PI * 2;
+      const speed = 160 + this.random() * 280;
       shard.vx = Math.cos(angle) * speed;
       shard.vy = Math.sin(angle) * speed;
-      shard.spin = (Math.random() * 2 - 1) * 12;
+      shard.spin = (this.random() * 2 - 1) * 12;
       shard.ageMs = 0;
       const sprite = shard.sprite;
       sprite.x = x;
@@ -55,7 +60,7 @@ export class ShardParticles {
       sprite.rotation = angle;
       sprite.tint = color;
       sprite.alpha = 1;
-      const s = scale * (0.7 + Math.random() * 0.6);
+      const s = scale * (0.7 + this.random() * 0.6);
       sprite.scaleX = s;
       sprite.scaleY = s;
       this.live.push(shard);

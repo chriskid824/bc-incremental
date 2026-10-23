@@ -51,6 +51,11 @@ export class PlayerView {
     this.pulseMs = 0;
   }
 
+  /** The spin and breathing clock back at zero, as a new view has it (Renderer.restart). */
+  rewind(): void {
+    this.timeMs = 0;
+  }
+
   update(player: Readonly<PlayerState>, dtMs: number): void {
     this.timeMs += dtMs;
     this.hitMs = Math.max(0, this.hitMs - dtMs);

@@ -463,6 +463,13 @@ document.documentElement.lang = locale;
 
 const root = document.getElementById('app');
 if (root === null) throw new Error('Missing #app element');
-main(root, locale, readDevFlags(window.location.search, WAVE_CAP)).catch((error: unknown) =>
-  showFatal(root, error),
-);
+const flags = readDevFlags(window.location.search, WAVE_CAP);
+if (flags.replay !== null) {
+  // A dev page in a chunk of its own (docs/v3 C10 design §1.7): the game and `?hive` never load
+  // it, and it writes no storage, sends no playtest event and calls no platform API.
+  import('./replay/route')
+    .then((route) => route.startReplayRoute(root, window.location.search))
+    .catch((error: unknown) => showFatal(root, error));
+} else {
+  main(root, locale, flags).catch((error: unknown) => showFatal(root, error));
+}

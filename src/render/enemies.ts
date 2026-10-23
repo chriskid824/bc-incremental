@@ -16,6 +16,8 @@ import type { Bursts } from './bursts';
 import type { EnemySpot } from './drones';
 import { packColor } from './fx';
 import { COLORS, mixColor } from './palette';
+import { defaultRandom } from './random';
+import type { RenderRandom } from './random';
 
 /** Polygon sides per shape; the v3 shapes' are placeholders until their own drawings. */
 const SIDES: Readonly<Record<EnemyShape, number>> = {
@@ -142,6 +144,7 @@ export class EnemyLayer {
   constructor(
     private readonly data: GameData,
     private readonly glowTexture: Texture,
+    private readonly random: RenderRandom = defaultRandom,
   ) {
     this.burnGlow = new ParticleContainer({
       label: 'burn-glow',
@@ -177,6 +180,12 @@ export class EnemyLayer {
     this.burnGlow.particleChildren.length = 0;
     this.burnGlow.update();
     this.flameDemand = 0;
+  }
+
+  /** The spin and flicker clock and the frame count back at zero, as a new layer has them. */
+  rewind(): void {
+    this.frame = 0;
+    this.timeMs = 0;
   }
 
   /** Positions and tints every live enemy; burning ones glow and shed flames via `bursts`. */
@@ -264,7 +273,7 @@ export class EnemyLayer {
     const view = this.pools.get(enemy.type)?.pop() ?? new EnemyView(this.data.enemies[enemy.type]);
     view.flashMs = 0;
     view.punch = HIT_PUNCH;
-    view.flameDebt = Math.random();
+    view.flameDebt = this.random();
     view.setHp(1);
     // Bosses and elites draw under the crowd so small enemies stay visible.
     if (view.def.radius >= 30) this.view.addChildAt(view.root, 0);
