@@ -22,7 +22,7 @@ import {
 } from '../../../src/meta/web';
 import type { AccountProgress, CharacterProgress, Price, WebEconomy } from '../../../src/meta/web';
 import { createSimulation, NO_INPUT, TICK_RATE } from '../../../src/sim';
-import type { ContactTally, EndReason, RunResult } from '../../../src/sim';
+import type { ContactTally, EndReason, RunResult, Simulation } from '../../../src/sim';
 import { compressIds, runSeed } from '../session';
 import type { StartWavePolicy } from '../session';
 import { webOf } from './content';
@@ -157,6 +157,8 @@ export interface CharacterRunRow {
   readonly byType: Readonly<Record<TypeColumn, TypeTally>>;
   /** The signature's bombs lobbed (lob events). */
   readonly bombs: number;
+  /** The most lob events in any BOMB_WINDOW_TICKS consecutive ticks of this run (one second). */
+  readonly bombsPeak: number;
   /** The counters of BUDGET_COUNTERS, null for one the run does not have. */
   readonly budget: Readonly<Record<BudgetCounter, number | null>>;
   /** Nodes bought after this run, in order, as `id` or `id×n` for consecutive repeats. */
@@ -269,6 +271,33 @@ function bulletsOf(result: RunResult): Readonly<Record<string, ContactTally>> | 
   if (!('bulletTakenBy' in result)) return null;
   return (result as { readonly bulletTakenBy: Readonly<Record<string, ContactTally>> })
     .bulletTakenBy;
+}
+
+/** The window of a run's bombs peak (G7): one second of ticks. */
+export const BOMB_WINDOW_TICKS = TICK_RATE;
+
+/**
+ * Steps a run to its end with NO_INPUT and counts its lob events: all of them, and the most in any
+ * BOMB_WINDOW_TICKS consecutive ticks, a window that slides tick by tick within this run (a run
+ * shorter than the window counts all its ticks).
+ */
+export function playRun(sim: Simulation): { readonly bombs: number; readonly bombsPeak: number } {
+  const ring = new Array<number>(BOMB_WINDOW_TICKS).fill(0);
+  let tick = 0;
+  let bombs = 0;
+  let inWindow = 0;
+  let bombsPeak = 0;
+  while (!sim.state.finished) {
+    let lobs = 0;
+    for (const event of sim.step(NO_INPUT)) if (event.type === 'lob') lobs += 1;
+    const slot = tick % BOMB_WINDOW_TICKS;
+    inWindow += lobs - (ring[slot] as number);
+    ring[slot] = lobs;
+    tick += 1;
+    bombs += lobs;
+    bombsPeak = Math.max(bombsPeak, inWindow);
+  }
+  return { bombs, bombsPeak };
 }
 
 /** A TypeTally while it is summed. */
@@ -448,10 +477,7 @@ export function runCharacterSession(
         startWave,
       );
       const sim = createSimulation(runConfig, data);
-      let bombs = 0;
-      while (!sim.state.finished) {
-        for (const event of sim.step(NO_INPUT)) if (event.type === 'lob') bombs += 1;
-      }
+      const { bombs, bombsPeak } = playRun(sim);
       result = sim.result();
       const cycleBefore = progress.cycleBest;
       const settled = settleWebRun(progress, result, data, wr.stats, economy);
@@ -550,6 +576,7 @@ export function runCharacterSession(
         ...damageColumns(result),
         byType: typeTallies(result),
         bombs,
+        bombsPeak,
         budget: budgetOf(result),
         bought: compressIds(visit.bought),
       };

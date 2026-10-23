@@ -17,13 +17,14 @@ import { frontierOf, probeRun } from '../../../src/meta/web/calibrate';
 import { GATED_KINDS } from '../../../src/meta/web/counts';
 import { fillBoard, unlockInvestment } from '../../../src/meta/web/invest';
 import { shortestRoute } from '../../../src/meta/web/path';
-import type { ContactTally, RunResult } from '../../../src/sim';
+import type { ContactTally, RunResult, Simulation } from '../../../src/sim';
 import { jobOf, runJobs } from '../jobs';
 import { compressIds } from '../session';
 import { builtCharacters, C10_SEED, resolveContent, webOf } from './content';
 import { PRESTIGE } from './prestige';
 import type { PrestigeHook } from './prestige';
 import {
+  BOMB_WINDOW_TICKS,
   budgetOf,
   centerShareOf,
   characterStartWave,
@@ -32,6 +33,7 @@ import {
   defaultSessionMinutes,
   FULL_SESSION_MINUTES,
   OTHER_SESSION_MINUTES,
+  playRun,
   PRE_PRESTIGE_MINUTES,
   PRESTIGE_WAVE,
   purchasesOf,
@@ -733,5 +735,57 @@ describe('row readings', () => {
       centerShare: 9 / 16,
     });
     expect(centerShareOf({ center: 0, hub: 0, outer: 0, fusion: 0, asc: 0 })).toBeNull();
+  });
+});
+
+/** A simulation whose tick t emits lobs[t] lob events beside another event, finished after the last. */
+function scripted(lobs: readonly number[]): Simulation {
+  let tick = 0;
+  const state = { finished: lobs.length === 0 };
+  const step = (): { type: string }[] => {
+    const events = Array.from({ length: lobs[tick] ?? 0 }, () => ({ type: 'lob' }));
+    events.push({ type: 'kill' });
+    tick += 1;
+    state.finished = tick >= lobs.length;
+    return events;
+  };
+  return { state, step } as unknown as Simulation;
+}
+
+/** `ticks` ticks with `at`'s lob counts and none elsewhere. */
+const lobsAt = (at: Readonly<Record<number, number>>, ticks: number): number[] =>
+  Array.from({ length: ticks }, (_, tick) => at[tick] ?? 0);
+
+describe('the bombs peak', () => {
+  it('is the most lob events in any 60 consecutive ticks, a window sliding tick by tick', () => {
+    expect(BOMB_WINDOW_TICKS).toBe(60);
+    // Ticks 55 and 65 share a second that no window from tick 0, 60, 120, … holds.
+    expect(playRun(scripted(lobsAt({ 55: 10, 65: 10 }, 200)))).toEqual({
+      bombs: 20,
+      bombsPeak: 20,
+    });
+    // 59 ticks apart: one window; 60 apart: never one.
+    expect(playRun(scripted(lobsAt({ 0: 5, 59: 5 }, 200)))).toEqual({ bombs: 10, bombsPeak: 10 });
+    expect(playRun(scripted(lobsAt({ 0: 5, 60: 5 }, 200)))).toEqual({ bombs: 10, bombsPeak: 5 });
+    // Ticks 69 and 129 are 60 apart: 3 + 4 + 5 is never one second's; 2 + 3 + 4 and 4 + 5 are.
+    expect(playRun(scripted(lobsAt({ 10: 1, 30: 2, 69: 3, 75: 4, 129: 5 }, 200)))).toEqual({
+      bombs: 15,
+      bombsPeak: 9,
+    });
+    // A run shorter than the window counts all its ticks.
+    expect(playRun(scripted([1, 2, 3]))).toEqual({ bombs: 6, bombsPeak: 6 });
+    expect(playRun(scripted([]))).toEqual({ bombs: 0, bombsPeak: 0 });
+  });
+
+  it('starts each run afresh: a window never spans two runs', () => {
+    expect(playRun(scripted(lobsAt({ 99: 7 }, 100)))).toEqual({ bombs: 7, bombsPeak: 7 });
+    expect(playRun(scripted(lobsAt({ 0: 7 }, 100)))).toEqual({ bombs: 7, bombsPeak: 7 });
+    const result = runCharacterSession(config({ content: { fixture: 'B1' }, minutes: 2 }));
+    expect(result.rows.length).toBeGreaterThan(1);
+    expect(result.rows.some((row) => row.bombs > 0)).toBe(true);
+    for (const row of result.rows) {
+      expect(row.bombsPeak).toBeLessThanOrEqual(row.bombs);
+      expect(row.bombsPeak > 0).toBe(row.bombs > 0);
+    }
   });
 });

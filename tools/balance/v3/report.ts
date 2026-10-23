@@ -4,12 +4,15 @@
  * M1's outputs stay in tools/balance/report.ts, unchanged (W10).
  */
 
-import { PACING_TARGETS, PACING_TOLERANCE } from '../../../src/data';
+import { PACING_TOLERANCE } from '../../../src/data';
 import { toCsv } from '../csv';
 import type { CsvValue } from '../csv';
 import { formatTable, quantile } from '../report';
+import { V3_PACING_TARGETS } from './checks/targets';
 import { BUDGET_COUNTERS, TYPE_COLUMNS, V3_MILESTONE_WAVES } from './session';
 import type { CharacterRunRow, CharacterSessionResult } from './session';
+
+export { V3_PACING_TARGETS } from './checks/targets';
 
 const ascending = (values: readonly number[]): number[] => [...values].sort((a, b) => a - b);
 const nullIfNaN = (value: number): number | null => (Number.isNaN(value) ? null : value);
@@ -149,16 +152,6 @@ export function characterMilestonesCsv(results: readonly CharacterSessionResult[
 // ---- curve_check.csv ----
 
 /**
- * The pacing targets of character sessions (初始值): src/data/curve.ts' PACING_TARGETS plus F5's
- * wave 100 at 5 h, kept in the tools so M1's curve check never moves.
- */
-export const V3_PACING_TARGETS: readonly {
-  readonly minutes: number;
-  readonly frontierWave: number;
-  readonly event: string;
-}[] = [...PACING_TARGETS, { minutes: 300, frontierWave: 100, event: 'clear' }];
-
-/**
  * A session's row at play time `minutes`, as the pacing check reads it (design §2.2): the last run
  * that ended by then, or the first run when none had (M1's rowAt). A session that stopped at the
  * prestige point or the clear keeps its last row (`carried`); one its budget stopped has none past
@@ -269,9 +262,16 @@ export function characterCurveCheckCsv(results: readonly CharacterSessionResult[
 
 // ---- budget.csv ----
 
-/** Per run: the budget and cap counters by name (blank for one the run lacks) and the bombs. */
+/**
+ * Per run: the budget and cap counters by name (blank for one the run lacks), the bombs and the
+ * bombs peak (the most in one second).
+ */
 export function budgetCsv(results: readonly CharacterSessionResult[]): string {
-  const header = ['character', 'scope', 'strategy', 'session', 'run', ...BUDGET_COUNTERS, 'bombs'];
+  const header = [
+    ...['character', 'scope', 'strategy', 'session', 'run'],
+    ...BUDGET_COUNTERS,
+    ...['bombs', 'bombsPeak'],
+  ];
   const rows: CsvValue[][] = [];
   for (const result of results) {
     for (const row of result.rows) {
@@ -283,6 +283,7 @@ export function budgetCsv(results: readonly CharacterSessionResult[]): string {
         row.run,
         ...BUDGET_COUNTERS.map((name) => row.budget[name]),
         row.bombs,
+        row.bombsPeak,
       ]);
     }
   }

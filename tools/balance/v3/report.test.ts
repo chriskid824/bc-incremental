@@ -156,6 +156,7 @@ describe('v3 report', () => {
             enemySpawnsSkipped: 7,
           },
           bombs: 8,
+          bombsPeak: 9,
         },
       ],
       endMinutes: 10.5,
@@ -186,7 +187,7 @@ describe('v3 report', () => {
     ]);
     expect(lines(budgetCsv([synthetic]))[1]).toEqual([
       ...['fire', 'full', 'default', '0', '1'],
-      ...['1', '2', '3', '4', '5', '', '7', '8'],
+      ...['1', '2', '3', '4', '5', '', '7', '8', '9'],
     ]);
 
     // Four sessions stopped at their prestige point after one run: read at 0 min, and carried.
@@ -233,6 +234,7 @@ describe('v3 report', () => {
       'enemyCapDelayed',
       'enemySpawnsSkipped',
       'bombs',
+      'bombsPeak',
     ]);
     expect(runs[0]?.slice(5, 7)).toEqual(['0', '0']);
     // C7.5's two counters: blank while runs lack them, their values once they have them.

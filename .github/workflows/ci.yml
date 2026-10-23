@@ -29,6 +29,9 @@ jobs:
       # Each simulation scenario timed against the normal run in this job, and the normal
       # run's own budget (tools/balance/bench.ts --check, bench.baseline.json).
       - run: npm run bench -- --check
+      # The PR subset of implementation-plan-v3 §4's balance checks on the registered content
+      # (tools/balance/v3/checks/cli.ts, docs/v3 C10 design §1.5): report.md goes to the summary.
+      - run: npm run checks -- --summary "$GITHUB_STEP_SUMMARY"
       - run: npx vite build
       # The Steam build's page (dist-steam/) and the Electron shell (dist-electron/); no Electron
       # binary is needed to build them (docs/v3 C9 design §1.6).
