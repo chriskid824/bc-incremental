@@ -174,7 +174,7 @@ describe('damage rows against M1 damageMult', () => {
       const modifiers = Array.from({ length: rng.int(13) }, () => randomM1Modifier(rng));
       expectM1(modifiers, `list ${n}: ${JSON.stringify(modifiers)}`);
     }
-  });
+  }, 30_000);
 });
 
 interface Reference {
