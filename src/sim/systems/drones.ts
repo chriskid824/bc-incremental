@@ -368,6 +368,7 @@ export function impactAt(
     if (!e.alive) continue;
     const isTarget = e === target;
     if (isTarget) budget.hits++;
+    // Its hits add no shock, so a blocked one changes nothing after it (R1).
     hitWithPayload(ctx, e, p, 0, 1, null, null, steady, depth, origin, isTarget ? primary : 0);
   }
   // Its victims carry the attack's serial, so the chain passes over them.

@@ -326,8 +326,8 @@ export const ALWAYS_IGNITES = 1 << 20;
 
 /**
  * Bits of Payload.bypass: its hits pass through an enemy's shield, its armour (coinHit's
- * ignoreShield and ignoreArmour). No enemy has either yet; the defences that read them come
- * with C7.
+ * ignoreShield and ignoreArmour). bypassOf (src/sim/combat/defend.ts) adds the bits of the hit
+ * row's ignoreShield and ignoreArmour stats.
  */
 export const IGNORE_SHIELD = 1;
 export const IGNORE_ARMOUR = 2;
@@ -400,7 +400,7 @@ export interface Payload {
    */
   readonly raisesChainJump: boolean;
   /**
-   * Shock stacks each of its chain jump hits adds, with no roll, to an enemy the hit leaves
+   * Shock stacks each of its chain jump hits that lands adds, with no roll, to an enemy it leaves
    * alive (a chainBolt's shockStacks, whose executor shocks its first hit too); 0 for none.
    */
   readonly shockOnHit: number;

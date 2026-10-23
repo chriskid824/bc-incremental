@@ -4,12 +4,12 @@
  * 0 (EmitterRuntime.timer). Each strike is an attack of its own (beginAttack): its target selector
  * picks an enemy from the player, as a periodic trigger's does; with none to pick the strike is
  * lost. The target takes the strike's hit, counted in the attack's budget, then shockStacks shock
- * stacks if the hit left it alive; then every other alive enemy within `radius` of it takes a
- * hit, in id order, counted in no budget; then the strike chains chainJumps jumps from the
- * target, on the general path (chainGeneral), each jump hit shocking its enemy alike
- * (EmitterRuntime.chainPayload). Nothing is drawn but the hits' own rolls, on the combat stream.
- * A strike is not the signature attack: its hits carry no PRIMARY, raise no center events and
- * repeat nothing.
+ * stacks if the hit landed (its defences did not block it in full: lead ruling R1) and left it
+ * alive; then every other alive enemy within `radius` of it takes a hit, in id order, counted in no
+ * budget; then the strike chains chainJumps jumps from the target, on the general path
+ * (chainGeneral), each jump hit shocking its enemy alike (EmitterRuntime.chainPayload). Nothing is
+ * drawn but the hits' own rolls, on the combat stream. A strike is not the signature attack: its
+ * hits carry no PRIMARY, raise no center events and repeat nothing.
  */
 
 import { addShock } from '../ailments/shock';
@@ -35,9 +35,9 @@ export function runStrike(ctx: RunContext, em: EmitterRuntime): void {
   const p = em.payload;
   beginAttack(ctx);
   ctx.chainBudget.hits++;
-  hitWithPayload(ctx, target, p, 0, 1, null, null, false, 0, -1);
+  const landed = hitWithPayload(ctx, target, p, 0, 1, null, null, false, 0, -1);
   const stacks = spec.shockStacks;
-  if (stacks > 0 && target.alive) addShock(ctx, target, stacks, 0);
+  if (landed && stacks > 0 && target.alive) addShock(ctx, target, stacks, 0);
   if (spec.radius > 0) {
     const targets = em.targets as Enemy[];
     const r = sizeOf(ctx.build, spec.radius);
@@ -45,6 +45,7 @@ export function runStrike(ctx: RunContext, em: EmitterRuntime): void {
     for (let j = 0; j < n; j++) {
       const enemy = targets[j] as Enemy;
       // Area hits count in no budget; an enemy killed earlier in this strike is passed over.
+      // They add no shock, so a blocked one changes nothing after it (R1).
       if (enemy !== target && enemy.alive) {
         hitWithPayload(ctx, enemy, p, 0, 1, null, null, false, 0, -1);
       }

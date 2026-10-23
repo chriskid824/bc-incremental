@@ -459,8 +459,8 @@ export interface SlashLineSpec {
 /**
  * One hit on the event's enemy (or the one the trigger's selector picked; on explode, the
  * explosion's primary) for `multiplier` × the damage stat, tagged hit and trigger. With
- * ignoreShield and ignoreArmour it passes through an enemy's shield and armour, which no enemy
- * has yet.
+ * ignoreShield and ignoreArmour it passes through an enemy's shield and armour (Payload.bypass,
+ * read by bypassOf in src/sim/combat/defend.ts).
  */
 export interface CoinHitSpec {
   readonly kind: 'coinHit';

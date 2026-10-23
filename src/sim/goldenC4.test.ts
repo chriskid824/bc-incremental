@@ -13,17 +13,18 @@
 
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { mul, num } from '../core/num';
+import { mul, num, toNumber } from '../core/num';
 import type { RuleSpec } from '../data/rules';
 import type { Modifier } from '../data/stats';
 import { TAG } from '../data/tags';
 import type { TriggerSpec } from '../data/triggers';
-import type { GameData } from '../data/types';
+import type { EnemyId, GameData } from '../data/types';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { createPayload, ROWS } from './emitters/types';
 import type { Payload } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
+import { ARMOURED } from './systems/enemyRecord';
 import { MOTION_HOMING, MOTION_LOB, MOTION_STRAIGHT, spawnShot } from './systems/shots';
 import {
   GOLDEN_BUILDS,
@@ -1556,6 +1557,54 @@ const capData = (): GameData =>
     },
   });
 
+/**
+ * C7.3's enemy defences (docs/v3 C7 design §2.4) on a v3 run of squares and shielders from wave
+ * 1 (TEST_WAVES' square rule and TEST_V3_WAVES' shielder rule, each from wave 1), with no affix,
+ * treasure, elite or boss (§1.9). The volley's hits of 10, 15 on a crit, are below 15 % of a
+ * shielder's max life from wave 12 on (134 at wave 12, 227 by wave 14), so its shield blocks
+ * every one; yet they burn and, through a poison-tagged ailmentOnBlock (滲透), poison it, and
+ * those kill shielders.
+ * armouredSquares() armours every square: a plain hit lands 5, a crit 15 whole, through a
+ * crit-tagged ignoreArmour (破甲). The build converts nothing: OWN test 2
+ * (src/sim/combat/defend.test.ts) pins the per-part tallies.
+ */
+const ENEMY_DEFENCE_STATS = makeStats({ critChance: 0.3, poisonChance: 0.5, igniteChance: 0.3 }, [
+  { stat: 'ignoreArmour', kind: 'flat', value: 1, tags: ['crit'] },
+  { stat: 'ailmentOnBlock', kind: 'flat', value: 1, tags: ['poison'] },
+]);
+
+const enemyDefenceData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: [
+        { enemy: 'square', fromWave: 1, base: 2, perWave: 0.3, maxCount: 20 },
+        { enemy: 'shielder', fromWave: 1, base: 1, perWave: 0.2, maxCount: 8 },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
+/**
+ * Armours every square of the run (ARMOURED on its record) before its first defended hit, as
+ * C7.6's 堅甲 will at spawn: a test module has no spawn hook, and both hit paths run the
+ * modifyDamage hooks before an enemy's defences, so this hook, which leaves the amount alone,
+ * reaches every hit they defend, thorns, shatters and drone impacts among them (lead ruling V5).
+ */
+function armouredSquares(): TestModule {
+  return (b) =>
+    b.hook('modifyDamage', (_ctx, hit, amount) => {
+      const v3 = hit.target.v3;
+      if (v3 !== null && hit.target.type === 'square') v3.defence |= ARMOURED;
+      return amount;
+    });
+}
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1827,6 +1876,13 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     data: capData,
     expected: ['424fdd97731eb9b8', 'edcf2e91fba84fbf'],
   },
+  {
+    name: 'enemyDefences',
+    config: { stats: ENEMY_DEFENCE_STATS, rules: [], startWave: 12 },
+    data: enemyDefenceData,
+    modules: () => [armouredSquares()],
+    expected: ['8915e4088942086b', '3d3d5bdb7f1cc85c'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -1936,6 +1992,44 @@ describe('golden C4 runs', () => {
     };
     expect([turretFires('swarm'), turretFires('swarmRepeat')]).toEqual([0, 0]);
     expect(turretFires('swarmTurret')).toBeGreaterThan(0);
+  });
+
+  it('blocks every hit on a shielder in enemyDefences, which still burns and poisons it, halves a square’s plain hits and lands its crits whole (C7.3)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'enemyDefences') as GoldenC4Entry;
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(
+        config,
+        entry.data?.() ?? makeTestData(),
+        entry.modules?.() ?? [],
+      );
+      const types = new Map<number, EnemyId>();
+      const seen = new Set<string>();
+      while (!sim.state.finished) {
+        const blocked = new Set<number>();
+        for (const event of sim.step(NO_INPUT)) {
+          if (event.type === 'enemySpawned') types.set(event.enemyId, event.enemy);
+          else if (event.type === 'hitBlocked') {
+            blocked.add(event.targetId);
+            seen.add(`${types.get(event.targetId)} blocks ${toNumber(event.amount)}`);
+          } else if (event.type === 'hit') {
+            seen.add(`${types.get(event.targetId)} takes ${toNumber(event.amount)}`);
+          } else if (event.type === 'ignite' && blocked.has(event.targetId)) {
+            seen.add('burn on a block');
+          } else if (event.type === 'ailmentApplied' && blocked.has(event.targetId)) {
+            seen.add(`${event.ailment} on a block`);
+          }
+        }
+      }
+      expect([...seen].sort(), `seed ${seed}`).toEqual([
+        'burn on a block',
+        'poison on a block',
+        'shielder blocks 10',
+        'shielder blocks 15',
+        'square takes 15',
+        'square takes 5',
+      ]);
+    }
   });
 
   it.each(cases)('$id', ({ entry, seed, expected }) => {

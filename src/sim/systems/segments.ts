@@ -8,10 +8,10 @@
  * link, so there are at most 2 per endpoint. Every alive enemy within its radius of a link is
  * marked (Enemy.segMark): the main grid's box query around the link, padded by ctx.shotPad,
  * then the tough enemies outside the box, as a straight shot finds them (shots.ts). Then one
- * pass over the enemies in id order hits each marked one once with the emitter's payload, and
- * gives each it does not kill shockStacks shock stacks, without a roll. The endpoints lie on
- * their own links, so they are hit too; enemies a hit's kill appends (split children) come
- * after the pass's count and are not.
+ * pass over the enemies in id order hits each marked one once with the emitter's payload, and gives
+ * each it lands on (its defences did not block the hit in full: lead ruling R1) and does not kill
+ * shockStacks shock stacks, without a roll. The endpoints lie on their own links, so they are hit
+ * too; enemies a hit's kill appends (split children) come after the pass's count and are not.
  *
  * The hits crit, roll no ailments (Hoshi's Q4 (B) names zone and aura hits only, so segments
  * keep (A)'s: Q4/F7) and raise no hit events: they add to the judgement's tally (PulseAcc), and
@@ -109,8 +109,8 @@ function judge(
   for (let j = 0; j < m; j++) {
     const enemy = enemies[j] as Enemy;
     if (enemy.segMark !== serial || !enemy.alive) continue;
-    hitPulse(ctx, acc, enemy, p, 1, 0, -1);
-    if (enemy.alive) addShock(ctx, enemy, stacks, 0);
+    const landed = hitPulse(ctx, acc, enemy, p, 1, 0, -1);
+    if (landed && enemy.alive) addShock(ctx, enemy, stacks, 0);
   }
   ctx.events.push({
     type: 'pulse',

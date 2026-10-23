@@ -6,9 +6,10 @@
  * freeze. Chances, the crit multiplier, the damage multiplier and frost are the scoped stats of
  * the hit's own ModTable row (the payload's slot for its tags and source), so tagged, scoped and
  * scaling modifiers apply per hit. Conversions split a hit's damage into parts with rows of
- * their own (src/sim/combat/convert.ts). A shocked or frozen enemy takes more (takenMult). Every
- * damage instance, hits and damage-over-time steps alike, goes into the run's tallies through
- * tally.
+ * their own (src/sim/combat/convert.ts). A shocked or frozen enemy takes more (takenMult). A v3
+ * run's enemy with a shield or armour then defends (src/sim/combat/defend.ts): a hit it blocks
+ * in full deals nothing (blockedHit). Every damage instance, hits and damage-over-time steps
+ * alike, goes into the run's tallies through tally.
  *
  * A hit raises the hit and crit trigger events and calls the onHit hooks (src/sim/effects/): a
  * surviving hit once its ailments are applied, so their conditions see them; a lethal one right
@@ -21,7 +22,7 @@ import type { Num } from '../../core/num';
 import { add, assertFinite, gt, lte, mul, sub, toNumber, ZERO } from '../../core/num';
 import { DOT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
-import { ailmentDps, applyBurn, applyPoison, creditOf } from '../ailments/apply';
+import { ailmentDps, applyBurn, applyPoison, applyPulseBurn, creditOf } from '../ailments/apply';
 import { addBleed } from '../ailments/bleed';
 import { addFrost } from '../ailments/frost';
 import { addShock, takenMult } from '../ailments/shock';
@@ -52,6 +53,7 @@ import type { Enemy, RunContext } from '../systems/context';
 import { killEnemy } from '../systems/death';
 import type { PulseAcc } from '../systems/systemState';
 import { convertHit } from './convert';
+import { blockedHit, bypassOf, defend } from './defend';
 
 const CRIT = TAG.crit;
 const BURN = TAG.burn;
@@ -73,8 +75,8 @@ const SHOCK_ALWAYS = SCOPED_INDEX.shockAlways;
 const FROST_ON_HIT = SCOPED_INDEX.frostOnHit;
 
 /** Bits of rollDots' result: the ailments a hit applies besides burn. */
-const POISONS = 1;
-const BLEEDS = 2;
+export const POISONS = 1;
+export const BLEEDS = 2;
 const SHOCKS = 4;
 
 const EV_HIT = EVENT.hit;
@@ -195,7 +197,10 @@ export function applyDots(
  * arrival, a discharge's targets, a fan round's first cone hit), and land
  * (src/sim/emitters/lob.ts) and impactAt (src/sim/systems/drones.ts) pass themselves. A primary
  * hit has the payload's tags and source, a jump jumpMask of the tags and the payload's
- * jumpSource; the ailments either applies are credited from the payload's source.
+ * jumpSource; the ailments either applies are credited from the payload's source. It returns
+ * false when the enemy's defences block the hit in full (blockedHit, src/sim/combat/defend.ts)
+ * and true otherwise, a hit that kills included: a caller that shocks the enemy after the hit
+ * skips a blocked one (lead ruling R1), and the callers that add nothing ignore it.
  */
 export function hitWithPayload(
   ctx: RunContext,
@@ -209,7 +214,7 @@ export function hitWithPayload(
   depth: number,
   origin: number,
   bits = 0,
-): void {
+): boolean {
   const build = ctx.build;
   const table = ctx.table;
   const ev = ctx.evalInput;
@@ -256,6 +261,23 @@ export function hitWithPayload(
   if (build.hooks.modifyDamage.length !== 0) {
     amount = modifyDamage(ctx, enemy, amount, mask, source, crit, k, depth, origin, flags);
   }
+  // Only a v3 run's enemies have a record: an M1 hit pays this one test.
+  if (enemy.v3 !== null && enemy.v3.defence !== 0) {
+    const landed = defend(
+      ctx,
+      enemy,
+      enemy.v3,
+      amount,
+      mask,
+      converted,
+      bypassOf(p, table, row, ev),
+    );
+    if (landed === null) {
+      blockedHit(ctx, enemy, p, amount, base, crit, ignites, rolled, depth, origin, p.aggregate);
+      return false;
+    }
+    amount = landed;
+  }
   applyHitDamage(
     ctx,
     enemy,
@@ -272,23 +294,8 @@ export function hitWithPayload(
     converted,
     p.aggregate ? ctx.sys.pulse : null,
   );
-  if (!enemy.alive) return;
-  if (ignites && ctx.burnTicks > 0) {
-    // The burn's damage is the hit's before its damage row: base × burnDamage × its own row,
-    // read at jump 0, since a burn is no chain instance. Poison and bleed do the same.
-    ev.chainJump = 0;
-    const burnRow = slotRow(build, p, crit ? SLOT_BURN_CRIT : SLOT_BURN);
-    applyBurn(
-      ctx,
-      enemy,
-      mul(base, ctx.burnDamage * statAt(table, burnRow, DAMAGE, ev)),
-      ctx.now + ctx.burnTicks,
-      depth,
-      creditOf(ctx, 'burn', p),
-      1,
-    );
-    if (ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
-  }
+  if (!enemy.alive) return true;
+  if (ignites && ctx.burnTicks > 0) applyHitBurn(ctx, enemy, p, base, crit, depth, origin, false);
   if (rolled !== 0) applyDots(ctx, enemy, p, base, crit, rolled, depth, origin);
   // Builds without frost on hit skip reading it; a payload that rolls no ailments adds none.
   if (ctx.hitsFrost && p.rollsAilments) {
@@ -301,6 +308,40 @@ export function hitWithPayload(
   if (ctx.hitListeners) {
     dispatchHit(ctx, enemy, amount, mask, source, crit, k, depth, origin, flags);
   }
+  return true;
+}
+
+/**
+ * The burn of a hit of `base` (crit or not) that ignited `enemy`, then its ailmentApplied
+ * trigger. Its damage is the hit's before its damage row: base × burnDamage × its own row, read
+ * at jump 0, since a burn is no chain instance; poison and bleed do the same (ailmentDps). A
+ * pulse's hit (`pulse`) burns through applyPulseBurn: at the records cap it replaces only a
+ * weaker stack, and a refused one changes and fires nothing (Q4/F4). A hit an enemy's defences
+ * block in full burns as it would have landed (blockedHit, src/sim/combat/defend.ts).
+ */
+export function applyHitBurn(
+  ctx: RunContext,
+  enemy: Enemy,
+  p: Payload,
+  base: Num,
+  crit: boolean,
+  depth: number,
+  origin: number,
+  pulse: boolean,
+): void {
+  const ev = ctx.evalInput;
+  ev.chainJump = 0;
+  const burnRow = slotRow(ctx.build, p, crit ? SLOT_BURN_CRIT : SLOT_BURN);
+  const dps = mul(base, ctx.burnDamage * statAt(ctx.table, burnRow, DAMAGE, ev));
+  const end = ctx.now + ctx.burnTicks;
+  const credit = creditOf(ctx, 'burn', p);
+  if (pulse) {
+    const applied = applyPulseBurn(ctx, enemy, dps, end, depth, credit, 1);
+    if (applied && ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
+    return;
+  }
+  applyBurn(ctx, enemy, dps, end, depth, credit, 1);
+  if (ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
 }
 
 /** Fills ctx.hitScratch for the hit's hooks, its amount included. */

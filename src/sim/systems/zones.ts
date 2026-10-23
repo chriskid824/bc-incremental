@@ -44,7 +44,15 @@ import { pctMaxHpFactor, statAt } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
 import { PULSE_TICKS, SIGNATURE_ZONE_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../caps';
 import { convertHit } from '../combat/convert';
-import { applyDots, applyHitDamage, dispatchHit, modifyDamage, rollDots } from '../combat/hit';
+import { blockedHit, bypassOf, defend } from '../combat/defend';
+import {
+  applyDots,
+  applyHitBurn,
+  applyHitDamage,
+  dispatchHit,
+  modifyDamage,
+  rollDots,
+} from '../combat/hit';
 import { raiseFreeze } from '../effects/centerEvents';
 import { fireApplied } from '../effects/dispatch';
 import { applyStacks, durationOf, frostOne } from '../effects/execute';
@@ -55,7 +63,6 @@ import {
   PRESCALED,
   ROWS,
   SLOT_BURN,
-  SLOT_BURN_CRIT,
   SLOT_HIT,
   SLOT_HIT_CRIT,
   slotRow,
@@ -274,6 +281,7 @@ function pulse(ctx: RunContext, z: ZonePool, acc: PulseAcc, s: number): void {
     if (!enemy.alive) continue;
     if (scale > 0) hitPulse(ctx, acc, enemy, p, scale, depth, origin);
     if (!enemy.alive) continue;
+    // The zone's terms are its own, not its hit's: they apply after a blocked hit too (R1).
     if (burnTerm) applyBurnTerm(ctx, enemy, p, base, stacks, depth, origin);
     else if (ails) applyStacks(ctx, ailment, enemy, p, base, stacks, depth, origin);
     if (frost > 0) frostOne(ctx, enemy, frost, source, depth, origin);
@@ -346,8 +354,12 @@ function quietDispatch(ctx: RunContext, crit: boolean, depth: number): void {
  * applyDots, except that its burn goes through applyPulseBurn: at the records cap it replaces
  * only a weaker stack, and a burn refused there fires nothing; and that a payload with
  * ALWAYS_IGNITES ignites on every hit, after its roll is drawn. A quiet pulse's hit leaves
- * dispatchHit to quietDispatch, which keeps only its counts. The differential tests in
- * zones.test.ts hold them equal wherever no burn is refused.
+ * dispatchHit to quietDispatch, which keeps only its counts. An enemy's defences take it where
+ * they take hitWithPayload's (defend, src/sim/combat/defend.ts): a hit they block in full adds
+ * nothing to the tally and skips the dispatch, quiet or not, and its burn goes through
+ * applyPulseBurn too (blockedHit). It returns what hitWithPayload does: false for a hit they
+ * block in full, true otherwise (lead ruling R1). The differential tests in zones.test.ts hold
+ * them equal wherever no burn is refused.
  */
 export function hitPulse(
   ctx: RunContext,
@@ -357,7 +369,7 @@ export function hitPulse(
   scale: number,
   depth: number,
   origin: number,
-): void {
+): boolean {
   const build = ctx.build;
   const table = ctx.table;
   const ev = ctx.evalInput;
@@ -396,6 +408,23 @@ export function hitPulse(
   if (build.hooks.modifyDamage.length !== 0) {
     amount = modifyDamage(ctx, enemy, amount, mask, source, crit, 0, depth, origin, flags);
   }
+  // Only a v3 run's enemies have a record: an M1 hit pays this one test.
+  if (enemy.v3 !== null && enemy.v3.defence !== 0) {
+    const landed = defend(
+      ctx,
+      enemy,
+      enemy.v3,
+      amount,
+      mask,
+      converted,
+      bypassOf(p, table, row, ev),
+    );
+    if (landed === null) {
+      blockedHit(ctx, enemy, p, amount, base, crit, ignites, rolled, depth, origin, true);
+      return false;
+    }
+    amount = landed;
+  }
   applyHitDamage(
     ctx,
     enemy,
@@ -412,23 +441,9 @@ export function hitPulse(
     converted,
     acc,
   );
-  if (!enemy.alive) return;
-  if (ignites && ctx.burnTicks > 0) {
-    // The burn's damage is the hit's before its damage row, as hitWithPayload's. At the records
-    // cap it replaces only a weaker stack (Q4/F4), and a refused one changes and fires nothing.
-    ev.chainJump = 0;
-    const burnRow = slotRow(build, p, crit ? SLOT_BURN_CRIT : SLOT_BURN);
-    const applied = applyPulseBurn(
-      ctx,
-      enemy,
-      mul(base, ctx.burnDamage * statAt(table, burnRow, DAMAGE, ev)),
-      ctx.now + ctx.burnTicks,
-      depth,
-      creditOf(ctx, 'burn', p),
-      1,
-    );
-    if (applied && ctx.appliedListeners) fireApplied(ctx, enemy, 'burn', depth, origin, p.flags);
-  }
+  if (!enemy.alive) return true;
+  // At the records cap the burn replaces only a weaker stack (Q4/F4).
+  if (ignites && ctx.burnTicks > 0) applyHitBurn(ctx, enemy, p, base, crit, depth, origin, true);
   if (rolled !== 0) applyDots(ctx, enemy, p, base, crit, rolled, depth, origin);
   if (ctx.hitsFrost && p.rollsAilments) {
     const frost = statAt(table, row, FROST_ON_HIT, ev);
@@ -441,6 +456,7 @@ export function hitPulse(
     if (acc.quiet) quietDispatch(ctx, crit, depth);
     else dispatchHit(ctx, enemy, amount, mask, source, crit, 0, depth, origin, flags);
   }
+  return true;
 }
 
 /**

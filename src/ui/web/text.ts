@@ -342,6 +342,9 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   contactDamageTaken: 'percent',
   lifeRegen: 'percent',
   extraLives: 'number',
+  ignoreShield: 'number',
+  ignoreArmour: 'number',
+  ailmentOnBlock: 'number',
 };
 
 /**

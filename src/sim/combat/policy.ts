@@ -8,10 +8,11 @@
  * rules add, extra jumps (跳電) and bounces (回彈), are hits of the payload's extraJumpPayload and
  * count against EXTRA_JUMP_CAP; every hit counts against CHAIN_HIT_CAP (src/sim/caps.ts). Each
  * jump hit of a payload that shocks on hit (Payload.shockOnHit, a chainBolt's) then shocks its
- * enemy if it is alive, and each of the signature arc's (Payload.raisesChainJump), extra jumps
- * and bounces included, raises the chainJump center event at its enemy (raiseChainJump). With
- * the run's table without a policy (RunContext.sys.chain.noPolicy) it deals what the linear path
- * does (chainFrom, src/sim/combat/chain.ts), hit for hit.
+ * enemy if it landed and left it alive, and each of the signature arc's (Payload.raisesChainJump),
+ * extra jumps and bounces included, raises the chainJump center event at its enemy
+ * (raiseChainJump), even when its enemy's defences block the jump in full. With the run's table
+ * without a policy (RunContext.sys.chain.noPolicy) it deals what the linear path does (chainFrom,
+ * src/sim/combat/chain.ts), hit for hit.
  */
 
 import { num } from '../../core/num';
@@ -156,7 +157,8 @@ export function chainGeneral(
 /**
  * Jump hit `k` of payload `q` (p's, or p's extraJumpPayload) of p's chain on `enemy` at `scale`
  * from (fromX, fromY), as hitWithPayload, then q's shockOnHit stacks of shock on the enemy if
- * the hit left it alive, at `depth`, then p's chainJump event when p raises one.
+ * the hit landed (its defences did not block it in full: lead ruling R1) and left it alive, at
+ * `depth`, then p's chainJump event when p raises one.
  */
 function jumpHit(
   ctx: RunContext,
@@ -171,8 +173,9 @@ function jumpHit(
   depth: number,
   origin: number,
 ): void {
-  hitWithPayload(ctx, enemy, q, k, scale, fromX, fromY, steady, depth, origin);
-  if (q.shockOnHit > 0 && enemy.alive) addShock(ctx, enemy, q.shockOnHit, depth);
+  const landed = hitWithPayload(ctx, enemy, q, k, scale, fromX, fromY, steady, depth, origin);
+  if (landed && q.shockOnHit > 0 && enemy.alive) addShock(ctx, enemy, q.shockOnHit, depth);
+  // A blocked jump still happened: the chain goes on from its enemy, whose hitMark is set (R1).
   if (p.raisesChainJump) raiseChainJump(ctx, enemy, fromX, fromY, depth, origin, p.flags);
 }
 

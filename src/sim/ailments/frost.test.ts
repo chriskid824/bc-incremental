@@ -87,7 +87,7 @@ const bossOf = (ctx: RunContext): Enemy => ctx.enemies.find((e) => e.boss) as En
 const signature = (ctx: RunContext): Payload => (ctx.emitters[0] as EmitterRuntime).payload;
 
 /** An emitter hit (depth 0, no origin) of the signature attack on `enemy`. */
-const emitterHit = (ctx: RunContext, enemy: Enemy): void =>
+const emitterHit = (ctx: RunContext, enemy: Enemy): boolean =>
   hitWithPayload(ctx, enemy, signature(ctx), 0, 1, null, null, false, 0, -1);
 
 type HitEvent = Extract<SimEvent, { type: 'hit' }>;

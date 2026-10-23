@@ -56,6 +56,7 @@ function pulse(ctx: RunContext, em: EmitterRuntime, scale: number): void {
   begin(ctx, acc, p);
   for (let j = 0; j < n; j++) {
     const enemy = targets[j] as Enemy;
+    // Its hits add no shock, so a blocked one changes nothing after it (R1).
     if (enemy.alive) hitPulse(ctx, acc, enemy, p, scale, 0, -1);
   }
   raisePulse(ctx, acc, em.index);
@@ -73,6 +74,7 @@ function coronaPulse(ctx: RunContext, em: EmitterRuntime): void {
   begin(ctx, acc, p);
   for (let j = 0; j < m; j++) {
     const enemy = enemies[j] as Enemy;
+    // Its hits add no shock, so a blocked one changes nothing after it (R1).
     if (enemy.alive) hitPulse(ctx, acc, enemy, p, 1, 0, -1);
   }
   raisePulse(ctx, acc, em.index);

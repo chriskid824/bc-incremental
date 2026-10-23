@@ -474,7 +474,20 @@ export type SimEvent =
    * (REVIVE_LIFE_FRAC of max life) with `livesLeft` remaining. It follows that contact's
    * playerHit, whose lifeLeft is 0. Never in an M1 run.
    */
-  | { readonly type: 'revive'; readonly lifeLeft: number; readonly livesLeft: number };
+  | { readonly type: 'revive'; readonly lifeLeft: number; readonly livesLeft: number }
+  /**
+   * The enemy's defences blocked a hit in full (src/sim/combat/defend.ts blockedHit): `amount`,
+   * its damage after takenMult and the modifyDamage hooks, dealt nothing, and it raised no hit
+   * event or trigger. A pulse's blocked hits raise none. Never in an M1 run.
+   */
+  | {
+      readonly type: 'hitBlocked';
+      readonly targetId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly amount: Num;
+      readonly crit: boolean;
+    };
 
 /**
  * Damage totals by kind of instance, for balance reporting: burn, poison and bleed by their

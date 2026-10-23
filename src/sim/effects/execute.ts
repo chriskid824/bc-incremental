@@ -50,7 +50,7 @@
  * or on the alive enemy nearest the event's point within the chain range: its first hit, which
  * counts 1 in its chain budget, then exactly `jumps` jumps on the general chain path
  * (chainGeneral, src/sim/combat/policy.ts) without a policy. Its payload shocks each enemy a
- * jump leaves alive (Payload.shockOnHit), and the executor its first one alike.
+ * jump lands on and leaves alive (Payload.shockOnHit), and the executor its first one alike.
  */
 
 import type { Num } from '../../core/num';
@@ -752,8 +752,8 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   },
   // An attack of its own on the live target, or on the alive enemy nearest the event's point
   // within the chain range ('nearestToPoint'): its first hit, counted in its budget, and
-  // shockStacks on it if the hit left it alive; then exactly `jumps` jumps, no roll, each
-  // shocking its enemy alike (Payload.shockOnHit).
+  // shockStacks on it if the hit landed and left it alive (R1); then exactly `jumps` jumps, no
+  // roll, each shocking its enemy alike (Payload.shockOnHit).
   chainBolt(ctx, spec, _fx, entry) {
     const first =
       spec.from === 'nearestToPoint'
@@ -764,9 +764,9 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const { depth, origin } = entry;
     beginAttack(ctx);
     ctx.chainBudget.hits++;
-    hitWithPayload(ctx, first, p, 0, 1, null, null, false, depth, origin);
+    const landed = hitWithPayload(ctx, first, p, 0, 1, null, null, false, depth, origin);
     const stacks = spec.shockStacks ?? 0;
-    if (stacks > 0 && first.alive) addShock(ctx, first, stacks, depth);
+    if (landed && stacks > 0 && first.alive) addShock(ctx, first, stacks, depth);
     const roots = ctx.sys.chain.frontier;
     roots[0] = first;
     chainGeneral(ctx, p, roots, 1, spec.jumps, false, depth, origin);

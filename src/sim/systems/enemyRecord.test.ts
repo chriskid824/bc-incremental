@@ -16,7 +16,16 @@ import { NO_INPUT, PLAYER_RADIUS } from '../types';
 import type { EnemyState } from '../types';
 import { createRunContext } from './context';
 import type { Enemy, RunContext, WaveRecord } from './context';
-import { AI_DASH, AI_NONE, AI_SHOOT, AI_SUMMON, AI_TREASURE, createEnemyV3 } from './enemyRecord';
+import {
+  AI_DASH,
+  AI_NONE,
+  AI_SHOOT,
+  AI_SUMMON,
+  AI_TREASURE,
+  ARMOURED,
+  createEnemyV3,
+  SHIELDED,
+} from './enemyRecord';
 import type { SpawnOrigin } from './enemyRecord';
 import { addEnemy } from './spawn';
 
@@ -75,12 +84,26 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
 
   it('holds `extra` from the origin, and true for the treasure whatever spawns it', () => {
     const { square, treasure } = TEST_ENEMIES;
-    expect(createEnemyV3(square, undefined)).toEqual({ ai: AI_NONE, extra: false, contactMult: 1 });
-    expect(createEnemyV3(square, ORIGIN)).toEqual({ ai: AI_NONE, extra: true, contactMult: 1 });
+    expect(createEnemyV3(square, undefined)).toEqual({
+      ai: AI_NONE,
+      extra: false,
+      defence: 0,
+      blockPct: 0,
+      contactMult: 1,
+    });
+    expect(createEnemyV3(square, ORIGIN)).toEqual({
+      ai: AI_NONE,
+      extra: true,
+      defence: 0,
+      blockPct: 0,
+      contactMult: 1,
+    });
     expect(createEnemyV3(square, { ...ORIGIN, extra: false }).extra).toBe(false);
     expect(createEnemyV3(treasure, undefined)).toEqual({
       ai: AI_TREASURE,
       extra: true,
+      defence: 0,
+      blockPct: 0,
       contactMult: 1,
     });
     expect(createEnemyV3(treasure, { ...ORIGIN, extra: false }).extra).toBe(true);
@@ -93,6 +116,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       expect(createEnemyV3({ ...square, id }, undefined), id).toEqual({
         ai: AI_NONE,
         extra: false,
+        defence: 0,
+        blockPct: 0,
         contactMult: 1,
       });
     }
@@ -105,8 +130,41 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
     expect(createEnemyV3({ ...square, behaviour: treasure.behaviour }, undefined)).toEqual({
       ai: AI_TREASURE,
       extra: true,
+      defence: 0,
+      blockPct: 0,
       contactMult: 1,
     });
+  });
+
+  it('gives a shield behaviour SHIELDED and its blockBelowPct, read from the behaviour, not the id', () => {
+    const { square, shielder } = TEST_ENEMIES;
+    expect([SHIELDED, ARMOURED]).toEqual([1, 2]);
+    expect(createEnemyV3(shielder, undefined)).toEqual({
+      ai: AI_NONE,
+      extra: false,
+      defence: SHIELDED,
+      blockPct: 0.15,
+      contactMult: 1,
+    });
+    // The shielder's id on a square's def, which has no behaviour: no defence.
+    expect(createEnemyV3({ ...square, id: 'shielder' }, undefined)).toMatchObject({
+      defence: 0,
+      blockPct: 0,
+    });
+    // A square given a shield of its own holds that shield's share, whatever spawned it.
+    const shielded: EnemyDef = { ...square, behaviour: { kind: 'shield', blockBelowPct: 0.4 } };
+    expect(createEnemyV3(shielded, ORIGIN)).toEqual({
+      ai: AI_NONE,
+      extra: true,
+      defence: SHIELDED,
+      blockPct: 0.4,
+      contactMult: 1,
+    });
+    // Every other v3 behaviour holds none.
+    for (const def of Object.values(V3_ENEMIES)) {
+      if (def.id === 'shielder') continue;
+      expect(createEnemyV3(def, undefined), def.id).toMatchObject({ defence: 0, blockPct: 0 });
+    }
   });
 });
 
@@ -154,7 +212,7 @@ describe('addEnemy: the v3 record (docs/v3 C7 design §1.3)', () => {
     ]);
     expect(child.radius).toBe(def.radius * 0.7);
     expect(child.contactDist).toBe(PLAYER_RADIUS + def.radius * 0.7);
-    expect(child.v3).toEqual({ ai: AI_NONE, extra: true, contactMult: 1 });
+    expect(child.v3).toEqual({ ai: AI_NONE, extra: true, defence: 0, blockPct: 0, contactMult: 1 });
     expect([child.tough, child.boss, child.stepDist]).toEqual([true, false, plain.stepDist]);
   });
 

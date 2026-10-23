@@ -15,6 +15,16 @@ export const AI_SHOOT = 2;
 export const AI_SUMMON = 3;
 export const AI_TREASURE = 4;
 
+/**
+ * Bits of EnemyV3.defence (docs/v3 C7 design §2.4): the defences defend
+ * (src/sim/combat/defend.ts, which exports them too) applies to the enemy's hits. SHIELDED blocks
+ * a hit part below blockPct of its max life (盾兵's shield), ARMOURED halves what passes (C7.6's
+ * 堅甲). They are defined here, outside the hit path's import cycle, so that createEnemyV3 and
+ * spawn.ts stay out of it.
+ */
+export const SHIELDED = 1;
+export const ARMOURED = 2;
+
 /** A v3 run's enemy record (Enemy.v3). */
 export interface EnemyV3 {
   /** Its AI kind (AI_*), from its def's behaviour; AI_NONE for a plain walker. */
@@ -24,6 +34,10 @@ export interface EnemyV3 {
    * calibration's φ leaves out (C7/F12).
    */
   readonly extra: boolean;
+  /** Its defences (SHIELDED, ARMOURED): SHIELDED from its def's shield behaviour, else none. */
+  defence: number;
+  /** The share of its max life a hit part must reach to pass SHIELDED; 0 without a shield. */
+  blockPct: number;
   /** × on its contact damage (src/sim/systems/contact.ts); 1 until C7.6: 狂暴's ×2. */
   contactMult: number;
 }
@@ -59,10 +73,13 @@ function aiOf(def: EnemyDef): number {
 
 /** The record of a v3 run's enemy of `def`, spawned with `origin` if its caller passed one. */
 export function createEnemyV3(def: EnemyDef, origin: SpawnOrigin | undefined): EnemyV3 {
+  const shield = def.behaviour?.kind === 'shield' ? def.behaviour : null;
   return {
     ai: aiOf(def),
     // The treasure comes from its schedule, never from composeWave, whatever spawns it.
     extra: (origin?.extra ?? false) || def.behaviour?.kind === 'treasure',
+    defence: shield === null ? 0 : SHIELDED,
+    blockPct: shield === null ? 0 : shield.blockBelowPct,
     contactMult: 1,
   };
 }

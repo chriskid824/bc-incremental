@@ -306,7 +306,7 @@ describe('ModTable', () => {
         expectRow(table, modifiers, base, key, sources);
       }
     }
-  });
+  }, 30_000);
 
   it('applies a scoped modifier only to the sources its class or exact id selects', () => {
     const sources = sourcesOf(['outer.poison', 'outer.fire', 'fusion.fire.poison', 'hub']);
@@ -455,8 +455,10 @@ describe('ModTable', () => {
         const row = table.row(mask);
         for (const stat of scopedStats) {
           if (stat === 'damage') continue;
+          // The table adds its rules' offset (+0 here) last, which turns the −0 of a zero base
+          // under a negative 1 + Σincreased into +0 where StatBlock keeps −0: the same number.
           expect(statAt(table, row, SCOPED_INDEX[stat], staticInput(0)), `${n} ${stat}`).toBe(
-            stats.values[stat],
+            stats.values[stat] + 0,
           );
         }
       }

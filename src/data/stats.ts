@@ -108,6 +108,18 @@ export const STAT_IDS = [
    * instead of ending the run (REVIVE_LIFE_FRAC, src/sim/systems/contact.ts).
    */
   'extraLives',
+  /**
+   * Above 0 on a hit's row, the hit passes an enemy's shield (src/sim/combat/defend.ts
+   * bypassOf), as a coinHit with ignoreShield does.
+   */
+  'ignoreShield',
+  /** Above 0 on a hit's row, the hit passes an enemy's armour (bypassOf). */
+  'ignoreArmour',
+  /**
+   * Above 0 on an ailment's row (poison's or bleed's), a hit that an enemy's defences block in
+   * full still applies that ailment if it rolled it (src/sim/combat/defend.ts blockedHit).
+   */
+  'ailmentOnBlock',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -158,6 +170,9 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   contactDamageTaken: 1,
   lifeRegen: 0,
   extraLives: 0,
+  ignoreShield: 0,
+  ignoreArmour: 0,
+  ailmentOnBlock: 0,
 };
 
 /**
@@ -179,6 +194,9 @@ export const SCOPED_STATS = [
   'bleedAlways',
   'shockAlways',
   'frostOnHit',
+  'ignoreShield',
+  'ignoreArmour',
+  'ailmentOnBlock',
 ] as const satisfies readonly StatId[];
 export type ScopedStat = (typeof SCOPED_STATS)[number];
 

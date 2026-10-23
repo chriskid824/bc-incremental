@@ -16,15 +16,18 @@ import { applyStacks, runEffect, runEffectQueue } from '../effects/execute';
 import { appliedFlag, CRIT_HIT, HIT_EVENT, SIGNATURE } from '../effects/flags';
 import { EVENT, MAX_DEPTH, SHATTER_TRIGGER } from '../effects/types';
 import type { CompiledTrigger } from '../effects/types';
-import { ALWAYS_IGNITES } from '../emitters/types';
-import type { Payload } from '../emitters/types';
+import { runAura } from '../emitters/aura';
+import { ALWAYS_IGNITES, PHASE_TICKS } from '../emitters/types';
+import type { EmitterRuntime, Payload } from '../emitters/types';
 import type { TestModule } from '../rules';
-import { centerTriggers, makeStats, placedEnemies, rngPositions } from '../testing';
+import { centerTriggers, makeStats, placedEnemies, rngPositions, v3TestData } from '../testing';
 import type { PlacedEnemy } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import type { SimEvent } from '../types';
 import { updateAilments } from './ailments';
 import type { BurnStack, Enemy, RunContext } from './context';
+import { ARMOURED, SHIELDED } from './enemyRecord';
+import type { EnemyV3 } from './enemyRecord';
 import { moveEnemies } from './movement';
 import { addZone, hitPulse, hoistPulseRows, stepZones } from './zones';
 
@@ -537,6 +540,26 @@ describe('zone hits and terms', () => {
       FIRST + 1,
     ]);
   });
+
+  it('applies its terms to an enemy whose shield blocked its hit in full, as to one it hit (R1)', () => {
+    const spec: GroundZoneSpec = { ...ZONE, ailment: 'poison', addFrostPerSec: 1, slow: 0.3 };
+    const ctx = placedEnemies(
+      [near(0, 0, { type: 'shielder', hp: 1e6 }), near(10, 0, { type: 'square', hp: 1e6 })],
+      { stats: zoneStats([idle(spec)]), data: v3TestData() },
+    );
+    const [one, two] = [enemy(ctx, 1), enemy(ctx, 2)];
+    expect(one.v3?.defence).toBe(SHIELDED);
+    runAt(ctx, effectOf(ctx, 0));
+    // The pulse hits for 100: the shielder's shield blocks it, the square takes it.
+    expect(pulsesOf(untilPulse(ctx))).toEqual([
+      { type: 'pulse', kind: 'zone', id: 1, hits: 1, total: num(100), crits: [] },
+    ]);
+    expect([toNumber(one.hp), toNumber(two.hp)]).toEqual([1e6, 1e6 - 100]);
+    // Its poison term, frost and slow on both alike.
+    const terms = (e: Enemy) => [e.poisonStacks, e.frost, e.zoneSlow];
+    expect(terms(one)).toEqual([1, 0.25, 0.3]);
+    expect(terms(one)).toEqual(terms(two));
+  });
 });
 
 describe('zone hit ailments (Q4 B)', () => {
@@ -996,6 +1019,51 @@ describe('zone pulse burns at the records cap (Q4/F4)', () => {
     // The ignite roll is drawn before the cap's check: the streams move, and alike.
     expect(rngPositions(refused.ctx)).not.toEqual(refused.before.rng);
     expect(rngPositions(refused.ctx)).toEqual(rngPositions(accepted.ctx));
+  });
+
+  it('refuses or takes the burn of a hit a shield blocks as of one that lands (C7.3)', () => {
+    // capped()'s run with a shielder of a v3 run: its shield blocks every hit of the zone's, so
+    // blockedHit (src/sim/combat/defend.ts) applies the pulse hit's burn, through applyPulseBurn.
+    const twin = (weak: number) => {
+      const stats = makeStats(
+        { damage: 400, critChance: 0, igniteChance: 0.99, burnMaxStacks: 2 },
+        [],
+        {
+          triggers: [
+            { source: 'fusion.fire.aura', spec: idle(ZONE) },
+            {
+              source: 'center',
+              spec: { on: 'ailmentApplied', when: [{ ailment: 'burn' }], do: heal },
+            },
+          ],
+          conversions: [],
+          emitters: [],
+        },
+      );
+      const ctx = placedEnemies([near(0, 0, { type: 'shielder' })], { stats, data: v3TestData() });
+      const e = enemy(ctx, 1);
+      expect(e.v3?.defence).toBe(SHIELDED);
+      burn(ctx, 1000);
+      burn(ctx, weak);
+      runAt(ctx, effectOf(ctx, 0));
+      const before = { state: burnState(e), hp: e.hp };
+      return { ctx, e, before, events: atPulse(ctx, 1) };
+    };
+    const refused = twin(500);
+    const accepted = twin(1);
+    for (const { ctx, e, before, events } of [refused, accepted]) {
+      // Blocked in full: no damage, pulse event or hitBlocked (a pulse's pushes none).
+      expect(e.hp).toBe(before.hp);
+      expect(ctx.sys.pulse.hits).toBe(0);
+      expect(events.filter((event) => event.type !== 'ignite')).toEqual([]);
+    }
+    expect(burnState(refused.e)).toEqual(refused.before.state);
+    expect(ignites(refused.events)).toEqual([]);
+    expect(queuedOf(refused.ctx)).toEqual([]);
+    const [kept, lit] = accepted.e.burns as [BurnStack, BurnStack];
+    expect([toNumber(kept.dps), toNumber(lit.dps)]).toEqual([1000, 100 * accepted.ctx.burnDamage]);
+    expect(ignites(accepted.events)).toEqual([{ type: 'ignite', targetId: 1, stacks: 2 }]);
+    expect(queuedOf(accepted.ctx)).toEqual([healOf(accepted.ctx)]);
   });
 
   it('replaces the weakest stack with a stronger burn, as hitWithPayload does on a copy', () => {
@@ -1940,6 +2008,261 @@ describe('hitPulse', () => {
       expect(a.counters.triggerDepthCapped).toBe(depth === MAX_DEPTH ? capped : 0);
     },
   );
+
+  /**
+   * The enemies of the defended cases below (C7.3, docs/v3 C7 design §2.4): shielders at even
+   * ids, the first so sturdy that its shield blocks every hit, the others only the smaller ones,
+   * and squares that die to some hits, every one armoured but the first (armour()).
+   */
+  const defendedPlaced = (r: { next(): number }): PlacedEnemy[] =>
+    Array.from({ length: 10 }, (_, k) =>
+      near(
+        4 * k,
+        0,
+        k % 2 === 0
+          ? { type: 'shielder', hp: k === 0 ? 1e9 : Math.round(1000 + r.next() * 4000) }
+          : { type: 'square', hp: Math.round(50 + r.next() * 600) },
+      ),
+    );
+  const armour = (ctx: RunContext): void => {
+    ctx.enemies.forEach((e, k) => {
+      if (k % 2 === 1 && k > 1) (e.v3 as EnemyV3).defence |= ARMOURED;
+    });
+  };
+
+  it.each(FIXTURES)(
+    'equals hitWithPayload on shielded and armoured enemies (fixture %i; OWN test 10)',
+    (n) => {
+      const r = createStreams(3000 + n).spawn;
+      const rolls = rollsOf(n);
+      const values = {
+        ...rolls.values,
+        critMultiplier: 1.5 + r.next(),
+        frozenDamageTaken: 0.5,
+        shockEffect: 0.2,
+      };
+      // Poison through a block on every fourth fixture from 1, armour passed on crits from 2.
+      const scoped: Modifier[] = [
+        ...rolls.scoped,
+        ...(n % 4 === 1
+          ? [{ stat: 'ailmentOnBlock', kind: 'flat', value: 1, tags: ['poison'] } as const]
+          : []),
+        ...(n % 4 === 2
+          ? [{ stat: 'ignoreArmour', kind: 'flat', value: 1, tags: ['crit'] } as const]
+          : []),
+      ];
+      // A cold part, which the shields test, or a poison part, which passes them.
+      const poisonPart = n % 5 === 3;
+      const conversions =
+        n % 5 === 0
+          ? [{ source: 'center', spec: { to: 'cold' as const, fraction: 0.4 } }]
+          : poisonPart
+            ? [{ source: 'center', spec: { to: 'poison' as const, fraction: 0.5 } }]
+            : [];
+      const triggers: TriggerSpec[] = [idle(ZONE), ...rolls.listeners];
+      if (n % 2 === 1) triggers.push({ on: 'hit', do: heal });
+      if (n % 3 === 2) triggers.push({ on: 'crit', do: heal });
+      const placed = defendedPlaced(r);
+      const make = (): RunContext => {
+        const stats = makeStats({ damage: 400, ...values }, scoped, {
+          ...centerTriggers(triggers),
+          conversions,
+        });
+        const ctx = placedEnemies(placed, {
+          stats,
+          rules: rolls.rules,
+          seed: 17 + n,
+          data: v3TestData(),
+        });
+        armour(ctx);
+        ctx.enemies.forEach((e, k) => {
+          if (k % 3 === 0) {
+            e.shockStacks = 2;
+            e.shockUntil = 1000;
+          }
+          if (k % 4 === 1) e.frozenUntil = 1000;
+        });
+        rolls.prepare(ctx);
+        return ctx;
+      };
+      const a = make();
+      const b = make();
+      const scale = 0.25 + r.next();
+      const pa = rolls.payload(a.effectPayloads[effectOf(a, 0)] as Payload);
+      const pb = rolls.payload(b.effectPayloads[effectOf(b, 0)] as Payload);
+      hoistPulseRows(a, a.sys.pulse, pa);
+      for (let k = 0; k < a.enemies.length; k++) {
+        const [ea, eb] = [a.enemies[k] as Enemy, b.enemies[k] as Enemy];
+        if (ea.alive) hitPulse(a, a.sys.pulse, ea, pa, scale, 1, FIRST);
+        if (eb.alive) hitWithPayload(b, eb, pb, 0, scale, null, null, false, 1, FIRST);
+      }
+      const state = (ctx: RunContext) => ({
+        hp: ctx.enemies.map((e) => [e.hp, e.alive, e.killDepth]),
+        tallies: [ctx.damageHit, ctx.damageCrit, ctx.damagePoison, ctx.maxHit, ctx.kills],
+        bySource: ctx.bySource.slice(0, 4),
+        rng: rngPositions(ctx),
+        pulse: { ...ctx.sys.pulse, row: 0, critRow: 0, crits: [...ctx.sys.pulse.crits] },
+        events: ctx.events.slice(),
+        queue: queuedOf(ctx),
+        life: ctx.player.life,
+        counters: { ...ctx.counters },
+        ...rolledState(ctx),
+      });
+      expect(state(a)).toEqual(state(b));
+      // No hit raised an event: a pulse's blocked ones push no hitBlocked either.
+      expect(a.events.some((event) => event.type === 'hit' || event.type === 'hitBlocked')).toBe(
+        false,
+      );
+      // The pulse counts and totals the hits that landed, and those alone.
+      const struck = a.enemies.filter((e) => e.hp !== e.maxHp);
+      const first = a.enemies[0] as Enemy;
+      if (!poisonPart) expect(struck).not.toContain(first);
+      expect(a.sys.pulse.hits).toBe(struck.length);
+      const lost = struck.reduce((sum, e) => sum + toNumber(sub(e.maxHp, e.hp)), 0);
+      expect(toNumber(a.sys.pulse.total)).toBeCloseTo(lost, 6);
+      // A sure ignite burns the first shielder, whose shield blocked the hit.
+      const sure = rolls.values.igniteChance === 1 || n % 7 === 3;
+      if (sure && pa.rollsAilments && !poisonPart) {
+        const ignited = a.events.some((e) => e.type === 'ignite' && e.targetId === first.id);
+        expect(ignited).toBe(true);
+      }
+    },
+  );
+
+  it.each(FIXTURES)(
+    'equals hitWithPayload on shielded and armoured enemies when every hit and crit trigger takes only signature hits (fixture %i; OWN test 10)',
+    (n) => {
+      const r = createStreams(4000 + n).spawn;
+      const rolls = rollsOf(n);
+      const triggers: TriggerSpec[] = [idle(ZONE)];
+      const listens = n % 3;
+      if (listens !== 2) triggers.push({ on: 'hit', when: [{ hitIs: 'signature' }], do: heal });
+      if (listens !== 1) triggers.push({ on: 'crit', when: [{ hitIs: 'signature' }], do: heal });
+      const depth = Math.floor(n / 12) % 2 === 0 ? 1 : MAX_DEPTH;
+      if (depth === 1) triggers.push(...rolls.listeners);
+      const placed = defendedPlaced(r);
+      const make = (): RunContext => {
+        const stats = makeStats(
+          { damage: 400, critMultiplier: 2, ...rolls.values },
+          rolls.scoped,
+          centerTriggers(triggers),
+        );
+        const ctx = placedEnemies(placed, {
+          stats,
+          rules: rolls.rules,
+          seed: 19 + n,
+          data: v3TestData(),
+        });
+        armour(ctx);
+        rolls.prepare(ctx);
+        return ctx;
+      };
+      const a = make();
+      const b = make();
+      const scale = 0.1 + 0.6 * r.next();
+      const pa = rolls.payload(a.effectPayloads[effectOf(a, 0)] as Payload);
+      const pb = rolls.payload(b.effectPayloads[effectOf(b, 0)] as Payload);
+      hoistPulseRows(a, a.sys.pulse, pa);
+      expect(a.sys.pulse.quiet).toBe(true);
+      for (let k = 0; k < a.enemies.length; k++) {
+        const [ea, eb] = [a.enemies[k] as Enemy, b.enemies[k] as Enemy];
+        if (ea.alive) hitPulse(a, a.sys.pulse, ea, pa, scale, depth, FIRST);
+        if (eb.alive) hitWithPayload(b, eb, pb, 0, scale, null, null, false, depth, FIRST);
+      }
+      const state = (ctx: RunContext) => ({
+        hp: ctx.enemies.map((e) => [e.hp, e.alive, e.killDepth]),
+        tallies: [ctx.damageHit, ctx.damageCrit, ctx.maxHit, ctx.kills],
+        bySource: ctx.bySource.slice(0, 4),
+        counters: { ...ctx.counters },
+        rng: rngPositions(ctx),
+        hits: ctx.sys.pulse.hits,
+        total: ctx.sys.pulse.total,
+        crits: ctx.sys.pulse.crits.slice(0, ctx.sys.pulse.critCount),
+        events: ctx.events.slice(),
+        queue: ctx.effectQueue.size,
+        triggerState: [ctx.triggerState.readyAt.slice(), ctx.triggerState.count.slice()],
+        ...rolledState(ctx),
+      });
+      expect(state(a)).toEqual(state(b));
+      // Only the hits that landed reach fire: the first shielder's never does.
+      const pulse = a.sys.pulse;
+      expect(pulse.hits).toBe(a.enemies.filter((e) => e.hp !== e.maxHp).length);
+      expect(pulse.hits).toBeLessThan(a.enemies.length);
+      const capped = (listens !== 2 ? pulse.hits : 0) + (listens !== 1 ? pulse.critCount : 0);
+      expect(a.counters.triggerDepthCapped).toBe(depth === MAX_DEPTH ? capped : 0);
+    },
+  );
+
+  it('returns false for a hit the defences block in full and true for any other (R1)', () => {
+    /**
+     * hitPulse of the zone's payload at scale 1, a hit of 100, on each of `placed` in turn: what
+     * it returned, and whether each enemy is alive after it.
+     */
+    const returns = (
+      placed: readonly PlacedEnemy[],
+      { poison = 0, m1 = false }: { poison?: number; m1?: boolean } = {},
+    ): { returned: boolean[]; alive: boolean[] } => {
+      const conversions =
+        poison > 0 ? [{ source: 'center', spec: { to: 'poison' as const, fraction: poison } }] : [];
+      const stats = makeStats({ damage: 400, critChance: 0, igniteChance: 0 }, [], {
+        ...centerTriggers([idle(ZONE)]),
+        conversions,
+      });
+      const ctx = placedEnemies(placed, { stats, ...(m1 ? {} : { data: v3TestData() }) });
+      expect(ctx.enemies.every((e) => (e.v3 === null) === m1)).toBe(true);
+      const p = ctx.effectPayloads[effectOf(ctx, 0)] as Payload;
+      hoistPulseRows(ctx, ctx.sys.pulse, p);
+      const returned = ctx.enemies.map((e) => hitPulse(ctx, ctx.sys.pulse, e, p, 1, 0, -1));
+      // A hit returns false exactly when it adds nothing to the pulse.
+      expect(ctx.sys.pulse.hits).toBe(returned.filter((r) => r).length);
+      return { returned, alive: ctx.enemies.map((e) => e.alive) };
+    };
+    // Blocked, landed, on an enemy without defences, and a kill.
+    const placed = [
+      near(0, 0, { type: 'shielder', hp: 1e6 }),
+      near(4, 0, { type: 'shielder', hp: 500 }),
+      near(8, 0, { type: 'square', hp: 1e6 }),
+      near(12, 0, { type: 'square', hp: 50 }),
+    ];
+    expect(returns(placed)).toEqual({
+      returned: [false, true, true, true],
+      alive: [true, true, true, false],
+    });
+    // A converted hit the shield blocks in part: its hit part, not its poison part.
+    expect(returns(placed.slice(0, 1), { poison: 0.5 }).returned).toEqual([true]);
+    // An M1 run's enemy, which has no record.
+    expect(returns([near(0, 0)], { m1: true }).returned).toEqual([true]);
+  });
+
+  it('lets an aura pulse’s blocked hit add nothing to its hits or total, and still burn (OWN test 10)', () => {
+    // A shielder whose shield blocks every pulse hit and a square, both within the aura.
+    const ctx = placedEnemies(
+      [near(-250, 0, { type: 'shielder', hp: 1e6 }), near(-220, 0, { type: 'square', hp: 1e6 })],
+      {
+        stats: makeStats({ damage: 10, critChance: 0, igniteChance: 1 }, [], {
+          triggers: [],
+          conversions: [],
+          emitters: [{ source: 'outer.aura', grant: { kind: 'aura' } }],
+        }),
+        data: v3TestData(),
+      },
+    );
+    const em = ctx.emitters[1] as EmitterRuntime;
+    ctx.now = (3 + 4 * em.index) % PHASE_TICKS;
+    runAura(ctx, em);
+    const [one, two] = ctx.enemies as [Enemy, Enemy];
+    // A pulse hit deals 2.5: the shielder's is blocked, the square's lands.
+    expect([toNumber(one.hp), toNumber(two.hp)]).toEqual([1e6, 1e6 - 2.5]);
+    expect(pulsesOf(ctx.events)).toEqual([
+      { type: 'pulse', kind: 'aura', id: 1, hits: 1, total: num(2.5), crits: [] },
+    ]);
+    expect(ctx.events.some((event) => event.type === 'hitBlocked')).toBe(false);
+    // Both ignite: the blocked hit's burn goes through applyPulseBurn as the landed one's.
+    expect(
+      ctx.events.flatMap((event) => (event.type === 'ignite' ? [event.targetId] : [])),
+    ).toEqual([1, 2]);
+    expect(one.burns.map((b) => b.dps)).toEqual(two.burns.map((b) => b.dps));
+  });
 
   it('is not quiet for a hit or crit trigger on other hits, an onHit hook or a signature payload', () => {
     const quietOf = (triggers: TriggerSpec[], flags = 0, modules: TestModule[] = []): boolean => {

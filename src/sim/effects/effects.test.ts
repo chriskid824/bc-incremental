@@ -66,7 +66,7 @@ function spawned(
 const signaturePayload = (ctx: RunContext): Payload => (ctx.emitters[0] as EmitterRuntime).payload;
 
 /** An emitter hit (depth 0, no origin) of the signature attack on `enemy`. */
-const emitterHit = (ctx: RunContext, enemy: Enemy, forcedCrit = false): void =>
+const emitterHit = (ctx: RunContext, enemy: Enemy, forcedCrit = false): boolean =>
   hitWithPayload(ctx, enemy, signaturePayload(ctx), 0, 1, null, null, forcedCrit, 0, -1);
 
 const isEffectHit = (event: SimEvent): event is HitEvent =>

@@ -74,7 +74,7 @@ function fixture(
 const enemy = (ctx: RunContext, id: number): Enemy => ctx.enemies[id - 1] as Enemy;
 
 /** An emitter hit (depth 0, no origin) of the signature attack on `target`. */
-const emitterHit = (ctx: RunContext, target: Enemy): void =>
+const emitterHit = (ctx: RunContext, target: Enemy): boolean =>
   hitWithPayload(
     ctx,
     target,

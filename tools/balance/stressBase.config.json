@@ -44,7 +44,10 @@
       "orbitCount": 0,
       "contactDamageTaken": 1,
       "lifeRegen": 0,
-      "extraLives": 0
+      "extraLives": 0,
+      "ignoreShield": 0,
+      "ignoreArmour": 0,
+      "ailmentOnBlock": 0
     },
     "values": {
       "damage": 450.22067097931824,
@@ -89,7 +92,10 @@
       "orbitCount": 0,
       "contactDamageTaken": 1,
       "lifeRegen": 0,
-      "extraLives": 0
+      "extraLives": 0,
+      "ignoreShield": 0,
+      "ignoreArmour": 0,
+      "ailmentOnBlock": 0
     },
     "scoped": [
       {

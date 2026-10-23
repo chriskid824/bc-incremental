@@ -107,6 +107,12 @@ flowchart LR
   - 敵人生成的敵人（C7.5 是分裂的子怪；C7.4b 的召喚、C7.6 的增殖與 C7.7 的洋蔥噴出之後也走這裡）先抽角度，再經過 `spawnOrSkip(ctx, def, rec, ux, uy, dist, origin?)`：存活數已經到上限就不生，`enemySpawnsSkipped` 加一（L4）。所以 stream 的位置不看場上有多少敵人，「存活 ≤ 上限」是不變量。
   - 還有敵人沒放出的波次（`released < queue.length`）不算清掉；波次計時照樣開下一波，不會卡住；`checkRunEnd` 的 `waveCap` 結束要等每個開著的波次都清掉。
   - M1 多付的成本：`releaseEnemies` 每 tick 一次 `cap === Infinity` 的判斷、每放一隻一次比較與一次遞減（`Infinity` 減一還是 `Infinity`），會分裂的敵人每次 `split` 一次判斷，之後是原本的迴圈。
+- **護盾與堅甲**（C7.3，C7 設計 §2.4，`src/sim/combat/defend.ts`）：v3 局的敵人在紀錄（`Enemy.v3`）裡帶 `defence`（`SHIELDED` 1、`ARMOURED` 2）與 `blockPct`：盾兵的 `shield` 行為給 `SHIELDED` 與它的 `blockBelowPct`（0.15），其他種類都是 0 與 0；`ARMOURED` 留給 C7.6 的堅甲。
+  - 位置：`hitWithPayload` 與 `hitPulse` 在受傷倍率與 `modifyDamage` hook 之後、`applyHitDamage` 之前，多一個判斷 `enemy.v3 !== null && enemy.v3.defence !== 0`。M1 的敵人沒有紀錄，每次擊中只多這一次判斷，判斷之後的路和原本逐句相同。過了判斷才讀 `bypassOf`：酬載的 `bypass` 位元（`coinHit` 的 `ignoreShield`、`ignoreArmour`：`IGNORE_SHIELD` 1、`IGNORE_ARMOUR` 2），加上這次擊中暴擊之後那一列的 `ignoreShield`、`ignoreArmour` 大於 0 的位元；所以帶 `[crit]` 的破甲只在暴擊時無視堅甲，帶 `[chain]` 的破盾電弧只在連鎖跳無視護盾。
+  - `defend` 的規則：沒有轉換的擊中是一段，有轉換的是 `ctx.hitParts` 的各段，每段乘 `amount / parts.total`（受傷倍率與 hook 對每段一樣；`parts.total` 是 0 時，hook 給的傷害全算第一段，和統計一樣）。持續傷害種類的段（轉成燃燒、毒、流血的）兩種防禦都不管。護盾：擊中種類的段嚴格小於 `blockPct × 最大生命` 就變成 0，在堅甲之前判斷（L8）；堅甲：通過的擊中段 × `ARMOUR_TAKEN`（0.5）。有轉換的擊中把每段落下的值寫回 `parts.amount` 與 `parts.total`，統計照落下的值逐段記。全部擋下（回傳 `null`）要三個條件同時成立：護盾生效（有 `SHIELDED`、沒有 `IGNORE_SHIELD`）、沒有持續傷害種類的段、每段都落下 0（R2）；所以 0 傷害的擊中種類擊中打在生效的護盾上也是全部擋下（§2.4 的邊界情形）。只有堅甲永遠不會全部擋下：沒有護盾或護盾被無視時，0 傷害的擊中落下 0，和打在沒有防禦的敵人身上一樣，有 `hit` 事件與觸發、照常施加擲中的異常狀態，沒有 `hitBlocked`。帶持續傷害種類的擊中（沒有轉換的燃燒、毒、流血種類擊中，或有持續傷害段的轉換擊中）打在護盾上也不算全部擋下，落下多少就是多少，0 也一樣。部分擋下的轉換擊中照樣造成落下的傷害、照常施加異常狀態。暴擊用乘過暴擊倍率的值比，連鎖的每一跳各自判斷，荊棘、碎裂與無人機的擊中一樣會被防禦；燃燒、毒、流血的每一步（`dealDot`）不經過 `defend`（gd:53）。
+  - `blockedHit`：全部擋下的擊中不扣血、不記統計、不發 `hit` 事件、不更新 `maxHit`、不派發 hit／crit 觸發與 `onHit`；脈衝的擊中也不算進脈衝的統計，不跑安靜派發。它設 `hitMark`（連鎖不會跳回這隻），不是脈衝的擊中發 `hitBlocked {targetId, x, y, amount, crit}`（`amount` 是受傷倍率與 hook 之後的傷害）。點燃擲中的燃燒照樣施加（`applyHitBurn`，脈衝裡經過 `applyPulseBurn`；L1）；毒與流血只在該異常狀態自己那一列（暴擊時是暴擊的列）的 `ailmentOnBlock` 大於 0 時施加，所以帶 `[poison]` 的滲透只讓毒過去；感電與冰冷一律不施加。擲骰都在防禦之前，也不多擲，所以酬載的 stream 位置和落下的擊中一樣；觸發的 stream 不一樣：擋下的擊中不派發 hit／crit 觸發，機率小於 1 的觸發就少擲一次。
+  - 回傳值（R1）：`hitWithPayload` 與 `hitPulse` 只在跑了 `blockedHit` 時回傳 `false`，其他路徑都回傳 `true`：M1 的擊中、沒有防禦的敵人、落下或部分擋下的擊中、致死的擊中。擊中之後加的四個感電先看回傳值，全部擋下就不加：`jumpHit` 的 `shockOnHit`、`chainBolt` 第一下的 `shockStacks`、落雷對目標的 `shockStacks`、線段每一下的 `shockStacks`。不變的有三處：被擋下的連鎖跳照樣發 `raiseChainJump`（跳已經發生，連鎖從被擋下、已設 `hitMark` 的敵人繼續）；區域脈衝迴圈在 `hitPulse` 之後的區域條款（異常條款、冰冷、緩速、標記）屬於區域、不屬於它的擊中，倍率 0 沒有擊中時也套用，所以脈衝擊中被擋下的護盾敵人照樣吃到；其他呼叫者都不看回傳值，包括落雷的範圍擊中、`aura.ts` 與無人機。
+  - 三個 scoped stat 都是基礎 0、格式 number：`ignoreShield`、`ignoreArmour`、`ailmentOnBlock`。C7.6 在 `defend` 裡加元素護盾（`WARDED`）與守護，C7b 的集火在裡面合併門檻。
 - 傷害引擎在 `src/sim/` 的子資料夾：`build/`（`compileBuild`、ModTable、來源、條件與縮放、`sizeOf`／`countOf`：攻擊、子彈與區域建立的每個半徑與數量都經過它們讀，現在是恆等，倍率跟 B1 一起做，C4 設計 D29）、`rules/`（招牌攻擊與它們的形態、規則模組）、`emitters/`（發射器：`volley`、`lob`、`fan`、`arc`、`strike`、`aura`、`orbit`、`drone`；酬載與共用型別在 `types.ts`）、`combat/`（命中、線性連鎖 `chain.ts`、一般連鎖 `policy.ts`、轉換）、`ailments/`（燃燒記錄、分桶環、流血、感電、冰冷、剩餘值 `remaining.ts`）、`effects/`（觸發派發、目標選擇器 `select.ts`、效果佇列與執行、中心事件、事件旗標 `flags.ts`）、`systems/`（tick 的各階段，加上 `context.ts` 的 `RunContext`、`systemState.ts` 的 `ctx.sys`、投射物池 `shots.ts`）。直接放在 `src/sim/` 的：`caps.ts`（所有規格上限，§4.7.1）、`grid.ts`（空間格）、`targeting.ts`（投射物選目標）、`types.ts`（事件、計數器、`SimState`）、`simulation.ts`、`testing.ts`（測試與工具共用的 fixture）。熱路徑不配置記憶體：每筆傷害最多新增一個 `SimEvent`（區域、線段與光環的擊中每次脈衝合成一個 `pulse` 事件）；分桶環、效果佇列、投射物池、區域池與無人機池是 typed array 物件池，命中、擊殺、中心事件、條件與選擇器的輸入各用一個重複使用的暫存物件。
 
 ### 4.4 屬性、修正與傷害引擎
@@ -130,7 +136,7 @@ type Modifier = {
 ```
 
 - 最終值 = `(base + Σflat) × (1 + Σincreased) × Π(1 + more)`。
-- **scoped stat**（`SCOPED_STATS`）的值隨每筆傷害變：傷害倍率、暴擊率、暴擊倍率、點燃／中毒／流血／感電機率、五個 `*Always`、`frostOnHit`。只有它們的修正可以帶 `tags`、`notTags`、`scope`、`when`、`scaling`；其他屬性（攻速、連鎖數、持續時間…）一局只有一個值。平坦傷害不能帶標籤，留在 `values.damage`。
+- **scoped stat**（`SCOPED_STATS`）的值隨每筆傷害變：傷害倍率、暴擊率、暴擊倍率、點燃／中毒／流血／感電機率、五個 `*Always`、`frostOnHit`，以及 C7.3 的 `ignoreShield`、`ignoreArmour`、`ailmentOnBlock`（§4.3 的護盾與堅甲）。只有它們的修正可以帶 `tags`、`notTags`、`scope`、`when`、`scaling`；其他屬性（攻速、連鎖數、持續時間…）一局只有一個值。平坦傷害不能帶標籤，留在 `values.damage`。
 - `StatBlock = { base, values, scoped, triggers, conversions }`（`src/data/stats.ts`）：`values` 是不帶標籤、範圍與條件的修正合出的最終值（和 M1 一樣）；scoped stat 的所有修正（含不帶標籤的）另外依資料順序放進 `scoped`；`triggers`、`conversions` 也依資料順序收集，各帶節點換算出的來源（`sourceOfNode`）。`meta` 用 `statBlockFor` 產生，測試與工具用 `makeStats`。
 - `*Always` 在擲骰**之後**把結果改成成功（例：灼熱暴擊 = `igniteAlways flat 1 [crit]` 加 `damage more −0.5 [hit] notTags [crit]`），所以 RNG 的消耗和改成資料之前一樣。
 - 縮放：貢獻 `c = min(cap, value × g(x))`，`g` 是線性、`log10(1 + x)` 或 `x^exponent`，`every` 會先把 x 取整步再套任何一種；flat 與 increased 加上 c，more 乘 `1 + c`。`powFactor` 是倍率，沒有 `1 +`：只能用在 value 1 的 more（`exponent > 0`，`cap` 省略或 ≥ 1），直接乘 `min(cap, max(1, x)^exponent)`。變數：連鎖第幾跳、目標的燃燒／毒／感電層數、目標的冰冷量表、目標和角色的距離、失去的生命比例。
@@ -203,7 +209,7 @@ type Modifier = {
   1. 暴擊：擲暴擊率，或必定暴擊（steadyAim 的節奏、`critAlways`）；`canCrit` 為 false 時整個跳過（碎裂）。
   2. 異常狀態依序擲：點燃、中毒、流血、感電；機率 0 不擲。
   3. 傷害：`基礎 × 暴擊倍率 × 連鎖保留 × 列的傷害倍率`（有轉換時分段，4.4.9）。傷害模式 `prescaled` 不乘列（C4 的引爆），`pctMaxHp` 是碎裂（4.4.7）。
-  4. 目標感電或凍結時 × 受傷倍率；有 `modifyDamage` hook 時依序套用。
+  4. 目標感電或凍結時 × 受傷倍率；有 `modifyDamage` hook 時依序套用。v3 局的敵人有護盾或堅甲時再經過 `defend`（§4.3 的護盾與堅甲），全部擋下的命中交給 `blockedHit`、回傳 `false`，不走 5、6。
   5. 扣血、統計、事件。致死的命中：先派發 hit／crit 觸發與 `onHit`（帶 `KILLED`，條件看到的是被打中那一刻的目標），再進擊殺。
   6. 沒死：施加擲中的異常狀態（每次成功施加都派發 `ailmentApplied`）與 `frostOnHit`，最後才派發 hit／crit 觸發與 `onHit`，所以條件看得到剛施加的狀態。
 - 派發只排佇列、只擲 `trigger` stream，所以命中不會重入。
@@ -460,7 +466,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 
 `src/sim/systems/segments.ts`。線段授予（雷網）的發射器在 segments 階段跑（`ctx.sys.segments.emitters`）：每 `em.interval` tick（`periodSec`，0.25 秒是 15）判定一次，相位 `(3 + 4 × index) % 15`（`em.timer` 從負值起算），所以各發射器在不同 tick 判定。
 
-- 端點是帶感電的活敵人（依 ID）。每個端點用端點自己的空間格（`segments.grid`、`nearestTwo`）連到 `range` 內最近的 1 或 2 個端點，兩邊互連的只算一條。每條線用主空間格的框查詢（加 `ctx.shotPad`）與大型敵人的補查，標記半徑內的敵人（`Enemy.segMark`）；然後依 ID 掃一次，被標記的各吃一下，沒死的加 `shockStacks` 層感電（不擲骰）。端點在自己的線上，所以也會被打。
+- 端點是帶感電的活敵人（依 ID）。每個端點用端點自己的空間格（`segments.grid`、`nearestTwo`）連到 `range` 內最近的 1 或 2 個端點，兩邊互連的只算一條。每條線用主空間格的框查詢（加 `ctx.shotPad`）與大型敵人的補查，標記半徑內的敵人（`Enemy.segMark`）；然後依 ID 掃一次，被標記的各吃一下，沒被全部擋下也沒死的加 `shockStacks` 層感電（不擲骰；§4.3 的 R1）。端點在自己的線上，所以也會被打。
 - 擊中標籤 `hit|lightning|area`（沒有 `chain`：不吃過載、不算預算、不發 chainJump），會暴擊、**不擲異常狀態**（Q4 (B) 只指名區域與光環，線段維持 (A)，Q4/F7），在 `combat` stream；加進脈衝統計，端點有 2 個以上的判定發一個 `pulse` 事件（`kind: 'segment'`），線的端點寫進 `SimState.segments` 給畫面。
 
 #### 4.7.8 授予：荊棘、落雷、光環、環繞
@@ -472,7 +478,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - **Stream（C27）**：授予的發射器（荊棘、光環、環繞、落雷、線段）都在 `combat` 擲，光環與日冕擊中的異常狀態也是；不另開 `grants` stream，`RNG_STREAMS` 與它的測試都不用動。
 - **荊棘**（`systems/contact.ts`）：每隻碰到角色的敵人先吃每個荊棘發射器的一擊（`hit|thorns`，預設 `damagePct` 3，會暴擊、擲異常狀態，深度 0，不是攻擊）；被殺死的不扣生命、不漏怪、不發 heroHit，只派發 contact。
 - **生命比例的快照**（C4 設計 D20、N10）：`ctx.evalInput.playerLifeFrac` 每 tick 只在 contact 階段最後寫一次，所以荊棘擊中讀到的 `lifeLostPct` 縮放是上一 tick 的值，效果階段的治療也要到下一次快照才看得到。刻意保留：這是最便宜的正確讀法。
-- **落雷**（`emitters/strike.ts`）：固定週期（不看攻速），計時從 0 起。每次落雷是一次攻擊：選擇器從角色選目標（`'player'` 是驗證錯誤；選不到這次就沒了），目標吃一下（算預算 1），還活著就加 `shockStacks` 層感電；然後 `radius` 內其他活敵人依 ID 各吃一下（不算預算）；最後在一般路徑跑固定的 `chainJumps` 跳（`em.chainPayload`，每跳感電，沒有連鎖策略）。選擇器由 `createRunContext` 編（`emitters/types.ts` 不能 import `select.ts`，§4.7.15）。
+- **落雷**（`emitters/strike.ts`）：固定週期（不看攻速），計時從 0 起。每次落雷是一次攻擊：選擇器從角色選目標（`'player'` 是驗證錯誤；選不到這次就沒了），目標吃一下（算預算 1），沒被全部擋下而且還活著就加 `shockStacks` 層感電（§4.3 的 R1）；然後 `radius` 內其他活敵人依 ID 各吃一下（不算預算）；最後在一般路徑跑固定的 `chainJumps` 跳（`em.chainPayload`，每跳感電，沒有連鎖策略）。選擇器由 `createRunContext` 編（`emitters/types.ts` 不能 import `select.ts`，§4.7.15）。
 - **光環**（`emitters/aura.ts`）：每 15 tick 在相位 `(3 + 4 × index) % 15` 脈衝，`auraRadius`（160）內的活敵人依 ID 各吃一下，照區域脈衝的規則擲骰並施加異常狀態（`hitPulse`，Q4 (B)），深度 0、沒有 origin；`em.attacks` 數脈衝。`em.interval` 是 `PHASE_TICKS`，執行時不讀。
   - 聚能脈衝（`everyNth`）：只有第 n 次脈衝作用、× `mult`；其他次只計數，不查詢、不擊中、不擲骰、不發事件。
   - 日冕（`corona`）：`em.timer` 數到它的週期，全場每隻活著的敵人吃一下日冕酬載（`em.alt`）；日冕不算脈衝。同一個 tick 先脈衝、再日冕。
@@ -520,8 +526,8 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - `groundZone`：在事件位置（或選擇器選到的敵人）加一個效果區域（§4.7.6）。
 - `projectiles`：在投射物池產生小投射物（`spawnShot`，受 `PROJECTILE_CAP` 限制），從事件位置或角色出發；`target`、`distinct` 追蹤，`radial`、`fan` 直線（§4.7.3）。
 - `slashLine`：一條線，依 ID 各打一次線寬一半加上自身半徑內的敵人（`grid.inSegmentBox` 加大型敵人的補查）；`'along'` 只用在 chainJump，沿著那一跳的角度。`slash` 事件在擊中之前。
-- `coinHit`：對目標一擊，`coin` 事件在前；酬載帶 `bypass` 位元，給 C7 的護盾與堅甲。
-- `chainBolt`：自己的一次攻擊，第一下算預算 1，然後正好 `jumps` 跳（一般路徑、沒有策略，整數跳數不擲骰），每一下沒殺死就加 `shockStacks` 層感電；不發 chainJump。
+- `coinHit`：對目標一擊，`coin` 事件在前；酬載帶 `bypass` 位元，給 C7 的護盾與堅甲，由 `bypassOf` 讀。
+- `chainBolt`：自己的一次攻擊，第一下算預算 1，然後正好 `jumps` 跳（一般路徑、沒有策略，整數跳數不擲骰），每一下沒被全部擋下也沒殺死就加 `shockStacks` 層感電（§4.3 的 R1）；不發 chainJump。
 
 #### 4.7.14 暫存緩衝的擁有者
 
@@ -567,13 +573,13 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - **葉模組怎麼保持是葉**：它的閉包經過 `build/eval.ts` → `effects/flags.ts` → `emitters/types.ts`（`flags.ts` 在頂層讀 `SIGNATURE`），還有 `eval.ts` import 的異常狀態模組與資料模組；其中任何一個 value-import 會回頭 import 它的模組，就形成循環。所以 `emitters/types.ts` 只用型別 import `ChainPolicy`，連鎖策略由 `createRunContext` 編好、當值傳給酬載；`emitters/types.ts` 不 import `select.ts`，落雷的選擇器也由 `createRunContext` 編；重複攻擊的酬載在 `context.ts` 建（`repeatPayload`）；層數上限的讀取放在 `records.ts`（`burnCapOf`）與 `shock.ts`（`shockCapOf`），不放 `remaining.ts`（C4.10）。閉包外的模組可以 value-import 葉模組：`context.ts` 拿工廠、`build/compile.ts` 拿 `NO_POLICY_SPEC`，還有各系統模組。
 - **`REPEAT_STEPS`，不是 `SignatureModule` 的成員**：招牌攻擊與規則模組是編譯時的程式（hook 透過 `rules/api.ts` 作用），不 value-import 任何走得到 `systems/context.ts` 的模組，所以讀它們 `const` 模組物件的 `rules/index.ts`（`SIGNATURES`、`RULE_MODULES`）也在循環外。重複攻擊如果是模組的成員，每個招牌攻擊模組都要 import `volley.ts`、`lob.ts`…，`rules/index.ts` 就會經過 `context.ts` → `build/compile.ts` 被拉進循環。`src/sim/rules/importOrder.test.ts` 守這件事：每個規則模組在新的模組登錄表裡第一個被 import，接著 import `rules/index.ts` 與 `systems/context.ts`，兩個登錄表的每一項都要有定義；執行器在 TDZ 丟錯或回傳 `undefined`，它都會失敗。
 - **C4.5b 的修正**：刪掉 `context.ts` 對 `systems/emitters.ts` 的 import（原本是 `context.ts` → `systems/emitters.ts` → `volley.ts` → `context.ts`），現在只有 `simulation.ts` import `systems/emitters.ts`；之後的 `ctx.sys` 工廠都在葉模組，`createRunContext` 不為了工廠 import 任何系統模組。它沒有讓 `context.ts` 離開循環：`context.ts` 還 import `shots.ts` 的 `createShotPool`，其他回到 `context.ts` 的路徑（例如 `shots.ts` → `lob.ts` → `volley.ts` → `context.ts`）也還在，靠上面的頂層規則與 import 順序測試守住。
-- **剩下的循環**，在 fa8a663 量的（一段腳本讀 `src/` 所有非測試模組的非型別 import 與 re-export，用和 `systemState.test.ts` 相同的規則判斷只有型別，再求強連通分量）：只有一個，15 個模組：
+- **剩下的循環**，在 fa8a663 量的（一段腳本讀 `src/` 所有非測試模組的非型別 import 與 re-export，用和 `systemState.test.ts` 相同的規則判斷只有型別，再求強連通分量）：只有一個，15 個模組；C7.3 的 `defend.ts` 和 `hit.ts` 互相 import，加入後是 16 個（`SHIELDED`、`ARMOURED` 定義在循環外的 `enemyRecord.ts`，所以 `spawn.ts` 不進來）：
   - `systems/`：`context.ts`、`shots.ts`、`death.ts`、`zones.ts`、`drones.ts`
-  - `combat/`：`hit.ts`、`chain.ts`、`policy.ts`
+  - `combat/`：`hit.ts`、`chain.ts`、`policy.ts`、`defend.ts`
   - `effects/`：`centerEvents.ts`、`dispatch.ts`、`execute.ts`
   - `emitters/`：`volley.ts`、`lob.ts`、`fan.ts`、`arc.ts`
 - 成員之間只靠呼叫連起來（例：`shots.ts` 呼叫 `land`；`REPEAT_STEPS` 指向 `fireVolleyRepeat`、`fireLobRepeat`、`fireFanRepeat`、`fireArcRepeat` 與 `drones.ts` 的 `swarmRepeat`），除了 `REPEAT_STEPS` 在 `execute.ts` 頂層引用的這五個函式宣告，沒有一個在頂層讀同一個循環的值。從外面走到它、沒有被成員 import 回去的，`src/` 有 25 個：`sim/` 的 `simulation.ts`、`index.ts`、`testing.ts`，`systems/` 的 `ailments.ts`、`contact.ts`、`emitters.ts`、`projectiles.ts`、`segments.ts`、`waves.ts`，`emitters/` 的 `strike.ts`、`aura.ts`、`orbit.ts`，`app/` 的 `input.ts`、`loop.ts`、`main.ts`、`playtest.ts`、`session.ts`，`meta/index.ts`、`meta/startWave.ts`，`render/` 的 `backdrop.ts`、`damageNumbers.ts`、`drones.ts`、`index.ts`、`player.ts`、`renderer.ts`；`tools/balance/` 另有 15 個。
-- `src/sim` 在每個循環之外、也走不到它的有 43 個：葉模組與它的閉包、`emitters/types.ts`、`emitters/drone.ts`、`effects/` 的 `types.ts`、`select.ts`、`flags.ts`、`queue.ts`，所有 `build/` 與 `ailments/` 模組（含 `remaining.ts`），`rules/` 的 15 個模組（招牌攻擊、形態、規則模組、`index.ts`、`api.ts`、`module.ts`），以及 `movement.ts`、`spawn.ts`、`runEnd.ts`、`targeting.ts` 等。其中幾個在頂層讀彼此的 `const`（`modTable.ts` 的 `ESTIMATE = staticInput()`、`apply.ts` 的 `DAMAGE = SCOPED_INDEX.damage`、`records.ts` 的 `BURN_TICK_INTERVAL = DOT_STEP_TICKS`），只因為它們在循環之外才合規；C4.10 把層數上限的讀取放在 `records.ts` 與 `shock.ts`，就是為了不讓它們進入循環。
+- `src/sim` 在每個循環之外、也走不到它的有 44 個：葉模組與它的閉包、`emitters/types.ts`、`emitters/drone.ts`、`effects/` 的 `types.ts`、`select.ts`、`flags.ts`、`queue.ts`，所有 `build/` 與 `ailments/` 模組（含 `remaining.ts`），`rules/` 的 15 個模組（招牌攻擊、形態、規則模組、`index.ts`、`api.ts`、`module.ts`），以及 `movement.ts`、`spawn.ts`、`runEnd.ts`、`targeting.ts` 等。其中幾個在頂層讀彼此的 `const`（`modTable.ts` 的 `ESTIMATE = staticInput()`、`apply.ts` 的 `DAMAGE = SCOPED_INDEX.damage`、`records.ts` 的 `BURN_TICK_INTERVAL = DOT_STEP_TICKS`），只因為它們在循環之外才合規；C4.10 把層數上限的讀取放在 `records.ts` 與 `shock.ts`，就是為了不讓它們進入循環。
 
 ### 4.8 C6 的角色局
 
@@ -784,7 +790,7 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 - `npm run fingerprint`（`tools/balance/fingerprint.ts`）：1,032 個案例（972 個合成 build＋60 個真實天賦 build）跑完，把每個 tick 的事件（投影到 M1 的欄位）與結果做雜湊，一個案例一行。`-- --check` 和 `tools/balance/fingerprint.baseline.txt` 逐行比對，重構必須完全相同；`-- --compare-results` 列出每個變動案例的波次、擊殺、漏怪、傷害與燃燒差多少；`-- --write` 重寫基準，只有量過、說明過的行為修改可以用。
 - `src/sim/golden.test.ts`：24 個案例 × 1,200 tick 的事件雜湊，跟著 `npm test` 跑。
-- `src/sim/goldenC4.test.ts`（GOLDEN-C4，也跟著 `npm test` 跑）：C4、C5、C7 的機制與 C6 角色局的 33 個 fixture（C4 的 21 個、C5 的 6 個、C6 的 4 個、C7 的 2 個：C7.2 的 `playerDefences` 與 C7.5 的 `enemyCap`），每個在 seed 1 與 2 各跑 1,200 tick。雜湊是 sha256 的前 16 個十六進位數字，算的是每個 tick 原樣的事件（不投影到 M1 的欄位），再加上 `projectResult`、`damageBySource` 與不為 0 的計數器（依 `COUNTER_IDS` 順序）；每個案例跑兩次，兩次要相同。落地一個機制的 commit 附上它的 fixture 與當時的雜湊；之後的 commit 不動已記錄的雜湊，除非 commit message 寫明重記哪些、為什麼。到 fa8a663 為止重記過：C4.7 的 `burst` 事件重記了用到 explode 或 nova 的 `thorns`、`selector`、`freezeList`、`zones`；`zones` 另外在 C4.6c、C4.6d、C4.7b 依 Q4 重記；C5.R 調 swarm 的數字時重記了 `swarm`、`swarmRepeat`、`swarmTurret`。後加的計數器在之前的 fixture 都是 0，不會動到雜湊。
+- `src/sim/goldenC4.test.ts`（GOLDEN-C4，也跟著 `npm test` 跑）：C4、C5、C7 的機制與 C6 角色局的 34 個 fixture（C4 的 21 個、C5 的 6 個、C6 的 4 個、C7 的 3 個：C7.2 的 `playerDefences`、C7.5 的 `enemyCap` 與 C7.3 的 `enemyDefences`），每個在 seed 1 與 2 各跑 1,200 tick。雜湊是 sha256 的前 16 個十六進位數字，算的是每個 tick 原樣的事件（不投影到 M1 的欄位），再加上 `projectResult`、`damageBySource` 與不為 0 的計數器（依 `COUNTER_IDS` 順序）；每個案例跑兩次，兩次要相同。落地一個機制的 commit 附上它的 fixture 與當時的雜湊；之後的 commit 不動已記錄的雜湊，除非 commit message 寫明重記哪些、為什麼。到 fa8a663 為止重記過：C4.7 的 `burst` 事件重記了用到 explode 或 nova 的 `thorns`、`selector`、`freezeList`、`zones`；`zones` 另外在 C4.6c、C4.6d、C4.7b 依 Q4 重記；C5.R 調 swarm 的數字時重記了 `swarm`、`swarmRepeat`、`swarmTurret`。後加的計數器在之前的 fixture 都是 0，不會動到雜湊。
 - `npx tsx tools/balance/probe.ts --json <檔案>` 與 `tools/balance/probeDiff.ts <前> <後>`：比兩次平衡探針（各策略的前線 F@10/20/40/60、到第 20／30 波的分鐘在 ±5% 內，T1–T8 通過）。`out/` 不進 git，參考檔放在本機的 `out/balance/`。
 - `npm run bench -- --scenario normal|hits|ailments|effects|poisonBoss|v3fire`：一般一局、擊中路徑、異常狀態壓力（瘟疫＋無盡烈焰，第 30 波）、效果佇列、Boss 身上約 500 層毒（和 5 層比，持續傷害每一步的成本要和層數無關，比值 < 1.3）、熔核的角色局（C6.6：GOLDEN-C4 的 `v3fire`，測試資料從第 12 波跑 20 秒，不看 `--start-wave`；不是壓力家族，沒有存活數區間，§4.8）。
 - C4 加的場景（`--scenario` 也接受這些 id）都是**壓力家族**，C5 的 `stressBase` 也是（`hive` 不是，見 §4.6.7）：用壓力 fixture（`src/sim/testing.ts` 的 `stressData`、`stressStats`）從第 30 波跑 30 秒（3 次暖身、20 次計時），tick 300 起約 300 隻活著，不看 `--start-wave`。`--check` 另外要求 seed 1 那一局在 tick 301–1800 的平均存活數在 280–320（釘住工作量），並印出一行壓力報告：中位數、比值、一起計時的 `normal` 的中位數與工作量（存活數、峰值與計數器；`stress` 另有區域、熔岩彈與線段的工作量）。閘門欄的 CI 是下一點的 `--check`（比值與存活數區間）。
