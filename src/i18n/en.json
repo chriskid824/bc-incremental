@@ -234,5 +234,13 @@
   "playtest.sending": "Send anonymous playtest data",
   "playtest.export": "Export data",
   "playtest.feedback": "Feedback survey",
-  "result.feedback": "Tell us what you think: a 2-minute survey"
+  "result.feedback": "Tell us what you think: a 2-minute survey",
+  "save.notice.restored": "Your latest save could not be read; the backup was loaded.",
+  "save.notice.v1Waiting": "Playtest progress waiting: {shards} shards, {cores} cores, best wave {wave}. Your first pick gets it.",
+  "save.notice.v1Claimed": "{character} got your playtest progress: {shards} shards, {cores} cores, best wave {wave}.",
+  "save.notice.refundedAll": "{character}: some talents are not available in this version, so all talents were refunded.",
+  "save.notice.dropped": "{character}: {count} talents no longer fit the web and were refunded.",
+  "save.notice.newer": "This save is from a newer version (save version {version}). Update the game; progress here is not saved.",
+  "save.notice.unreadable": "Your save could not be read. Progress is not saved until you start over.",
+  "save.action.startOver": "Start over"
 }

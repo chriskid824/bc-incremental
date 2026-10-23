@@ -11,11 +11,14 @@ export interface SaveStorage {
 }
 
 const KEY_PREFIX = 'bc-incremental.save.';
+/** The v3 game's save v2 (src/app/profileStore.ts), apart from M1's save under KEY_PREFIX. */
+export const PROFILE_SAVE_PREFIX = 'bc-incremental.profile.';
 
 /**
- * localStorage-backed slots, kept under `prefix` + the slot name. Reads and writes swallow quota
- * and privacy-mode errors. The `?hive` prototype passes its own prefix (src/app/devFlags.ts), so
- * its profile never touches the player's save.
+ * localStorage-backed slots, kept under `prefix` + the slot name; the default prefix is the M1
+ * page's. Reads and writes swallow quota and privacy-mode errors. The `?hive` prototype
+ * (src/app/devFlags.ts) and the v3 game (PROFILE_SAVE_PREFIX) pass their own prefixes, so neither
+ * profile touches the M1 page's save.
  */
 export class LocalSaveStorage implements SaveStorage {
   constructor(

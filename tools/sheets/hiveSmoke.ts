@@ -1,16 +1,19 @@
 /**
  * SMOKE of the `?hive` prototype (docs/v3 C5 design §0.2, §13): starts a Vite dev server and
  * plays the browser build in headless Chromium through Playwright, as tools/sheets/capture.ts
- * does. In one fresh browser context (empty localStorage) it opens the plain page first, then
- * `?hive`, `?hive&lang=zh-TW` and `?hive&wave=30`, and plays each for 60 s at 4×, pressing
- * Enter so a new run starts whenever one ends.
+ * does. In one fresh browser context, whose localStorage holds only the v3 game's save v2
+ * (`bc-incremental.profile.main` and `.backup`, both tests/fixtures/save-v2.json minified), it
+ * opens the plain page first, then `?hive`, `?hive&lang=zh-TW` and `?hive&wave=30`, and plays
+ * each for 60 s at 4×, pressing Enter so a new run starts whenever one ends.
  *
  * It fails on any page error or console error. On the plain page it also fails on the
  * prototype's badge anywhere in the page and on a `bc-incremental.hive.save.` key in
  * localStorage afterwards, so a hive prefix, badge or preset wired without the flag fails here.
  * Under `?hive` it checks the badge in both locales, that the `&wave=30` page's first run starts
- * at wave 30, and that the plain page's save is left as it was. localStorage is read after
- * leaving a page, so the save each page makes on its way out counts.
+ * at wave 30, and that the plain page's save is left as it was. After every page it fails unless
+ * both v2 slots are byte-identical and no other `bc-incremental.profile.` key appeared, so no
+ * page touches the v3 game's save (docs/v3 C8 design §2.3). localStorage is read after leaving a
+ * page, so the save each page makes on its way out counts.
  *
  * It saves three screenshots for the lead to look at: the hive docked as a run starts, the
  * drones mid-sortie, and wave 30 from the `&wave=30` page's first run. The page's clock
@@ -22,7 +25,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -48,6 +51,12 @@ const CHROMIUM_ARGS = [
 /** src/app/devFlags.ts and src/platform/storage.ts. */
 const HIVE_SAVE_PREFIX = 'bc-incremental.hive.save.';
 const PLAYER_SAVE = 'bc-incremental.save.main';
+/** src/platform/storage.ts: the v3 game's save v2, which no page here may touch. */
+const PROFILE_SAVE_PREFIX = 'bc-incremental.profile.';
+const PROFILE_SLOTS: readonly string[] = [
+  `${PROFILE_SAVE_PREFIX}main`,
+  `${PROFILE_SAVE_PREFIX}backup`,
+];
 /** The badge's text in each locale (src/i18n, app.prototype.hive). */
 const BADGES = { en: 'Hive prototype', 'zh-TW': '蜂巢原型' } as const;
 
@@ -94,6 +103,7 @@ interface Page {
   on(event: 'console', listener: (message: ConsoleMessage) => void): void;
 }
 interface StorageState {
+  readonly cookies: readonly unknown[];
   readonly origins: readonly {
     readonly origin: string;
     readonly localStorage: readonly { readonly name: string; readonly value: string }[];
@@ -107,6 +117,7 @@ interface Browser {
   newContext(options: {
     viewport: { width: number; height: number };
     locale: string;
+    storageState: StorageState;
   }): Promise<BrowserContext>;
   close(): Promise<void>;
 }
@@ -155,6 +166,17 @@ async function storageAfterLeaving(
   const state = await context.storageState();
   const items = state.origins.find((entry) => entry.origin === origin)?.localStorage ?? [];
   return new Map(items.map((item) => [item.name, item.value]));
+}
+
+/**
+ * Checks that both v2 slots in `items` still hold `seeded`, byte for byte, and that no other
+ * `bc-incremental.profile.` key appeared.
+ */
+function checkProfile(items: ReadonlyMap<string, string>, seeded: string): void {
+  for (const key of PROFILE_SLOTS) check(items.get(key) === seeded, `${key} changed`);
+  for (const key of items.keys()) {
+    if (key.startsWith(PROFILE_SAVE_PREFIX)) check(PROFILE_SLOTS.includes(key), `wrote ${key}`);
+  }
 }
 
 /** Opens `url` and waits for `ready`, the screen a page with this profile lands on. */
@@ -209,6 +231,9 @@ async function main(): Promise<void> {
   const docked = join(out, 'hive-docked.png');
   const sortie = join(out, 'hive-sortie.png');
   const wave30 = join(out, 'hive-wave30.png');
+  // Save v2 as the v3 game's store writes it (src/app/profileStore.ts): the fixture, minified.
+  const fixture = resolve(import.meta.dirname, '../../tests/fixtures/save-v2.json');
+  const profileSave = JSON.stringify(JSON.parse(readFileSync(fixture, 'utf8')));
 
   const { chromium } = loadPlaywright();
   const server = await createServer({
@@ -222,8 +247,18 @@ async function main(): Promise<void> {
     const base = server.resolvedUrls?.local[0];
     if (base === undefined) throw new Error('Vite did not report a local URL');
     browser = await chromium.launch({ args: CHROMIUM_ARGS });
-    // A fresh context: empty localStorage, as on a first visit.
-    const context = await browser.newContext({ viewport: VIEWPORT, locale: 'en-US' });
+    // A fresh context, as on a first visit, but for a v3 game's save in its two slots.
+    const origin = new URL(base).origin;
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      locale: 'en-US',
+      storageState: {
+        cookies: [],
+        origins: [
+          { origin, localStorage: PROFILE_SLOTS.map((name) => ({ name, value: profileSave })) },
+        ],
+      },
+    });
     const page = await context.newPage();
     page.on('pageerror', (error) => failures.push(`${current}: page error: ${error.message}`));
     page.on('console', (message) => {
@@ -241,11 +276,11 @@ async function main(): Promise<void> {
       check(!plainText.includes(label), `the prototype's badge "${label}" is on the plain page`);
     }
     check((await badge(page)) === null, 'a .bc-badge element is on the plain page');
-    const origin = new URL(base).origin;
     const plain = await storageAfterLeaving(page, context, origin);
     for (const key of plain.keys()) {
       check(!key.startsWith(HIVE_SAVE_PREFIX), `the plain page wrote ${key}`);
     }
+    checkProfile(plain, profileSave);
     const playerSave = plain.get(PLAYER_SAVE);
     check(playerSave !== undefined, `the plain page saved nothing under ${PLAYER_SAVE}`);
 
@@ -262,12 +297,14 @@ async function main(): Promise<void> {
     ]);
     await page.clock.resume();
     await play(page);
+    checkProfile(await storageAfterLeaving(page, context, origin), profileSave);
 
     await open(page, base, '/?hive&lang=zh-TW', TALENTS);
     check((await badge(page)) === BADGES['zh-TW'], `the badge reads ${await badge(page)}`);
     await page.keyboard.press('Enter');
     await page.waitForSelector(HUD, { timeout: LOAD_TIMEOUT_MS });
     await play(page);
+    checkProfile(await storageAfterLeaving(page, context, origin), profileSave);
 
     // `&wave=30`: its first run starts at wave 30.
     await open(page, base, '/?hive&wave=30', TALENTS);
@@ -278,9 +315,10 @@ async function main(): Promise<void> {
     check(/ 30$/.test(runLine), `the first run's HUD reads "${runLine}"`);
     await page.clock.resume();
     await play(page);
+    const after = await storageAfterLeaving(page, context, origin);
+    checkProfile(after, profileSave);
 
     current = 'after the hive pages';
-    const after = await storageAfterLeaving(page, context, origin);
     check(after.has(`${HIVE_SAVE_PREFIX}main`), 'no hive save');
     check(after.get(PLAYER_SAVE) === playerSave, `the hive pages changed ${PLAYER_SAVE}`);
 

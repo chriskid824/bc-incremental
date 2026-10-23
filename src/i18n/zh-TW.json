@@ -234,5 +234,13 @@
   "playtest.sending": "傳送匿名試玩數據",
   "playtest.export": "匯出數據",
   "playtest.feedback": "回饋問卷",
-  "result.feedback": "花 2 分鐘填問卷，告訴我們你的想法"
+  "result.feedback": "花 2 分鐘填問卷，告訴我們你的想法",
+  "save.notice.restored": "最新的存檔讀不出來，已改讀備份。",
+  "save.notice.v1Waiting": "試玩版的進度待領取：{shards} 碎片、{cores} 核心、最遠第 {wave} 波，給你第一個選的角色。",
+  "save.notice.v1Claimed": "{character} 拿到了試玩版的進度：{shards} 碎片、{cores} 核心、最遠第 {wave} 波。",
+  "save.notice.refundedAll": "{character} 有天賦在這個版本無法使用，全部天賦都退還了。",
+  "save.notice.dropped": "{character} 有 {count} 個天賦不再符合天賦網的規則，已經退還。",
+  "save.notice.newer": "這份存檔來自較新的版本（存檔版本 {version}）。請更新遊戲；這裡的進度不會存下來。",
+  "save.notice.unreadable": "存檔讀不出來。重新開始之前，進度不會存下來。",
+  "save.action.startOver": "重新開始"
 }

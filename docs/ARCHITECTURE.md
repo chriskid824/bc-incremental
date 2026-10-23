@@ -32,7 +32,7 @@ src/
   sim/         一局的模擬：狀態、系統、固定 timestep（純 TS）
   meta/        局外進度：資源、天賦配點、轉生、昇華（純 TS）
     web/       v3 天賦網的角色進度、價格、購買規則、路徑、外盤揭露與角色局的 build、結算
-  save/        存檔序列化、版本遷移（純 TS）
+  save/        存檔：M1 的入口（版本 1）、存檔 v2 的資料層、載入、序列化與版本遷移（純 TS）
   platform/    平台介面與各平台實作（web、steam、portal）
   render/      PixiJS：實體外觀、粒子、傷害數字、鏡頭、展示模式
   ui/          DOM：主選單、結算、天賦網外框、設定、HUD
@@ -43,6 +43,7 @@ tools/
   balance/     平衡模擬器 CLI 與 build 策略
     v3/        v3 天賦網的角色工作階段（`--character`）：配點策略、局間的迴圈與 v3 的 CSV
   content/     v3 內容的工具：天賦網快照（`npm run snapshots`）
+  save/        存檔 fixture 的產生腳本（`npx tsx tools/save/<腳本>.ts --write`，`--check` 只比對）
 electron/      main process、preload、steamworks 橋接
 tests/         跨模組測試、存檔 fixture
 viewer.html    開發用天賦網檢視器（`npm run dev` 的 /viewer.html，不進 build）
@@ -65,7 +66,7 @@ flowchart LR
 ```
 
 - `meta` 把天賦網與昇華編譯成一個 `StatBlock`（屬性的最終值，加上帶標籤、範圍或條件的修正、觸發與轉換，§4.4）和一組 `RuleSpec`（keystone 規則與參數），連同起始波次交給 `sim` 開一局。v3 的角色局另外帶 `RunConfig.character`（`CharacterRun`：角色 ID 與帶來源、係數的規則 `SourcedRule`，§4.8），這時 `RunConfig.rules` 是空的、招牌攻擊是那個角色的；M1 的局不帶。v3 這一側在 `src/meta/web`：`webBuild` 依 `web.nodes` 的順序收集擁有的節點（招牌攻擊節點除外），沒有縮放的修正把階數併成一筆（`flat`、`increased` 乘上階數，`more` 是 (1 + 值)^階數 − 1），有縮放的照階數重複；觸發與轉換照階數重複、發射器只算一次，融合盤的觸發與規則帶那條融合的係數，規則每條只放一次、不照階數重複。`webRunConfig` 把它包成 `RunConfig`，`webStartWave` 讀這輪轉生的最遠波次（`cycleBest`），一局結束走 `settleWebRun`（同一個 `settleRun`，另外更新歷來最遠波次 `bestWave`）。跳波補償由 `meta` 在結算時依期望掉落計算，`sim` 只回報有沒有清掉起始波次。
-- v3 的購買規則也在 `src/meta/web`：`canBuy` 依十二列的順序回傳第一個不通過的理由（`BUY_REASONS`），`buy` 把價格從錢包移到 `spent`。要碎片的節點各走三條成長曲線之一（`PRICE_CURVE_OF`；★ 只收核心、昇華節點只收迴響），買幾次的總價是封閉式，和購買順序無關，所以 `refundNode`、`refundPreview` 與 `legalize` 退回的都是兩個封閉式的差（最多退到 `spent`），`refundAll` 整筆退回 `spent`。外盤揭露（`revealedOuters`）由歷來最遠波次算出來，不另外存。角色與帳號的進度（`CharacterProgress`、`AccountProgress`）是不可變的值，C8 之前只放在記憶體，不動存檔格式。
+- v3 的購買規則也在 `src/meta/web`：`canBuy` 依十二列的順序回傳第一個不通過的理由（`BUY_REASONS`），`buy` 把價格從錢包移到 `spent`。要碎片的節點各走三條成長曲線之一（`PRICE_CURVE_OF`；★ 只收核心、昇華節點只收迴響），買幾次的總價是封閉式，和購買順序無關，所以 `refundNode`、`refundPreview` 與 `legalize` 退回的都是兩個封閉式的差（最多退到 `spent`），`refundAll` 整筆退回 `spent`。外盤揭露（`revealedOuters`）由歷來最遠波次算出來，不另外存。角色與帳號的進度（`CharacterProgress`、`AccountProgress`）是不可變的值。角色的進度 C8 起存進存檔 v2：`src/save/profile.ts` 讀寫，`src/app/profileStore.ts` 的 `ProfileStore` 存到槽位（§8）；帳號的進度不另外存，由存檔裡的奇點旗標算出（`src/save/account.ts` 的 `accountProgress`）。
 - `sim` 每個 tick 產出 `SimEvents`（擊中、暴擊、點燃、連鎖、死亡、掉落）。`render` 只讀狀態和事件，不改狀態。
 - 一局結束時 `sim` 回傳 `RunResult`（最遠波次、各類與各來源的傷害統計、掉落、計數器），`meta` 結算資源後存檔。
 - 平衡模擬器直接呼叫 `meta` 與 `sim`，不載入 `render`、`ui`、`platform`。
@@ -654,14 +655,21 @@ interface Platform {
 ## 8. 存檔格式
 
 ```json
-{ "v": 3, "savedAt": "2026-11-01T12:00:00Z", "game": "bc-incremental", "data": { } }
+{ "v": 2, "savedAt": "2026-11-01T12:00:00Z", "game": "bc-incremental", "data": { } }
 ```
 
 - JSON，不壓縮、不加密（單機遊戲，改存檔不是問題）。
-- 讀檔流程：解析 → 依 `v` 依序跑 `migrations[v]` 直到最新版 → zod 驗證 → 載入。驗證失敗就載入備份並記錄錯誤。
-- 兩個輪替槽位（`main`、`backup`），每局結束與選單中每 30 秒自動存檔。關分頁或重新整理（`pagehide`）時也存檔；當時如果在局中，先把這局到目前為止的碎片、核心與最遠波次計入（`Session.abandonRun`，沒有跳波補償），局數 +1，下次開啟回到天賦網。
-- 設定頁提供匯出／匯入存檔字串（Base64），方便玩家回報問題。
-- 每個舊版本保留一份 fixture 存檔，測試確保它能遷移到最新版並通過驗證。
+- 外層 `{v, savedAt, game, data}`（`src/save/format.ts` 的 `EnvelopeSchema`）每個版本都一樣：格式改變只改 `data`，所以舊版讀到任何較新版本的存檔都是 `newer`。外層的 schema 是 strict，又在比對版本之前就跑，所以外層多一個欄位會讀成 `invalid`；這時較新的 `main` 旁邊只要有一份讀得出來的舊 `backup`，就會變成 `restored`，把較新的存檔蓋掉。
+- 兩個版本、兩條讀檔流程：
+  - 版本 1（`M1_SAVE_VERSION`）是 M1 的格式。M1 頁面、`?hive`、`hivePreset` 與工具用 `src/save/index.ts` 的 `loadSave`、`serializeSave`，只讀寫版本 1，不跑遷移，較新的版本（存檔 v2 也是）讀成錯誤。
+  - 版本 2（`SAVE_VERSION`）是存檔 v2（docs/v3 C8 設計 §1）：帳號，加上每個角色一份進度。v3 遊戲用 `src/save/profile.ts` 的 `parseProfile`：解析 → 外層 → 版本高於 `SAVE_VERSION` 就是 `newer`，不讀資料 → 依 `v` 依序跑 `MIGRATIONS[v]` 到 `SAVE_VERSION` → zod 驗證 → 載入時的修正：改名照 `ID_RENAMES`；改名成 null（移除）或合併的節點、網上沒有的節點與不見的昇華，讓那個角色的天賦全部退還（`refundedAll`）；`legalize` 拿掉不合規則的配點，照價退還（`dropped`）；配置（`loadouts`）拿掉被移除的節點。全部退還與 `legalize` 的退還各留一則通知（`SaveNotice`），改名與配置的清理不留；版本 1 的存檔有待領取的進度時另有 `v1Waiting`。`serializeProfile` 寫出前用同一份 schema 檢查，這個 build 讀不回來的內容（例如小數的核心）丟 `SaveFormatError`，什麼都不寫。
+- 三組 key：M1 頁面的 `bc-incremental.save.main`、`.backup`；v3 遊戲的 `bc-incremental.profile.main`、`.backup`（`src/platform/storage.ts` 的 `PROFILE_SAVE_PREFIX`）；`?hive` 原型的 `bc-incremental.hive.save.*`（`src/app/devFlags.ts`）。三組互不寫入，前綴也不互為前綴；v3 遊戲只在兩個 v2 槽位都是空的時候與重新開始時讀 M1 的 key（見下），`?hive` 的 key 只有 `?hive` 讀。前綴不含版本號：之後的格式在原地遷移。Steam 版的存檔是檔案，不看前綴（§7），所以那裡要第二份存檔得另取檔名。
+- 兩個輪替槽位（`main`、`backup`），每局結束與選單中每 30 秒自動存檔。關分頁或重新整理（`pagehide`）時也存檔；當時如果在局中，先把這局到目前為止的碎片、核心與最遠波次計入（`Session.abandonRun`，沒有跳波補償），局數 +1，下次開啟回到天賦網。M1 頁面先讀 `main`，讀不出來改讀 `backup`，都不行就從頭開始；存檔時把 `main` 現在的內容抄進 `backup`，再寫 `main`。
+- v3 遊戲的槽位由 `src/app/profileStore.ts` 的 `ProfileStore` 讀寫（B1 接上頁面）。`open()` 讀兩個槽位，第一個成立的就是結果：任一槽位是較新的版本 → `newer`；`main` 讀得出來 → `loaded`；`backup` 讀得出來 → `restored`，用備份的內容重寫 `main`，`backup` 一字不變；都不行 → `unreadable`。`save()` 把上一份讀進或寫出的文字抄進 `backup`，不是 `main` 現在的內容，所以壞掉的 `main` 不會蓋掉好的備份；再寫 `main`，讀回來比對，不一樣就是 `failed`（localStorage 滿了或不能用時，寫入的錯誤被吞掉）。遷移過、修正過或從備份還原的存檔在開啟時馬上寫回，所以每則通知只出現一次。通知的文字是 `save.notice.*`，`src/ui/saveNotice.ts` 把通知轉成 i18n key 與格式化好的值。
+- 兩種唯讀：`newer` 時可以玩，但不存檔，請玩家更新遊戲；`unreadable` 時也不存檔，直到玩家按「重新開始」（`startOver()`，只在 `unreadable` 時可以按），所以修好的版本還讀得到這份存檔。重新開始時從新的存檔開始（M1 的存檔還在的話，再匯入一次），馬上寫 `main`；讀不出來的 `backup` 留到下一次存檔。
+- M1 進度的一次性匯入：兩個 v2 槽位都是空的時候，`ProfileStore` 先讀 M1 的 `main`，再讀 `backup`，第一份讀得出來的版本 1 存檔變成新的存檔，馬上寫進 v2 的 `main`：速度、遊戲時間與局數照舊，花掉與沒花的碎片、核心連同最遠波次變成帳號的待領取進度，給第一個選的角色。M1 的 key 只讀不寫，`?hive` 的 key 不讀；之後在 M1 頁面玩的進度不會再帶過來。Steam 版沒有 M1 的存檔，不匯入。
+- 設定頁提供匯出／匯入存檔字串（Base64），方便玩家回報問題（M3）。
+- 每個版本至少保留一份 fixture 存檔（`tests/fixtures/`），測試確保它能遷移到最新版並通過驗證：版本 1 是 `save-v1.json` 與約一小時 M1 試玩的 `save-v1-playtest.json`，版本 2 是 `save-v2.json`。後兩份由 `tools/save/playtestV1.ts` 與 `tools/save/fixtureV2.ts` 產生（`--write` 寫檔，`--check` 只比對），不要手改。`src/save/save.test.ts` 另外釘住一份每個欄位都有值的存檔的完整文字：格式一改就失敗，直到 `SAVE_VERSION` +1、寫好遷移、加上 fixture。
 - Steam 雲端存檔用 Steamworks 的 Auto-Cloud 同步存檔資料夾，不需要額外程式碼。
 
 ## 9. 試玩數據
