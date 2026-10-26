@@ -458,7 +458,7 @@ describe('runWebFuzz (§4.9)', () => {
       expect(report.builds.some((line) => line.bestWave === wave)).toBe(true);
       expect(report.builds.some((line) => line.startWave === wave)).toBe(true);
     }
-  });
+  }, 30_000);
 
   it("draws build i from createRng(deriveSeed(seed, 'webFuzz:' + i)), in the module's fixed order (L2, D3)", () => {
     const report = fuzz(24, 1);

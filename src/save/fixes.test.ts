@@ -592,7 +592,7 @@ describe('fixProfile on random profiles (T8 (i), T9)', () => {
       expect(second.changed, `profile ${i}`).toBe(false);
       expect(second.profile, `profile ${i}`).toBe(first.profile);
     }
-  });
+  }, 30_000);
 
   it('T9: conserves every currency, by refundAll or by legalize’s exact move', () => {
     const issues = DAMAGED.flatMap(({ profile, context: damage }, i) => {

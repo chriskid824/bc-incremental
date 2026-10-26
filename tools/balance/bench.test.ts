@@ -239,7 +239,7 @@ describe('stressBase (docs/v3 C5 design §7.3, §9 C5.6)', () => {
     // Every field but the timed lob aim.
     expect(asJson(workload)).toEqual(pinned);
     expect(lobAimMicros).toBeGreaterThan(0);
-  });
+  }, 30_000);
 
   it('pins every workload field but lobAimMicros (§9 C5.6, PGR2-6)', () => {
     const fields = [

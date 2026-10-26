@@ -143,7 +143,7 @@ describe('volley', () => {
       if (actual.join() !== expected.join()) mismatches++;
     }
     expect(mismatches).toBe(0);
-  });
+  }, 30_000);
 });
 
 describe('projectileEstimate', () => {

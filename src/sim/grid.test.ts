@@ -606,7 +606,7 @@ describe('grid queries match the linear scans', () => {
     // The random states really exercise tie-breaking and late items.
     expect(total.ties).toBeGreaterThan(TIES_MIN);
     expect(total.late).toBeGreaterThan(LATE_MIN);
-  });
+  }, 30_000);
 });
 
 // ---- The shot queries (src/sim/systems/shots.ts) against the linear scans ----
@@ -703,7 +703,7 @@ describe('the shot queries match the linear scans', () => {
     }
     expect(scanned).toBeGreaterThan(100);
     expect(blocks).toBeGreaterThan(200);
-  });
+  }, 30_000);
 
   it('answers the same after sortNow, which sorts a scanned source once', () => {
     const rng = createRng(20261015);

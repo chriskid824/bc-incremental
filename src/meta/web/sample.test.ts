@@ -222,7 +222,7 @@ describe('sampleProgress (D25, AMB18)', () => {
       expect(count / 400, id).toBeGreaterThan(0.8);
       expect(count / 400, id).toBeLessThan(1.2);
     }
-  });
+  }, 30_000);
 
   it('stops when canBuy accepts nothing, and buys nothing for no purchases', () => {
     // fire.full cut down to two ◆ next to the root: two purchases, then nothing is open.

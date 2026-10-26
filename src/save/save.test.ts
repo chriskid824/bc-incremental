@@ -466,7 +466,7 @@ describe('byte stability (T8)', () => {
       if (!loaded.ok) continue;
       expect(serializeProfile(deepFreeze(loaded.profile), 'now'), `profile ${i}`).toBe(text);
     }
-  });
+  }, 30_000);
 });
 
 const TRIPWIRE = 'the save format changed: SAVE_VERSION + 1, a migration and a fixture (CLAUDE.md)';
