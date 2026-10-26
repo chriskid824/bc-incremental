@@ -8,7 +8,7 @@
  * Plays the pr set's plan (run.ts) on the balance pool, evaluates it and writes report.md,
  * checks.json, checks.csv and the sessions' CSVs to --out; prints the report. Exits 0 without an
  * unaccepted FAIL, 1 with one, 2 for a usage error and 3 for a crash. The nightly and weekly sets
- * are C10.4's (`npm run nightly`).
+ * run in shards (`npm run nightly`, tools/balance/v3/nightly.ts), whose merge writes the same files.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -27,6 +27,7 @@ import {
   characterRunsCsv,
 } from '../report';
 import { deadBoardsCsv, deadNodesCsv } from './boards';
+import { doublesCsv, fusionsCsv, triplesCsv } from './fusions';
 import { keystonesCsv } from './keystones';
 import {
   checksCsv,
@@ -102,7 +103,7 @@ export function parseChecksOptions(argv: readonly string[]): ChecksOptions | nul
 }
 
 /** process.env's value, or a git command's output, or 'unknown'; never throws. */
-function fromGit(env: string | undefined, args: readonly string[]): string {
+export function fromGit(env: string | undefined, args: readonly string[]): string {
   if (env !== undefined && env !== '') return env;
   try {
     const out = execFileSync('git', [...args], {
@@ -142,7 +143,10 @@ export interface ChecksDeps {
   readonly ref?: () => string;
 }
 
-/** The CSVs a check of the set writes beside report.md, when the set holds it (design §1.4). */
+/**
+ * The CSVs a check of the set writes beside report.md, when the set holds it (design §1.4):
+ * fusions.csv with the mirrors, so the pr set's strength writes none.
+ */
 const CHECK_CSVS: readonly (readonly [
   CheckId,
   string,
@@ -154,6 +158,9 @@ const CHECK_CSVS: readonly (readonly [
   ['affixes', 'affixes.csv', affixesCsv],
   ['deadBoards', 'dead_boards.csv', deadBoardsCsv],
   ['deadNodes', 'dead_nodes.csv', deadNodesCsv],
+  ['mirrors', 'fusions.csv', fusionsCsv],
+  ['doubles', 'doubles.csv', doublesCsv],
+  ['triples', 'triples.csv', triplesCsv],
 ];
 
 /**

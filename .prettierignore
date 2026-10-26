@@ -7,3 +7,4 @@ package-lock.json
 docs
 CLAUDE.md
 .claude
+tools/balance/probe.baseline.json

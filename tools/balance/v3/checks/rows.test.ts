@@ -34,6 +34,8 @@ import {
   enemyRowCheck,
   enemyRowCsv,
   enemyRowUnitId,
+  escapesOf,
+  judgedRun,
   OUTER_ROW_GAIN,
   outerHolds,
   outerRowCheck,
@@ -177,6 +179,24 @@ describe('the row rules', () => {
       weakHolds({ time: 10, damage, leaks, uncleared: 0 }, medians);
     expect([at(1, 500), at(0, 0), at(1.25, 0), at(2, 0)]).toEqual([true, true, false, false]);
     expect(weakHolds({ time: 25.5, damage: 0, leaks: 0, uncleared: 0 }, medians)).toBe(false);
+  });
+
+  it('reads a treasure wave any treasure escaped at ENEMY_ROW_MAX_SECONDS, uncleared; any other as it ran (lead ruling U18)', () => {
+    // Two treasures, one fled: escapes = count − kills − leaks.
+    const fled = testWave({ clearSeconds: 3, count: 2, kills: 1 });
+    expect(escapesOf(fled)).toBe(1);
+    expect(judgedRun(fled, 'treasure')).toEqual({
+      ...fled,
+      clearSeconds: ENEMY_ROW_MAX_SECONDS,
+      cleared: false,
+    });
+    expect(judgedRun(fled, 'triangle')).toBe(fled);
+    // Every treasure caught: its clear time. A leak is not an escape.
+    const caught = testWave({ clearSeconds: 3, count: 2, kills: 2 });
+    expect(judgedRun(caught, 'treasure')).toBe(caught);
+    const leaked = testWave({ clearSeconds: 3, count: 2, kills: 1, leaks: 1 });
+    expect(escapesOf(leaked)).toBe(0);
+    expect(judgedRun(leaked, 'treasure')).toBe(leaked);
   });
 
   it('reads the medians over seeds: clear time, contact plus bullets, leaks per 10', () => {
@@ -599,6 +619,37 @@ describe('enemyRow (敵人對照表)', () => {
     expect(ofCheck(rows, 'fire × triangle')).toMatchObject({ status: 'info', target: '△: info' });
   });
 
+  it("judges the treasure's ✓ on catches: a wave the treasure fled reads 60 s, uncleared (lead ruling U18)", () => {
+    // 蜂巢 is ✓ against the treasure: its waves end in 3 s, the treasure fleeing or caught;
+    // 熔核 (✗, exempt) catches it in 40 s.
+    const plan = planOf('B2');
+    const summon = (kills: number): CheckResult =>
+      ofCheck(
+        enemyRowCheck(
+          plan,
+          rowResults(plan, {
+            enemyRow: ({ character, column }) =>
+              column !== 'treasure'
+                ? {}
+                : character === 'fire'
+                  ? { clearSeconds: 40 }
+                  : { clearSeconds: 3, count: 1, kills },
+          }),
+        ),
+        'summon × treasure',
+      );
+    // Fled on every seed: 60 s against the median of 40 and 60, as an uncleared wave.
+    expect(summon(0)).toMatchObject({
+      status: 'pass',
+      measured: 'time 60 s, damage 0, 0 leaks per 10 (8 of 8 uncleared) (medians 50 s, 0)',
+    });
+    // Caught on every seed: its 3 s against the median of 40 and 3, as C10.3 judges a clear time.
+    expect(summon(1)).toMatchObject({
+      status: 'FAIL',
+      measured: 'time 3 s, damage 0, 0 leaks per 10 (medians 21.5 s, 0)',
+    });
+  });
+
   it('is noData while a seed or an answer reading is missing, or the answer was refused', () => {
     const plan = planOf('B2');
     const rows = enemyRowCheck(
@@ -636,10 +687,10 @@ describe('enemyRow (敵人對照表)', () => {
     const lines = csv.trimEnd().split('\n');
     expect(lines[0]).toBe(
       'character,column,mark,build,seed,node,purchases,refused,clearSeconds,cleared,died,count,' +
-        'leaks,contact,bullet,session',
+        'leaks,kills,contact,bullet,session',
     );
     expect(lines).toHaveLength(1 + 4 * 8);
-    expect(lines[1]).toBe('fire,triangle,even,snapshot,0,,,,10,true,false,10,0,0,2,0');
+    expect(lines[1]).toBe('fire,triangle,even,snapshot,0,,,,10,true,false,10,0,10,0,2,0');
   });
 });
 
@@ -721,12 +772,12 @@ describe('outerRow (外盤能補的敵人)', () => {
     const lines = csv.trimEnd().split('\n');
     expect(lines[0]).toBe(
       'character,outer,column,cover,seed,bought,unpaid,refused,clearSeconds,cleared,died,count,' +
-        'leaks,contact,bullet,session',
+        'leaks,kills,contact,bullet,session',
     );
     expect(lines).toHaveLength(1 + 12 * 8);
     expect(lines[1]).toBe(
       'fire,poison,triangle,answer,0,outer.poison.main.entry,outer.poison.alpha.r1,' +
-        'outer.poison.alpha.r1: notEnoughShards,8,true,false,10,0,10,,0',
+        'outer.poison.alpha.r1: notEnoughShards,8,true,false,10,0,10,10,,0',
     );
   });
 });
@@ -810,6 +861,45 @@ describe('affixes (菁英詞綴)', () => {
         '5 countering boards (fire.center, outer.poison, outer.crit, outer.ice, outer.summon); ' +
         'one for every character',
     });
+  });
+
+  it('counters no affix on a board whose plain median kill time is censored (lead ruling U19)', () => {
+    // No board kills its plain elite (60 s, uncleared): an affixed elite killed in 10 s, or never,
+    // reads no ratio below AFFIX_RATIO_MAX, so no board counters an affix.
+    for (const affixed of [
+      { clearSeconds: 10 },
+      { clearSeconds: ENEMY_ROW_MAX_SECONDS, cleared: false },
+    ]) {
+      const rows = affixesCheck(
+        plan,
+        rowResults(plan, {
+          affix: ({ affixed: drew, seed }) => ({
+            bits: drew ? 1 << seed : 0,
+            run: drew ? affixed : { clearSeconds: ENEMY_ROW_MAX_SECONDS, cleared: false },
+          }),
+        }),
+      );
+      expect(ofCheck(rows, 'swift')).toMatchObject({
+        status: 'FAIL',
+        measured: '0 countering boards; none for fire',
+      });
+    }
+    // The center alone kills its plain elite in 10 s: it alone counters.
+    const center = affixesCheck(
+      plan,
+      rowResults(plan, {
+        affix: ({ outer, affixed: drew, seed }) => ({
+          bits: drew ? 1 << seed : 0,
+          run:
+            drew || outer === null
+              ? { clearSeconds: 10 }
+              : { clearSeconds: ENEMY_ROW_MAX_SECONDS, cleared: false },
+        }),
+      }),
+    );
+    expect(ofCheck(center, 'swift').measured).toBe(
+      '1 countering boards (fire.center); one for every character',
+    );
   });
 
   it('is noData for an affix no elite drew, or a board missing a plain seed', () => {
@@ -906,7 +996,7 @@ describe("the nightly plan with C10.3's units", () => {
     });
 
   it('runs the row and board measures in the second phase, the same results on 1 and 4 workers', async () => {
-    const plan = checkSet(
+    const nightly = checkSet(
       'nightly',
       fixtureContent('B2'),
       { fixture: 'B2' },
@@ -916,6 +1006,11 @@ describe("the nightly plan with C10.3's units", () => {
         c7: BASE_C7,
       },
     );
+    // The sessions alone: the stub plays no first-phase measure (C10.4's doubles, M1 diffs, fuzz).
+    const plan = {
+      ...nightly,
+      units: nightly.units.filter((unit) => unit.job.kind === 'character'),
+    };
     const [one, four] = [
       await runPlan(plan, 1, () => {}, stub),
       await runPlan(plan, 4, () => {}, stub),

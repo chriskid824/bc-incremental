@@ -191,17 +191,25 @@ export function measureResults(
   return results;
 }
 
-/** A test wave's reading: cleared in 10 s with no leak and no damage, then `fields`. */
-export const testWave = (fields: Partial<TestWaveReading> = {}): TestWaveReading => ({
-  clearSeconds: 10,
-  cleared: true,
-  died: false,
-  count: 10,
-  leaks: 0,
-  contact: 0,
-  bullet: null,
-  ...fields,
-});
+/**
+ * A test wave's reading: cleared in 10 s with no leak and no damage, then `fields`; every enemy
+ * that did not leak killed unless `fields` gives the kills.
+ */
+export function testWave(fields: Partial<TestWaveReading> = {}): TestWaveReading {
+  const count = fields.count ?? 10;
+  const leaks = fields.leaks ?? 0;
+  return {
+    clearSeconds: 10,
+    cleared: true,
+    died: false,
+    count,
+    leaks,
+    kills: count - leaks,
+    contact: 0,
+    bullet: null,
+    ...fields,
+  };
+}
 
 /** The row of `rows` with `subject`; throws when there is none or more than one. */
 export function rowWith(rows: readonly CheckResult[], subject: string): CheckResult {

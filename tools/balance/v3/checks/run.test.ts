@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { CalibrationEntry, Content } from '../../../../src/data/web';
 import { fixtureContent } from '../../../../src/data/web/testing';
+import { WEB_FUZZ_BUILDS } from '../../../../src/meta/web/fuzz';
 import { auditStart } from '../../../../src/meta/web/invest';
 import type { BalanceJob, JobResult } from '../../jobs';
 import { C10_SEED, resolveContent, webOf } from '../content';
 import type { LegacyHook } from '../legacy';
 import type { KeystoneReading } from '../measures';
 import { PRE_PRESTIGE_MINUTES } from '../session';
-import { strengthUnitId } from './fusions';
+import { webStrategiesFor } from '../strategies';
+import { DOUBLE_SEEDS, strengthUnitId, TRIPLE_SEEDS } from './fusions';
 import { KEYSTONE_SEEDS } from './keystones';
+import { m1Units } from './m1';
 import {
-  CHECK_STANDARDS,
   checkSet,
   derivedUnits,
   evaluate,
@@ -20,6 +22,7 @@ import {
   PR_SESSIONS,
   runPlan,
   SET_CHECKS,
+  standardOf,
 } from './run';
 import type { RunJobs } from './run';
 import { centerShareCsv } from './sessions';
@@ -154,24 +157,45 @@ describe('the check sets', () => {
   });
 
   it('makes the nightly and weekly plans on NIGHTLY_SESSIONS sessions, PR_SESSIONS with --quick', () => {
+    // B2's two characters, four fusions each: C(4, 2) doubles and C(4, 3) triples a character.
+    const strategies = webStrategiesFor(webOf(B2, 'fire', 'full')).length;
+    const kinds = (plan: CheckPlan): Record<string, number> => {
+      const counts: Record<string, number> = {};
+      for (const { id, job } of plan.units) {
+        const kind =
+          job.kind === 'measure'
+            ? job.measure
+            : id.split(':')[2] === 'default'
+              ? 'default'
+              : 'strategy';
+        counts[kind] = (counts[kind] ?? 0) + 1;
+      }
+      return counts;
+    };
     for (const set of ['nightly', 'weekly'] as const) {
       const plan = checkSet(set, fixtureContent('B2'), B2, { c7: NO_C7 });
       expect(plan.checks).toEqual(SET_CHECKS[set]);
       expect(plan.sessions).toBe(NIGHTLY_SESSIONS);
-      expect(plan.units).toHaveLength(2 * NIGHTLY_SESSIONS);
+      const units = (sessions: number) => ({
+        default: 2 * sessions,
+        strategy: 2 * (strategies - 1) * sessions,
+        double: 2 * 6 * DOUBLE_SEEDS,
+        ...(set === 'weekly' ? { triple: 2 * 4 * TRIPLE_SEEDS } : {}),
+        m1: 2,
+        fuzz: WEB_FUZZ_BUILDS,
+      });
+      expect(kinds(plan)).toEqual(units(NIGHTLY_SESSIONS));
       expect(plan.keystones.length).toBeGreaterThan(0);
       const quick = checkSet(set, fixtureContent('B2'), B2, { c7: NO_C7, quick: true });
-      expect([quick.quick, quick.sessions, quick.units.length]).toEqual([
+      expect([quick.quick, quick.sessions, kinds(quick)]).toEqual([
         true,
         PR_SESSIONS,
-        2 * PR_SESSIONS,
+        units(PR_SESSIONS),
       ]);
     }
-    // Every C10.2 check but ci.yml's two is in the nightly; the weekly adds C10.4's triples.
-    expect(SET_CHECKS.nightly).toEqual(
-      CHECK_IDS.filter((id) => id !== 'fuzz' && id !== 'performance'),
-    );
-    expect(SET_CHECKS.weekly).toEqual(SET_CHECKS.nightly);
+    // Every check but ci.yml's performance is in the weekly; the nightly leaves out the triples.
+    expect(SET_CHECKS.weekly).toEqual(CHECK_IDS.filter((id) => id !== 'performance'));
+    expect(SET_CHECKS.nightly).toEqual(SET_CHECKS.weekly.filter((id) => id !== 'triples'));
   });
 
   it('gives each unit an id from what it reads, the same in any plan, plain data a worker takes', () => {
@@ -189,7 +213,7 @@ describe('the check sets', () => {
       expect(JSON.parse(JSON.stringify(unit))).toStrictEqual(unit);
     }
     expect(JSON.parse(JSON.stringify(two))).toStrictEqual(two);
-  });
+  }, 30_000);
 });
 
 describe('derivedUnits', () => {
@@ -347,28 +371,40 @@ describe('the exit code', () => {
 describe('registered content before B1', () => {
   const registered = resolveContent('registered');
 
-  it('is noCenter in every check of every set, with what unlocks it, and exits 0', async () => {
+  it('is noCenter in every check of every set but m1, with what unlocks it, and exits 0', async () => {
     for (const set of SETS) {
       const plan = checkSet(set, registered, 'registered');
-      expect([plan.characters, plan.units, plan.keystones]).toEqual([[], [], []]);
-      expect(plan.strength.map(({ group, key }) => [group, key])).toEqual([
-        ['hand', null],
-        ['template', null],
-      ]);
-      const run = await runPlan(plan, 2);
-      expect(run).toEqual({ results: {}, modes: [] });
-      const rows = evaluate(plan, run.results);
-      expect(rows).toEqual(
-        plan.checks.map((id) =>
-          naRow(
-            id,
-            set,
-            'all',
-            CHECK_STANDARDS[id],
-            'noCenter',
-            'no character has a center in the registered content',
+      expect([plan.characters, plan.keystones]).toEqual([[], []]);
+      // The M1 diffs alone, which need no center (lead ruling U15); the pr set has none.
+      expect(plan.units).toEqual(set === 'pr' ? [] : m1Units());
+      // The pr set's two groups, unfilled; the nightly's every fusion, none.
+      expect(plan.strength.map(({ group, key }) => [group, key])).toEqual(
+        set === 'pr'
+          ? [
+              ['hand', null],
+              ['template', null],
+            ]
+          : [],
+      );
+      if (set === 'pr') expect(await runPlan(plan, 2)).toEqual({ results: {}, modes: [] });
+      const rows = evaluate(plan, {});
+      expect(rows.filter((row) => row.id !== 'm1')).toEqual(
+        plan.checks
+          .filter((id) => id !== 'm1')
+          .map((id) =>
+            naRow(
+              id,
+              set,
+              'all',
+              standardOf(set, id),
+              'noCenter',
+              'no character has a center in the registered content',
+            ),
           ),
-        ),
+      );
+      // Unread here: m1's rows are noData, never noCenter (checks/m1.test.ts reads them).
+      expect(rows.filter((row) => row.id === 'm1').map((row) => row.reason?.id)).toEqual(
+        set === 'pr' ? [] : ['noData', 'noData'],
       );
       expect(exitCodeOf(rows)).toBe(0);
     }
@@ -407,6 +443,7 @@ describe('runPlan', () => {
             without: 10,
             route: [],
             refused: null,
+            refunded: [],
           };
           return { kind: 'measure', measure: 'keystone', result };
         }
@@ -422,7 +459,12 @@ describe('runPlan', () => {
   };
 
   it('runs the sessions, then the measures derivedUnits reads from them, every result by its unit id', async () => {
-    const plan = checkSet('nightly', fixtureContent('B1'), B1, { c7: NO_C7, sessions: 2 });
+    const nightly = checkSet('nightly', fixtureContent('B1'), B1, { c7: NO_C7, sessions: 2 });
+    // The sessions alone: the stub plays no first-phase measure (C10.4's doubles, M1 diffs, fuzz).
+    const plan = {
+      ...nightly,
+      units: nightly.units.filter((unit) => unit.job.kind === 'character'),
+    };
     const calls: BalanceJob[][] = [];
     const run = await runPlan(plan, 3, () => {}, stub(calls));
     expect(calls[0]).toEqual(plan.units.map((unit) => unit.job));

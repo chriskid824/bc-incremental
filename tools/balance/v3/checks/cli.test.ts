@@ -8,10 +8,11 @@ import type { CliIo } from '../../cli';
 import { deadBoardsCsv, deadNodesCsv } from './boards';
 import type { ChecksDeps } from './cli';
 import { main, parseChecksOptions, planOutputs, readCommit } from './cli';
+import { doublesCsv, fusionsCsv, triplesCsv } from './fusions';
 import { keystonesCsv } from './keystones';
 import { SUMMARY_MAX_BYTES, trimSummary } from './report';
 import { affixesCsv, enemyRowCsv, outerRowCsv } from './rows';
-import { checkSet } from './run';
+import { checkSet, SET_CHECKS } from './run';
 import type { PlanRun } from './run';
 import { NO_C7, runRow, sessionResult, sessionResults } from './testing';
 import type { CheckPlan, CheckSetId } from './types';
@@ -272,8 +273,10 @@ describe('npm run checks', () => {
       'affixes.csv',
       'dead_boards.csv',
       'dead_nodes.csv',
+      'fusions.csv',
+      'doubles.csv',
     ]);
-    expect(names('weekly')).toEqual(names('nightly'));
+    expect(names('weekly')).toEqual([...names('nightly'), 'triples.csv']);
     // Each file holds its own check's CSV.
     const nightly = checkSet(
       'nightly',
@@ -288,6 +291,10 @@ describe('npm run checks', () => {
       ['affixes.csv', affixesCsv(nightly, {})],
       ['dead_boards.csv', deadBoardsCsv(nightly, {})],
       ['dead_nodes.csv', deadNodesCsv(nightly, {})],
+      ['fusions.csv', fusionsCsv(nightly, {})],
+      ['doubles.csv', doublesCsv(nightly, {})],
     ]);
+    const weekly = { ...nightly, set: 'weekly' as const, checks: SET_CHECKS.weekly };
+    expect(planOutputs(weekly, {}).at(-1)).toEqual(['triples.csv', triplesCsv(weekly, {})]);
   });
 });

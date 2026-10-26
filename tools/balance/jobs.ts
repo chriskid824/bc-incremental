@@ -33,7 +33,7 @@ export type AnySessionConfig = SessionConfig | CharacterSessionConfig;
 export const jobOf = (config: AnySessionConfig): BalanceJob =>
   config.character === undefined ? { kind: 'm1', config } : { kind: 'character', config };
 
-/** Runs one job here, in this thread. */
+/** Runs one job here, in this thread; throws, naming it, for a kind it does not know. */
 export function runJob(job: BalanceJob): JobResult {
   switch (job.kind) {
     case 'm1':
@@ -42,6 +42,8 @@ export function runJob(job: BalanceJob): JobResult {
       return { kind: 'character', result: runCharacterSession(job.config) };
     case 'measure':
       return { kind: 'measure', measure: job.measure, result: runMeasure(job.measure, job.input) };
+    default:
+      throw new Error(`Unknown balance job kind '${String((job as { kind?: unknown }).kind)}'`);
   }
 }
 

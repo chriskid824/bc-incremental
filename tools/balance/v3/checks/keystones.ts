@@ -1,9 +1,11 @@
 /**
- * 關鍵天賦, keystones (docs/v3 C10 design §2.2's keystones row): every visible ★, the center's two
- * and each open outer's (impl:545, :555), measured on a default session's prestige-point snapshot
- * (tools/balance/v3/measures.ts' measureKeystone): the median frontier x with the ★ less the median
- * without it, over KEYSTONE_SEEDS seeds, in M1's +4 to +6 waves. The measures read a session's
- * snapshot, so their units come in a plan's second phase (run.ts' derivedUnits).
+ * 關鍵天賦, keystones (docs/v3 C10 design §2.2's keystones row): every visible ★ (impl:485
+ * 「每個 ★」: the center's two, the hub's two and each open outer's; gd:257), measured on a default
+ * session's prestige-point snapshot (tools/balance/v3/measures.ts' measureKeystone): the median
+ * frontier x with the ★ less the median without it, over KEYSTONE_SEEDS seeds, in M1's +4 to +6
+ * waves. Where the snapshot's own ★ fill keystoneCap, the base refunds them, the last bought first,
+ * until the ★ fits (lead ruling U12). The measures read a session's snapshot, so their units come
+ * in a plan's second phase (run.ts' derivedUnits).
  */
 
 import type { CharacterId } from '../../../../src/data';
@@ -48,8 +50,8 @@ export interface KeystoneTarget {
 }
 
 /**
- * The visible ★ of each character's full web (the sessions' scope), in web order: the center's and
- * each open outer's. The hub's are left out, as the design's row lists them.
+ * The visible ★ of each character's full web (the sessions' scope), in web order: the center's, the
+ * hub's and each open outer's (impl:485 「每個 ★」, the lead's 10/23 ruling over §2.2's row).
  */
 export function keystoneTargets(
   content: ContentRef,
@@ -60,7 +62,7 @@ export function keystoneTargets(
       .nodes.filter(
         (node) =>
           node.kind === 'keystone' &&
-          (isCenterBoard(node.board) || node.board.startsWith('outer.')),
+          (isCenterBoard(node.board) || node.board === 'hub' || node.board.startsWith('outer.')),
       )
       .map((node) => ({
         character,
@@ -196,7 +198,10 @@ export function keystonesCheck(
   });
 }
 
-/** keystones.csv: one line per ★ and seed, with the snapshot's session and the purchases made. */
+/**
+ * keystones.csv: one line per ★ and seed, with the snapshot's session, the purchases made and the
+ * snapshot's ★ refunded to make room under keystoneCap.
+ */
 export function keystonesCsv(plan: CheckPlan, results: UnitResults): string {
   const header = [
     'character',
@@ -208,6 +213,7 @@ export function keystonesCsv(plan: CheckPlan, results: UnitResults): string {
     'without',
     'gain',
     'route',
+    'refunded',
     'refused',
   ];
   const rows: CsvValue[][] = [];
@@ -224,6 +230,7 @@ export function keystonesCsv(plan: CheckPlan, results: UnitResults): string {
         reading.without,
         reading.with === null || reading.without === null ? null : reading.with - reading.without,
         reading.route.join(' '),
+        reading.refunded.join(' '),
         reading.refused,
       ]);
     }

@@ -368,9 +368,27 @@ const affixReadings = (
 ): AffixReading[] =>
   bySeed((seed) => measureResultOf(results, affixUnitId(character, outer, affixed, seed), 'affix'));
 
-/** A build's stats from its readings, or why it has none: a seed unread, or a refused purchase. */
+/** The enemies a test wave let escape: neither killed nor leaked (a treasure's flight, C7D §3.2). */
+export const escapesOf = (run: TestWaveReading): number => run.count - run.kills - run.leaks;
+
+/**
+ * A seed as the rows judge it (lead ruling U18): in the treasure's column a wave any treasure
+ * escaped reads ENEMY_ROW_MAX_SECONDS, flagged as uncleared, so its ✓ and the outers' treasure rows
+ * judge catches, not the escape timer; every other column's wave reads as it ran.
+ */
+export function judgedRun(run: TestWaveReading, column: RowEnemy): TestWaveReading {
+  return column === 'treasure' && escapesOf(run) > 0
+    ? { ...run, clearSeconds: ENEMY_ROW_MAX_SECONDS, cleared: false }
+    : run;
+}
+
+/**
+ * A build's stats in `column` from its readings (judgedRun's), or why it has none: a seed unread,
+ * or a refused purchase.
+ */
 function statsOf(
   readings: readonly { readonly run: TestWaveReading | null; readonly refused: string | null }[],
+  column: RowEnemy,
 ): RowStats | string {
   if (readings.length < ENEMY_ROW_SEEDS) {
     return `${readings.length} of ${ENEMY_ROW_SEEDS} seeds measured`;
@@ -379,7 +397,7 @@ function statsOf(
   if (runs.length < readings.length) {
     return `no test wave: ${readings.find(({ run }) => run === null)?.refused ?? 'no run'}`;
   }
-  return rowStats(runs);
+  return rowStats(runs.map((run) => judgedRun(run, column)));
 }
 
 const seconds = (value: number): string => `${Number(value.toFixed(1))} s`;
@@ -391,13 +409,31 @@ const statsText = (stats: RowStats): string =>
   `${amount(stats.leaks)} leaks per ${ZERO_MEDIAN_LEAKS.per}` +
   (stats.uncleared > 0 ? ` (${stats.uncleared} of ${ENEMY_ROW_SEEDS} uncleared)` : '');
 
-/** A test wave's CSV columns, and a reading's cells (empty with no run). */
-const RUN_COLUMNS = ['clearSeconds', 'cleared', 'died', 'count', 'leaks', 'contact', 'bullet'];
+/** A test wave's CSV columns, and a reading's cells (empty with no run), as it ran. */
+const RUN_COLUMNS = [
+  'clearSeconds',
+  'cleared',
+  'died',
+  'count',
+  'leaks',
+  'kills',
+  'contact',
+  'bullet',
+];
 
 const runCells = (run: TestWaveReading | null): CsvValue[] =>
   run === null
     ? RUN_COLUMNS.map(() => null)
-    : [run.clearSeconds, run.cleared, run.died, run.count, run.leaks, run.contact, run.bullet];
+    : [
+        run.clearSeconds,
+        run.cleared,
+        run.died,
+        run.count,
+        run.leaks,
+        run.kills,
+        run.contact,
+        run.bullet,
+      ];
 
 // ---- 敵人對照表 ----
 
@@ -433,7 +469,7 @@ export function enemyRowCheck(plan: CheckPlan, results: UnitResults): CheckResul
     const bases = plan.characters.map((character) =>
       boardSnapshot(plan, results, character) === null
         ? `no default session of ${character} has a ${DEAD_BOARD_MINUTES}-min snapshot`
-        : statsOf(enemyRowReadings(results, character, column, false)),
+        : statsOf(enemyRowReadings(results, character, column, false), column),
     );
     const read = bases.filter((base): base is RowStats => typeof base !== 'string');
     const medians: RowMedians | null =
@@ -501,7 +537,7 @@ function enemyRowOf(
     });
   }
   const readings = enemyRowReadings(results, character, column, true);
-  const answer = statsOf(readings);
+  const answer = statsOf(readings, column);
   if (typeof answer === 'string') {
     return naRow('enemyRow', plan.set, subject, target, 'noData', answer, shown);
   }
@@ -593,9 +629,9 @@ export function outerRowCheck(plan: CheckPlan, results: UnitResults): CheckResul
           rows.push(naRow('outerRow', plan.set, subject, target, 'noData', detail));
           continue;
         }
-        const base = statsOf(enemyRowReadings(results, character, column, false));
+        const base = statsOf(enemyRowReadings(results, character, column, false), column);
         const readings = outerRowReadings(results, character, outer, column);
-        const withOuter = statsOf(readings);
+        const withOuter = statsOf(readings, column);
         if (typeof base === 'string' || typeof withOuter === 'string') {
           const detail =
             typeof base === 'string' ? `without: ${base}` : `with: ${withOuter as string}`;
@@ -718,10 +754,15 @@ function affixBoards(plan: CheckPlan, results: UnitResults): AffixBoard[] {
   });
 }
 
-/** r_b(a): the median kill time of the affixed seeds whose elite drew a over the plain median. */
+/**
+ * r_b(a): the median kill time of the affixed seeds whose elite drew a over the plain median. A
+ * censored plain median (ENEMY_ROW_MAX_SECONDS: its median seed killed no plain elite) reads ∞, so
+ * a board that never kills an elite counters no affix (lead ruling U19).
+ */
 function ratioOf(board: AffixBoard, bit: number): number | null {
   const drew = board.affixed.filter(({ bits }) => bits !== null && (bits & (1 << bit)) !== 0);
   if (board.plain === null || drew.length === 0) return null;
+  if (board.plain >= ENEMY_ROW_MAX_SECONDS) return Number.POSITIVE_INFINITY;
   return median(drew.map(({ run }) => killSeconds(run))) / board.plain;
 }
 

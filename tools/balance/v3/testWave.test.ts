@@ -123,6 +123,7 @@ describe('test wave readings', () => {
       died: false,
       count: 10,
       leaks: 3,
+      kills: 2,
       contact: 7,
       bullet: null,
     });
@@ -243,6 +244,7 @@ describe('test wave runs', () => {
       died: false,
       count: ENEMY_ROW_COUNT,
       leaks: 0,
+      kills: 0,
       contact: 0,
       bullet: 0,
     });

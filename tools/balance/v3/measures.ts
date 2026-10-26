@@ -4,14 +4,17 @@
  * frontierOf). A measure's input and its reading are plain data, so a worker can take one and send
  * the other back, and a reading depends only on its input. C10.2's measures are `keystone` and
  * `fusionStrength`; C10.3's read single-type test waves (testWave.ts: `enemyRow`, `outerRow`,
- * `affix`) and an outer's investment (`deadBoard`). C10.4 adds `mirror`, `double` and `triple`.
+ * `affix`) and an outer's investment (`deadBoard`). C10.4's are `mirror` (the strength measure's
+ * with-core run read for its damage by source), `double` and `triple` (a character's fusions two
+ * or three at a time), `m1` (checks/m1.ts: the fingerprint and the probe, the M1 diffs) and
+ * `fuzz` (checks/fuzz.ts: one build of the web fuzz).
  */
 
 import { deriveSeed } from '../../../src/core/rng';
 import { characterGameData, stdHpAt } from '../../../src/data';
-import type { CharacterId, GameData, OuterId } from '../../../src/data';
+import type { CharacterId, GameData, OuterId, SourceClass } from '../../../src/data';
 import type { AssembledWeb, FusionKey, RowEnemy } from '../../../src/data/web';
-import { refundNode } from '../../../src/meta/web';
+import { boardCounts, refundNode, WEB_RULES, webBuild, webRunConfig } from '../../../src/meta/web';
 import type { AccountProgress, CharacterProgress, WebEconomy } from '../../../src/meta/web';
 import {
   CALIBRATION_ACCOUNT,
@@ -24,11 +27,17 @@ import {
 import { GATED_KINDS, storedRank } from '../../../src/meta/web/counts';
 import { auditBuy, fillBoard, unlockInvestment } from '../../../src/meta/web/invest';
 import { shortestRoute } from '../../../src/meta/web/path';
+import { createSimulation, NO_INPUT } from '../../../src/sim';
 import { boardInvestment, deadBoardBase } from './checks/boards';
 import type { BoardInvestment } from './checks/boards';
+import { measureFuzz } from './checks/fuzz';
+import type { FuzzInput, FuzzReading } from './checks/fuzz';
+import { measureM1 } from './checks/m1';
+import type { M1Input, M1Reading } from './checks/m1';
 import { affixBitsOf, answerNode } from './checks/rows';
 import { C10_SEED, webOf } from './content';
 import type { ContentRef } from './content';
+import { damageByClass } from './session';
 import type { SessionSnapshot } from './session';
 import { eliteWaveData, rowSeed, testWaveData, testWaveRun } from './testWave';
 import type { TestWaveReading } from './testWave';
@@ -80,6 +89,11 @@ export interface KeystoneReading {
   readonly route: readonly string[];
   /** The refused purchase and canBuy's reason; null when every purchase is made. */
   readonly refused: string | null;
+  /**
+   * The owned ★ the base also refunded to make room under the keystone cap (lead ruling U12), the
+   * last bought first; empty when the cap had room.
+   */
+  readonly refunded: readonly string[];
 }
 
 /** A session's DEAD_BOARD_MINUTES snapshot as a measure reads it (checks/boards.ts' boardSnapshot). */
@@ -181,6 +195,40 @@ export interface DeadBoardReading {
   readonly refused: string | null;
 }
 
+/** A strength measure's with-core run read for its damage (design §2.4's mirrors row). */
+export interface MirrorReading {
+  readonly key: FusionKey;
+  readonly seed: number;
+  /** damageBySource summed by sourceClass (v3/session.ts' damageByClass). */
+  readonly damage: Readonly<Record<SourceClass, number>>;
+  /** The run's highest wave cleared and ticks: the strength measure's with-core run's. */
+  readonly highestWaveCleared: number;
+  readonly ticks: number;
+}
+
+/** A character's fusions two or three at a time (design §2.4's doubles and triples rows). */
+export interface ComboInput {
+  readonly content: ContentRef;
+  readonly character: CharacterId;
+  /** The fusions' outers in the web's clock order: 2 for a double, 3 for a triple. */
+  readonly outers: readonly OuterId[];
+  /** Seed index s: comboSeed(measure, s), the same for every combination of the measure. */
+  readonly seed: number;
+}
+
+export interface ComboReading {
+  readonly character: CharacterId;
+  readonly outers: readonly OuterId[];
+  readonly seed: number;
+  /** x of every outer's unlockInvestment, and of it with every core; null when one is refused. */
+  readonly base: number | null;
+  readonly with: number | null;
+  /** stdHpAt(with) ÷ stdHpAt(base); null when a purchase is refused. */
+  readonly ratio: number | null;
+  /** The refused purchase and canBuy's reason; null when every purchase is made. */
+  readonly refused: string | null;
+}
+
 export interface MeasureInputs {
   readonly keystone: KeystoneInput;
   readonly fusionStrength: StrengthInput;
@@ -188,6 +236,11 @@ export interface MeasureInputs {
   readonly outerRow: OuterRowInput;
   readonly affix: AffixInput;
   readonly deadBoard: DeadBoardInput;
+  readonly mirror: StrengthInput;
+  readonly double: ComboInput;
+  readonly triple: ComboInput;
+  readonly m1: M1Input;
+  readonly fuzz: FuzzInput;
 }
 export interface MeasureReadings {
   readonly keystone: KeystoneReading;
@@ -196,7 +249,26 @@ export interface MeasureReadings {
   readonly outerRow: OuterRowReading;
   readonly affix: AffixReading;
   readonly deadBoard: DeadBoardReading;
+  readonly mirror: MirrorReading;
+  readonly double: ComboReading;
+  readonly triple: ComboReading;
+  readonly m1: M1Reading;
+  readonly fuzz: FuzzReading;
 }
+/** Every measure, in MeasureInputs' order: what a shard file may name (lead ruling U14). */
+export const MEASURE_IDS = [
+  'keystone',
+  'fusionStrength',
+  'enemyRow',
+  'outerRow',
+  'affix',
+  'deadBoard',
+  'mirror',
+  'double',
+  'triple',
+  'm1',
+  'fuzz',
+] as const satisfies readonly (keyof MeasureInputs)[];
 export type MeasureId = keyof MeasureInputs;
 export type MeasureInput = MeasureInputs[MeasureId];
 export type MeasureReading = MeasureReadings[MeasureId];
@@ -225,38 +297,167 @@ export const strengthSeed = (s: number): number => deriveSeed(CALIBRATION_SEED, 
 /** A dead-board measure's seed s (design §2.3: 8 seeds, the same for every board). */
 export const deadBoardSeed = (s: number): number => deriveSeed(C10_SEED, `deadBoard:${s}`);
 
+/** A double's or a triple's seed s: deriveSeed(C10_SEED, 'double:s' or 'triple:s'), the same for every combination. */
+export const comboSeed = (measure: 'double' | 'triple', s: number): number =>
+  deriveSeed(C10_SEED, `${measure}:${s}`);
+
 /**
- * Fusion strength on one seed, as calibrateFusion measures it at a coef: c's web in FULL_SCOPE
- * with a fresh save's account, the base its unlockInvestment, the core bought through auditBuy,
- * and the probe of the base with the core on the web reassembled at `coef`.
+ * A combination's account (design §2.4): a fresh save's, calibration's, whose 2 fusion slots hold a
+ * double; 奇點 beaten for a triple's third slot (src/meta/web/counts.ts' fusionSlotsAfterSingularity).
+ */
+export const COMBO_ACCOUNTS: Readonly<Record<'double' | 'triple', AccountProgress>> = {
+  double: CALIBRATION_ACCOUNT,
+  triple: { singularityBeaten: true },
+};
+
+/** Fusion c.o's calibration builds: c's FULL_SCOPE web, the base, the base with the core, the web at `coef`. */
+interface StrengthBuilds {
+  readonly web: AssembledWeb;
+  readonly base: CharacterProgress;
+  readonly withCore: CharacterProgress;
+  readonly at: AssembledWeb;
+}
+
+/**
+ * calibrateFusion's builds at a coef: c's web in FULL_SCOPE with a fresh save's account, the base
+ * its unlockInvestment, the core bought through auditBuy, the web reassembled at `coef`. The
+ * strength measure and the mirrors' read the same builds (lead ruling U3: one re-measure).
+ */
+function strengthBuilds(input: StrengthInput, measure: MeasureId): StrengthBuilds {
+  const { key } = input;
+  const [c, o] = key.split('.') as [CharacterId, OuterId];
+  const web = webOf(input.content, c, 'full');
+  const core = web.fusions.get(o)?.board.nodes.find((node) => node.kind === 'core');
+  if (core === undefined) throw new Error(`${measure} '${key}': no such fusion core in the web`);
+  const base = unlockInvestment(web, CALIBRATION_ACCOUNT, o);
+  const step = auditBuy(web, base, CALIBRATION_ACCOUNT, core.id);
+  if (!step.ok) {
+    throw new Error(`${measure} '${key}': the core is refused: ${step.refusal.reason}`);
+  }
+  const at = webOf(input.content, c, 'full', { [key]: input.coef });
+  return { web, base, withCore: step.progress, at };
+}
+
+/**
+ * Fusion strength on one seed, as calibrateFusion measures it at a coef: the probe of the base, and
+ * of the base with the core on the web reassembled at `coef` (strengthBuilds).
  */
 export function measureStrength(
   input: StrengthInput,
   probe: MeasureProbe = probeX,
 ): StrengthReading {
-  const { key } = input;
-  const [c, o] = key.split('.') as [CharacterId, OuterId];
-  const web = webOf(input.content, c, 'full');
-  const core = web.fusions.get(o)?.board.nodes.find((node) => node.kind === 'core');
-  if (core === undefined)
-    throw new Error(`fusionStrength '${key}': no such fusion core in the web`);
-  const base = unlockInvestment(web, CALIBRATION_ACCOUNT, o);
-  const step = auditBuy(web, base, CALIBRATION_ACCOUNT, core.id);
-  if (!step.ok) {
-    throw new Error(`fusionStrength '${key}': the core is refused: ${step.refusal.reason}`);
-  }
+  const { web, base, withCore, at } = strengthBuilds(input, 'fusionStrength');
   const data = characterGameData();
   const seed = strengthSeed(input.seed);
   const without = probe(web, base, seed, data);
-  const at = webOf(input.content, c, 'full', { [key]: input.coef });
-  const withCore = probe(at, step.progress, seed, data);
+  const withX = probe(at, withCore, seed, data);
   return {
-    key,
+    key: input.key,
     seed: input.seed,
     base: without,
-    with: withCore,
-    ratio: stdHpAt(withCore) / stdHpAt(without),
+    with: withX,
+    ratio: stdHpAt(withX) / stdHpAt(without),
   };
+}
+
+/**
+ * The run probeRun makes of `progress` on `web` (src/meta/web/calibrate.ts: from PROBE_START_WAVE,
+ * the scope's wave cap, to the build's death or PROBE_MAX_TICKS), read for its damage by source
+ * class instead of its frontier.
+ */
+export function classRun(
+  web: AssembledWeb,
+  progress: CharacterProgress,
+  seed: number,
+  data: GameData,
+): Omit<MirrorReading, 'key' | 'seed'> {
+  const config = {
+    ...webRunConfig(
+      webBuild(web, progress),
+      seed,
+      PROBE_START_WAVE,
+      web.scope.waveCap ?? undefined,
+    ),
+    maxTicks: PROBE_MAX_TICKS,
+  };
+  const sim = createSimulation(config, data);
+  while (!sim.state.finished) sim.step(NO_INPUT);
+  const result = sim.result();
+  return {
+    damage: damageByClass(result),
+    highestWaveCleared: result.highestWaveCleared,
+    ticks: result.ticks,
+  };
+}
+
+/**
+ * A mirror's reading on one seed (design §2.4's mirrors row): the strength measure's with-core run
+ * (the base with the core on the web at the entry's coef, on calibrateFusion's seed s), read for
+ * its damage by source class.
+ */
+export function measureMirror(input: StrengthInput): MirrorReading {
+  const { withCore, at } = strengthBuilds(input, 'mirror');
+  const run = classRun(at, withCore, strengthSeed(input.seed), characterGameData());
+  return { key: input.key, seed: input.seed, ...run };
+}
+
+/**
+ * The fusions of `outers` together on `character`'s web (design §2.4's doubles and triples rows):
+ * base = every outer's unlockInvestment, the first's then each next one's purchases it lacks in
+ * the order that investment bought them; with = the base and each fusion's core, in `outers`'
+ * order. Every purchase is an audit purchase (auditBuy), so only the rules refuse: the fusion slots
+ * of `account` above all, and a refusal is reported, not measured. The web is the content's (its
+ * calibrated coefs); both builds are probed on calibration's probe.
+ */
+export function measureCombo(
+  measure: 'double' | 'triple',
+  input: ComboInput,
+  probe: MeasureProbe = probeX,
+): ComboReading {
+  const { character, outers, seed } = input;
+  const account = COMBO_ACCOUNTS[measure];
+  const web = webOf(input.content, character, 'full');
+  const reading = (fields: Pick<ComboReading, 'base' | 'with' | 'ratio' | 'refused'>) => ({
+    character,
+    outers,
+    seed,
+    ...fields,
+  });
+  const refused = (id: string, reason: string) =>
+    reading({ base: null, with: null, ratio: null, refused: `${id}: ${reason}` });
+  const [first, ...others] = outers;
+  if (first === undefined) throw new Error(`${measure}: no fusion to measure on ${character}`);
+  let base = unlockInvestment(web, account, first);
+  for (const outer of others) {
+    const next = unlockInvestment(web, account, outer);
+    for (const id of Object.keys(next.ranks)) {
+      while (storedRank(base, id) < storedRank(next, id)) {
+        const step = auditBuy(web, base, account, id);
+        if (!step.ok) return refused(id, step.refusal.reason);
+        base = step.progress;
+      }
+    }
+  }
+  let withCores = base;
+  for (const outer of outers) {
+    const core = web.fusions.get(outer)?.board.nodes.find((node) => node.kind === 'core');
+    if (core === undefined) {
+      throw new Error(`${measure} '${character}.${outer}': no such fusion core in the web`);
+    }
+    const step = auditBuy(web, withCores, account, core.id);
+    if (!step.ok) return refused(core.id, step.refusal.reason);
+    withCores = step.progress;
+  }
+  const data = characterGameData();
+  const at = comboSeed(measure, seed);
+  const baseX = probe(web, base, at, data);
+  const withX = probe(web, withCores, at, data);
+  return reading({
+    base: baseX,
+    with: withX,
+    ratio: stdHpAt(withX) / stdHpAt(baseX),
+    refused: null,
+  });
 }
 
 /** The gate refusals of canBuy's rows 7–9: the purchases that make them go are on the node's board. */
@@ -269,11 +470,21 @@ const added = (web: AssembledWeb, before: CharacterProgress, after: CharacterPro
     .map((node) => node.id);
 
 /**
+ * The owned ★ of `progress` in purchase order: its ranks' key order, which buy appends to and
+ * refundNode keeps (src/meta/web/rules.ts).
+ */
+const ownedStars = (web: AssembledWeb, progress: CharacterProgress): string[] =>
+  Object.keys(progress.ranks).filter(
+    (id) => web.byId.get(id)?.kind === 'keystone' && storedRank(progress, id) > 0,
+  );
+
+/**
  * A ★ on a prestige-point snapshot (design §2.2): base = the snapshot with the ★ refunded
- * (refundNode); without = base + the route to the ★ (shortestRoute through no gated kind) + the
- * ★'s gate (fillBoard on its board while canBuy refuses the ★ on a gate; a ★ has none as built);
- * with = without + the ★. Each purchase is an audit purchase (auditBuy), so the wallet never
- * refuses; a refusal (the ★ cap, say) is reported, not measured.
+ * (refundNode), and, while the ★ the snapshot owns leave no room under the keystone cap, the owned
+ * ★ bought last refunded too, then the one before (lead ruling U12); without = base + the route
+ * to the ★ (shortestRoute through no gated kind) + the ★'s gate (fillBoard on its board while
+ * canBuy refuses the ★ on a gate; a ★ has none as built); with = without + the ★. Each purchase is
+ * an audit purchase (auditBuy), so the wallet never refuses; a refusal is reported, not measured.
  */
 export function measureKeystone(
   input: KeystoneInput,
@@ -285,10 +496,17 @@ export function measureKeystone(
   if (node === undefined || node.kind !== 'keystone') {
     throw new Error(`keystone '${star}': no such ★ in ${character}'s web`);
   }
+  let base = refundNode(web, input.snapshot, account, star, input.economy);
+  const refunded: string[] = [];
+  while (boardCounts(web, base).keystones >= WEB_RULES.keystonesHeld) {
+    const last = ownedStars(web, base).at(-1);
+    if (last === undefined) break;
+    base = refundNode(web, base, account, last, input.economy);
+    refunded.push(last);
+  }
   const reading = (
     fields: Pick<KeystoneReading, 'with' | 'without' | 'route' | 'refused'>,
-  ): KeystoneReading => ({ character, star, seed: input.seed, ...fields });
-  const base = refundNode(web, input.snapshot, account, star, input.economy);
+  ): KeystoneReading => ({ character, star, seed: input.seed, ...fields, refunded });
   const route = shortestRoute(web, base, star, (other) => !GATED_KINDS.has(other.kind));
   if (route === null) {
     return reading({ with: null, without: null, route: [], refused: `${star}: no route` });
@@ -445,7 +663,7 @@ export function measureDeadBoard(
   return { character, outer, seed, x, bought, unpaid, refused };
 }
 
-/** Runs one measure here, in this thread. */
+/** Runs one measure here, in this thread; throws, naming it, for a measure it does not know (U14). */
 export function runMeasure(measure: MeasureId, input: MeasureInput): MeasureReading {
   switch (measure) {
     case 'keystone':
@@ -460,5 +678,16 @@ export function runMeasure(measure: MeasureId, input: MeasureInput): MeasureRead
       return measureAffix(input as AffixInput);
     case 'deadBoard':
       return measureDeadBoard(input as DeadBoardInput);
+    case 'mirror':
+      return measureMirror(input as StrengthInput);
+    case 'double':
+    case 'triple':
+      return measureCombo(measure, input as ComboInput);
+    case 'm1':
+      return measureM1(input as M1Input);
+    case 'fuzz':
+      return measureFuzz(input as FuzzInput);
+    default:
+      throw new Error(`Unknown measure '${String(measure satisfies never)}'`);
   }
 }

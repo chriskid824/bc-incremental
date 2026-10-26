@@ -11,6 +11,7 @@ import type { BalanceJob, JobResult } from '../../jobs';
 import type { ContentRef } from '../content';
 import type { MeasureId, MeasureReadings } from '../measures';
 import type { CharacterSessionConfig, CharacterSessionResult } from '../session';
+import type { WebStrategyId } from '../strategies';
 import type { C7Parts } from './c7';
 import type { StrengthTarget } from './fusions';
 import type { KeystoneTarget } from './keystones';
@@ -48,8 +49,9 @@ export type CheckSetId = 'pr' | 'nightly' | 'weekly';
 
 /**
  * The checks in the report's order: implementation-plan-v3 §4's rows (impl:474-491), the three
- * checks from other sources after 遊玩時間 (菁英詞綴 is gd:769's), and the PR set's pointers to
- * ci.yml's steps last. C10.4 puts its fusion matrices at their rows.
+ * checks from other sources after 遊玩時間 (菁英詞綴 is gd:769's), the M1 diffs (C3D:1778) after
+ * the budget report, and the fuzz and the performance check last: the pr set's pointers to
+ * ci.yml's steps, the nightly's own fuzz.
  */
 export const CHECK_IDS = [
   'pacing',
@@ -59,16 +61,20 @@ export const CHECK_IDS = [
   'enemyRow',
   'outerRow',
   'fusionStrength',
+  'mirrors',
   'centerShare',
   'deadBoards',
   'deadNodes',
   'keystones',
+  'doubles',
+  'triples',
   'legacy',
   'playTime',
   'pointBudget',
   'prestigeReturn',
   'affixes',
   'budget',
+  'm1',
   'fuzz',
   'performance',
 ] as const;
@@ -88,16 +94,20 @@ export const CHECK_DEFS: Readonly<Record<CheckId, CheckDef>> = {
   enemyRow: { name: '敵人對照表', source: 'impl:478; gd:766' },
   outerRow: { name: '外盤能補的敵人', source: 'impl:479; gd:768' },
   fusionStrength: { name: '融合強度', source: 'impl:480; src/meta/web/calibrate.ts' },
+  mirrors: { name: '鏡像融合', source: 'impl:481' },
   centerShare: { name: '中心主體性', source: 'impl:482; C3D:1773-1776, :1799' },
   deadBoards: { name: '死盤', source: 'impl:483; gd:770' },
   deadNodes: { name: '死節點', source: 'impl:484' },
   keystones: { name: '關鍵天賦', source: 'impl:485; tools/balance/keystones.ts' },
+  doubles: { name: '雙融合組合', source: 'impl:486' },
+  triples: { name: '三融合組合', source: 'impl:487' },
   legacy: { name: '傳承', source: 'impl:488; gd:792' },
   playTime: { name: '遊玩時間', source: 'impl:489; gd:794' },
   pointBudget: { name: '一輪轉生的點數', source: 'gd:318-319; S301' },
   prestigeReturn: { name: '轉生後回到最遠波次', source: 'GDD:245' },
   affixes: { name: '菁英詞綴', source: 'gd:769' },
   budget: { name: '預算報告', source: 'impl:490; C3D:1777; C5D:1483; C4D:3127' },
+  m1: { name: 'M1 差異', source: 'C3D:1778; tools/balance/probeDiff.ts' },
   fuzz: { name: '模糊測試', source: 'impl:463; ci.yml' },
   performance: { name: '效能', source: 'impl:491; ci.yml' },
 };
@@ -180,9 +190,12 @@ export interface CheckPlan {
   readonly prestige: boolean;
   readonly legacy: boolean;
   readonly singularity: boolean;
-  /** The first phase: the default sessions and the measures that read no session. */
+  /**
+   * The first phase: the default sessions, the nightly's other strategies' sessions, and the
+   * measures that read no session.
+   */
   readonly units: readonly PlanUnit[];
-  /** The fusions strength re-measures, with their entries. */
+  /** The fusions strength re-measures, with their entries; the mirrors' pairs come from them. */
   readonly strength: readonly StrengthTarget[];
   /** The ★ keystones measures on each character's prestige-point snapshot. */
   readonly keystones: readonly KeystoneTarget[];
@@ -192,9 +205,16 @@ export interface CheckPlan {
   readonly c7: C7Parts;
 }
 
+/** A session's unit id: the character, the strategy and the session index. */
+export const strategyUnitId = (
+  character: CharacterId,
+  strategy: WebStrategyId,
+  session: number,
+): string => `session:${character}:${strategy}:${session}`;
+
 /** A default session's unit id. */
 export const sessionUnitId = (character: CharacterId, session: number): string =>
-  `session:${character}:default:${session}`;
+  strategyUnitId(character, 'default', session);
 
 /** A second character's session after the first's 傳承 (LEGACY). */
 export const legacyUnitId = (character: CharacterId, session: number): string =>

@@ -115,6 +115,11 @@ export interface TestWaveReading {
   readonly count: number;
   /** damageTakenBy's hits and damage and bulletTakenBy's damage (null before C7.4b), by column. */
   readonly leaks: number;
+  /**
+   * The run's kills (RunResult.kills): with leaks, what tells a caught treasure from an escaped one
+   * (escapes = count − kills − leaks; lead ruling U18).
+   */
+  readonly kills: number;
   readonly contact: number;
   readonly bullet: number | null;
 }
@@ -138,6 +143,7 @@ export function testWaveReading(
     died: result.endReason === 'death',
     count,
     leaks: tally.leaks,
+    kills: result.kills,
     contact: tally.contact,
     bullet: tally.bullet,
   };

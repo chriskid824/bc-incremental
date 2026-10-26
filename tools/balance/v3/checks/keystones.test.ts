@@ -77,17 +77,20 @@ function owning(star: string): CharacterProgress {
 /** 16 readings of `star` whose medians are `with` and `without`. */
 const readings = (
   star: string,
-  read: (seed: number) => Pick<KeystoneReading, 'with' | 'without'> & { refused?: string },
+  read: (
+    seed: number,
+  ) => Pick<KeystoneReading, 'with' | 'without'> & { refused?: string; refunded?: string[] },
 ): Record<string, JobResult> =>
   Object.fromEntries(
     Array.from({ length: KEYSTONE_SEEDS }, (_, seed) => {
-      const { refused = null, ...xs } = read(seed);
+      const { refused = null, refunded = [], ...xs } = read(seed);
       const result: KeystoneReading = {
         character: 'fire',
         star,
         seed,
         route: ['a', 'b'],
         refused,
+        refunded,
         ...xs,
       };
       return [keystoneUnitId('fire', star, seed), { kind: 'measure', measure: 'keystone', result }];
@@ -107,10 +110,12 @@ const plusFive =
     10 + purchasesOf(at, progress) + (storedRank(progress, star) > 0 ? 4 : 0);
 
 describe('keystones (關鍵天賦)', () => {
-  it("lists each character's center ★ and each open outer's, not the hub's", () => {
+  it("lists every visible ★: the center's, the hub's and each open outer's (lead ruling U12)", () => {
     expect(keystoneTargets(B1, ['fire']).map((target) => target.star)).toEqual([
       'fire.center.main.star-one',
       'fire.center.main.star-two',
+      'hub.rules.rule-one',
+      'hub.rules.rule-two',
       'outer.poison.main.star',
       'outer.crit.main.star',
       'outer.ice.main.star',
@@ -366,23 +371,49 @@ describe('keystones (關鍵天賦)', () => {
     expect((reading.with as number) - (reading.without as number)).toBe(5);
   });
 
-  it('reports a ★ the cap refuses instead of measuring it', () => {
-    // Both center ★ owned: the keystone cap's 2.
-    const both = mergeRanks(owning('fire.center.main.star-two'), owning(STAR));
-    const reading = measureKeystone(
-      {
-        content: B1,
-        character: 'fire',
-        star: 'outer.ice.main.star',
-        snapshot: both,
-        account: FRESH_ACCOUNT,
-        economy: DEFAULT_WEB_ECONOMY,
-        seed: 0,
-      },
-      plusFive('outer.ice.main.star'),
+  it('refunds the ★ bought last when the snapshot fills the cap, then measures (lead ruling U12)', () => {
+    // Both center ★ owned, the keystone cap's 2: star-one bought first, star-two last.
+    const second = 'fire.center.main.star-two';
+    const both = mergeRanks(owning(second), owning(STAR));
+    expect(Object.keys(both.ranks).indexOf(STAR)).toBeLessThan(
+      Object.keys(both.ranks).indexOf(second),
     );
-    expect(reading).toMatchObject({ with: null, without: null });
-    expect(reading.refused).toBe('outer.ice.main.star: keystoneCap');
+    const ice = 'outer.ice.main.star';
+    const seen: CharacterProgress[] = [];
+    const probe: MeasureProbe = (at, progress, seed, data) => {
+      seen.push(progress);
+      return plusFive(ice)(at, progress, seed, data);
+    };
+    const input = {
+      content: B1,
+      character: 'fire' as const,
+      star: ice,
+      snapshot: both,
+      account: FRESH_ACCOUNT,
+      economy: DEFAULT_WEB_ECONOMY,
+      seed: 0,
+    };
+    const reading = measureKeystone(input, probe);
+    expect(reading).toMatchObject({ refused: null, refunded: [second] });
+    expect((reading.with as number) - (reading.without as number)).toBe(5);
+    // With and without both keep the ★ bought first and lack the one refunded.
+    expect(
+      seen.map((progress) => [storedRank(progress, STAR), storedRank(progress, second)]),
+    ).toEqual([
+      [1, 0],
+      [1, 0],
+    ]);
+    // Room under the cap: nothing else is refunded.
+    expect(measureKeystone({ ...input, snapshot: owning(STAR) }, plusFive(ice)).refunded).toEqual(
+      [],
+    );
+    // keystones.csv lists the refunded ★.
+    const results = merged(
+      withSnapshot(both),
+      readings(STAR, () => ({ with: 15, without: 10, refunded: [second] })),
+    );
+    const csv = keystonesCsv(onePlan, results).trimEnd().split('\n');
+    expect(csv[1]).toBe(`fire,${STAR},star-one,0,0,15,10,5,a b,${second},`);
   });
 
   it('FAILs the fixture, whose ★ have no effect: gain 0 on 16 probe seeds', () => {
@@ -399,7 +430,9 @@ describe('keystones (關鍵天賦)', () => {
       /^\+0 \(x [\d.]+ with, [\d.]+ without; session 0's prestige point/,
     );
     const csv = keystonesCsv(onePlan, results).trimEnd().split('\n');
-    expect(csv[0]).toBe('character,star,slug,session,seed,with,without,gain,route,refused');
+    expect(csv[0]).toBe(
+      'character,star,slug,session,seed,with,without,gain,route,refunded,refused',
+    );
     expect(csv).toHaveLength(1 + KEYSTONE_SEEDS);
     expect(csv[1]).toMatch(/^fire,fire\.center\.main\.star-one,star-one,0,0,[\d.]+,[\d.]+,0,/);
   });

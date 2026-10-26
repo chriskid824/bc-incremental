@@ -1,0 +1,136 @@
+name: Nightly
+
+# implementation-plan-v3 §4's nightly balance checks (tools/balance/v3/nightly.ts, docs/v3 C10
+# design §1.6): the plan job turns `npm run nightly -- --plan --json` into a matrix of shards, each
+# shard runs on its own runner, and the report job merges them, puts report.md in the run's
+# Summary and keeps every CSV in the nightly-report artifact for 90 days. An unaccepted FAIL or a
+# missing shard fails the run, so GitHub mails whoever committed the cron line (Hoshi, in B1's
+# merge); after Actions → Nightly → Disable and Enable, whoever re-enabled it.
+#
+# By hand (Actions → Nightly → Run workflow): `ref` checks out a batch branch's tools and content
+# (empty: the repository variable NIGHTLY_REF, kept unset, then this workflow's ref), and `set`
+# picks the weekly, the nightly with the triples. The schedule runs the weekly on Wednesdays.
+
+on:
+  schedule:
+    # 03:17 Asia/Taipei (UTC+8, no daylight saving), off the hour's busy minute.
+    - cron: '17 19 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA to check (empty for NIGHTLY_REF, then this workflow's ref)
+        type: string
+        default: ''
+      set:
+        description: The nightly, or the weekly with the triples
+        type: choice
+        options: [nightly, weekly]
+        default: nightly
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ inputs.ref || vars.NIGHTLY_REF || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      weekly: ${{ steps.plan.outputs.weekly }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || vars.NIGHTLY_REF || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The weekly when a dispatch asks for it, and on the schedule's Wednesday in Asia/Taipei
+      # (`date +%u`: 1 Monday … 7 Sunday; Hoshi reads the report on Wednesdays, 初始值). The
+      # matrix takes only the shards' ids; every job reads the rest from the plan it recomputes.
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          SET: ${{ inputs.set }}
+          TRIPLES_WEEKDAY: '3'
+        run: |
+          weekly=false
+          if [ "$EVENT" = workflow_dispatch ] && [ "$SET" = weekly ]; then weekly=true; fi
+          if [ "$EVENT" = schedule ] && [ "$(TZ=Asia/Taipei date +%u)" = "$TRIPLES_WEEKDAY" ]; then weekly=true; fi
+          flag=''
+          if [ "$weekly" = true ]; then flag=--weekly; fi
+          npm run --silent nightly -- --plan $flag --json > "$RUNNER_TEMP/plan.json"
+          node -e '
+            const plan = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+            if (plan.version !== 1) throw new Error(`Plan JSON version ${plan.version}; this workflow reads 1`);
+            console.log(`matrix=${JSON.stringify({ include: plan.shards.map((s) => ({ shard: s.id })) })}`);
+          ' "$RUNNER_TEMP/plan.json" >> "$GITHUB_OUTPUT"
+          echo "weekly=$weekly" >> "$GITHUB_OUTPUT"
+
+  shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || vars.NIGHTLY_REF || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Shard
+        env:
+          SHARD: ${{ matrix.shard }}
+          WEEKLY: ${{ needs.plan.outputs.weekly }}
+        run: |
+          flag=''
+          if [ "$WEEKLY" = true ]; then flag=--weekly; fi
+          npm run nightly -- --shard "$SHARD" $flag --out nightly-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-${{ matrix.shard }}
+          path: nightly-out/
+          retention-days: 7
+          overwrite: true
+
+  report:
+    needs: [plan, shard]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || vars.NIGHTLY_REF || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-*
+          merge-multiple: true
+          path: nightly-in
+      # Exits 1 on an unaccepted FAIL or a missing, foreign or unreadable shard.
+      - name: Merge
+        run: npm run nightly -- --merge nightly-in --out nightly-report --summary "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-report
+          path: nightly-report/
+          retention-days: 90
+          overwrite: true

@@ -17,6 +17,7 @@ import {
   measureDeadBoard,
   measureEnemyRow,
   measureKeystone,
+  measureMirror,
   measureOuterRow,
   measureStrength,
   runMeasure,
@@ -26,6 +27,8 @@ import type {
   DeadBoardInput,
   EnemyRowInput,
   KeystoneInput,
+  MeasureId,
+  MeasureInput,
   MeasureProbe,
   OuterRowInput,
 } from './measures';
@@ -85,6 +88,57 @@ describe('measure jobs', () => {
     expect(() =>
       measureStrength({ content: B5, key: 'fire.nope' as FusionKey, coef: 1, seed: 0 }),
     ).toThrow("fusionStrength 'fire.nope': no such fusion core in the web");
+  });
+});
+
+describe("C10.4's measures", () => {
+  const jobs: MeasureJob[] = [
+    {
+      kind: 'measure',
+      measure: 'mirror',
+      input: { content: B5, key: 'fire.crit', coef: 0.5, seed: 0 },
+    },
+    {
+      kind: 'measure',
+      measure: 'double',
+      input: { content: B1, character: 'fire', outers: ['poison', 'crit'], seed: 0 },
+    },
+    {
+      kind: 'measure',
+      measure: 'triple',
+      input: { content: B1, character: 'fire', outers: ['poison', 'crit', 'ice'], seed: 1 },
+    },
+    { kind: 'measure', measure: 'fuzz', input: { content: B1, seed: 1029, only: 'fire.full.0' } },
+  ];
+
+  it('runs each through runJob, its input and reading plain data, the same on two workers', async () => {
+    for (const job of jobs) {
+      const result = runJob(job);
+      expect(result).toMatchObject({ kind: 'measure', measure: job.measure });
+      expect(JSON.parse(JSON.stringify(job))).toStrictEqual(job);
+      expect(JSON.parse(JSON.stringify(result))).toStrictEqual(result);
+    }
+    const [inProcess, workers] = [await runJobs(jobs, 1), await runJobs(jobs, 2)];
+    expect(workers.mode).toBe('workers');
+    expect(workers.results).toEqual(inProcess.results);
+  }, 60_000);
+
+  it('refuses a fusion core the web does not have', () => {
+    expect(() =>
+      measureMirror({ content: B5, key: 'fire.nope' as FusionKey, coef: 1, seed: 0 }),
+    ).toThrow("mirror 'fire.nope': no such fusion core in the web");
+  });
+
+  it('throws, naming it, on a job kind or a measure it does not know (lead ruling U14)', () => {
+    expect(() => runJob({ kind: 'warp' } as unknown as BalanceJob)).toThrow(
+      "Unknown balance job kind 'warp'",
+    );
+    expect(() => runMeasure('teleport' as MeasureId, {} as MeasureInput)).toThrow(
+      "Unknown measure 'teleport'",
+    );
+    expect(() =>
+      runJob({ kind: 'measure', measure: 'teleport', input: {} } as unknown as BalanceJob),
+    ).toThrow("Unknown measure 'teleport'");
   });
 });
 

@@ -95,6 +95,7 @@
 | `npm run smoke:electron` | Electron 冒煙測試（沒有 Steam 也能跑）：先 `npm run electron:install`，再在 container 裡用 `xvfb-run -a -s "-screen 0 1280x800x24" npm run smoke:electron` 跑，截圖輸出到 `out/electron-smoke/` |
 | `npm run balance -- --strategy all --sessions 8 --minutes 60` | 平衡模擬器，CSV 輸出到 `out/balance/`（參數見 `tools/balance/cli.ts`） |
 | `npm run checks` | 平衡檢查的 PR 子集（`docs/v3/implementation-plan-v3.md` §4），pass／FAIL 報告輸出到 `out/checks/`；有未接受的 FAIL 時結束碼為 1（參數見 `tools/balance/v3/checks/cli.ts`） |
+| `npm run nightly` | 平衡檢查的夜間與每週集合（`docs/v3/implementation-plan-v3.md` §4）：本機依序跑計畫、每個分片與合併，輸出到 `out/nightly/`；`--weekly` 加三融合、`--quick` 減少工作階段、`--content fixture` 用測試內容；排程由 `.github/workflows/nightly.yml` 分片跑（參數見 `tools/balance/v3/nightly.ts`） |
 | `npm run bench` | 模擬核心效能量測 |
 | `npm run fingerprint` | 行為指紋；加 `-- --check` 和 `tools/balance/fingerprint.baseline.txt` 逐行比對，重構必須完全相同 |
 | `npm run readings` | 機器讀數：依序跑 `bench -- --share` 與 `bench -- --check`（各加 `--json`），印出 `bc-incremental readings v1` 區塊並寫到 `out/readings/readings.txt` |

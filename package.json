@@ -25,6 +25,7 @@
     "test:watch": "vitest",
     "balance": "tsx tools/balance/cli.ts",
     "checks": "tsx tools/balance/v3/checks/cli.ts",
+    "nightly": "tsx tools/balance/v3/nightly.ts",
     "bench": "tsx tools/balance/bench.ts",
     "fingerprint": "tsx tools/balance/fingerprint.ts",
     "readings": "tsx tools/balance/readings.ts",

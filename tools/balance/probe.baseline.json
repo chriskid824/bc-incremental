@@ -1,0 +1,325 @@
+{
+  "seeds": [
+    1,
+    2,
+    3
+  ],
+  "sessions": 12,
+  "minutes": 60,
+  "strategies": {
+    "crit-greedy": {
+      "frontier": {
+        "F@10": {
+          "pooled": 13,
+          "perSeed": [
+            14,
+            13,
+            13
+          ]
+        },
+        "F@20": {
+          "pooled": 24,
+          "perSeed": [
+            23,
+            23.5,
+            24
+          ]
+        },
+        "F@40": {
+          "pooled": 33.5,
+          "perSeed": [
+            34,
+            33,
+            34
+          ]
+        },
+        "F@60": {
+          "pooled": 42,
+          "perSeed": [
+            42,
+            42,
+            42
+          ]
+        }
+      },
+      "minutesToWave": {
+        "20": {
+          "pooled": 16.550277777777776,
+          "perSeed": [
+            16.434583333333332,
+            17.10486111111111,
+            16.988888888888887
+          ]
+        },
+        "30": {
+          "pooled": 25.54486111111111,
+          "perSeed": [
+            24.786527777777778,
+            25.665277777777778,
+            26.046666666666667
+          ]
+        }
+      },
+      "firstNotableMinutes": 5.404861111111112,
+      "firstKeystoneMinutes": 14.751111111111111,
+      "firstRepeatableRun": 13,
+      "elites": {
+        "killed": 323,
+        "reached": 0,
+        "alive": 6
+      },
+      "bosses": {
+        "killed": 601,
+        "reached": 0,
+        "alive": 134
+      },
+      "bossKillSeconds": 3.3333333333333335,
+      "multipliers": {
+        "ranks": 17,
+        "repeatableMultD": 5.054470284992946,
+        "sectorMultD": 12.238894056847545,
+        "sectorMultAttack": 12.238894056847545,
+        "sectorMultCrowd": 47.80817990956072
+      },
+      "overkill": {
+        "maxShare": 0.058355437665782495,
+        "runsOver": 0,
+        "runs": 1125
+      }
+    },
+    "dot-greedy": {
+      "frontier": {
+        "F@10": {
+          "pooled": 13,
+          "perSeed": [
+            13,
+            13,
+            13
+          ]
+        },
+        "F@20": {
+          "pooled": 23,
+          "perSeed": [
+            21,
+            23,
+            24
+          ]
+        },
+        "F@40": {
+          "pooled": 31,
+          "perSeed": [
+            31,
+            31,
+            31
+          ]
+        },
+        "F@60": {
+          "pooled": 37,
+          "perSeed": [
+            37,
+            37,
+            37
+          ]
+        }
+      },
+      "minutesToWave": {
+        "20": {
+          "pooled": 15.363055555555556,
+          "perSeed": [
+            15.146666666666667,
+            15.452083333333334,
+            15.362083333333334
+          ]
+        },
+        "30": {
+          "pooled": 30.28152777777778,
+          "perSeed": [
+            30.28152777777778,
+            30.634444444444444,
+            29.710833333333333
+          ]
+        }
+      },
+      "firstNotableMinutes": 5.342777777777778,
+      "firstKeystoneMinutes": 12.082083333333333,
+      "firstRepeatableRun": 11,
+      "elites": {
+        "killed": 303,
+        "reached": 124,
+        "alive": 136
+      },
+      "bosses": {
+        "killed": 300,
+        "reached": 11,
+        "alive": 258
+      },
+      "bossKillSeconds": 9.3,
+      "multipliers": {
+        "ranks": 16,
+        "repeatableMultD": 4.594972986357222,
+        "sectorMultD": 7.649004329004327,
+        "sectorMultAttack": 7.649004329004329,
+        "sectorMultCrowd": 11.951569264069265
+      },
+      "overkill": {
+        "maxShare": 0,
+        "runsOver": 0,
+        "runs": 1250
+      }
+    },
+    "chain-greedy": {
+      "frontier": {
+        "F@10": {
+          "pooled": 14,
+          "perSeed": [
+            14,
+            15,
+            14
+          ]
+        },
+        "F@20": {
+          "pooled": 24,
+          "perSeed": [
+            24,
+            24.5,
+            24
+          ]
+        },
+        "F@40": {
+          "pooled": 34,
+          "perSeed": [
+            33,
+            33.5,
+            35
+          ]
+        },
+        "F@60": {
+          "pooled": 38,
+          "perSeed": [
+            37.5,
+            38,
+            38
+          ]
+        }
+      },
+      "minutesToWave": {
+        "20": {
+          "pooled": 15.624444444444446,
+          "perSeed": [
+            15.665972222222221,
+            15.752638888888889,
+            15.521805555555556
+          ]
+        },
+        "30": {
+          "pooled": 27.085277777777776,
+          "perSeed": [
+            27.40611111111111,
+            27.11347222222222,
+            26.60527777777778
+          ]
+        }
+      },
+      "firstNotableMinutes": 4.3462499999999995,
+      "firstKeystoneMinutes": 14.05652777777778,
+      "firstRepeatableRun": 12,
+      "elites": {
+        "killed": 555,
+        "reached": 33,
+        "alive": 126
+      },
+      "bosses": {
+        "killed": 326,
+        "reached": 5,
+        "alive": 219
+      },
+      "bossKillSeconds": 10.341666666666667,
+      "multipliers": {
+        "ranks": 17,
+        "repeatableMultD": 5.054470284992944,
+        "sectorMultD": 6.2536764705882355,
+        "sectorMultAttack": 19.06864078991596,
+        "sectorMultCrowd": 19.06864078991596
+      },
+      "overkill": {
+        "maxShare": 0.03325004804920238,
+        "runsOver": 0,
+        "runs": 1346
+      }
+    }
+  },
+  "checks": [
+    {
+      "id": "T1",
+      "label": "pure F@60 in 34–46",
+      "value": "42 / 37 / 38",
+      "pass": true
+    },
+    {
+      "id": "T2",
+      "label": "parity to wave 20: pooled ≤ 1.20, each seed ≤ 1.25",
+      "value": "1.08 (1.09/1.11/1.11)",
+      "pass": true
+    },
+    {
+      "id": "T2",
+      "label": "parity to wave 30: pooled ≤ 1.20, each seed ≤ 1.25",
+      "value": "1.19 (1.22/1.19/1.14)",
+      "pass": true
+    },
+    {
+      "id": "T4",
+      "label": "pure F@10 in 13–17.5 (pooled)",
+      "value": "13 / 13 / 14 (all seeds in)",
+      "pass": true
+    },
+    {
+      "id": "T4",
+      "label": "pure F@20 in 19–25.5 (pooled)",
+      "value": "24 / 23 / 24 (all seeds in)",
+      "pass": true
+    },
+    {
+      "id": "T4",
+      "label": "pure F@40 in 25.5–34.5 (pooled)",
+      "value": "33.5 / 31 / 34 (a seed out)",
+      "pass": true
+    },
+    {
+      "id": "T4",
+      "label": "pure first notable ≥ 3 min",
+      "value": "5.4 / 5.3 / 4.3",
+      "pass": true
+    },
+    {
+      "id": "T4",
+      "label": "pure first keystone 10–25 min",
+      "value": "14.8 / 12.1 / 14.1",
+      "pass": true
+    },
+    {
+      "id": "T6",
+      "label": "sector× ÷ Might× at 30 min > 1 (chain: with jumps)",
+      "value": "2.42 / 1.66 / 3.77",
+      "pass": true
+    },
+    {
+      "id": "T7",
+      "label": "elites / bosses near the frontier killed ≥ 50% of those killed or reaching you",
+      "value": "100%/100% · 71%/96% · 94%/98%",
+      "pass": true
+    },
+    {
+      "id": "info",
+      "label": "boss kill time near the frontier 8–15 s (GDD §7.5)",
+      "value": "3.3 / 9.3 / 10.3",
+      "pass": false
+    },
+    {
+      "id": "T8",
+      "label": "overkill time share per run ≤ 30% (bench: npm run bench)",
+      "value": "max 5.8%",
+      "pass": true
+    }
+  ]
+}

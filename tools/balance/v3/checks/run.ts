@@ -1,30 +1,40 @@
 /**
- * The §4 checks' sets, plans and evaluation (docs/v3 C10 design §1.4–§1.6, §2.2, §2.3). checkSet
+ * The §4 checks' sets, plans and evaluation (docs/v3 C10 design §1.4–§1.6, §2.2–§2.4). checkSet
  * makes a set's plan from the content: the checks, and units that are plain-data balance jobs with
  * stable ids. derivedUnits gives the second phase's units from the first phase's results (the ★
  * measures on the prestige-point snapshots, the legacy sessions, and the rows', affixes' and dead
- * boards' measures on the DEAD_BOARD_MINUTES snapshots); runPlan runs both on the pool;
- * evaluate turns the results into one CheckResult per check and subject. evaluate is a pure
- * function of the plan and the results, so the nightly's shards (C10.4) can split a plan and its
- * merge can evaluate results it did not run.
+ * boards' measures on the DEAD_BOARD_MINUTES snapshots), and derivedReads says which sessions it
+ * reads for a character; runPlan runs both on the pool; evaluate turns the results into one
+ * CheckResult per check and subject. evaluate is a pure function of the plan and the results, so
+ * the nightly's shards (nightly.ts) split a plan and its merge evaluates results it did not run.
  */
 
 import { PACING_TOLERANCE } from '../../../../src/data';
+import type { CharacterId } from '../../../../src/data';
 import type { Content } from '../../../../src/data/web';
 import { DEFAULT_WEB_ECONOMY } from '../../../../src/meta/web';
+import { WEB_FUZZ_SEED } from '../../../../src/meta/web/fuzz';
 import { runJobs } from '../../jobs';
 import type { BalanceJob, JobResult } from '../../jobs';
 import type { PoolRun } from '../../pool';
-import { builtCharacters, C10_SEED, formatContentRef } from '../content';
+import { builtCharacters, C10_SEED, formatContentRef, webOf } from '../content';
 import type { ContentRef } from '../content';
 import { LEGACY } from '../legacy';
 import type { LegacyHook } from '../legacy';
 import { PRESTIGE } from '../prestige';
-import { CLEAR_WAVE, FULL_SESSION_MINUTES, PRE_PRESTIGE_MINUTES } from '../session';
-import type { CharacterSessionConfig } from '../session';
+import {
+  CLEAR_WAVE,
+  FULL_SESSION_MINUTES,
+  OTHER_SESSION_MINUTES,
+  PRE_PRESTIGE_MINUTES,
+} from '../session';
+import type { CharacterSessionConfig, SessionSnapshot } from '../session';
+import { webStrategiesFor } from '../strategies';
+import type { WebStrategyId } from '../strategies';
 import { ACCEPTED_CHECK_FAILS, acceptedKey } from './accepted';
 import {
   boardUnits,
+  DEAD_BOARD_MINUTES,
   DEAD_BOARDS_STANDARD,
   DEAD_NODES_STANDARD,
   deadBoardsCheck,
@@ -33,7 +43,21 @@ import {
 import { budgetCheck } from './budget';
 import { probeC7Parts } from './c7';
 import type { C7Parts } from './c7';
-import { fusionStrengthCheck, STRENGTH_BAND, strengthTargets, strengthUnits } from './fusions';
+import {
+  comboStandard,
+  comboUnits,
+  doublesCheck,
+  everyStrengthTarget,
+  fusionStrengthCheck,
+  mirrorsCheck,
+  MIRRORS_STANDARD,
+  mirrorUnits,
+  STRENGTH_BAND,
+  strengthTargets,
+  strengthUnits,
+  triplesCheck,
+} from './fusions';
+import { FUZZ_NIGHTLY_STANDARD, fuzzCheck, fuzzUnits } from './fuzz';
 import {
   KEYSTONE_GAIN,
   KEYSTONE_SEEDS,
@@ -76,7 +100,8 @@ import {
   POINT_BUDGET,
   PRESTIGE_RETURN_MAX,
 } from './targets';
-import { checkRow, naRow, sessionUnitId } from './types';
+import { m1Check, M1_STANDARD, m1Units } from './m1';
+import { checkRow, naRow, sessionUnitId, strategyUnitId } from './types';
 import type { CheckId, CheckPlan, CheckResult, CheckSetId, PlanUnit, UnitResults } from './types';
 
 /**
@@ -94,9 +119,9 @@ export const MENU_SECONDS = 20;
 /**
  * Each set's checks in the report's order (design §1.4, §1.5). pr is impl:493's list: the built
  * characters' default build (quick pacing), one hand and one template fusion, newbie fairness,
- * the center share, and ci.yml's fuzz and performance steps. The nightly is every C10.2 and C10.3
- * check on NIGHTLY_SESSIONS sessions; C10.4 adds its own and the nightly's global fuzz shard, and
- * the weekly is the nightly plus C10.4's triples.
+ * the center share, and ci.yml's fuzz and performance steps. The nightly is every other check on
+ * NIGHTLY_SESSIONS sessions: fusion strength over every fusion, the mirrors, the doubles, the M1
+ * diffs and its own fuzz (the global-fuzz shard); the weekly is the nightly with the triples.
  */
 export const SET_CHECKS: Readonly<Record<CheckSetId, readonly CheckId[]>> = {
   pr: ['pacing', 'newbie', 'fusionStrength', 'centerShare', 'fuzz', 'performance'],
@@ -108,16 +133,20 @@ export const SET_CHECKS: Readonly<Record<CheckSetId, readonly CheckId[]>> = {
     'enemyRow',
     'outerRow',
     'fusionStrength',
+    'mirrors',
     'centerShare',
     'deadBoards',
     'deadNodes',
     'keystones',
+    'doubles',
     'legacy',
     'playTime',
     'pointBudget',
     'prestigeReturn',
     'affixes',
     'budget',
+    'm1',
+    'fuzz',
   ],
   weekly: [
     'pacing',
@@ -127,16 +156,21 @@ export const SET_CHECKS: Readonly<Record<CheckSetId, readonly CheckId[]>> = {
     'enemyRow',
     'outerRow',
     'fusionStrength',
+    'mirrors',
     'centerShare',
     'deadBoards',
     'deadNodes',
     'keystones',
+    'doubles',
+    'triples',
     'legacy',
     'playTime',
     'pointBudget',
     'prestigeReturn',
     'affixes',
     'budget',
+    'm1',
+    'fuzz',
   ],
 };
 
@@ -177,6 +211,7 @@ export const CHECK_STANDARDS: Readonly<Record<CheckId, string>> = {
   fusionStrength:
     `every calibration seed in [${STRENGTH_BAND.min}, ${STRENGTH_BAND.max}] at the entry's ` +
     'coef; digest current (初始值)',
+  mirrors: MIRRORS_STANDARD,
   centerShare:
     `median (center + asc) ÷ all damage ≥ ${CENTER_SHARE_MIN} in the first run reaching wave ` +
     `${CENTER_SHARE_WAVE} (初始值)`,
@@ -185,6 +220,8 @@ export const CHECK_STANDARDS: Readonly<Record<CheckId, string>> = {
   keystones:
     `each visible ★: median x(with) − median x(without) over ${KEYSTONE_SEEDS} seeds in ` +
     `[+${KEYSTONE_GAIN.low}, +${KEYSTONE_GAIN.high}] waves (初始值)`,
+  doubles: comboStandard('double'),
+  triples: comboStandard('triple'),
   legacy: `the second character's minutes to wave ${LEGACY_WAVE} ≤ ${LEGACY_MAX} × the first's (初始值)`,
   playTime:
     `a fresh account clears wave ${CLEAR_WAVE} in ${PLAY_TIME_MINUTES[0]}–` +
@@ -195,9 +232,14 @@ export const CHECK_STANDARDS: Readonly<Record<CheckId, string>> = {
   prestigeReturn: `median minutes back to the last cycle's best ≤ ${PRESTIGE_RETURN_MAX} × that cycle's (初始值)`,
   affixes: AFFIXES_STANDARD,
   budget: 'Σ effectsDropped = 0; the other budget and cap counters are info',
+  m1: M1_STANDARD,
   fuzz: "ci.yml's `npm run fuzz:web` passes",
   performance: "ci.yml's `npm run bench -- --check` passes",
 };
+
+/** A check's standard in `set`: the nightly's fuzz runs its own builds, the pr set's points at ci.yml. */
+export const standardOf = (set: CheckSetId, id: CheckId): string =>
+  id === 'fuzz' && set !== 'pr' ? FUZZ_NIGHTLY_STANDARD : CHECK_STANDARDS[id];
 
 export interface CheckSetOptions {
   /** The nightly's --quick: PR_SESSIONS where the set reads NIGHTLY_SESSIONS. */
@@ -213,18 +255,24 @@ export interface CheckSetOptions {
   readonly c7?: C7Parts;
   /** In place of ACCEPTED_CHECK_FAILS. */
   readonly accepted?: Readonly<Record<string, string>>;
+  /** The nightly fuzz's seed (nightly.ts: WEB_FUZZ_SEED + the commit's first six hex digits). */
+  readonly fuzzSeed?: number;
 }
 
-/** A default session of the checks: the C10 seed, the max start wave, a fresh account, the full scope. */
+/**
+ * A session of the checks: the C10 seed, the max start wave, a fresh account, the full scope;
+ * `strategy`'s, the default build's unless named.
+ */
 function defaultSessionConfig(
   ref: ContentRef,
   character: CharacterSessionConfig['character'],
   session: number,
   minutes: number,
+  strategy: WebStrategyId = 'default',
 ): CharacterSessionConfig {
   return {
     character,
-    strategy: 'default',
+    strategy,
     session,
     seed: C10_SEED,
     minutes,
@@ -239,8 +287,10 @@ function defaultSessionConfig(
 /**
  * The plan of `set` on `content` (read from `ref` by the units): the characters with a center,
  * their default sessions (PR_SESSIONS in the pr set and a quick nightly, else NIGHTLY_SESSIONS),
- * the strength measures of the first hand and template fusions with entries, and the visible ★.
- * Before B1 it has no characters and no units.
+ * the strength measures (the pr set's first hand and template fusions with entries, the nightly's
+ * every calibrated fusion) and the visible ★; in the nightly, every other strategy's sessions
+ * (which deadNodes reads), the mirrors', doubles' and triples' measures, the M1 diffs and the
+ * fuzz's builds. Before B1 it has no characters, and only the M1 diffs' units.
  */
 export function checkSet(
   set: CheckSetId,
@@ -255,7 +305,14 @@ export function checkSet(
   const legacy = options.legacy ?? LEGACY !== null;
   const sessions = options.sessions ?? (set === 'pr' || quick ? PR_SESSIONS : NIGHTLY_SESSIONS);
   const minutes = options.minutes ?? (prestige ? FULL_SESSION_MINUTES : PRE_PRESTIGE_MINUTES);
-  const strength = checks.includes('fusionStrength') ? strengthTargets(content, characters) : [];
+  const otherMinutes = options.minutes ?? (prestige ? OTHER_SESSION_MINUTES : PRE_PRESTIGE_MINUTES);
+  const has = (id: CheckId): boolean => checks.includes(id);
+  const strength =
+    has('fusionStrength') || has('mirrors')
+      ? set === 'pr'
+        ? strengthTargets(content, characters)
+        : everyStrengthTarget(content, characters)
+      : [];
   const sessionUnits = checks.some((id) => SESSION_CHECKS.has(id))
     ? characters.flatMap((character) =>
         Array.from({ length: sessions }, (_, session): PlanUnit => ({
@@ -265,6 +322,22 @@ export function checkSet(
             config: defaultSessionConfig(ref, character, session, minutes),
           },
         })),
+      )
+    : [];
+  // Every other strategy's sessions, whose purchases deadNodes reads (C10.3's D15).
+  const strategyUnits = has('deadNodes')
+    ? characters.flatMap((character) =>
+        webStrategiesFor(webOf(ref, character, 'full'))
+          .filter((strategy) => strategy !== 'default')
+          .flatMap((strategy) =>
+            Array.from({ length: sessions }, (_, session): PlanUnit => ({
+              id: strategyUnitId(character, strategy, session),
+              job: {
+                kind: 'character',
+                config: defaultSessionConfig(ref, character, session, otherMinutes, strategy),
+              },
+            })),
+          ),
       )
     : [];
   return {
@@ -279,7 +352,18 @@ export function checkSet(
     legacy,
     // 奇點 and the clear land with 傳承 in B5 (implementation-plan-v3 §8.1).
     singularity: options.singularity ?? LEGACY !== null,
-    units: [...sessionUnits, ...strengthUnits(ref, strength)],
+    units: [
+      ...sessionUnits,
+      ...strategyUnits,
+      ...(has('fusionStrength') ? strengthUnits(ref, strength) : []),
+      ...(has('mirrors') ? mirrorUnits(ref, strength) : []),
+      ...(has('doubles') ? comboUnits('double', content, ref, characters) : []),
+      ...(has('triples') ? comboUnits('triple', content, ref, characters) : []),
+      ...(has('m1') ? m1Units() : []),
+      ...(has('fuzz') && set !== 'pr'
+        ? fuzzUnits(content, ref, options.fuzzSeed ?? WEB_FUZZ_SEED)
+        : []),
+    ],
     strength,
     keystones: checks.includes('keystones') ? keystoneTargets(ref, characters) : [],
     accepted: options.accepted ?? ACCEPTED_CHECK_FAILS,
@@ -305,6 +389,63 @@ export function derivedUnits(
     ...rowUnits(plan, results),
     ...boardUnits(plan, results),
   ];
+}
+
+/** The checks whose units derive from a character's DEAD_BOARD_MINUTES snapshot (rows.ts, boards.ts). */
+const BOARD_SNAPSHOT_CHECKS: readonly CheckId[] = ['enemyRow', 'outerRow', 'deadBoards'];
+
+/** The sessions derivedUnits reads for one character's units (lead ruling U11). */
+export interface DerivedReads {
+  /** The character's default session ids in index order; empty when no derived check reads them. */
+  readonly sessions: readonly string[];
+  /** The snapshots read off them: the sessions up to the lowest holding each one are enough. */
+  readonly snapshots: readonly SessionSnapshot['minutes'][];
+  /** Sessions read whole: for a later character's legacy units, the first's default sessions. */
+  readonly whole: readonly string[];
+}
+
+/**
+ * What derivedUnits reads to make `character`'s units, from keystoneUnits', rowUnits',
+ * boardUnits' and legacyUnits' rules: its default sessions in index order up to the lowest holding
+ * the prestige point (when it has a ★ to measure) and a DEAD_BOARD_MINUTES snapshot (for the rows,
+ * the dead boards and, once C7.6 is live, the affixes); and, once B5 sets LEGACY, a later
+ * character's legacy sessions read every default session of the first. nightly.ts' `<c>-probes`
+ * replays exactly these, and its merge checks the units they gave against derivedUnits on every
+ * merged session.
+ */
+export function derivedReads(
+  plan: CheckPlan,
+  character: CharacterId,
+  legacy: LegacyHook | null = LEGACY,
+): DerivedReads {
+  const snapshots: SessionSnapshot['minutes'][] = [];
+  if (
+    plan.checks.includes('keystones') &&
+    plan.keystones.some((target) => target.character === character)
+  ) {
+    snapshots.push('prestige');
+  }
+  if (
+    BOARD_SNAPSHOT_CHECKS.some((id) => plan.checks.includes(id)) ||
+    (plan.checks.includes('affixes') && plan.c7['C7.6'])
+  ) {
+    snapshots.push(DEAD_BOARD_MINUTES);
+  }
+  const [first] = plan.characters;
+  const legacyReads =
+    plan.checks.includes('legacy') &&
+    plan.legacy &&
+    legacy !== null &&
+    first !== undefined &&
+    first !== character &&
+    plan.characters.includes(character);
+  const ids = (of: CharacterId): string[] =>
+    Array.from({ length: plan.sessions }, (_, session) => sessionUnitId(of, session));
+  return {
+    sessions: snapshots.length > 0 && plan.characters.includes(character) ? ids(character) : [],
+    snapshots,
+    whole: legacyReads ? ids(first) : [],
+  };
 }
 
 /** Runs balance jobs; runJobs (tools/balance/jobs.ts) unless a test passes its own. */
@@ -371,39 +512,48 @@ const EVALUATORS: Readonly<
   enemyRow: enemyRowCheck,
   outerRow: outerRowCheck,
   fusionStrength: fusionStrengthCheck,
+  mirrors: mirrorsCheck,
   centerShare: centerShareCheck,
   deadBoards: deadBoardsCheck,
   deadNodes: deadNodesCheck,
   keystones: keystonesCheck,
+  doubles: doublesCheck,
+  triples: triplesCheck,
   legacy: legacyCheck,
   playTime: playTimeCheck,
   pointBudget: pointBudgetCheck,
   prestigeReturn: prestigeReturnCheck,
   affixes: affixesCheck,
   budget: budgetCheck,
-  fuzz: (plan) => ciStep(plan, 'fuzz', 'npm run fuzz:web'),
+  m1: m1Check,
+  fuzz: (plan, results) =>
+    plan.set === 'pr' ? ciStep(plan, 'fuzz', 'npm run fuzz:web') : fuzzCheck(plan, results),
   performance: (plan) => ciStep(plan, 'performance', 'npm run bench -- --check'),
 };
 
+/** Checks real before B1: m1 judges the M1 path, which needs no center (lead ruling U15). */
+const CENTERLESS_CHECKS: ReadonlySet<CheckId> = new Set<CheckId>(['m1']);
+
 /**
  * The plan's rows in check order, a pure function of the plan and the unit results. Before B1
- * (no character with a center) every check is one noCenter row. A FAIL whose acceptedKey the plan
- * accepts carries the reason; fusion strength's come from content.acceptedFails instead.
+ * (no character with a center) every check but m1 is one noCenter row. A FAIL whose acceptedKey
+ * the plan accepts carries the reason; fusion strength's come from content.acceptedFails instead.
  */
 export function evaluate(plan: CheckPlan, results: UnitResults): CheckResult[] {
-  const rows =
-    plan.characters.length === 0
-      ? plan.checks.map((id) =>
+  const rows = plan.checks.flatMap((id) =>
+    plan.characters.length === 0 && !CENTERLESS_CHECKS.has(id)
+      ? [
           naRow(
             id,
             plan.set,
             'all',
-            CHECK_STANDARDS[id],
+            standardOf(plan.set, id),
             'noCenter',
             `no character has a center in the ${formatContentRef(plan.content)} content`,
           ),
-        )
-      : plan.checks.flatMap((id) => EVALUATORS[id](plan, results));
+        ]
+      : EVALUATORS[id](plan, results),
+  );
   return rows.map((row) => {
     if (row.status !== 'FAIL' || row.accepted !== undefined || row.id === 'fusionStrength') {
       return row;
