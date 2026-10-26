@@ -201,13 +201,16 @@ export interface ReplayCounts {
 /**
  * A spec's run played into a view. A (re)start creates the run from its spec, simulates its
  * warm-up undrawn, re-seeds the view and shows tick 0; the clip then runs durationTicks ticks
- * (fewer if the run ends), and a looping one starts again. seek(t) restarts and steps frames to
- * t, so it equals stepping from the start.
+ * (fewer if the run ends), and a looping one starts again, unless its run ended inside the
+ * warm-up: that clip has no tick to show, so it holds tick 0 as one that does not loop. seek(t)
+ * restarts and steps frames to t, so it equals stepping from the start.
  */
 export class ReplayRun {
   private sim: Simulation;
   private ctx: RunContext | null = null;
   private tickValue = 0;
+  /** The run ended inside its warm-up: a restart would show the same tick 0 again. */
+  private endedInWarmup = false;
 
   constructor(
     private readonly spec: ReplaySpec,
@@ -232,7 +235,7 @@ export class ReplayRun {
   advance(ticks: number): void {
     for (let i = 0; i < ticks; i++) {
       if (this.over) {
-        if (!this.spec.loop) return;
+        if (!this.spec.loop || this.endedInWarmup) return;
         this.sim = this.restart();
         this.onLoop();
       }
@@ -290,6 +293,7 @@ export class ReplayRun {
     this.ctx = null;
     const sim = createSimulation(config, setup.data, [...setup.testModules, probe]);
     for (let i = 0; i < spec.warmupTicks && !sim.state.finished; i++) sim.step(NO_INPUT);
+    this.endedInWarmup = sim.state.finished;
     this.tickValue = 0;
     this.view.start(typicalHitOf(config), renderSeedOf(spec));
     this.view.frame(sim.state, 1, 0);

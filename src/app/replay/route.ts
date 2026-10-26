@@ -47,22 +47,34 @@ export async function startReplayRoute(root: HTMLElement, search: string): Promi
   const expose = (handle: ReplayHandle): void => {
     if (route.step) Object.assign(window, { __replay: handle });
   };
-  let handle = await open();
-  expose(handle);
+  const first = await open();
+  expose(first);
   if (route.width !== null) return;
+  /** The handle in `handle`'s place at the window's size now: itself while its readout is done. */
+  const recreate = async (handle: ReplayHandle | null): Promise<ReplayHandle | null> => {
+    if (handle !== null) {
+      if (route.readout && handle.frameStats().phase === 'done') return handle;
+      handle.destroy();
+    }
+    try {
+      const next = await open();
+      expose(next);
+      return next;
+    } catch (error) {
+      showError(root, String(error));
+      return null;
+    }
+  };
+  // Each re-creation waits for the one before it and replaces the handle that one made (null
+  // when it failed): a settle during a re-creation never destroys a handle twice or leaks the
+  // one being made, and the last settle's size wins (the lead's ruling H9).
+  let last: Promise<ReplayHandle | null> = Promise.resolve(first);
   let pending: ReturnType<typeof setTimeout> | null = null;
   window.addEventListener('resize', () => {
     if (pending !== null) clearTimeout(pending);
     pending = setTimeout(() => {
       pending = null;
-      if (route.readout && handle.frameStats().phase === 'done') return;
-      handle.destroy();
-      open()
-        .then((next) => {
-          handle = next;
-          expose(next);
-        })
-        .catch((error: unknown) => showError(root, String(error)));
+      last = last.then(recreate);
     }, RESIZE_SETTLE_MS);
   });
 }

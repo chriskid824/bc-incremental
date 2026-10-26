@@ -30,6 +30,8 @@
     "readings": "tsx tools/balance/readings.ts",
     "fps:web": "vite build && vite preview --port 4173 --strictPort",
     "fps:steam": "npm run build:electron && electron . --bc-replay=renderStress",
+    "gif": "tsx tools/sheets/gif.ts",
+    "clips": "tsx tools/sheets/clips.ts",
     "snapshots": "tsx tools/content/snapshots.ts",
     "content": "tsx tools/content/check.ts",
     "calibrate": "tsx tools/content/calibrate.ts",

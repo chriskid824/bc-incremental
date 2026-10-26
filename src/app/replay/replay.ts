@@ -29,7 +29,10 @@ export interface ReplayHandle {
   seek(tick: number): void;
   /** The readout's numbers over play mode's frames so far (readout.ts). */
   frameStats(): FrameStats;
-  /** Stops, then renderer.destroy() and app.destroy(), whose renderer loses the WebGL context. */
+  /**
+   * Stops, then renderer.destroy() and app.destroy(), whose renderer loses the WebGL context. A
+   * second call does nothing.
+   */
   destroy(): void;
 }
 
@@ -137,6 +140,7 @@ export async function createReplay(
     });
   let raf = 0;
   let playing = false;
+  let destroyed = false;
   /** The last rAF's time; null after a (re)start, so the next interval is not counted. */
   let last: number | null = null;
   const frame = (now: number): void => {
@@ -184,6 +188,9 @@ export async function createReplay(
     },
     frameStats: () => timer.stats(),
     destroy() {
+      // Pixi throws when its Application is destroyed twice (the lead's ruling H9).
+      if (destroyed) return;
+      destroyed = true;
       pause();
       unwatch();
       panel?.remove();

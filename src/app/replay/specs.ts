@@ -102,6 +102,12 @@ export function renderStressSpec(o: Partial<ReplaySpec> = {}): ReplaySpec {
 const WHOLE = /^\d+$/;
 /** The largest seed: createRng reads a seed as an unsigned 32-bit integer (src/core/rng.ts). */
 const SEED_MAX = 0xffffffff;
+/** `&seconds=`'s longest clip: a capture of up to a minute (the lead's ruling H8). */
+const SECONDS_MAX = 60;
+/** `&fps=`'s rates: the divisors of TICK_RATE, so that every frame steps whole ticks. */
+const FPS_RATES = Array.from({ length: TICK_RATE }, (_, i) => i + 1).filter(
+  (fps) => TICK_RATE % fps === 0,
+);
 
 type Parsed<T> = T | { readonly error: string };
 
@@ -153,7 +159,8 @@ function specOf(value: string, o: Partial<ReplaySpec>): Parsed<ReplaySpec> {
 }
 
 /**
- * The spec `?replay=` names in `search` (a page's location.search), with `&seed=`, `&wave=` and
+ * The spec `?replay=` names in `search` (a page's location.search), with `&seed=`, `&wave=`,
+ * `&seconds=` (the clip's length: n × TICK_RATE ticks; without it, the form's own) and
  * `&fixture`. An error for a missing or empty `?replay=` (the game's page, readDevFlags), an
  * unknown form or a parameter out of range.
  */
@@ -165,9 +172,12 @@ export function parseReplayParam(search: string): ReplaySpec | { readonly error:
   if (isError(seed)) return seed;
   const wave = wholeParam(params, 'wave', 1, Number.MAX_SAFE_INTEGER);
   if (isError(wave)) return wave;
+  const seconds = wholeParam(params, 'seconds', 1, SECONDS_MAX);
+  if (isError(seconds)) return seconds;
   return specOf(value, {
     ...(seed === undefined ? {} : { seed }),
     ...(wave === undefined ? {} : { startWave: wave }),
+    ...(seconds === undefined ? {} : { durationTicks: seconds * TICK_RATE }),
     ...(params.has('fixture') ? { content: 'fixture' as const } : {}),
   });
 }
@@ -181,7 +191,10 @@ export interface ReplayRoute {
   readonly step: boolean;
   /** `&readout=0|1`: the frame-time readout; 1 for renderStress, else 0, by default. */
   readonly readout: boolean;
-  /** Ticks a step-mode frame runs: TICK_RATE ÷ GIF_FPS for a GIF (a 30 fps capture), else 1. */
+  /**
+   * Ticks a step-mode frame runs: TICK_RATE ÷ `&fps=`; without it TICK_RATE ÷ GIF_FPS for a GIF
+   * (a 30 fps capture), else 1.
+   */
   readonly frameTicks: number;
 }
 
@@ -193,7 +206,19 @@ function flagParam(params: URLSearchParams, name: string): Parsed<boolean | unde
   return text === '1';
 }
 
-/** parseReplayParam's spec with the route's `&width=`, `&step=` and `&readout=`. */
+/** `&fps=`: one of FPS_RATES; undefined when absent. */
+function fpsParam(params: URLSearchParams): Parsed<number | undefined> {
+  const text = params.get('fps');
+  if (text === null) return undefined;
+  const value = WHOLE.test(text) ? Number(text) : NaN;
+  if (!FPS_RATES.includes(value)) {
+    const rates = `${FPS_RATES.slice(0, -1).join(', ')} or ${FPS_RATES.at(-1)}`;
+    return { error: `&fps=${text}: a divisor of ${TICK_RATE}: ${rates}` };
+  }
+  return value;
+}
+
+/** parseReplayParam's spec with the route's `&width=`, `&step=`, `&readout=` and `&fps=`. */
 export function parseReplayRoute(search: string): ReplayRoute | { readonly error: string } {
   const spec = parseReplayParam(search);
   if (isError(spec)) return spec;
@@ -204,12 +229,14 @@ export function parseReplayRoute(search: string): ReplayRoute | { readonly error
   if (isError(step)) return step;
   const readout = flagParam(params, 'readout');
   if (isError(readout)) return readout;
+  const fps = fpsParam(params);
+  if (isError(fps)) return fps;
   const gif = (params.get('replay') ?? '').startsWith('gif:');
   return {
     spec,
     width: width ?? (gif ? GIF_WIDTH : null),
     step: step ?? false,
     readout: readout ?? spec.build.kind === 'preset',
-    frameTicks: gif ? TICK_RATE / GIF_FPS : 1,
+    frameTicks: fps !== undefined ? TICK_RATE / fps : gif ? TICK_RATE / GIF_FPS : 1,
   };
 }

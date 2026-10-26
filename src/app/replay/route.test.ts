@@ -3,7 +3,8 @@
  * options each route hands the component (a gif:'s frameTicks and width, step mode's resolution,
  * the readout on for renderStress and off in step mode), `window.__replay` in step mode, the
  * replay re-created once a resize settles, a done readout's block kept through a resize, a fixed
- * `&width=` never re-created, and a bad route shown as an error.
+ * `&width=` never re-created, a bad route shown as an error, and a settle during a re-creation
+ * chained on it, a failed one included (the lead's ruling H9).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,6 +19,16 @@ interface Created {
 }
 
 const created = vi.hoisted(() => [] as Created[]);
+/**
+ * While `hold` is set, createReplay's promise waits for the test, as app.init keeps a re-creation
+ * in flight: `release` resolves the oldest one waiting, and `fail` rejects it.
+ */
+const deferred = vi.hoisted(() => ({
+  hold: false,
+  waiting: [] as { resolve(): void; reject(error: Error): void }[],
+}));
+const release = (): void => deferred.waiting.shift()?.resolve();
+const fail = (error: Error): void => deferred.waiting.shift()?.reject(error);
 
 vi.mock('./replay', () => ({
   createReplay: (_root: unknown, spec: ReplaySpec, options: ReplayOptions) => {
@@ -34,7 +45,10 @@ vi.mock('./replay', () => ({
       },
     };
     created.push(entry);
-    return Promise.resolve(entry.handle);
+    if (!deferred.hold) return Promise.resolve(entry.handle);
+    return new Promise((resolve, reject) =>
+      deferred.waiting.push({ resolve: () => resolve(entry.handle), reject }),
+    );
   },
 }));
 
@@ -72,6 +86,7 @@ function resize(width: number, height: number): void {
 beforeEach(() => {
   vi.useFakeTimers();
   created.length = 0;
+  Object.assign(deferred, { hold: false, waiting: [] });
   shown = [];
   const resizes = new Set<() => void>();
   win = {
@@ -169,5 +184,41 @@ describe('startReplayRoute (docs/v3 C10 design §1.7)', () => {
     expect(created).toHaveLength(0);
     expect(shown).toHaveLength(1);
     expect(shown[0]).toMatch(/^replay: /);
+  });
+
+  it('chains a settle on the re-creation in flight: each handle destroyed once, the last size kept', async () => {
+    await startReplayRoute(root, '?replay=renderStress&step=1');
+    deferred.hold = true;
+    resize(1000, 600);
+    await vi.advanceTimersByTimeAsync(250);
+    // The first re-creation is in flight: the first handle is destroyed, the second being made.
+    expect(created.map((entry) => entry.destroyed)).toEqual([1, 0]);
+    resize(800, 450);
+    await vi.advanceTimersByTimeAsync(250);
+    // The second settle waits for it: nothing more is destroyed or made yet.
+    expect(created.map((entry) => entry.destroyed)).toEqual([1, 0]);
+    deferred.hold = false;
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(created.map((entry) => entry.destroyed)).toEqual([1, 1, 0]);
+    expect(created[2]?.options).toMatchObject({ width: 800, height: 450, mode: 'step' });
+    expect(win.__replay).toBe(created[2]?.handle);
+    expect(shown).toEqual([]);
+  });
+
+  it('shows a failed re-creation and opens afresh at the next settle, destroying no handle twice', async () => {
+    await startReplayRoute(root, '?replay=renderStress');
+    deferred.hold = true;
+    resize(1000, 600);
+    await vi.advanceTimersByTimeAsync(250);
+    fail(new Error('no WebGL'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown).toEqual(['replay: Error: no WebGL']);
+    deferred.hold = false;
+    resize(900, 500);
+    await vi.advanceTimersByTimeAsync(250);
+    // The failed one made no handle: the next settle destroys nothing and opens at its size.
+    expect(created.map((entry) => entry.destroyed)).toEqual([1, 0, 0]);
+    expect(created[2]?.options).toMatchObject({ width: 900, height: 500, readout: true });
   });
 });

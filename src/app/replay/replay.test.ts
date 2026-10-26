@@ -3,7 +3,8 @@
  * Application and the game's Renderer are stubs, and so are the page's window, document,
  * navigator and requestAnimationFrame, so node runs the component itself: step mode's
  * frameTicks, play mode through FixedStepClock, the readout fed the rAF intervals, its restarts,
- * and its panel with Copy and a read-only textarea, `page:` read from the protocol.
+ * and its panel with Copy and a read-only textarea, `page:` read from the protocol; destroy()
+ * releasing everything once, however often it is called.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -330,6 +331,15 @@ describe('createReplay (docs/v3 C10 design §1.7)', () => {
     expect(raf.pending).toBeNull();
     expect((body.children[0] as StubElement).removed).toBe(true);
     expect([stubs.renderersDestroyed, stubs.appsDestroyed]).toEqual([1, 1]);
+    expect([win.count(), doc.count()]).toEqual([0, 0]);
+  });
+
+  it('releases once when destroyed twice: the second call does nothing (the lead’s ruling H9)', async () => {
+    const handle = await open({ mode: 'play', readout: true });
+    frameAt(0);
+    handle.destroy();
+    handle.destroy();
+    expect([stubs.renderersDestroyed, stubs.appsDestroyed, raf.cancelled]).toEqual([1, 1, 1]);
     expect([win.count(), doc.count()]).toEqual([0, 0]);
   });
 });

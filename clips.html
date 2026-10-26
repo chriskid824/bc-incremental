@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clip wall</title>
+    <!-- Dev-only clip wall of the fusions (npm run dev, then /clips.html; ?all for every fusion,
+         ?fixture for the test fixture, ?step=1 for tools/sheets/clips.ts). It is not a build
+         input. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #0b0d12;
+        color: #e8ecf4;
+        font-family:
+          'Noto Sans', 'Segoe UI', 'Microsoft JhengHei', 'PingFang TC', 'WenQuanYi Zen Hei',
+          sans-serif;
+        font-size: 13px;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border-bottom: 1px solid #262b36;
+      }
+      header h1 {
+        margin: 0 8px 0 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      header .summary {
+        color: #9aa3b5;
+      }
+      /* Four 320 px tiles a row, each 216 px tall with its two label lines, so
+         tools/sheets/clips.ts captures the wall 1320 px wide and of an even height, as the MP4's
+         yuv420p needs. */
+      #wall {
+        display: grid;
+        grid-template-columns: repeat(4, 320px);
+        gap: 8px;
+        width: max-content;
+        padding: 8px;
+      }
+      .tile {
+        margin: 0;
+        width: 320px;
+      }
+      .clip {
+        width: 320px;
+        height: 180px;
+        overflow: hidden;
+        background: #000000;
+      }
+      .label {
+        height: 36px;
+        font:
+          12px/18px ui-monospace,
+          monospace;
+      }
+      .label div {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+      .about {
+        color: #9aa3b5;
+      }
+      .error {
+        margin: 8px;
+        color: #ff8a8a;
+        font:
+          12px/1.4 ui-monospace,
+          monospace;
+        white-space: pre-wrap;
+      }
+      .empty {
+        margin: 16px;
+        color: #9aa3b5;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="clips"></main>
+    <script type="module" src="/src/app/clips.ts"></script>
+  </body>
+</html>

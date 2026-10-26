@@ -14,6 +14,14 @@
  *
  * It saves the first load's three frames for the lead to look at.
  *
+ * The clips smoke (§2.6; the lead's ruling H6), in a third fresh context:
+ * `/clips.html?fixture&step=1` opens 12 fixture tiles of 320 × 180 px on page 1 of 3; five flips
+ * (pages 2, 3, 1, 2, 3, each stepped) show each page's tiles, and no tile shown loses its WebGL
+ * context: none fires `webglcontextlost` while on the wall, none reads isContextLost() after the
+ * flips, and Chromium never warns of too many active contexts. A flip's destroy() releases each
+ * replaced tile's context (WEBGL_lose_context), so its canvas, off the wall by then, fires one
+ * `webglcontextlost`: the smoke counts them, one a destroyed tile.
+ *
  *   npx tsx tools/sheets/replaySmoke.ts [--out out/replay-smoke]
  *
  * Playwright is taken from node_modules or the global install, as capture.ts takes it.
@@ -40,6 +48,35 @@ const CHROMIUM_ARGS = [
   '--enable-unsafe-swiftshader',
   '--ignore-gpu-blocklist',
 ];
+
+/** The clip wall's smoke (§2.6): fixture tiles, a page's 12 of 32, and the five flips' pages. */
+const CLIPS = '/clips.html?fixture&step=1';
+const CLIPS_VIEWPORT = { width: 1400, height: 900 };
+const CLIPS_PAGES = 3;
+const CLIPS_FLIPS = [2, 3, 1, 2, 3] as const;
+/** The tiles of each fixture page: 32 template and templateOverride fusions, 12 a page. */
+const CLIPS_TILES = [12, 12, 8] as const;
+/**
+ * Watches the wall's canvases not yet watched: a `webglcontextlost` on one still on the wall is a
+ * tile shown losing its context, on one off it a destroy() releasing it (C10.5a). The canvases now.
+ */
+const WATCH_WALL = `(() => {
+  const seen = (window.__smokeSeen ??= new WeakSet());
+  const lost = (window.__smokeLost ??= { shown: 0, released: 0 });
+  const canvases = [...document.querySelectorAll('#wall canvas')];
+  for (const canvas of canvases) {
+    if (seen.has(canvas)) continue;
+    seen.add(canvas);
+    canvas.addEventListener('webglcontextlost', () => {
+      if (canvas.isConnected) lost.shown++;
+      else lost.released++;
+    });
+  }
+  return canvases.map((canvas) => canvas.width + 'x' + canvas.height);
+})()`;
+/** The wall's canvases whose context is lost. */
+const LOST_NOW = `[...document.querySelectorAll('#wall canvas')].filter((canvas) =>
+  (canvas.getContext('webgl2') ?? canvas.getContext('webgl'))?.isContextLost() ?? true).length`;
 
 const INTRO = '.bc-intro:not([hidden])';
 const TALENTS = '.bc-talents:not([hidden])';
@@ -165,6 +202,65 @@ function foreign(requests: readonly string[], origin: string): string[] {
 const fetchesReplay = (requests: readonly string[], origin: string): boolean =>
   requests.some((request) => request.startsWith(`GET ${origin}${REPLAY_MODULES}`));
 
+/** The clips smoke (§2.6): the wall's first page, five flips and its contexts; what it read. */
+async function clipsSmoke(browser: Browser, base: string): Promise<string[]> {
+  const context = await browser.newContext({ viewport: CLIPS_VIEWPORT, locale: 'en-US' });
+  const { page } = await watchedPage(context);
+  const warnings: string[] = [];
+  page.on('console', (message) => {
+    if (message.text().includes('WebGL contexts')) warnings.push(message.text());
+  });
+  current = CLIPS;
+  await page.goto(new URL(CLIPS, base).href, { timeout: LOAD_TIMEOUT_MS });
+  await page.waitForFunction('window.__clips?.ready === true', undefined, {
+    timeout: LOAD_TIMEOUT_MS,
+  });
+  const pages = Number(await page.evaluate('window.__clips.pages'));
+  check(pages === CLIPS_PAGES, `${pages} pages, not ${CLIPS_PAGES}`);
+  const first = (await page.evaluate(WATCH_WALL)) as string[];
+  check(first.length === CLIPS_TILES[0], `page 1 shows ${first.length} tiles`);
+  check(
+    first.every((size) => size === '320x180'),
+    `page 1's canvases: ${[...new Set(first)].join(', ')}`,
+  );
+  await page.evaluate('window.__clips.step(15)');
+  let destroyed = first.length;
+  const shown: string[] = [];
+  for (const [i, n] of CLIPS_FLIPS.entries()) {
+    current = `${CLIPS} (page ${n})`;
+    await page.evaluate(`window.__clips.page(${n})`);
+    const sizes = (await page.evaluate(WATCH_WALL)) as string[];
+    const tiles = CLIPS_TILES[n - 1] ?? 0;
+    check(sizes.length === tiles, `page ${n} shows ${sizes.length} tiles, not ${tiles}`);
+    await page.evaluate('window.__clips.step(15)');
+    shown.push(`${n}: ${sizes.length}`);
+    // The next flip destroys them; the last flip's page stays.
+    if (i < CLIPS_FLIPS.length - 1) destroyed += sizes.length;
+  }
+  current = `${CLIPS} (after ${CLIPS_FLIPS.length} flips)`;
+  // The released contexts' events come a task after their destroy().
+  await page
+    .waitForFunction(`window.__smokeLost.released >= ${destroyed}`, undefined, { timeout: 10_000 })
+    .catch(() => undefined);
+  const lost = (await page.evaluate('window.__smokeLost')) as { shown: number; released: number };
+  const lostNow = Number(await page.evaluate(LOST_NOW));
+  check(lost.shown === 0, `${lost.shown} webglcontextlost on tiles shown`);
+  check(lostNow === 0, `${lostNow} tiles shown have lost their context`);
+  check(
+    lost.released === destroyed,
+    `${lost.released} contexts released of ${destroyed} destroyed`,
+  );
+  check(warnings.length === 0, `warnings: ${warnings.join(' | ')}`);
+  await context.close();
+  return [
+    `${CLIPS} at ${CLIPS_VIEWPORT.width}x${CLIPS_VIEWPORT.height}: ${pages} pages, page 1 ` +
+      `${first.length} tiles of ${first[0] ?? 'none'}`,
+    `  ${CLIPS_FLIPS.length} flips (page: tiles) ${shown.join(', ')}; webglcontextlost on tiles ` +
+      `shown: ${lost.shown}; lost after the flips: ${lostNow}; released by destroy(): ` +
+      `${lost.released} of ${destroyed}; context warnings: ${warnings.length}`,
+  ];
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     args: process.argv.slice(2),
@@ -239,6 +335,8 @@ async function main(): Promise<void> {
     }
     await gameContext.close();
 
+    const clips = await clipsSmoke(browser, base);
+
     console.log(`${REPLAY}, loaded twice at ${VIEWPORT.width}x${VIEWPORT.height}:`);
     for (const [i, frame] of FRAMES.entries()) {
       console.log(`  frame ${frame}: sha256 ${hashes[i]}`);
@@ -250,6 +348,7 @@ async function main(): Promise<void> {
         `localStorage keys: ${keys.length}`,
     );
     console.log(`pages that fetched ${REPLAY_MODULES} of /, /?hive: ${fetched.length}`);
+    for (const line of clips) console.log(line);
   } finally {
     await browser?.close();
     await server.close();

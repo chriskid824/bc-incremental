@@ -100,4 +100,6 @@
 | `npm run readings` | 機器讀數：依序跑 `bench -- --share` 與 `bench -- --check`（各加 `--json`），印出 `bc-incremental readings v1` 區塊並寫到 `out/readings/readings.txt` |
 | `npm run fps:web` | build 網頁版並用 `vite preview` 開在 port 4173；瀏覽器開 `/?replay=renderStress` 量畫面時間，量完面板給 `bc-incremental fps v1` 區塊 |
 | `npm run fps:steam` | build Steam 版後用 Electron 開同一個量測畫面（`--bc-replay=renderStress`） |
+| `npm run gif -- --character <c>` | PR 的 15 秒 GIF：headless Chromium 逐格擷取 `?replay=gif:<c>`，ffmpeg 做成 GIF 和 MP4，輸出到 `out/gif/`；GIF 超過 9.5 MB 依序改 480 px、20 fps，都超過就附 MP4。`--fusion <c>.<o>` 擷取手工融合的片段，`--fixture` 用測試 fixture；PATH 上要有 ffmpeg（參數見 `tools/sheets/gif.ts`） |
+| `npm run clips` | 片段牆的擷取：開發頁 `/clips.html`（`npm run dev` 開，不進 build）每頁 12 個 3 秒融合片段，存成 `out/clips/wall-<n>.gif` 和 `.mp4`；`--all` 連手工融合一起，`--fixture` 用測試 fixture；PATH 上要有 ffmpeg |
 | `npm run format` | Prettier 自動排版 |

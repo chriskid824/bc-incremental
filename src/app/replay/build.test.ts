@@ -177,6 +177,25 @@ describe('the replay core (docs/v3 C10 design §1.7, OWN test 1)', () => {
     expect(once.view.seen.filter((entry) => entry[0] === 'start')).toHaveLength(1);
   });
 
+  it('holds a looping clip whose run ends inside its warm-up, as one that does not loop', () => {
+    // The wall's wave-18 fire.ice run on the fixture ends within 90 ticks of its 300 warm-up
+    // ticks, so 600 warm-up ticks hold all of it.
+    let loops = 0;
+    const clip = fusionClipSpec('fire.ice', { content: 'fixture', warmupTicks: 600 });
+    const { run, view } = replay(clip, () => loops++);
+    expect([run.tick, run.over]).toEqual([0, true]);
+    run.stepFrames(30, 2);
+    expect([run.tick, run.over, loops]).toEqual([0, true, 0]);
+    // One start and its tick 0, then 30 frames of that same state: no restart, no event.
+    expect(view.seen.map((entry) => entry[0])).toEqual([
+      'start',
+      ...Array<string>(31).fill('frame'),
+    ]);
+    expect(new Set(view.seen.slice(1).map((entry) => entry[1])).size).toBe(1);
+    run.seek(40, 2);
+    expect([run.tick, loops]).toEqual([0, 0]);
+  });
+
   it('adds a probe that changes nothing: the clip’s events are the run’s own after its warm-up', () => {
     const { run, view } = replay(SPEC);
     run.advance(120);
