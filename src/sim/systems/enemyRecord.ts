@@ -6,8 +6,9 @@
  * imports as a type only.
  */
 
-import type { EnemyDef } from '../../data/types';
+import type { EnemyBehaviour, EnemyDef } from '../../data/types';
 import { DT } from '../types';
+import type { Enemy } from './context';
 
 /** Enemy AI kinds (EnemyV3.ai): what a v3 type does each tick beyond walking in. */
 export const AI_NONE = 0;
@@ -69,6 +70,12 @@ export interface EnemyV3 {
    * for a tough def, × its origin's dropScale.
    */
   dropScale: number;
+  /**
+   * The tick of a shooter's next shot or a summoner's next summons (src/sim/systems/enemyAi.ts),
+   * armed when it first reaches its post; Infinity until then, and for every other type. Each
+   * frozen tick pushes it back one, which leaves Infinity as it is.
+   */
+  nextAct: number;
 }
 
 /**
@@ -82,6 +89,32 @@ export interface SpawnOrigin {
   readonly dropScale: number;
   readonly extra: boolean;
   readonly affixes: number;
+}
+
+/**
+ * The origin of an enemy-made spawn at its def's own hp, radius and drops, outside composeWave's
+ * count and with no affix: a summoner's children (summon, src/sim/systems/enemyAi.ts) and, from
+ * C7.7, an onion's bursts. One frozen constant, passed as is.
+ */
+export const EXTRA_ORIGIN: SpawnOrigin = Object.freeze({
+  hpScale: 1,
+  radiusScale: 1,
+  dropScale: 1,
+  extra: true,
+  affixes: 0,
+});
+
+type TreasureBehaviour = Extract<EnemyBehaviour, { readonly kind: 'treasure' }>;
+
+/**
+ * The angle an orbiting treasure (ORBITING, standing at its post) turns its bearing by in a tick
+ * at slow `slow`: its slowed walk step over its orbitDist; 0 for one of speed 0, or fully slowed.
+ * The orbit turns by it (src/sim/systems/enemyAi.ts), and bleedRemaining
+ * (src/sim/ailments/remaining.ts) and the lob's lead (src/sim/emitters/lob.ts) read it.
+ */
+export function orbitTurn(enemy: Enemy, slow: number): number {
+  const v = enemy.v3 as EnemyV3;
+  return (v.baseStep * (1 - slow)) / (enemy.def.behaviour as TreasureBehaviour).orbitDist;
 }
 
 /** The AI kind of each behaviour; shield, regeneration and layers walk in as M1's types do. */
@@ -123,5 +156,6 @@ export function createEnemyV3(
     escapeDist: 0,
     regen: def.behaviour?.kind === 'regen' ? def.behaviour.lifePctPerSec : 0,
     dropScale: (def.tough ? toughDropMult : 1) * (origin?.dropScale ?? 1),
+    nextAct: Infinity,
   };
 }

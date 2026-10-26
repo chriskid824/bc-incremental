@@ -92,7 +92,8 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  *   (TRANSFER_EFFECTS), which run at the kill while the victim's ailments are still on it.
  * - nthAttack: every Nth attack (`every`) of the build's emitters, at the attack's first target.
  * - waveStart, periodic (every `every` seconds): no target; effects start at the player.
- * - heroHit: an enemy reached the player and hurt it; no target, effects start at the player.
+ * - heroHit: an enemy reached the player and hurt it, or a shooter's bullet hit it; no target,
+ *   effects start at the player.
  * - contact: an enemy touched the player; the target is that enemy.
  * - ailmentApplied: a hit or an effect applied an ailment (AppliedAilment) to its target; moving
  *   stacks (spreadAilment) applies nothing.
@@ -182,7 +183,7 @@ export type HitKind = (typeof HIT_KINDS)[number];
 
 /**
  * What a v3 enemy is doing (targetState): dashing, a dasher's dash; stopped, a dasher charging
- * its dash (src/sim/systems/enemyAi.ts), and from C7.4b shooters and summoners at their posts.
+ * its dash, or a shooter or a summoner at its post (src/sim/systems/enemyAi.ts).
  */
 export const TARGET_STATES = ['dashing', 'stopped'] as const;
 export type TargetState = (typeof TARGET_STATES)[number];

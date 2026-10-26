@@ -15,13 +15,14 @@ import { createRng, deriveSeed } from '../../core/rng';
 import { loadGameData } from '../../data';
 import { stdHp, stdHpAt } from '../../data/curve';
 import { coefRange } from '../../data/fusion/sensitivity';
-import type { GameData } from '../../data/types';
+import type { GameData, SpawnRule } from '../../data/types';
 import { assembleWeb } from '../../data/web/assemble';
 import { FULL_SCOPE } from '../../data/web/scope';
 import { fixtureContent } from '../../data/web/testing';
 import type { AssembledWeb, FusionKey } from '../../data/web/types';
 import type { TestModule } from '../../sim/rules';
 import { createSimulation } from '../../sim/simulation';
+import { TEST_V3_WAVES, v3TestData } from '../../sim/testing';
 import { NO_INPUT } from '../../sim/types';
 import { webBuild, webRunConfig } from './build';
 import {
@@ -149,6 +150,102 @@ describe('waveHp and frontierOf (AMB15)', () => {
     expect(died.ticks).toBeLessThan(PROBE_MAX_TICKS);
     const cut = probeRun(web, base, 5, data, 60);
     expect([cut.timeout, cut.ticks]).toEqual([true, 60]);
+  });
+});
+
+describe('probeRun on a v3 run (docs/v3 C7 design §2.6, C7/F12; lead ruling Y8)', () => {
+  /** v3 fixture data of `rules` from wave 1, with no affix, treasure, elite or boss. */
+  const v3Data = (rules: readonly SpawnRule[]): GameData =>
+    v3TestData({
+      waves: {
+        rules,
+        eliteEvery: 1000,
+        bossEvery: 1000,
+        v3: {
+          ...TEST_V3_WAVES.v3,
+          affixes: [],
+          treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+        },
+      },
+    });
+  const web = assembleWeb(fixtureContent(), 'lightning', FULL_SCOPE);
+  const progress = sampleProgress(web, createRng(3), {
+    purchases: 140,
+    account: CALIBRATION_ACCOUNT,
+    bestWave: 30,
+    prestiged: false,
+  });
+
+  /** The probe's run again, counted from its events; `extras` from a tick hook. */
+  function counted(v3: GameData) {
+    const extras = new Set<number>();
+    const watch: TestModule = (b) =>
+      void b.hook('tick', (ctx) => {
+        for (const e of ctx.enemies) if (e.v3 !== null && e.v3.extra) extras.add(e.id);
+      });
+    const sim = createSimulation(
+      { ...webRunConfig(webBuild(web, progress), 777, 1), maxTicks: 20_000 },
+      v3,
+      [watch, ((b) => void b.hook('onKill', () => undefined)) satisfies TestModule],
+    );
+    const ids = { spawned: [] as number[], killed: [] as number[], leaked: [] as number[] };
+    let summoned = 0;
+    let bullets = 0;
+    while (!sim.state.finished) {
+      for (const event of sim.step(NO_INPUT)) {
+        if (event.type === 'enemySpawned') ids.spawned.push(event.enemyId);
+        else if (event.type === 'enemyKilled') ids.killed.push(event.enemyId);
+        else if (event.type === 'playerHit') ids.leaked.push(event.enemyId);
+        else if (event.type === 'summoned') summoned += event.count;
+        else if (event.type === 'bulletHit') bullets++;
+      }
+    }
+    const alive = sim.state.enemies.map((e) => e.id);
+    return { ids, alive, extras, summoned, bullets };
+  }
+
+  it('leaves out a summoner’s children, killed, leaked or alive, as waveHp does (§2.6 OWN test 11)', () => {
+    // Planted bug: the extra fates kept, so that φ counts HP its waveHp never holds.
+    const v3 = v3Data([
+      { enemy: 'summoner', fromWave: 1, base: 2, perWave: 0.2, maxCount: 8 },
+      { enemy: 'triangle', fromWave: 1, base: 6, perWave: 0.6, maxCount: 40 },
+    ]);
+    const run = probeRun(web, progress, 777, v3, 20_000);
+    const { ids, alive, extras, summoned } = counted(v3);
+    const own = (list: readonly number[]) => list.filter((id) => !extras.has(id)).length;
+    const ends = (end: EnemyFate['end']) => run.enemies.filter((fate) => fate.end === end).length;
+    // The children: every extra enemy, many of them killed or leaked.
+    expect(extras.size).toBe(summoned);
+    expect(
+      ids.killed.length + ids.leaked.length - own(ids.killed) - own(ids.leaked),
+    ).toBeGreaterThan(10);
+    expect({
+      spawned: run.enemies.length,
+      killed: ends('killed'),
+      leaked: ends('leaked'),
+      alive: ends('alive'),
+    }).toEqual({
+      spawned: ids.spawned.length - summoned,
+      killed: own(ids.killed),
+      leaked: own(ids.leaked),
+      alive: own(alive),
+    });
+    // R-C7-6: φ stays below 1.
+    const x = frontierOf(run, v3);
+    expect(x).toBeGreaterThanOrEqual(run.highestWaveCleared);
+    expect(x).toBeLessThan(run.highestWaveCleared + 1);
+  });
+
+  it('counts no shooter as leaked by its bullets: they push bulletHit, never playerHit (Y8)', () => {
+    // Planted bug: a bullet's hit pushing playerHit, which marks its shooter leaked.
+    const v3 = v3Data([{ enemy: 'shooter', fromWave: 1, base: 4, perWave: 0.4, maxCount: 8 }]);
+    const run = probeRun(web, progress, 777, v3, 20_000);
+    const { ids, bullets } = counted(v3);
+    expect(bullets).toBeGreaterThan(0);
+    // Shooters stand at their post: none reaches the player, and the run has no other enemy.
+    expect(ids.leaked).toEqual([]);
+    expect(run.enemies.filter((fate) => fate.end === 'leaked')).toEqual([]);
+    expect(run.enemies.length).toBe(ids.spawned.length);
   });
 });
 

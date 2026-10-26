@@ -18,6 +18,7 @@ import type { RuleSpec } from '../data/rules';
 import type { Modifier } from '../data/stats';
 import { TAG } from '../data/tags';
 import type { TriggerSpec } from '../data/triggers';
+import { ENEMY_IDS } from '../data/types';
 import type { EnemyId, GameData } from '../data/types';
 import { frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
@@ -27,7 +28,7 @@ import type { Payload } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
 import type { RunContext } from './systems/context';
-import { ARMOURED, CHARGING, DASHING, FLEEING, ORBITING } from './systems/enemyRecord';
+import { ARMOURED, CHARGING, DASHING, FLEEING, ORBITING, STOPPED } from './systems/enemyRecord';
 import { MOTION_HOMING, MOTION_LOB, MOTION_STRAIGHT, spawnShot } from './systems/shots';
 import {
   GOLDEN_BUILDS,
@@ -41,7 +42,7 @@ import {
   v3TestData,
 } from './testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, NO_INPUT } from './types';
-import type { CounterId, RunConfig } from './types';
+import type { ContactTally, CounterId, EnemyState, RunConfig } from './types';
 
 const GOLDEN_C4_TICKS = 1200;
 const GOLDEN_C4_SEEDS = [1, 2] as const;
@@ -1640,6 +1641,36 @@ const regenDasherTreasureData = (): GameData =>
     },
   });
 
+/**
+ * C7.4b's shooters and summoners (docs/v3 C7 design §2.6) on a v3 run of both from wave 1, 8
+ * shooters and 20 summoners a wave (the design names no count: at TEST_V3_WAVES' 1 + 0.2 a wave
+ * the field never comes near the cap within the run), with a cap of 120 and no affix, treasure,
+ * elite or boss (§1.9; TEST_V3_WAVES.v3 spread, as v3TestData's merge is shallow). A mid build,
+ * damage 20 on BASE_STATS' volley with one extra life, takes contacts at ×0.05
+ * (contactDamageTaken), which bullets skip: at ×1 the summoned triangles end the run near tick
+ * 580, before the field fills. In both seeds the shooters fire from their posts, a bullet takes
+ * the first life, bullets hit the revived life, the summons fill the field to the cap near tick
+ * 1,000 and skip children there, and a bullet ends the run.
+ */
+const SHOOTER_SUMMONER_STATS = makeStats({ damage: 20, extraLives: 1, contactDamageTaken: 0.05 });
+const shooterSummonerData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: [
+        { enemy: 'shooter', fromWave: 1, base: 8, perWave: 0, maxCount: 8 },
+        { enemy: 'summoner', fromWave: 1, base: 20, perWave: 0, maxCount: 20 },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        enemyCap: 120,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1924,6 +1955,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     data: regenDasherTreasureData,
     expected: ['4788017e5f438056', '1e13679b1acb27bd'],
   },
+  {
+    name: 'shooterSummoner',
+    config: { stats: SHOOTER_SUMMONER_STATS, rules: [], startWave: 12 },
+    data: shooterSummonerData,
+    expected: ['b0267c6a4aa2d8d1', '90a15c629a900259'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -2206,6 +2243,203 @@ describe('golden C4 runs', () => {
       'treasure escapes after 480 unfrozen ticks of orbit',
       'treasure escapes past the edge',
       'treasure flees out',
+    ];
+    expect(bySeed).toEqual({ 1: pins, 2: pins });
+  });
+
+  it('stops shooters within a step of 300 and summoners of 480, fires every 120 ticks and summons every 180 from a period after each stops, lands each bullet ceil((d − 36) / (200/60)) ticks after its shot, tallies the bullets in bulletTakenBy alone, revives on a bullet and dies to one, and summons extra children in their summoner’s wave through the cap in shooterSummoner (C7.4b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'shooterSummoner') as GoldenC4Entry;
+    const posts: Partial<Record<EnemyId, { readonly dist: number; readonly period: number }>> = {
+      shooter: { dist: 300, period: 120 },
+      summoner: { dist: 480, period: 180 },
+    };
+    const bySeed: Record<number, string[]> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const seen = new Set<string>();
+      // Each enemy as first seen: its type, wave and whether it is extra; each shooter's and
+      // summoner's stop tick and last act; each bullet in flight's fire tick and distance.
+      const enemies = new Map<number, { type: EnemyId; wave: number; extra: boolean }>();
+      const stops = new Map<number, number>();
+      const acts = new Map<number, number>();
+      const shots = new Map<number, { at: number; d: number }>();
+      let peak = 0;
+      const note = (e: EnemyState): void => {
+        if (!enemies.has(e.id)) {
+          enemies.set(e.id, { type: e.type, wave: e.wave, extra: e.v3 !== null && e.v3.extra });
+        }
+      };
+      const watch: TestModule = (b) =>
+        void b.hook('tick', (ctx) => {
+          // After the enemy AI step and movement, before this tick's hits.
+          let alive = 0;
+          for (const e of ctx.enemies) {
+            if (!e.alive) continue;
+            alive++;
+            note(e);
+            const post = posts[e.type];
+            if (post === undefined || stops.has(e.id) || e.v3?.state !== STOPPED) continue;
+            stops.set(e.id, ctx.now);
+            seen.add(
+              e.dist <= post.dist && e.dist > post.dist - e.def.speed * DT
+                ? `${e.type} stops within a step of ${post.dist}`
+                : `${e.type} stops at ${e.dist}`,
+            );
+          }
+          peak = Math.max(peak, alive);
+          for (const e of ctx.sys.enemyAi.list) {
+            if (e.type === 'triangle') seen.add('a summoned triangle on the AI list');
+          }
+        });
+      const act = (id: number, type: 'shooter' | 'summoner', now: number): void => {
+        const { period } = posts[type] as { readonly period: number };
+        const last = acts.get(id);
+        if (last === undefined) {
+          seen.add(
+            now - (stops.get(id) ?? -Infinity) === period
+              ? `${type} first acts ${period} ticks after it stops`
+              : `${type} first acts off time`,
+          );
+        } else {
+          seen.add(
+            now - last === period
+              ? `${type} acts every ${period} ticks`
+              : `${type} acts ${now - last} ticks after its last act`,
+          );
+        }
+        acts.set(id, now);
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [watch]);
+      // The bulletHit and playerHit events summed by type, as RunResult tallies them.
+      const bullets = new Map<EnemyId, ContactTally>();
+      const contacts = new Map<EnemyId, ContactTally>();
+      const tally = (sums: Map<EnemyId, ContactTally>, type: EnemyId, damage: number): void => {
+        const sum = sums.get(type) ?? { hits: 0, damage: 0 };
+        sums.set(type, { hits: sum.hits + 1, damage: sum.damage + damage });
+      };
+      let children: number[] = [];
+      let skipped = 0;
+      let revived = false;
+      let last: { bullet: boolean; lifeLeft: number } | null = null;
+      while (!sim.state.finished) {
+        const now = sim.state.tick + 1;
+        const events = sim.step(NO_INPUT);
+        // The children spawned this tick, which the tick hook saw before their summoned event.
+        for (const e of sim.state.enemies) note(e);
+        for (const event of events) {
+          if (event.type === 'enemySpawned' && event.enemy === 'triangle') {
+            children.push(event.enemyId);
+          } else if (event.type === 'bulletFired') {
+            act(event.enemyId, 'shooter', now);
+            const d = Math.hypot(event.x - ARENA_WIDTH / 2, event.y - ARENA_HEIGHT / 2);
+            shots.set(event.bulletId, { at: now, d });
+          } else if (event.type === 'summoned') {
+            act(event.enemyId, 'summoner', now);
+            seen.add(event.count === 2 ? 'summoner summons 2' : 'summoner skips at the cap');
+            skipped += 2 - event.count;
+            // Its children's enemySpawned events come right before it.
+            if (children.length !== event.count) seen.add('a triangle spawned outside a summons');
+            const wave = enemies.get(event.enemyId)?.wave;
+            for (const id of children) {
+              const child = enemies.get(id);
+              seen.add(
+                child?.extra === true && child.wave === wave
+                  ? 'summoned children are extra, in their summoner’s wave'
+                  : 'a summoned child is not extra or not in its summoner’s wave',
+              );
+            }
+            children = [];
+          } else if (event.type === 'bulletHit') {
+            tally(bullets, event.enemy, event.damage);
+            seen.add(`a bullet hits for ${event.damage}`);
+            const shot = shots.get(event.bulletId);
+            if (shot !== undefined) {
+              const flight = (shot.d - 36) / (200 / 60);
+              seen.add(
+                Math.abs(flight - Math.round(flight)) < 1e-6
+                  ? `a bullet fired at a tie, ${shot.d} away`
+                  : now - shot.at === Math.ceil(flight)
+                    ? 'a bullet hits ceil((d − 36) / (200/60)) ticks after its shot'
+                    : `a bullet hits ${now - shot.at - Math.ceil(flight)} ticks off`,
+              );
+            }
+            if (revived && event.lifeLeft > 0) seen.add('bullets hit the revived life');
+            last = { bullet: true, lifeLeft: event.lifeLeft };
+          } else if (event.type === 'playerHit') {
+            const type = enemies.get(event.enemyId)?.type ?? 'triangle';
+            tally(contacts, type, event.damage);
+            seen.add(`a ${type} touches for ${event.damage}`);
+            last = { bullet: false, lifeLeft: event.lifeLeft };
+          } else if (event.type === 'revive') {
+            seen.add(
+              last?.bullet === true && last.lifeLeft === 0
+                ? `a bullet takes the first life, revived at ${event.lifeLeft}`
+                : 'a contact takes the first life',
+            );
+            revived = true;
+          } else if (event.type === 'runEnded') {
+            seen.add(
+              last?.bullet === true && last.lifeLeft === 0
+                ? `a bullet ends the run (${event.reason})`
+                : `the run ends (${event.reason})`,
+            );
+          }
+        }
+      }
+      const result = sim.result();
+      const sums = (
+        taken: Readonly<Record<EnemyId, ContactTally>>,
+        events: Map<EnemyId, ContactTally>,
+      ): boolean =>
+        ENEMY_IDS.every((id) => {
+          const sum = events.get(id) ?? { hits: 0, damage: 0 };
+          return taken[id].hits === sum.hits && taken[id].damage === sum.damage;
+        });
+      let leaks = 0;
+      for (const sum of contacts.values()) leaks += sum.hits;
+      seen.add(`killedBy ${result.killedBy}`);
+      seen.add(
+        sums(result.bulletTakenBy, bullets)
+          ? 'bulletTakenBy sums the bulletHit events'
+          : 'bulletTakenBy is not the bulletHit events',
+      );
+      seen.add(
+        sums(result.damageTakenBy, contacts) && result.leaks === leaks
+          ? 'damageTakenBy and leaks sum the playerHit events alone'
+          : 'damageTakenBy or leaks is not the playerHit events',
+      );
+      seen.add(
+        skipped > 0 && result.counters.enemySpawnsSkipped === skipped
+          ? 'enemySpawnsSkipped counts the children skipped'
+          : `enemySpawnsSkipped ${result.counters.enemySpawnsSkipped} for ${skipped} skipped`,
+      );
+      seen.add(peak === 120 ? 'the field fills to the cap of 120' : `the field peaks at ${peak}`);
+      bySeed[seed] = [...seen].sort();
+    }
+    // Each seed stops, fires and summons on time, lands every bullet on time for its 3 whole
+    // (a triangle's contact of 8 lands 0.4), revives on a bullet that bullets then hit, fills the
+    // field to the cap and skips children there, and dies to a bullet.
+    const pins = [
+      'a bullet ends the run (death)',
+      'a bullet hits ceil((d − 36) / (200/60)) ticks after its shot',
+      'a bullet hits for 3',
+      'a bullet takes the first life, revived at 50',
+      'a triangle touches for 0.4',
+      'bulletTakenBy sums the bulletHit events',
+      'bullets hit the revived life',
+      'damageTakenBy and leaks sum the playerHit events alone',
+      'enemySpawnsSkipped counts the children skipped',
+      'killedBy shooter',
+      'shooter acts every 120 ticks',
+      'shooter first acts 120 ticks after it stops',
+      'shooter stops within a step of 300',
+      'summoned children are extra, in their summoner’s wave',
+      'summoner acts every 180 ticks',
+      'summoner first acts 180 ticks after it stops',
+      'summoner skips at the cap',
+      'summoner stops within a step of 480',
+      'summoner summons 2',
+      'the field fills to the cap of 120',
     ];
     expect(bySeed).toEqual({ 1: pins, 2: pins });
   });

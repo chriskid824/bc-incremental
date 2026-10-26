@@ -4,19 +4,29 @@ import type { Num } from '../../core/num';
 import type { RuleSpec } from '../../data/rules';
 import type { StatBlock } from '../../data/stats';
 import type { TriggerSpec } from '../../data/triggers';
-import type { GameData } from '../../data/types';
+import type { EnemyId, GameData } from '../../data/types';
 import { CENTER } from '../build/sources';
 import { KILL_BY_BURN } from '../effects/flags';
 import type { TestModule } from '../rules';
 import { updateAilments } from '../systems/ailments';
 import { createRunContext } from '../systems/context';
 import type { BurnStack, Enemy, RunContext } from '../systems/context';
+import { CHARGING, DASHING, FLEEING, ORBITING, STOPPED, stepEnemyAi } from '../systems/enemyAi';
 import { rebuildGrid } from '../systems/grid';
 import { moveEnemies } from '../systems/movement';
 import { releaseEnemies } from '../systems/spawn';
 import { startDueWave } from '../systems/waves';
-import { centerTriggers, makeConfig, makeStats, makeTestData, stationarySquares } from '../testing';
-import { DT } from '../types';
+import {
+  centerTriggers,
+  makeConfig,
+  makeStats,
+  makeTestData,
+  placedEnemies,
+  stationarySquares,
+  TEST_V3_WAVES,
+  v3TestData,
+} from '../testing';
+import { ARENA_HEIGHT, ARENA_WIDTH, DT } from '../types';
 import type { SimEvent } from '../types';
 import { applyBurn, applyPoison } from './apply';
 import { addBleed, holdsBleed } from './bleed';
@@ -505,6 +515,127 @@ describe('bleed (R9)', () => {
     expectRel(toNumber(consumeAilment(all.ctx, all.enemy, 'bleed', 1)), all.left, 'all');
     expect([all.enemy.bleedPending, bleedRemaining(all.ctx, all.enemy)]).toEqual([ZERO, ZERO]);
     expect(dealt(advance(all.ctx, 200), all.enemy, 'bleed')).toBe(0);
+  });
+});
+
+describe('bleed of a v3 enemy (docs/v3 C7 design §2.5, §2.6; lead rulings Y9, Y12)', () => {
+  /** v3 data whose waves hold no enemy (docs/v3 C7 design §1.9); the treasure orbits a second. */
+  const data = v3TestData({
+    enemies: {
+      treasure: {
+        behaviour: { kind: 'treasure', orbitDist: 480, orbitSec: 1, fleeMult: 2 },
+      },
+    },
+    waves: {
+      rules: [{ enemy: 'triangle', fromWave: 1, base: 0, perWave: 0, maxCount: 0 }],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      spawnDurationSec: 0,
+      waveTimerSec: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
+  interface Case {
+    readonly type: EnemyId;
+    /** Its start, right of the player, and its speed. */
+    readonly dx: number;
+    readonly speed: number;
+    /** Ticks of the enemy AI step and movement before it bleeds. */
+    readonly ticks: number;
+    /** Pushed out this far, then a tick more. */
+    readonly out?: number;
+    readonly frozen?: boolean;
+    readonly state: number;
+    readonly moving: boolean;
+  }
+
+  // A bleed of 8 dps for 60 ticks from now: nothing accrued, 60 ticks to come.
+  it.each<[string, Case]>([
+    ['walking in', { type: 'square', dx: 600, speed: 60, ticks: 1, state: 0, moving: true }],
+    [
+      'turning in its orbit',
+      { type: 'treasure', dx: 480, speed: 150, ticks: 1, state: ORBITING, moving: true },
+    ],
+    [
+      'walking back to its orbit',
+      { type: 'treasure', dx: 480, speed: 150, ticks: 1, out: 20, state: ORBITING, moving: true },
+    ],
+    ['fleeing', { type: 'treasure', dx: 480, speed: 150, ticks: 70, state: FLEEING, moving: true }],
+    ['dashing', { type: 'dasher', dx: 420, speed: 110, ticks: 40, state: DASHING, moving: true }],
+    [
+      'walking back to its post',
+      { type: 'shooter', dx: 300, speed: 120, ticks: 1, out: 80, state: 0, moving: true },
+    ],
+    [
+      'a shooter at its post',
+      { type: 'shooter', dx: 300, speed: 120, ticks: 1, state: STOPPED, moving: false },
+    ],
+    [
+      'a summoner at its post',
+      { type: 'summoner', dx: 480, speed: 90, ticks: 1, state: STOPPED, moving: false },
+    ],
+    [
+      'charging',
+      { type: 'dasher', dx: 420, speed: 110, ticks: 1, state: CHARGING | STOPPED, moving: false },
+    ],
+    [
+      'orbiting at speed 0',
+      { type: 'treasure', dx: 480, speed: 0, ticks: 1, state: ORBITING, moving: false },
+    ],
+    [
+      'frozen in its orbit',
+      {
+        type: 'treasure',
+        dx: 480,
+        speed: 150,
+        ticks: 1,
+        frozen: true,
+        state: ORBITING,
+        moving: false,
+      },
+    ],
+    [
+      'frozen walking in',
+      { type: 'square', dx: 600, speed: 60, ticks: 1, frozen: true, state: 0, moving: false },
+    ],
+  ])('rates the bleed of an enemy %s by what its next tick counts', (_label, c) => {
+    // Planted bug (C7.4a's gap): only a step above 0 moving, so an orbit and a flight stand.
+    const ctx = placedEnemies(
+      [{ x: ARENA_WIDTH / 2 + c.dx, y: ARENA_HEIGHT / 2, type: c.type, speed: c.speed }],
+      { stats: makeStats({ bleedStationaryMult: 2 }), data },
+    );
+    const enemy = enemyAt(ctx, 0);
+    const tick = (): void => {
+      stepEnemyAi(ctx);
+      moveEnemies(ctx);
+      ctx.now++;
+      ctx.state.tick++;
+    };
+    for (let k = 0; k < c.ticks; k++) tick();
+    if (c.out !== undefined) {
+      enemy.dist += c.out;
+      enemy.x = ctx.player.x + enemy.ux * enemy.dist;
+      enemy.y = ctx.player.y + enemy.uy * enemy.dist;
+      tick();
+    }
+    if (c.frozen === true) {
+      ctx.frostApplied = true;
+      enemy.frozenUntil = ctx.now + 100;
+    }
+    addBleed(ctx, enemy, num(8), ctx.now + 60, 0, CENTER);
+    expect(enemy.v3?.state).toBe(c.state);
+    expect(ctx.bleedMoveMult).not.toBe(2);
+    const rate = c.moving ? ctx.bleedMoveMult : 2;
+    expectRel(toNumber(bleedRemaining(ctx, enemy)), 8 * 60 * DT * rate, 'bleedRemaining');
+    // Its next tick, the bleed's start, counts nothing; the one after counts as it reads.
+    tick();
+    tick();
+    expect(enemy.bleedMovedTicks).toBe(c.moving ? 1 : 0);
   });
 });
 

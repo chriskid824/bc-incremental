@@ -87,6 +87,7 @@ import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
 import {
   compilePolicy,
+  createBulletPool,
   createChainState,
   createDronePool,
   createEnemyAiState,
@@ -813,6 +814,7 @@ export function createRunContext(
   const segments = createSegmentState(emitters.filter((em) => em.spec.kind === 'segment'));
   // Its turrets' targets go through ctx.shootable, read once ctx exists.
   const drones = createDronePool(layout, (enemy) => ctx.shootable(enemy));
+  const bullets = createBulletPool(ENEMY_IDS);
   let shotPad = 0;
   for (const id of reachableEnemies(data)) {
     const def = data.enemies[id];
@@ -841,6 +843,8 @@ export function createRunContext(
     segments,
     drones,
     droneCount: drones.count,
+    bullets,
+    bulletCount: 0,
     shards: ZERO,
     cores: 0,
     finished: false,
@@ -1032,6 +1036,7 @@ export function createRunContext(
         maxLife,
         effects.some((fx) => fx.kind === 'shield'),
       ),
+      bullets,
     },
 
     enemies,

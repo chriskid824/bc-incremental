@@ -20,7 +20,7 @@ import {
 } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, NO_INPUT } from '../types';
 import type { SimEvent } from '../types';
-import { damagePlayer, resolveContacts, REVIVE_LIFE_FRAC } from './contact';
+import { CONTACT, damagePlayer, resolveContacts, REVIVE_LIFE_FRAC } from './contact';
 import { createRunContext } from './context';
 import type { Enemy, RunContext } from './context';
 import { compact } from './death';
@@ -548,13 +548,43 @@ describe('player defences (docs/v3 C7 design §2.2)', () => {
     const ctx = placedEnemies([AT, AT], { stats: makeStats({ ...NO_ROLLS, maxLife: 20 }) });
     expect(ctx.sys.defence).toBeNull();
     const [first, second] = ctx.enemies as [Enemy, Enemy];
-    damagePlayer(ctx, first.id, 'square', 15);
-    damagePlayer(ctx, second.id, 'square', 15);
+    damagePlayer(ctx, first.id, 'square', 15, CONTACT, -1);
+    damagePlayer(ctx, second.id, 'square', 15, CONTACT, -1);
     expect(ctx.events).toEqual([
       { type: 'playerHit', enemyId: first.id, damage: 15, lifeLeft: 5 },
       { type: 'playerHit', enemyId: second.id, damage: 15, lifeLeft: 0 },
     ]);
     expect(ctx.taken.square).toEqual({ hits: 2, damage: 30 });
     expect(ctx.killedBy).toBe('square');
+  });
+
+  it('floors contactTaken at 0: a contactDamageTaken that sums below 0 never heals (C7.2’s floor)', () => {
+    // Planted bug: no floor, so that a contact of 15 × −0.5 heals 7.5.
+    expect(createPlayerDefence({ ...BASE_STATS, contactDamageTaken: -0.5 }, 100, false)).toEqual({
+      contactTaken: 0,
+      regenPerTick: 0,
+      livesLeft: 0,
+    });
+    const ctx = placedEnemies([AT], { stats: defended({ contactDamageTaken: -0.5 }, []) });
+    const [square] = ctx.enemies as [Enemy];
+    ctx.player.life = 50;
+    resolveContacts(ctx);
+    expect(defenceEvents(ctx)).toEqual([
+      { type: 'playerHit', enemyId: square.id, damage: 0, lifeLeft: 50 },
+    ]);
+    expect([ctx.player.life, ctx.taken.square]).toEqual([50, { hits: 1, damage: 0 }]);
+  });
+
+  it('floors regenPerTick at 0: a lifeRegen below 0 never drains life (C7.2’s floor)', () => {
+    // Planted bug: no floor, so that life drains 0.02 × 60 × DT a tick.
+    expect(createPlayerDefence({ ...BASE_STATS, lifeRegen: -0.02 }, 60, false)).toEqual({
+      contactTaken: 1,
+      regenPerTick: 0,
+      livesLeft: 0,
+    });
+    const ctx = placedEnemies([], { stats: defended({ maxLife: 60, lifeRegen: -0.02 }, []) });
+    ctx.player.life = 30;
+    for (let k = 0; k < 10; k++) resolveContacts(ctx);
+    expect([ctx.player.life, ctx.killedBy]).toEqual([30, null]);
   });
 });

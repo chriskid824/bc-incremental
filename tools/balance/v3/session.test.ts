@@ -17,7 +17,9 @@ import { frontierOf, probeRun } from '../../../src/meta/web/calibrate';
 import { GATED_KINDS } from '../../../src/meta/web/counts';
 import { fillBoard, unlockInvestment } from '../../../src/meta/web/invest';
 import { shortestRoute } from '../../../src/meta/web/path';
+import { createSimulation, NO_INPUT } from '../../../src/sim';
 import type { ContactTally, RunResult, Simulation } from '../../../src/sim';
+import { TEST_V3_WAVES, v3TestData } from '../../../src/sim/testing';
 import { jobOf, runJobs } from '../jobs';
 import { compressIds } from '../session';
 import { builtCharacters, C10_SEED, resolveContent, webOf } from './content';
@@ -624,11 +626,22 @@ describe('greedy probes', () => {
 
   it("stops a probe at the scope's wave cap", () => {
     const data = characterGameData();
-    // Enemies without contact damage: a probe runs on to the wave cap, or to its ticks without one.
+    // Enemies that neither hurt the player nor hold their wave: no contact damage, and shooters and
+    // summoners walk in as M1's types do (at their posts, C7.4b's, the empty build could never
+    // clear them, and bullets hurt). A probe runs on to the wave cap, or to its ticks without one.
     const harmless = {
       ...data,
       enemies: Object.fromEntries(
-        Object.entries(data.enemies).map(([id, enemy]) => [id, { ...enemy, contactDamage: 0 }]),
+        Object.entries(data.enemies).map(([id, { behaviour, ...enemy }]) => [
+          id,
+          {
+            ...enemy,
+            contactDamage: 0,
+            ...(behaviour === undefined || behaviour.kind === 'shoot' || behaviour.kind === 'summon'
+              ? {}
+              : { behaviour }),
+          },
+        ]),
       ) as typeof data.enemies,
     };
     const high = { ...emptyProgress('fire'), cycleBest: 80, bestWave: 80 };
@@ -639,6 +652,43 @@ describe('greedy probes', () => {
     const full = probeFrom(web, high, 5, harmless, 40, 7_200);
     expect(full).toMatchObject({ ticks: 7_200, timeout: true });
     expect(full.enemies.some((fate) => fate.wave > 40)).toBe(true);
+  });
+
+  it('leaves out the extra enemies as probeRun does: summoned children have no fate (C7/F12)', () => {
+    // Planted bug: probeFrom keeping the fates of the extra enemies that probeRun leaves out.
+    // Two summoners a wave that the build cannot kill, and six triangles.
+    const v3 = v3TestData({
+      enemies: { summoner: { hpMult: 1e9 } },
+      waves: {
+        rules: [
+          { enemy: 'summoner', fromWave: 1, base: 2, perWave: 0, maxCount: 2 },
+          { enemy: 'triangle', fromWave: 1, base: 6, perWave: 0, maxCount: 6 },
+        ],
+        eliteEvery: 1000,
+        bossEvery: 1000,
+        v3: {
+          ...TEST_V3_WAVES.v3,
+          affixes: [],
+          treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+        },
+      },
+    });
+    const progress = owning(['hub.might.might']);
+    const sim = createSimulation(
+      { ...cappedRunConfig(web, webBuild(web, progress), 5, 1), maxTicks: 6_000 },
+      v3,
+    );
+    let summoned = 0;
+    while (!sim.state.finished) {
+      for (const e of sim.step(NO_INPUT)) if (e.type === 'summoned') summoned += e.count;
+    }
+    expect(summoned).toBeGreaterThan(10);
+    const probe = probeFrom(web, progress, 5, v3, 1, 6_000);
+    expect(probe).toEqual(probeRun(web, progress, 5, v3, 6_000));
+    // Eight fates a wave at most: its summoners and triangles, never their children.
+    const perWave = new Map<number, number>();
+    for (const fate of probe.enemies) perWave.set(fate.wave, (perWave.get(fate.wave) ?? 0) + 1);
+    expect(Math.max(...perWave.values())).toBe(8);
   });
 });
 

@@ -48,6 +48,7 @@ import { EVENT } from '../effects/types';
 import { enqueueModuleEffect } from '../rules/api';
 import { rollCount } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
+import { ORBITING, orbitTurn } from '../systems/enemyRecord';
 import { MOTION_LOB, spawnShot } from '../systems/shots';
 import { addZone, PULSES_PER_SECOND } from '../systems/zones';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
@@ -273,14 +274,27 @@ export function aimFar(ctx: RunContext, em: EmitterRuntime): Enemy | null {
 
 /**
  * The landing point of a bomb aimed at `target`, into ctx.sys.lob: where the enemy will be when
- * the bomb lands if it keeps walking at its current slow, flightTicks of its steps closer to the
- * player, but no closer than its contact distance.
+ * the bomb lands if it keeps going at its current slow. An orbiting treasure standing at its orbit
+ * (src/sim/systems/enemyAi.ts) keeps its distance and turns its bearing by flightTicks of its turn
+ * (orbitTurn); an orbit that ends during the flight is not modelled. Any other enemy keeps walking
+ * along its line, flightTicks of its steps closer to the player (further out for one that flees),
+ * but no closer than its contact distance; one that stands (a step of 0) is aimed where it stands.
  */
 function lead(ctx: RunContext, spec: LobSpec, target: Enemy): void {
-  const walked = spec.flightTicks * target.stepDist * (1 - enemySlow(ctx, target, ctx.now));
-  const dist = Math.max(target.contactDist, target.dist - walked);
+  const slow = enemySlow(ctx, target, ctx.now);
   const player = ctx.player;
   const ls = ctx.sys.lob;
+  const v3 = target.v3;
+  if (v3 !== null && v3.state === ORBITING && target.stepDist === 0) {
+    const angle = spec.flightTicks * orbitTurn(target, slow);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    ls.x = player.x + (target.ux * cos - target.uy * sin) * target.dist;
+    ls.y = player.y + (target.ux * sin + target.uy * cos) * target.dist;
+    return;
+  }
+  const walked = spec.flightTicks * target.stepDist * (1 - slow);
+  const dist = Math.max(target.contactDist, target.dist - walked);
   ls.x = player.x + target.ux * dist;
   ls.y = player.y + target.uy * dist;
 }

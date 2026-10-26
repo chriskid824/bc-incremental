@@ -40,6 +40,13 @@ function end(ctx: RunContext, reason: EndReason): void {
     leaks += tally.hits;
     damageTaken += tally.damage;
   }
+  // The bullets' tally, copied as the contacts' is; neither leaks nor damageTaken counts it.
+  const bulletTally = ctx.sys.bullets.takenBy;
+  const bulletTakenBy = {} as Record<EnemyId, ContactTally>;
+  for (const id of ENEMY_IDS) {
+    const tally = bulletTally[id];
+    bulletTakenBy[id] = { hits: tally.hits, damage: tally.damage };
+  }
   const bySource: Record<string, Num> = {};
   ctx.sources.names.forEach((name, ix) => {
     bySource[name] = ctx.bySource[ix] as Num;
@@ -70,6 +77,7 @@ function end(ctx: RunContext, reason: EndReason): void {
     leaks,
     damageTaken,
     damageTakenBy: takenBy,
+    bulletTakenBy,
     killedBy: ctx.killedBy,
   };
 }

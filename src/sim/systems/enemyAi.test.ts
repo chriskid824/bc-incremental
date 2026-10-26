@@ -1,11 +1,13 @@
 /**
- * The enemy AI step (docs/v3 C7 design §2.5, src/sim/systems/enemyAi.ts): regeneration, the
- * dasher and the treasure of a v3 run, the treasure schedule, the kill drops and the two
- * conditions. The design's OWN tests are named in their titles, each with a comment naming the
- * planted bug it kills; the rest pin the edge cases and the lead's rulings W4 (a frozen enemy
- * regenerates), W5 (the regeneration row), W6 (the treasure) and W7 (the drops). Placed enemies
- * stand on the line to the player's right, bearing (1, 0), and walk at their def's speed unless
- * a test says; tick() runs one tick's enemy AI and movement stages, as step does.
+ * The enemy AI step (docs/v3 C7 design §2.5, §2.6, src/sim/systems/enemyAi.ts): regeneration,
+ * the dasher, the treasure, the shooter and the summoner of a v3 run, the treasure schedule, the
+ * kill drops and the two conditions. The design's OWN tests are named in their titles, §2.5's as
+ * (OWN test N) and §2.6's as (§2.6 OWN test N), each with a comment naming the planted bug it
+ * kills; the rest pin the edge cases and the lead's rulings W4 (a frozen enemy regenerates), W5
+ * (the regeneration row), W6 (the treasure), W7 (the drops), Y4 (the shooter's timer), Y7 (the
+ * summons' stream) and Y9 (a post stands for bleed). Placed enemies stand on the line to the
+ * player's right, bearing (1, 0), and walk at their def's speed unless a test says; tick() runs
+ * one tick's enemy AI and movement stages, as step does.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -200,7 +202,7 @@ describe('the enemy AI list and step (docs/v3 C7 design §2.5)', () => {
       at('shooter', 600),
       at('summoner', 600),
     ]);
-    // The shooter and summoner have AI kinds, though C7.4b gives them their work.
+    // The shooter and the summoner are listed for their posts (§2.6).
     expect(ids(ctx.sys.enemyAi.list)).toEqual([2, 3, 5, 7, 8]);
     addEnemy(ctx, ctx.data.enemies.square, ctx.current as WaveRecord, 1, 0, 700);
     addEnemy(ctx, ctx.data.enemies.regenerator, ctx.current as WaveRecord, 1, 0, 700);
@@ -564,7 +566,8 @@ describe('the dasher (docs/v3 C7 design §2.5)', () => {
         JSON.stringify([DASHING, [2, 1.5]]),
       ]),
     );
-    // A regenerator, an orbiting treasure and a shooter (before C7.4b) are in neither state.
+    // A regenerator, an orbiting treasure and a shooter still walking to its post are in neither
+    // state.
     expect(record(enemy(ctx, 3)).state).toBe(ORBITING);
     for (const id of [2, 3, 4]) expect(read(enemy(ctx, id)), `${id}`).toEqual([1, 1.5]);
     // Nor is any enemy of an M1 run, which has no record.
@@ -1001,6 +1004,314 @@ describe('the treasure (docs/v3 C7 design §2.5)', () => {
     freeze(ctx, square, 5);
     for (let k = 0; k < 5; k++) tick(ctx);
     expect([treasure.bleedMovedTicks, square.bleedMovedTicks]).toEqual([39, 39]);
+  });
+});
+
+describe('the shooter and the summoner (docs/v3 C7 design §2.6)', () => {
+  /** Their walk steps: the shooter's (speed 120) and the summoner's (speed 90). */
+  const SHOOTER_STEP = 120 * DT;
+  const SUMMONER_STEP = 90 * DT;
+
+  it('stops within one step of 300 and fires every 120 ticks while it stands there, never while it walks (§2.6 OWN test 1)', () => {
+    // Planted bug: firing on its timer while walking. Pushed out on tick 400, its shot due on 412,
+    // it walks back and holds its fire until it stands again, on 440.
+    const ctx = placed([at('shooter', 401)]);
+    const shooter = enemy(ctx, 1);
+    const fired: number[] = [];
+    let stopped = 0;
+    while (ctx.now <= 600) {
+      const now = ctx.now;
+      if (now === 400) push(ctx, shooter, 80);
+      const events = tick(ctx);
+      if (stopped === 0 && record(shooter).state === STOPPED) {
+        stopped = now;
+        expect(shooter.dist).toBeGreaterThan(300 - SHOOTER_STEP);
+        expect(shooter.dist).toBeLessThanOrEqual(300);
+        expect(record(shooter).nextAct).toBe(now + 120);
+      }
+      if (events.some((e) => e.type === 'bulletFired')) {
+        fired.push(now);
+        expect([record(shooter).state, shooter.stepDist], `tick ${now}`).toEqual([STOPPED, 0]);
+      }
+    }
+    expect(stopped).toBe(52);
+    expect(fired).toEqual([172, 292, 440, 532]);
+  });
+
+  it('walks back to its post when pushed 80 out, then fires from within a step of 300 (§2.6 OWN test 10)', () => {
+    // Planted bug: it stays put, and fires from where the push left it.
+    const ctx = placed([at('shooter', 300)]);
+    const shooter = enemy(ctx, 1);
+    expect(ticksWith(ctx, 150, 'bulletFired')).toEqual([121]);
+    push(ctx, shooter, 80);
+    const walking: number[] = [];
+    let back = 0;
+    const fired: SimEvent[] = [];
+    while (ctx.now <= 250) {
+      const now = ctx.now;
+      const events = tick(ctx);
+      if (record(shooter).state === 0) walking.push(now);
+      else if (back === 0) back = now;
+      fired.push(...events.filter((e) => e.type === 'bulletFired'));
+    }
+    // It walks on ticks 151 to 190 at its step and stands again on 191, at 300.
+    expect([walking.length, walking[0], walking.at(-1), back]).toEqual([40, 151, 190, 191]);
+    expect([shooter.dist, shooter.stepDist]).toEqual([300, 0]);
+    expect(fired).toEqual([
+      { type: 'bulletFired', bulletId: 2, enemyId: 1, x: PLAYER.x + 300, y: PLAYER.y },
+    ]);
+  });
+
+  it('arms its timer on its first arrival only: back at its post before its first shot, it fires on that timer (Y4)', () => {
+    // Planted bug: arming on every arrival, which would fire on 181.
+    const ctx = placed([at('shooter', 300)]);
+    const shooter = enemy(ctx, 1);
+    expect(ticksWith(ctx, 20, 'bulletFired')).toEqual([]);
+    expect([record(shooter).state, record(shooter).nextAct]).toEqual([STOPPED, 121]);
+    push(ctx, shooter, 80);
+    expect(ticksWith(ctx, 40, 'bulletFired')).toEqual([]);
+    expect(record(shooter).state).toBe(0);
+    tick(ctx);
+    expect([record(shooter).state, shooter.dist, record(shooter).nextAct]).toEqual([
+      STOPPED,
+      300,
+      121,
+    ]);
+    expect(ticksWith(ctx, 200, 'bulletFired')).toEqual([121, 241]);
+  });
+
+  it('fires once on arrival when its shot fell due on a long walk back, then a period later: no catch-up (Y4)', () => {
+    // Planted bugs: no `now + period` when the timer is still behind, which fires on the ticks
+    // after the arrival too, and `<` for `<=`, which fires on 362 after an arrival on 361, the
+    // timer then exactly at the arrival tick.
+    for (const [out, fires] of [
+      [600, [430, 550]],
+      [462, [361, 481]],
+    ] as const) {
+      const ctx = placed([at('shooter', 300)]);
+      expect(ticksWith(ctx, 129, 'bulletFired')).toEqual([121]);
+      push(ctx, enemy(ctx, 1), out);
+      // It walks from tick 130, missing its 241 shot (and its 361 one when pushed 600).
+      expect(ticksWith(ctx, 421, 'bulletFired'), `${out}`).toEqual(fires);
+    }
+  });
+
+  it('keeps an unarmed timer at Infinity while frozen on its walk in, and arms it a period after it arrives (Y4)', () => {
+    // Planted bug: arming the timer before the shooter reaches its post.
+    const ctx = placed([at('shooter', 401)]);
+    const shooter = enemy(ctx, 1);
+    for (let k = 0; k < 9; k++) tick(ctx);
+    freeze(ctx, shooter, 30);
+    for (let k = 0; k < 30; k++) tick(ctx);
+    expect([shooter.dist, record(shooter).state, record(shooter).nextAct]).toEqual([
+      383,
+      0,
+      Infinity,
+    ]);
+    // It walks on from tick 40 and stands on 82, at 299.
+    expect(ticksWith(ctx, 250, 'bulletFired')).toEqual([202]);
+    expect([shooter.dist, record(shooter).nextAct]).toEqual([299, 322]);
+  });
+
+  it('pauses a frozen shooter’s and summoner’s timers: neither acts while frozen, and each acts as many ticks late (§2.6 OWN test 9)', () => {
+    // Planted bug: the timers run on while frozen, which fires and summons on 150.
+    const ctx = placed([at('shooter', 250, { speed: 0 }), at('summoner', 400, { speed: 0 })]);
+    const [shooter, summoner] = [enemy(ctx, 1), enemy(ctx, 2)];
+    for (let k = 0; k < 99; k++) tick(ctx);
+    expect([record(shooter).nextAct, record(summoner).nextAct]).toEqual([121, 181]);
+    freeze(ctx, shooter, 50);
+    freeze(ctx, summoner, 50);
+    const fired: number[] = [];
+    const summoned: number[] = [];
+    while (ctx.now <= 420) {
+      const now = ctx.now;
+      for (const e of tick(ctx)) {
+        if (e.type === 'bulletFired') fired.push(now);
+        if (e.type === 'summoned') summoned.push(now);
+      }
+    }
+    expect(fired).toEqual([171, 291, 411]);
+    expect(summoned).toEqual([231, 411]);
+  });
+
+  it('stops within a step of 480 and summons 2 triangles on its rim every 180 ticks through the enemy cap: past it they are skipped and counted, its timer going on (§2.6 OWN test 7)', () => {
+    // Planted bug: addEnemy called directly, past the cap. A cap of 6 holds the summoner and 5.
+    const ctx = placed([at('summoner', 481)], {
+      data: quietV3({ triangle: { speed: 0 } }, { enemyCap: 6 }),
+    });
+    const summoner = enemy(ctx, 1);
+    tick(ctx);
+    expect(record(summoner).state).toBe(0);
+    tick(ctx);
+    expect([record(summoner).state, summoner.dist, record(summoner).nextAct]).toEqual([
+      STOPPED,
+      481 - SUMMONER_STEP,
+      182,
+    ]);
+    const summons: [number, number][] = [];
+    while (ctx.now <= 800) {
+      const now = ctx.now;
+      for (const e of tick(ctx)) if (e.type === 'summoned') summons.push([now, e.count]);
+    }
+    expect(summons).toEqual([
+      [182, 2],
+      [362, 2],
+      [542, 1],
+      [722, 0],
+    ]);
+    expect(ctx.counters.enemySpawnsSkipped).toBe(3);
+    const children = ctx.enemies.slice(1);
+    expect(children.map((e) => [e.id, e.type])).toEqual([
+      [2, 'triangle'],
+      [3, 'triangle'],
+      [4, 'triangle'],
+      [5, 'triangle'],
+      [6, 'triangle'],
+    ]);
+    for (const child of children) {
+      expect(Math.hypot(child.x - summoner.x, child.y - summoner.y)).toBeCloseTo(22, 9);
+    }
+  });
+
+  it('gives its children extra, its wave and record, and their def’s hp, radius and drops; they keep its wave open after it dies (§2.6 OWN test 8)', () => {
+    // Planted bug: extra false. A later wave has started before the summons.
+    const ctx = placed([at('summoner', 400, { speed: 0 })]);
+    const summoner = enemy(ctx, 1);
+    const rec = summoner.rec;
+    for (let k = 0; k < 100; k++) tick(ctx);
+    startWave(ctx, 2);
+    const later = ctx.current as WaveRecord;
+    expect(later).not.toBe(rec);
+    expect(ticksWith(ctx, 81, 'summoned')).toEqual([181]);
+    const children = [enemy(ctx, 2), enemy(ctx, 3)];
+    // A triangle of the same record spawned as a wave's.
+    addEnemy(ctx, ctx.data.enemies.triangle, rec, 1, 0, 700);
+    const plain = enemy(ctx, 4);
+    expect(record(plain).extra).toBe(false);
+    for (const child of children) {
+      expect([child.type, child.wave, child.rec === rec, record(child).extra]).toEqual([
+        'triangle',
+        1,
+        true,
+        true,
+      ]);
+      expect([hp(child), child.radius, record(child).dropScale]).toEqual([
+        hp(plain),
+        plain.radius,
+        record(plain).dropScale,
+      ]);
+    }
+    removeEnemy(ctx, plain);
+    // On no AI list: a triangle has no work.
+    expect(ids(ctx.sys.enemyAi.list)).toEqual([1]);
+    expect([rec.alive, later.alive]).toEqual([3, 0]);
+    // The summoner's wave stays open while its children live.
+    removeEnemy(ctx, summoner);
+    updateClears(ctx);
+    expect([rec.alive, rec.cleared, ctx.open.includes(rec)]).toEqual([2, false, true]);
+    for (const child of children) removeEnemy(ctx, child);
+    updateClears(ctx);
+    expect([rec.alive, rec.cleared]).toEqual([0, true]);
+  });
+
+  it('puts summoned children with work on the AI list after the kept entries, in id order: they act from the next tick', () => {
+    // Two summoners of dashers summon on tick 181, the regenerator between them dead.
+    const data = quietV3({
+      summoner: {
+        behaviour: { kind: 'summon', stopDist: 480, periodSec: 3, enemy: 'dasher', count: 2 },
+      },
+    });
+    const ctx = placed(
+      [
+        at('summoner', 300, { speed: 0 }),
+        at('regenerator', 600, { hp: 1000 }),
+        at('summoner', 300, { speed: 0 }),
+      ],
+      { data },
+    );
+    for (let k = 0; k < 180; k++) tick(ctx);
+    expect(ids(ctx.sys.enemyAi.list)).toEqual([1, 2, 3]);
+    removeEnemy(ctx, enemy(ctx, 2));
+    const events = tick(ctx);
+    expect(eventsOf([events], 'summoned')).toEqual([
+      { type: 'summoned', enemyId: 1, count: 2 },
+      { type: 'summoned', enemyId: 3, count: 2 },
+    ]);
+    expect(eventsOf([events], 'dasherCharge')).toEqual([]);
+    expect(ids(ctx.sys.enemyAi.list)).toEqual([1, 3, 4, 5, 6, 7]);
+    // Within their chargeDist, the dashers charge on their first step, in id order.
+    expect(eventsOf([tick(ctx)], 'dasherCharge').map((e) => e.enemyId)).toEqual([4, 5, 6, 7]);
+  });
+
+  it('draws each child’s angle on the split stream before the cap check: a summons moves it by its count, its children skipped or not, and no other stream (Y7)', () => {
+    // Planted bug: the angle drawn after the cap check, so that a full field draws nothing.
+    const run = (enemyCap: number) => {
+      const ctx = placed([at('summoner', 400, { speed: 0 })], {
+        data: quietV3({ triangle: { speed: 0 } }, { enemyCap }),
+      });
+      const before = rngPositions(ctx);
+      const ticks = Array.from({ length: 361 }, () => tick(ctx));
+      return { ctx, before, counts: eventsOf(ticks, 'summoned').map((e) => e.count) };
+    };
+    const full = run(1);
+    const open = run(400);
+    expect([full.counts, open.counts]).toEqual([
+      [0, 0],
+      [2, 2],
+    ]);
+    expect([full.ctx.counters.enemySpawnsSkipped, open.ctx.counters.enemySpawnsSkipped]).toEqual([
+      4, 0,
+    ]);
+    // A fresh run's split stream after the 4 angles of two summons of 2.
+    const reference = placed([at('summoner', 400, { speed: 0 })]);
+    for (let k = 0; k < 4; k++) reference.splitRng.range(0, 2 * Math.PI);
+    for (const { ctx, before } of [full, open]) {
+      expect(rngPositions(ctx)).toEqual({ ...before, split: rngPositions(reference).split });
+    }
+  });
+
+  it('stands for its bleed at its post: a shooter or summoner counts its ticks as moving only while it walks (Y9)', () => {
+    // Planted bug: its walk step left on at its post, so that it walks on through it.
+    const ctx = placed([at('shooter', 310), at('summoner', 485), at('square', 700, { speed: 60 })]);
+    const [shooter, summoner, square] = [enemy(ctx, 1), enemy(ctx, 2), enemy(ctx, 3)];
+    for (const e of [shooter, summoner, square]) addBleed(ctx, e, num(8), ctx.now + 600, 0, CENTER);
+    // From the tick after the bleed's start: the shooter walks ticks 1 to 5, the summoner 1 to 4.
+    for (let k = 0; k < 30; k++) tick(ctx);
+    expect([record(shooter).state, record(summoner).state]).toEqual([STOPPED, STOPPED]);
+    expect([shooter.bleedMovedTicks, summoner.bleedMovedTicks, square.bleedMovedTicks]).toEqual([
+      4, 3, 29,
+    ]);
+    // Pushed out, the shooter counts its walk back, ticks 31 to 35.
+    push(ctx, shooter, 10);
+    for (let k = 0; k < 10; k++) tick(ctx);
+    expect([shooter.bleedMovedTicks, summoner.bleedMovedTicks, square.bleedMovedTicks]).toEqual([
+      9, 3, 39,
+    ]);
+    expect([shooter.dist, summoner.dist]).toEqual([300, 485 - 4 * SUMMONER_STEP]);
+  });
+
+  it("applies targetState 'stopped' to a shooter and a summoner at their posts, and neither state while they walk", () => {
+    const mods: Modifier[] = [
+      { stat: 'damage', kind: 'more', value: 1, when: [{ targetState: 'dashing' }] },
+      { stat: 'critMultiplier', kind: 'flat', value: 1, when: [{ targetState: 'stopped' }] },
+    ];
+    const ctx = placed([at('shooter', 302), at('summoner', 482)], { mods });
+    const row = ctx.table.row(rowKey(TAG.hit, CENTER));
+    const read = (e: Enemy): [number, number] => [
+      statAt(ctx.table, row, DAMAGE, on(ctx, e)),
+      statAt(ctx.table, row, CRIT_MULTIPLIER, on(ctx, e)),
+    ];
+    const [shooter, summoner] = [enemy(ctx, 1), enemy(ctx, 2)];
+    expect([read(shooter), read(summoner)]).toEqual([
+      [1, 1.5],
+      [1, 1.5],
+    ]);
+    for (let k = 0; k < 3; k++) tick(ctx);
+    expect([record(shooter).state, record(summoner).state]).toEqual([STOPPED, STOPPED]);
+    expect([read(shooter), read(summoner)]).toEqual([
+      [1, 2.5],
+      [1, 2.5],
+    ]);
   });
 });
 

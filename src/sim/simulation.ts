@@ -153,8 +153,10 @@ export function createSimulation(
    *    triggers, then release queued enemies (spawn.ts), so a new wave's first enemy appears on
    *    its start tick; in a v3 run only while its enemy cap has room, oldest wave first.
    * 2b. enemyAI: in a v3 run, the enemies with work, in id order, regenerate and act: dashers
-   *    charge and dash, treasures circle and flee, and an escaped treasure leaves the field;
-   *    frozen ones pause their timers and only regenerate (enemyAi.ts).
+   *    charge and dash, treasures circle and flee, and an escaped treasure leaves the field,
+   *    shooters fire and summoners summon at their posts; frozen ones pause their timers and only
+   *    regenerate (enemyAi.ts). Then the bullets in flight move, and hit the player, through its
+   *    defences, before any contact (bullets.ts).
    * 3. movement: every enemy walks towards the player, or out for a fleeing treasure, by the
    *    step the enemy AI left it (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).

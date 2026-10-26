@@ -10,6 +10,7 @@
 
 import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
+import type { EnemyId } from '../../data/types';
 import {
   CHAIN_HIT_CAP,
   DRONE_MEMORY,
@@ -26,7 +27,13 @@ import type { CompiledEffect } from '../effects/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import type { GridPoint, SpatialGrid } from '../grid';
 import { DRONE_DOCKED, DRONE_FIXED, DRONE_KIND_TURRET, DT } from '../types';
-import type { DroneViewState, SegmentLinesState, SegmentViewState, ZonePoolState } from '../types';
+import type {
+  BulletViewState,
+  DroneViewState,
+  SegmentLinesState,
+  SegmentViewState,
+  ZonePoolState,
+} from '../types';
 import type { Enemy } from './context';
 import { createEnemyGrid } from './grid';
 
@@ -55,6 +62,8 @@ export interface SystemState {
   readonly enemyAi: EnemyAiState;
   /** The player's defences (src/sim/systems/contact.ts damagePlayer); null in an M1 build. */
   readonly defence: PlayerDefenceState;
+  /** The shooters' bullets (src/sim/systems/bullets.ts), also SimState.bullets. */
+  readonly bullets: BulletPool;
 }
 
 /**
@@ -725,9 +734,65 @@ export function createPlayerDefence(
   if (contactDamageTaken === 1 && lifeRegen === 0 && extraLives === 0 && !hasShieldEffect) {
     return null;
   }
+  // Floored at 0 (the lead's ruling on C7.2): increased modifiers that sum past −100 % never
+  // make a contact heal, and a lifeRegen below 0 never drains life.
   return {
-    contactTaken: contactDamageTaken,
-    regenPerTick: lifeRegen * maxLife * DT,
+    contactTaken: Math.max(0, contactDamageTaken),
+    regenPerTick: Math.max(0, lifeRegen * maxLife * DT),
     livesLeft: Math.floor(extraLives),
+  };
+}
+
+/**
+ * The bullet pool (RunContext.sys.bullets, docs/v3 C7 design §1.4), also SimState.bullets: the
+ * bullets in flight in typed arrays, the slots 0 .. count − 1 in id order, and the hits they
+ * dealt by their shooter's type. It has no cap and drops no bullet (C7/F15): it grows by doubling
+ * (growBullets, src/sim/systems/bullets.ts), which replaces every array but keeps the object, so
+ * SimState.bullets stays this object. A run without shooters (every M1 run) never fills a slot,
+ * and its arrays stay empty.
+ */
+export interface BulletPool extends BulletViewState {
+  id: Int32Array;
+  x: Float64Array;
+  y: Float64Array;
+  prevX: Float64Array;
+  prevY: Float64Array;
+  /** Live slots, 0 .. count − 1, in id order. */
+  count: number;
+  /** The id the next bullet takes. */
+  nextId: number;
+  /** Its velocity per tick. */
+  vx: Float64Array;
+  vy: Float64Array;
+  /** The damage it deals the player: its shooter's bulletDamage. */
+  damage: Float64Array;
+  /** Its shooter's id, and type as its ENEMY_IDS ordinal. */
+  owner: Int32Array;
+  ownerType: Uint8Array;
+  /**
+   * The bullets that hit the player and their damage, by their shooter's type, every type present
+   * (RunResult.bulletTakenBy is a copy, src/sim/systems/runEnd.ts).
+   */
+  readonly takenBy: Record<EnemyId, { hits: number; damage: number }>;
+}
+
+/** An empty bullet pool, with a tally for each type of `ids` (ENEMY_IDS, passed in). */
+export function createBulletPool(ids: readonly EnemyId[]): BulletPool {
+  const takenBy = {} as Record<EnemyId, { hits: number; damage: number }>;
+  for (const id of ids) takenBy[id] = { hits: 0, damage: 0 };
+  return {
+    id: new Int32Array(0),
+    x: new Float64Array(0),
+    y: new Float64Array(0),
+    prevX: new Float64Array(0),
+    prevY: new Float64Array(0),
+    count: 0,
+    nextId: 1,
+    vx: new Float64Array(0),
+    vy: new Float64Array(0),
+    damage: new Float64Array(0),
+    owner: new Int32Array(0),
+    ownerType: new Uint8Array(0),
+    takenBy,
   };
 }

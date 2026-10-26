@@ -8,9 +8,10 @@
  * ailment accrued since its last step, and what it will deal. Burn records count from their last
  * step (burnLeft: the previous step tick, or this tick once the enemy's step has dealt it), DoT
  * rings their remaining, and bleed what it accrued at the rates that applied, then the rest at
- * the rate the enemy takes now: moving, or standing still, frozen or fully slowed
- * (bleedRemaining, Hoshi's Q7 (A)). A victim its burn or poison step killed never took that
- * step's bleed, so its bleed still counts from the previous step tick (Hoshi's Q7/F1).
+ * the rate the enemy takes now: moving (walking in or out, dashing, or an orbit that turns), or
+ * standing still, at its post, frozen or fully slowed (bleedRemaining, Hoshi's Q7 (A)). A victim
+ * its burn or poison step killed never took that step's bleed, so its bleed still counts from the
+ * previous step tick (Hoshi's Q7/F1).
  *
  * A consume takes a share f of it: every stack keeps going, its damage × (1 − f), so the stack
  * counts stay (a ring scales each step, RingPool.consume); f = 1 takes it all and removes the
@@ -24,6 +25,7 @@ import { add, mul, num, ZERO } from '../../core/num';
 import type { DetonateAilment } from '../../data/triggers';
 import { KILL_BY_BURN, KILL_BY_POISON } from '../effects/flags';
 import type { BurnStack, Enemy, RunContext } from '../systems/context';
+import { ORBITING, orbitTurn } from '../systems/enemyRecord';
 import { DT } from '../types';
 import { syncRingStacks } from './apply';
 import { accruedBleed, lastStep } from './bleed';
@@ -58,11 +60,21 @@ export function burnLeft(ctx: RunContext, enemy: Enemy): Num {
 /**
  * The damage the bleed has yet to deal: what is pending, what it accrued since it was last dealt
  * (bleedDealtAt; its moving ticks weighted), and the rest of it at the rate the enemy takes now,
- * moving or standing still (a dead, frozen or fully slowed enemy stands).
+ * moving or standing still. It moves exactly when its next tick, as it is now, counts for its
+ * bleed (src/sim/systems/movement.ts, the enemy AI step's orbit): alive, slowed below 1, and
+ * either with a step (walking in, dashing, fleeing out, or walking back to its orbit) or orbiting
+ * with a turn above 0 (orbitTurn, src/sim/systems/enemyRecord.ts). A dead, frozen or fully slowed
+ * enemy stands, and so do one at its post (a shooter, a summoner), a charging dasher and an
+ * orbiting treasure of speed 0.
  */
 export function bleedRemaining(ctx: RunContext, enemy: Enemy): Num {
   const now = ctx.now;
-  const moving = enemy.alive && enemy.stepDist * (1 - enemySlow(ctx, enemy, now)) > 0;
+  const slow = enemySlow(ctx, enemy, now);
+  const v3 = enemy.v3;
+  const moving =
+    enemy.alive &&
+    slow < 1 &&
+    (enemy.stepDist !== 0 || (v3 !== null && v3.state === ORBITING && orbitTurn(enemy, slow) > 0));
   const mult = moving ? ctx.bleedMoveMult : ctx.bleedStationaryMult;
   const ticks = Math.max(0, enemy.bleedUntil - Math.max(enemy.bleedStart, now));
   const future = mul(enemy.bleedDps, ticks * DT * mult);

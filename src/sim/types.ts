@@ -208,6 +208,21 @@ export interface DroneViewState {
   readonly seat: Int16Array;
 }
 
+/**
+ * The enemy bullet pool (src/sim/systems/bullets.ts) as render and tools read it: the shooters'
+ * bullets in flight, in typed arrays. Slots 0 .. SimState.bulletCount − 1 hold them in id order.
+ * The pool grows by replacing its arrays, so a reader takes them from SimState.bullets each tick.
+ */
+export interface BulletViewState {
+  /** Its id, 1 up in the order the bullets were fired: the order the stage steps them in. */
+  readonly id: Int32Array;
+  readonly x: Float64Array;
+  readonly y: Float64Array;
+  /** Its position at the previous tick, for render interpolation and its trail. */
+  readonly prevX: Float64Array;
+  readonly prevY: Float64Array;
+}
+
 export interface PlayerState {
   readonly x: number;
   readonly y: number;
@@ -246,6 +261,9 @@ export interface SimState {
   /** The drones; the first droneCount slots hold them, docked from tick 0. */
   readonly drones: DroneViewState;
   droneCount: number;
+  /** The enemy bullets; the first bulletCount slots are in flight. None in an M1 run. */
+  readonly bullets: BulletViewState;
+  bulletCount: number;
   /** Currencies collected so far this run (before skip compensation, which meta adds). */
   shards: Num;
   cores: number;
@@ -465,14 +483,14 @@ export type SimEvent =
     }
   | { readonly type: 'runEnded'; readonly reason: EndReason }
   /**
-   * The player's shield took `amount` of a contact's damage, before life (and before that
-   * contact's playerHit); `shieldLeft` remains. Never in an M1 run.
+   * The player's shield took `amount` of a contact's or a bullet's damage, before life (and
+   * before that hit's playerHit or bulletHit); `shieldLeft` remains. Never in an M1 run.
    */
   | { readonly type: 'shieldAbsorbed'; readonly amount: number; readonly shieldLeft: number }
   /**
-   * A contact brought life to 0 with an extra life left: life is back at `lifeLeft`
-   * (REVIVE_LIFE_FRAC of max life) with `livesLeft` remaining. It follows that contact's
-   * playerHit, whose lifeLeft is 0. Never in an M1 run.
+   * A contact or a bullet brought life to 0 with an extra life left: life is back at `lifeLeft`
+   * (REVIVE_LIFE_FRAC of max life) with `livesLeft` remaining. It follows that hit's playerHit or
+   * bulletHit, whose lifeLeft is 0. Never in an M1 run.
    */
   | { readonly type: 'revive'; readonly lifeLeft: number; readonly livesLeft: number }
   /**
@@ -504,7 +522,37 @@ export type SimEvent =
       readonly enemyId: number;
       readonly x: number;
       readonly y: number;
-    };
+    }
+  /**
+   * Shooter `enemyId` fired bullet `bulletId` (BulletViewState.id) from (x, y), its position,
+   * straight at the player (src/sim/systems/bullets.ts). Never in an M1 run.
+   */
+  | {
+      readonly type: 'bulletFired';
+      readonly bulletId: number;
+      readonly enemyId: number;
+      readonly x: number;
+      readonly y: number;
+    }
+  /**
+   * Bullet `bulletId` of shooter `enemyId`, of type `enemy`, reached the player while alive, in
+   * a contact's playerHit place (src/sim/systems/contact.ts damagePlayer): `damage` reached life
+   * past the shield, contactDamageTaken aside, leaving `lifeLeft` (0 on a hit that revives). It
+   * is not a leak. Never in an M1 run.
+   */
+  | {
+      readonly type: 'bulletHit';
+      readonly bulletId: number;
+      readonly enemyId: number;
+      readonly enemy: EnemyId;
+      readonly damage: number;
+      readonly lifeLeft: number;
+    }
+  /**
+   * Summoner `enemyId` summoned: `count` of its children spawned, the rest skipped at the enemy
+   * cap (enemySpawnsSkipped), so 0 when the cap skipped them all. Never in an M1 run.
+   */
+  | { readonly type: 'summoned'; readonly enemyId: number; readonly count: number };
 
 /**
  * Damage totals by kind of instance, for balance reporting: burn, poison and bleed by their
@@ -581,7 +629,11 @@ export const COUNTER_IDS = [
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 
-/** Enemies of one type that reached the player, and their contact damage. */
+/**
+ * Enemies of one type that reached the player, and their contact damage; or, in
+ * RunResult.bulletTakenBy, the bullets of one type's shooters that hit the player and their
+ * damage.
+ */
 export interface ContactTally {
   readonly hits: number;
   readonly damage: number;
@@ -617,7 +669,7 @@ export interface RunResult {
   readonly maxHit: Num;
   /** Seconds spent in waves where the enemies' standard HP was ≤ 1/10 of the average hit. */
   readonly overkillSeconds: number;
-  /** Enemies that reached the player (one playerHit event each). */
+  /** Enemies that reached the player (one playerHit event each); bullets are not leaks. */
   readonly leaks: number;
   /**
    * Their total contact damage, as in the playerHit events (what reached life past
@@ -628,8 +680,13 @@ export interface RunResult {
   /** leaks and damageTaken by enemy type; every type is present, zero if it never got through. */
   readonly damageTakenBy: Readonly<Record<EnemyId, ContactTally>>;
   /**
-   * Type of the enemy whose contact brought life to 0 with no extra life left; null unless
-   * endReason is 'death'.
+   * The bullets that hit the player and their damage, as in the bulletHit events, by their
+   * shooter's type; every type is present, zero in a run without shooters (an M1 run's).
+   */
+  readonly bulletTakenBy: Readonly<Record<EnemyId, ContactTally>>;
+  /**
+   * Type of the enemy whose contact, or whose bullet, brought life to 0 with no extra life left;
+   * null unless endReason is 'death'.
    */
   readonly killedBy: EnemyId | null;
 }

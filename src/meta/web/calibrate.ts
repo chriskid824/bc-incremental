@@ -67,7 +67,10 @@ export interface EnemyFate {
   readonly end: EnemyEnd;
 }
 
-/** What frontierOf reads of a run: every enemy that spawned, split children included. */
+/**
+ * What frontierOf reads of a run: every enemy that spawned, split children included, but the
+ * extra ones (EnemyV3.extra: summons, the treasure), which waveHp does not count (C7/F12).
+ */
 export interface ProbeRun {
   readonly highestWaveCleared: number;
   readonly enemies: readonly EnemyFate[];
@@ -117,6 +120,12 @@ export function frontierOf(run: ProbeRun, data: GameData): number {
   return run.highestWaveCleared + lost / waveHp(next, data);
 }
 
+/**
+ * An enemy outside composeWave's count, which φ leaves out as waveHp does (C7/F12); greedy's
+ * probes (tools/balance/v3/visit.ts probeFrom) leave it out too.
+ */
+export const isExtra = (enemy: EnemyState): boolean => enemy.v3 !== null && enemy.v3.extra;
+
 /** The fate of an enemy ending `end`, read off its state. */
 const fateOf = (enemy: EnemyState, end: EnemyEnd): EnemyFate => ({
   wave: enemy.wave,
@@ -129,7 +138,8 @@ const fateOf = (enemy: EnemyState, end: EnemyEnd): EnemyFate => ({
  * One probe run (D26, F4): `progress` on `web` from PROBE_START_WAVE until the build dies or
  * `maxTicks`, with every enemy's fate: a watch module's onKill hook records each kill as it
  * happens, split children killed on the tick they appear included; the enemies new at each tick's
- * end are kept, and the playerHit events say which of them leaked.
+ * end are kept, and the playerHit events say which of them leaked (a bullet's bulletHit is no
+ * leak). An extra enemy has no fate, killed, leaked or alive (isExtra).
  */
 export function probeRun(
   web: AssembledWeb,
@@ -141,7 +151,7 @@ export function probeRun(
   const killed = new Map<number, EnemyFate>();
   const watch: TestModule = (b) =>
     void b.hook('onKill', (_ctx, victim) => {
-      killed.set(victim.id, fateOf(victim, 'killed'));
+      if (!isExtra(victim)) killed.set(victim.id, fateOf(victim, 'killed'));
     });
   const config = {
     ...webRunConfig(
@@ -166,7 +176,7 @@ export function probeRun(
     for (let k = enemies.length - 1; k >= 0; k--) {
       const enemy = enemies[k] as EnemyState;
       if (enemy.id <= newest) break;
-      seen.set(enemy.id, enemy);
+      if (!isExtra(enemy)) seen.set(enemy.id, enemy);
     }
     newest = Math.max(newest, enemies[enemies.length - 1]?.id ?? 0);
   }

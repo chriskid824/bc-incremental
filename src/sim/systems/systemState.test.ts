@@ -35,9 +35,9 @@ const LEAF_IMPORTS = [
 const REMAINING = 'sim/ailments/remaining.ts';
 
 /**
- * The modules remaining.ts may value-import: §0.7's C4.10 entry, and effects/flags.ts for the
- * kill kinds bleedRemaining reads (Hoshi's Q7/F1), already in its closure through apply.ts and
- * eval.ts.
+ * The modules remaining.ts may value-import: §0.7's C4.10 entry, effects/flags.ts for the kill
+ * kinds bleedRemaining reads (Hoshi's Q7/F1), and systems/enemyRecord.ts for the orbit's turn it
+ * reads (C7.4b), both already in its closure through apply.ts and eval.ts.
  */
 const REMAINING_IMPORTS = [
   'core/num.ts',
@@ -48,6 +48,7 @@ const REMAINING_IMPORTS = [
   'sim/ailments/records.ts',
   'sim/ailments/apply.ts',
   'sim/effects/flags.ts',
+  'sim/systems/enemyRecord.ts',
 ];
 
 /** The only modules that may value-import remaining.ts (§0.7's C4.10 entry). */

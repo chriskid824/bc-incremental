@@ -244,7 +244,7 @@ describe('test wave runs', () => {
       count: ENEMY_ROW_COUNT,
       leaks: 0,
       contact: 0,
-      bullet: null,
+      bullet: 0,
     });
   });
 

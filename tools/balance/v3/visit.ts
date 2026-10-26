@@ -18,7 +18,7 @@ import type {
   WebEconomy,
   WebRun,
 } from '../../../src/meta/web';
-import { frontierOf } from '../../../src/meta/web/calibrate';
+import { frontierOf, isExtra } from '../../../src/meta/web/calibrate';
 import type { EnemyEnd, EnemyFate, ProbeRun } from '../../../src/meta/web/calibrate';
 import { createSimulation, NO_INPUT } from '../../../src/sim';
 import type { EnemyState, RunConfig } from '../../../src/sim';
@@ -116,8 +116,9 @@ const fateOf = (enemy: EnemyState, end: EnemyEnd): EnemyFate => ({
 /**
  * probeRun's bookkeeping (src/meta/web/calibrate.ts) from `startWave` rather than wave 1: a watch
  * module records each kill as it happens, the enemies new at each tick's end are kept and the
- * playerHit events say which leaked. The waves below the start wave count as cleared, so a run that
- * clears nothing reads F = startWave − 1 where the run's highestWaveCleared says 0.
+ * playerHit events say which leaked (a bullet's bulletHit is no leak); an extra enemy (isExtra:
+ * summons, the treasure) has no fate. The waves below the start wave count as cleared, so a run
+ * that clears nothing reads F = startWave − 1 where the run's highestWaveCleared says 0.
  */
 export function probeFrom(
   web: AssembledWeb,
@@ -130,7 +131,7 @@ export function probeFrom(
   const killed = new Map<number, EnemyFate>();
   const watch: TestModule = (b) =>
     void b.hook('onKill', (_ctx, victim) => {
-      killed.set(victim.id, fateOf(victim, 'killed'));
+      if (!isExtra(victim)) killed.set(victim.id, fateOf(victim, 'killed'));
     });
   const config = { ...cappedRunConfig(web, webBuild(web, progress), seed, startWave), maxTicks };
   const sim = createSimulation(config, data, [watch]);
@@ -147,7 +148,7 @@ export function probeFrom(
     for (let k = enemies.length - 1; k >= 0; k--) {
       const enemy = enemies[k] as EnemyState;
       if (enemy.id <= newest) break;
-      seen.set(enemy.id, enemy);
+      if (!isExtra(enemy)) seen.set(enemy.id, enemy);
     }
     newest = Math.max(newest, enemies[enemies.length - 1]?.id ?? 0);
   }

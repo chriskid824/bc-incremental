@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { num } from '../../src/core/num';
-import { isBehaviourModifier, NO_EXTRAS } from '../../src/data';
+import { ENEMY_IDS, isBehaviourModifier, NO_EXTRAS } from '../../src/data';
 import { computeStatBlock } from '../../src/meta';
 import { COUNTER_IDS } from '../../src/sim';
 import type { RunResult, SimEvent } from '../../src/sim';
@@ -188,6 +188,9 @@ describe('M1 projection', () => {
         treasure: tally,
         onion: tally,
       },
+      bulletTakenBy: Object.fromEntries(
+        ENEMY_IDS.map((id) => [id, tally]),
+      ) as RunResult['bulletTakenBy'],
       killedBy: 'triangle',
     } satisfies RunResult;
     const later: RunResult = {
@@ -195,6 +198,7 @@ describe('M1 projection', () => {
       damage: { ...result.damage, poison: num(7), bleed: num(1) },
       damageBySource: { center: num(10), 'outer.poison': num(8) },
       counters: { ...result.counters, effectsRun: 12 },
+      bulletTakenBy: { ...result.bulletTakenBy, shooter: { hits: 2, damage: 6 } },
     };
     expect(projectResult(later)).toEqual(projectResult(result));
   });

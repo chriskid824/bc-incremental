@@ -3,6 +3,7 @@ import { num, toNumber, ZERO } from '../../core/num';
 import { createStreams } from '../../core/rng';
 import type { Rng } from '../../core/rng';
 import type { RuleSpec, SignatureSpec } from '../../data/rules';
+import type { EnemyId } from '../../data/types';
 import type { Modifier, StatBlock, StatId } from '../../data/stats';
 import { TAG } from '../../data/tags';
 import { STACK_AILMENTS } from '../../data/triggers';
@@ -22,7 +23,9 @@ import type { TestModule } from '../rules';
 import { magmaBomb } from '../rules/magmaBomb';
 import { createSimulation } from '../simulation';
 import type { Enemy, RunContext } from '../systems/context';
+import { ORBITING, stepEnemyAi } from '../systems/enemyAi';
 import { rebuildGrid } from '../systems/grid';
+import { moveEnemies } from '../systems/movement';
 import { moveProjectiles } from '../systems/projectiles';
 import { MOTION_STRAIGHT, spawnShot } from '../systems/shots';
 import { stepZones } from '../systems/zones';
@@ -35,6 +38,8 @@ import {
   placedEnemies,
   rngPositions,
   stationarySquares,
+  TEST_V3_WAVES,
+  v3TestData,
 } from '../testing';
 import type { PlacedEnemy } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, NO_INPUT, TICK_RATE } from '../types';
@@ -793,6 +798,81 @@ describe('lob aim', () => {
         hits: [UNSTEADY, STEADY, UNSTEADY],
       });
     });
+  });
+});
+
+describe('lob aim at a v3 enemy (docs/v3 C7 design §2.5, §2.6; lead ruling Y12)', () => {
+  /** v3 data whose waves hold no enemy (docs/v3 C7 design §1.9); the treasure orbits a second. */
+  const data = v3TestData({
+    enemies: {
+      treasure: {
+        behaviour: { kind: 'treasure', orbitDist: 480, orbitSec: 1, fleeMult: 2 },
+      },
+    },
+    waves: {
+      rules: [{ enemy: 'triangle', fromWave: 1, base: 0, perWave: 0, maxCount: 0 }],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      spawnDurationSec: 0,
+      waveTimerSec: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
+  /**
+   * One enemy of `type` `dx` right of the player at `speed`, with the magmaBomb signature, after
+   * `ticks` ticks of the enemy AI step and movement: where the lob leads it, and where it is after
+   * the bomb's FLIGHT ticks more.
+   */
+  function leadAndLanding(type: EnemyId, dx: number, speed: number, ticks: number) {
+    const ctx = placedEnemies([{ x: P.x + dx, y: P.y, type, speed }], {
+      stats: plain(),
+      signature: MAGMA,
+      data,
+    });
+    const target = enemy(ctx, 1);
+    const tick = (): void => {
+      stepEnemyAi(ctx);
+      moveEnemies(ctx);
+      ctx.now++;
+      ctx.state.tick++;
+    };
+    for (let k = 0; k < ticks; k++) tick();
+    const state = target.v3?.state;
+    rebuildGrid(ctx);
+    expect(aim(ctx)).toBe(target);
+    const lead = { x: ctx.sys.lob.x, y: ctx.sys.lob.y };
+    for (let k = 0; k < FLIGHT; k++) tick();
+    return { state, lead, landing: { x: target.x, y: target.y }, dist: target.dist };
+  }
+
+  it('leads a treasure turning in its orbit along it: where it stands after the flight’s turns', () => {
+    // Planted bug (C7.4a's gap): an orbiting treasure, its step 0, aimed where it stands.
+    const { state, lead, landing, dist } = leadAndLanding('treasure', 480, 150, 1);
+    expect([state, dist]).toEqual([ORBITING, 480]);
+    expect(lead.x).toBeCloseTo(landing.x, 9);
+    expect(lead.y).toBeCloseTo(landing.y, 9);
+    // 24 turns of 2.5 / 480 from bearing (1, 0), 1 turn already taken.
+    expect(Math.atan2(lead.y - P.y, lead.x - P.x)).toBeCloseTo((25 * 2.5) / 480, 12);
+  });
+
+  it.each<[string, EnemyId, number, number, number, number]>([
+    // A fleeing treasure 24 steps of 5 further out, from 480 + 10 × 5 (its flight from tick 61).
+    ['a fleeing treasure further out', 'treasure', 480, 150, 70, 650],
+    // A charging dasher stands its 36 ticks, a shooter at its post and a treasure orbiting at
+    // speed 0 stand: each where it stands.
+    ['a charging dasher where it stands', 'dasher', 420, 110, 1, 420],
+    ['a shooter at its post where it stands', 'shooter', 300, 120, 1, 300],
+    ['a treasure orbiting at speed 0 where it stands', 'treasure', 480, 0, 1, 480],
+  ])('leads %s, along its line', (_label, type, dx, speed, ticks, landsAt) => {
+    const { lead, landing, dist } = leadAndLanding(type, dx, speed, ticks);
+    expect(dist).toBe(landsAt);
+    expect([lead.x, lead.y]).toEqual([landing.x, landing.y]);
+    expect(Math.hypot(lead.x - P.x, lead.y - P.y)).toBeCloseTo(landsAt, 9);
   });
 });
 
