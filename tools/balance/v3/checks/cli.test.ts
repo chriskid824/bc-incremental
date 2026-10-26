@@ -3,13 +3,18 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fixtureContent } from '../../../../src/data/web/testing';
 import type { CliIo } from '../../cli';
+import { deadBoardsCsv, deadNodesCsv } from './boards';
 import type { ChecksDeps } from './cli';
-import { main, parseChecksOptions, readCommit } from './cli';
+import { main, parseChecksOptions, planOutputs, readCommit } from './cli';
+import { keystonesCsv } from './keystones';
 import { SUMMARY_MAX_BYTES, trimSummary } from './report';
+import { affixesCsv, enemyRowCsv, outerRowCsv } from './rows';
+import { checkSet } from './run';
 import type { PlanRun } from './run';
-import { runRow, sessionResult, sessionResults } from './testing';
-import type { CheckPlan } from './types';
+import { NO_C7, runRow, sessionResult, sessionResults } from './testing';
+import type { CheckPlan, CheckSetId } from './types';
 
 let root = '';
 beforeEach(() => {
@@ -249,5 +254,40 @@ describe('npm run checks', () => {
     expect(JSON.parse(read('checks.json')).header.quick).toBe(false);
     expect(read('report.md')).toMatch(/^- set: pr$/m);
     expect(existsSync(join(root, 'keystones.csv'))).toBe(false);
+  });
+
+  it("writes beside the report C10.2's CSVs, then the CSV of each check the set holds", () => {
+    const names = (set: CheckSetId): string[] =>
+      planOutputs(
+        checkSet(set, fixtureContent('B1'), { fixture: 'B1' }, { sessions: 1, c7: NO_C7 }),
+        {},
+      ).map(([name]) => name);
+    const pr = ['runs.csv', 'milestones.csv', 'curve_check.csv', 'budget.csv', 'center_share.csv'];
+    expect(names('pr')).toEqual(pr);
+    expect(names('nightly')).toEqual([
+      ...pr,
+      'keystones.csv',
+      'enemy_row.csv',
+      'outer_row.csv',
+      'affixes.csv',
+      'dead_boards.csv',
+      'dead_nodes.csv',
+    ]);
+    expect(names('weekly')).toEqual(names('nightly'));
+    // Each file holds its own check's CSV.
+    const nightly = checkSet(
+      'nightly',
+      fixtureContent('B1'),
+      { fixture: 'B1' },
+      { sessions: 1, c7: NO_C7 },
+    );
+    expect(planOutputs(nightly, {}).slice(pr.length)).toEqual([
+      ['keystones.csv', keystonesCsv(nightly, {})],
+      ['enemy_row.csv', enemyRowCsv(nightly, {})],
+      ['outer_row.csv', outerRowCsv(nightly, {})],
+      ['affixes.csv', affixesCsv(nightly, {})],
+      ['dead_boards.csv', deadBoardsCsv(nightly, {})],
+      ['dead_nodes.csv', deadNodesCsv(nightly, {})],
+    ]);
   });
 });

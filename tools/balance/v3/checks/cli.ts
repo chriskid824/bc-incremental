@@ -26,6 +26,7 @@ import {
   characterMilestonesCsv,
   characterRunsCsv,
 } from '../report';
+import { deadBoardsCsv, deadNodesCsv } from './boards';
 import { keystonesCsv } from './keystones';
 import {
   checksCsv,
@@ -39,9 +40,10 @@ import {
 import type { ReportHeader } from './report';
 import { checkSet, evaluate, exitCodeOf, PR_SESSIONS, PR_TARGET_SECONDS, runPlan } from './run';
 import type { CheckSetOptions, PlanRun } from './run';
+import { affixesCsv, enemyRowCsv, outerRowCsv } from './rows';
 import { centerShareCsv } from './sessions';
 import { defaultSessions } from './types';
-import type { CheckPlan } from './types';
+import type { CheckId, CheckPlan, UnitResults } from './types';
 
 const HELP = `Usage: npm run checks -- [options]
 
@@ -140,6 +142,41 @@ export interface ChecksDeps {
   readonly ref?: () => string;
 }
 
+/** The CSVs a check of the set writes beside report.md, when the set holds it (design §1.4). */
+const CHECK_CSVS: readonly (readonly [
+  CheckId,
+  string,
+  (plan: CheckPlan, results: UnitResults) => string,
+])[] = [
+  ['keystones', 'keystones.csv', keystonesCsv],
+  ['enemyRow', 'enemy_row.csv', enemyRowCsv],
+  ['outerRow', 'outer_row.csv', outerRowCsv],
+  ['affixes', 'affixes.csv', affixesCsv],
+  ['deadBoards', 'dead_boards.csv', deadBoardsCsv],
+  ['deadNodes', 'dead_nodes.csv', deadNodesCsv],
+];
+
+/**
+ * The files beside report.md, checks.json and checks.csv, by name: the default sessions' runs,
+ * milestones, curve check and budget, the center share, then each CHECK_CSVS file whose check the
+ * set holds.
+ */
+export function planOutputs(plan: CheckPlan, results: UnitResults): [string, string][] {
+  const sessions = plan.characters.flatMap((character) =>
+    defaultSessions(plan, results, character),
+  );
+  return [
+    ['runs.csv', characterRunsCsv(sessions)],
+    ['milestones.csv', characterMilestonesCsv(sessions)],
+    ['curve_check.csv', characterCurveCheckCsv(sessions)],
+    ['budget.csv', budgetCsv(sessions)],
+    ['center_share.csv', centerShareCsv(plan, results)],
+    ...CHECK_CSVS.filter(([id]) => plan.checks.includes(id)).map(
+      ([, name, csv]): [string, string] => [name, csv(plan, results)],
+    ),
+  ];
+}
+
 const CONSOLE: CliIo = {
   log: (message) => console.log(message),
   warn: (message) => console.warn(message),
@@ -180,19 +217,7 @@ export async function main(
       wallSeconds: (clock() - started) / 1000,
     };
 
-    const sessions = plan.characters.flatMap((character) =>
-      defaultSessions(plan, results, character),
-    );
-    const outputs: [string, string][] = [
-      ['runs.csv', characterRunsCsv(sessions)],
-      ['milestones.csv', characterMilestonesCsv(sessions)],
-      ['curve_check.csv', characterCurveCheckCsv(sessions)],
-      ['budget.csv', budgetCsv(sessions)],
-      ['center_share.csv', centerShareCsv(plan, results)],
-      ...(plan.checks.includes('keystones')
-        ? [['keystones.csv', keystonesCsv(plan, results)] as [string, string]]
-        : []),
-    ];
+    const outputs = planOutputs(plan, results);
     const files = ['report.md', 'checks.json', 'checks.csv', ...outputs.map(([name]) => name)];
     const markdown = reportMarkdown(header, plan, rows, files);
     mkdirSync(options.out, { recursive: true });

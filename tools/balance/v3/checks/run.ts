@@ -1,8 +1,9 @@
 /**
- * The §4 checks' sets, plans and evaluation (docs/v3 C10 design §1.4–§1.6, §2.2). checkSet makes
- * a set's plan from the content: the checks, and units that are plain-data balance jobs with
+ * The §4 checks' sets, plans and evaluation (docs/v3 C10 design §1.4–§1.6, §2.2, §2.3). checkSet
+ * makes a set's plan from the content: the checks, and units that are plain-data balance jobs with
  * stable ids. derivedUnits gives the second phase's units from the first phase's results (the ★
- * measures on the prestige-point snapshots, the legacy sessions); runPlan runs both on the pool;
+ * measures on the prestige-point snapshots, the legacy sessions, and the rows', affixes' and dead
+ * boards' measures on the DEAD_BOARD_MINUTES snapshots); runPlan runs both on the pool;
  * evaluate turns the results into one CheckResult per check and subject. evaluate is a pure
  * function of the plan and the results, so the nightly's shards (C10.4) can split a plan and its
  * merge can evaluate results it did not run.
@@ -22,6 +23,13 @@ import { PRESTIGE } from '../prestige';
 import { CLEAR_WAVE, FULL_SESSION_MINUTES, PRE_PRESTIGE_MINUTES } from '../session';
 import type { CharacterSessionConfig } from '../session';
 import { ACCEPTED_CHECK_FAILS, acceptedKey } from './accepted';
+import {
+  boardUnits,
+  DEAD_BOARDS_STANDARD,
+  DEAD_NODES_STANDARD,
+  deadBoardsCheck,
+  deadNodesCheck,
+} from './boards';
 import { budgetCheck } from './budget';
 import { probeC7Parts } from './c7';
 import type { C7Parts } from './c7';
@@ -33,6 +41,15 @@ import {
   keystoneTargets,
   keystoneUnits,
 } from './keystones';
+import {
+  affixesCheck,
+  AFFIXES_STANDARD,
+  ENEMY_ROW_STANDARD,
+  enemyRowCheck,
+  OUTER_ROW_STANDARD,
+  outerRowCheck,
+  rowUnits,
+} from './rows';
 import {
   centerShareCheck,
   characterFairnessCheck,
@@ -77,8 +94,8 @@ export const MENU_SECONDS = 20;
 /**
  * Each set's checks in the report's order (design §1.4, §1.5). pr is impl:493's list: the built
  * characters' default build (quick pacing), one hand and one template fusion, newbie fairness,
- * the center share, and ci.yml's fuzz and performance steps. The nightly is every C10.2 check on
- * NIGHTLY_SESSIONS sessions; C10.3 and C10.4 add theirs and the nightly's global fuzz shard, and
+ * the center share, and ci.yml's fuzz and performance steps. The nightly is every C10.2 and C10.3
+ * check on NIGHTLY_SESSIONS sessions; C10.4 adds its own and the nightly's global fuzz shard, and
  * the weekly is the nightly plus C10.4's triples.
  */
 export const SET_CHECKS: Readonly<Record<CheckSetId, readonly CheckId[]>> = {
@@ -88,13 +105,18 @@ export const SET_CHECKS: Readonly<Record<CheckSetId, readonly CheckId[]>> = {
     'firstHours',
     'newbie',
     'characterFairness',
+    'enemyRow',
+    'outerRow',
     'fusionStrength',
     'centerShare',
+    'deadBoards',
+    'deadNodes',
     'keystones',
     'legacy',
     'playTime',
     'pointBudget',
     'prestigeReturn',
+    'affixes',
     'budget',
   ],
   weekly: [
@@ -102,13 +124,18 @@ export const SET_CHECKS: Readonly<Record<CheckSetId, readonly CheckId[]>> = {
     'firstHours',
     'newbie',
     'characterFairness',
+    'enemyRow',
+    'outerRow',
     'fusionStrength',
     'centerShare',
+    'deadBoards',
+    'deadNodes',
     'keystones',
     'legacy',
     'playTime',
     'pointBudget',
     'prestigeReturn',
+    'affixes',
     'budget',
   ],
 };
@@ -119,12 +146,17 @@ const SESSION_CHECKS: ReadonlySet<CheckId> = new Set<CheckId>([
   'firstHours',
   'newbie',
   'characterFairness',
+  'enemyRow',
+  'outerRow',
   'centerShare',
+  'deadBoards',
+  'deadNodes',
   'keystones',
   'legacy',
   'playTime',
   'pointBudget',
   'prestigeReturn',
+  'affixes',
   'budget',
 ]);
 
@@ -140,12 +172,16 @@ export const CHECK_STANDARDS: Readonly<Record<CheckId, string>> = {
   characterFairness:
     `slowest ÷ fastest median minutes to waves ${FAIRNESS_WAVES.join(', ')} ≤ ` +
     `${FAIRNESS_MAX} (初始值)`,
+  enemyRow: ENEMY_ROW_STANDARD,
+  outerRow: OUTER_ROW_STANDARD,
   fusionStrength:
     `every calibration seed in [${STRENGTH_BAND.min}, ${STRENGTH_BAND.max}] at the entry's ` +
     'coef; digest current (初始值)',
   centerShare:
     `median (center + asc) ÷ all damage ≥ ${CENTER_SHARE_MIN} in the first run reaching wave ` +
     `${CENTER_SHARE_WAVE} (初始值)`,
+  deadBoards: DEAD_BOARDS_STANDARD,
+  deadNodes: DEAD_NODES_STANDARD,
   keystones:
     `each visible ★: median x(with) − median x(without) over ${KEYSTONE_SEEDS} seeds in ` +
     `[+${KEYSTONE_GAIN.low}, +${KEYSTONE_GAIN.high}] waves (初始值)`,
@@ -157,6 +193,7 @@ export const CHECK_STANDARDS: Readonly<Record<CheckId, string>> = {
     `median purchases ${POINT_BUDGET.prestige.join('–')} at the prestige point, ` +
     `${POINT_BUDGET.clear.join('–')} at the clear (初始值)`,
   prestigeReturn: `median minutes back to the last cycle's best ≤ ${PRESTIGE_RETURN_MAX} × that cycle's (初始值)`,
+  affixes: AFFIXES_STANDARD,
   budget: 'Σ effectsDropped = 0; the other budget and cap counters are info',
   fuzz: "ci.yml's `npm run fuzz:web` passes",
   performance: "ci.yml's `npm run bench -- --check` passes",
@@ -252,15 +289,22 @@ export function checkSet(
 
 /**
  * The plan's second phase, a pure function of the plan and the first phase's results (design
- * G4): the ★ measures on each character's prestige-point snapshot (keystones.ts' keystoneUnits)
- * and, once B5 sets LEGACY, the legacy sessions (sessions.ts' legacyUnits).
+ * G4): the ★ measures on each character's prestige-point snapshot (keystones.ts' keystoneUnits);
+ * once B5 sets LEGACY, the legacy sessions (sessions.ts' legacyUnits); and the row, affix and
+ * dead-board measures on each character's DEAD_BOARD_MINUTES snapshot (rows.ts' rowUnits,
+ * boards.ts' boardUnits).
  */
 export function derivedUnits(
   plan: CheckPlan,
   results: UnitResults,
   legacy: LegacyHook | null = LEGACY,
 ): PlanUnit[] {
-  return [...keystoneUnits(plan, results), ...legacyUnits(plan, results, legacy)];
+  return [
+    ...keystoneUnits(plan, results),
+    ...legacyUnits(plan, results, legacy),
+    ...rowUnits(plan, results),
+    ...boardUnits(plan, results),
+  ];
 }
 
 /** Runs balance jobs; runJobs (tools/balance/jobs.ts) unless a test passes its own. */
@@ -324,13 +368,18 @@ const EVALUATORS: Readonly<
   firstHours: firstHoursCheck,
   newbie: newbieCheck,
   characterFairness: characterFairnessCheck,
+  enemyRow: enemyRowCheck,
+  outerRow: outerRowCheck,
   fusionStrength: fusionStrengthCheck,
   centerShare: centerShareCheck,
+  deadBoards: deadBoardsCheck,
+  deadNodes: deadNodesCheck,
   keystones: keystonesCheck,
   legacy: legacyCheck,
   playTime: playTimeCheck,
   pointBudget: pointBudgetCheck,
   prestigeReturn: prestigeReturnCheck,
+  affixes: affixesCheck,
   budget: budgetCheck,
   fuzz: (plan) => ciStep(plan, 'fuzz', 'npm run fuzz:web'),
   performance: (plan) => ciStep(plan, 'performance', 'npm run bench -- --check'),

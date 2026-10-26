@@ -47,22 +47,27 @@ export const NA_UNLOCKS: Readonly<Record<NaReason, string>> = {
 export type CheckSetId = 'pr' | 'nightly' | 'weekly';
 
 /**
- * C10.2's checks in the report's order: implementation-plan-v3 §4's rows (impl:474-491), the two
- * checks from other sources after 遊玩時間, and the PR set's pointers to ci.yml's steps last.
- * C10.3 and C10.4 put theirs at their rows.
+ * The checks in the report's order: implementation-plan-v3 §4's rows (impl:474-491), the three
+ * checks from other sources after 遊玩時間 (菁英詞綴 is gd:769's), and the PR set's pointers to
+ * ci.yml's steps last. C10.4 puts its fusion matrices at their rows.
  */
 export const CHECK_IDS = [
   'pacing',
   'firstHours',
   'newbie',
   'characterFairness',
+  'enemyRow',
+  'outerRow',
   'fusionStrength',
   'centerShare',
+  'deadBoards',
+  'deadNodes',
   'keystones',
   'legacy',
   'playTime',
   'pointBudget',
   'prestigeReturn',
+  'affixes',
   'budget',
   'fuzz',
   'performance',
@@ -80,13 +85,18 @@ export const CHECK_DEFS: Readonly<Record<CheckId, CheckDef>> = {
   firstHours: { name: '前兩小時', source: 'impl:475; gd:829-835' },
   newbie: { name: '新手公平', source: 'impl:476; gd:838' },
   characterFairness: { name: '角色公平', source: 'impl:477; gd:839' },
+  enemyRow: { name: '敵人對照表', source: 'impl:478; gd:766' },
+  outerRow: { name: '外盤能補的敵人', source: 'impl:479; gd:768' },
   fusionStrength: { name: '融合強度', source: 'impl:480; src/meta/web/calibrate.ts' },
   centerShare: { name: '中心主體性', source: 'impl:482; C3D:1773-1776, :1799' },
+  deadBoards: { name: '死盤', source: 'impl:483; gd:770' },
+  deadNodes: { name: '死節點', source: 'impl:484' },
   keystones: { name: '關鍵天賦', source: 'impl:485; tools/balance/keystones.ts' },
   legacy: { name: '傳承', source: 'impl:488; gd:792' },
   playTime: { name: '遊玩時間', source: 'impl:489; gd:794' },
   pointBudget: { name: '一輪轉生的點數', source: 'gd:318-319; S301' },
   prestigeReturn: { name: '轉生後回到最遠波次', source: 'GDD:245' },
+  affixes: { name: '菁英詞綴', source: 'gd:769' },
   budget: { name: '預算報告', source: 'impl:490; C3D:1777; C5D:1483; C4D:3127' },
   fuzz: { name: '模糊測試', source: 'impl:463; ci.yml' },
   performance: { name: '效能', source: 'impl:491; ci.yml' },

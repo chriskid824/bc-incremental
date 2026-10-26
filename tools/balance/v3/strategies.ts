@@ -117,7 +117,7 @@ export function openNodes(web: AssembledWeb, progress: CharacterProgress): WebNo
  * Breadth-first from `starts`, a level at a time in web order, over the neighbours `admits` lets
  * in; the nodes found, starts excluded, in the order found.
  */
-function breadthFirst(
+export function breadthFirst(
   web: AssembledWeb,
   starts: readonly string[],
   admits: (node: WebNode) => boolean,
