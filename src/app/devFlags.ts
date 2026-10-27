@@ -4,8 +4,9 @@
  * from a preset save, the center is the hive with its drones, and no playtest events are sent.
  * Under it, `&wave=N` starts the first run at wave N and `&shards=N` tops the shards up to at
  * least N; without `?hive` neither does anything. `?replay=<spec>` opens the replay route instead
- * of the game (src/app/replay/route.ts, docs/v3 C10 design §1.7). Like `?lang=`, these are not
- * player text. Everything main.ts does with them is here, pure, so the tests reach it.
+ * of the game (src/app/replay/route.ts, docs/v3 C10 design §1.7), and `?enemies` the enemy grid
+ * (src/app/enemies/route.ts, docs/v3 C7 design §2.9). Like `?lang=`, these are not player text.
+ * Everything main.ts does with them is here, pure, so the tests reach it.
  */
 
 import { max, num } from '../core/num';
@@ -26,6 +27,11 @@ export interface DevFlags {
    * itself (parseReplayParam). null when absent or empty: the page is the game, as without it.
    */
   readonly replay: string | null;
+  /**
+   * `?enemies`, with or without a value, with or without `?hive`: the page is the enemy grid,
+   * unless `?replay=` names a replay, which main.ts opens first.
+   */
+  readonly enemies: boolean;
 }
 
 /** Save keys of the `?hive` profile (`…main`, `…backup`), apart from the player's own save. */
@@ -43,7 +49,8 @@ export function readDevFlags(search: string, waveCap: number): DevFlags {
   const spec = params.get('replay');
   // An empty `?replay=` names no replay (docs/v3 C10 design §2.5's test 5): the game, as before.
   const replay = spec === null || spec === '' ? null : spec;
-  if (!params.has('hive')) return { hive: false, wave: null, shards: null, replay };
+  const enemies = params.has('enemies');
+  if (!params.has('hive')) return { hive: false, wave: null, shards: null, replay, enemies };
   const wave = wholeNumber(params.get('wave'));
   const shards = wholeNumber(params.get('shards'));
   return {
@@ -51,6 +58,7 @@ export function readDevFlags(search: string, waveCap: number): DevFlags {
     wave: wave === null ? null : Math.min(Math.max(1, wave), Math.max(1, waveCap)),
     shards: shards === null || shards < 0 ? null : shards,
     replay,
+    enemies,
   };
 }
 

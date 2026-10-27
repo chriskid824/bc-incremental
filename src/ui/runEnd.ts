@@ -2,7 +2,8 @@
  * Wording of the result screen's "why the run ended" section: the cause, which enemies got
  * through, a note when the start wave was not cleared (no skip compensation, the next run starts
  * lower), and on death one tip naming the two levers (kill faster, or survive longer), picked
- * from the run's contact damage. DOM-free so tests can run it.
+ * from the run's contact damage and, in a v3 run, its shooters' bullets (docs/v3 C7 design §2.9).
+ * DOM-free so tests can run it.
  */
 
 import { formatNum } from '../core/format';
@@ -36,6 +37,11 @@ export interface RunEndFacts {
   readonly leaks: number;
   readonly damageTaken: number;
   readonly damageTakenBy: Readonly<Record<EnemyId, ContactTally>>;
+  /**
+   * RunResult.bulletTakenBy: the bullets that hit the player by their shooter's type. Not leaks,
+   * so the leak line leaves them out; the tip counts them. Absent reads as none.
+   */
+  readonly bulletTakenBy?: Readonly<Partial<Record<EnemyId, ContactTally>>>;
   readonly killedBy: EnemyId | null;
 }
 
@@ -74,14 +80,22 @@ const NAMES: Readonly<Record<EnemyId, { readonly one: MessageKey; readonly many:
 export const enemyName = (id: EnemyId): string => t(NAMES[id].one);
 export const enemyPlural = (id: EnemyId): string => t(NAMES[id].many);
 
-/** The type that dealt the most contact damage, the first in ENEMY_IDS on ties; null if none. */
-export function mainThreat(by: Readonly<Record<EnemyId, ContactTally>>): EnemyId | null {
+/**
+ * The type that dealt the most damage: its contacts', plus its bullets' when `bullets`
+ * (RunResult.bulletTakenBy, read structurally) is given; the first in ENEMY_IDS on ties; null if
+ * none.
+ */
+export function mainThreat(
+  by: Readonly<Record<EnemyId, ContactTally>>,
+  bullets?: Readonly<Partial<Record<EnemyId, ContactTally>>>,
+): EnemyId | null {
   let best: EnemyId | null = null;
   let bestDamage = 0;
   for (const id of ENEMY_IDS) {
-    if (by[id].damage > bestDamage) {
+    const damage = by[id].damage + (bullets?.[id]?.damage ?? 0);
+    if (damage > bestDamage) {
       best = id;
-      bestDamage = by[id].damage;
+      bestDamage = damage;
     }
   }
   return best;
@@ -136,11 +150,13 @@ function tipText(facts: RunEndFacts, enemies: EnemySpeeds): string | null {
   if (facts.glassCannon) {
     return t('result.tip.glassCannon', { glassCannon: t('talent.glassCannon.name') });
   }
-  const main = mainThreat(facts.damageTakenBy) ?? facts.killedBy;
+  const main = mainThreat(facts.damageTakenBy, facts.bulletTakenBy) ?? facts.killedBy;
   if (main === null) return null;
   const vitality = t('talent.vitality.name');
-  const tally = facts.damageTakenBy[main];
-  const perHit = tally.hits > 0 ? tally.damage / tally.hits : 0;
+  const contact = facts.damageTakenBy[main];
+  const bullet = facts.bulletTakenBy?.[main];
+  const hits = contact.hits + (bullet?.hits ?? 0);
+  const perHit = hits > 0 ? (contact.damage + (bullet?.damage ?? 0)) / hits : 0;
   if (perHit >= facts.maxLife * HEAVY_HIT_SHARE) {
     return t('result.tip.heavy', {
       enemy: enemyName(main),

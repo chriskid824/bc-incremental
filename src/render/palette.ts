@@ -30,6 +30,15 @@ export const COLORS = {
   damageCrit: 0xffe066,
   damageBurn: 0xff8a3d,
   damageChain: 0x7ff6ff,
+  /** A hit the enemy's defences took in full (hitBlocked): steel, apart from a landed hit's white. */
+  blocked: 0x9aa6bd,
+  /** 衝刺者 while it charges its dash (gd A.5 「衝刺前變紅 0.6 秒」). */
+  enemyCharge: 0xff3b3b,
+  /** Enemy bullets: hostile red, apart from the player's cool projectiles; their core near white. */
+  bullet: 0xff5a4e,
+  bulletCore: 0xffe4dc,
+  /** The player's shield arc (PlayerState.shield): the player's cyan, lighter. */
+  playerShield: 0xcff6ff,
 } as const;
 
 /** Linear blend of two 0xRRGGBB colors; t = 0 gives a, t = 1 gives b. */

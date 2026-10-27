@@ -138,6 +138,28 @@ const CSS = `
     transform 200ms ease-out;
 }
 .bc-toast.bc-visible { opacity: 1; transform: translate(-50%, 0); }
+.bc-banner {
+  /* A new enemy's line (src/ui/bannerView.ts): slides down from the top, never takes input. */
+  inset: auto;
+  top: 16px;
+  left: 50%;
+  max-width: calc(100vw - 32px);
+  transform: translate(-50%, -160%);
+  padding: 10px 20px;
+  border-radius: 10px;
+  background: rgba(14, 17, 26, 0.94);
+  border: 1px solid rgba(232, 236, 242, 0.5);
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition:
+    opacity 250ms ease-out,
+    transform 250ms ease-out;
+}
+.bc-banner.bc-visible { opacity: 1; transform: translate(-50%, 0); }
 .bc-badge {
   /* The ?hive prototype's corner label (src/app/main.ts), over every screen. */
   inset: auto auto 14px 16px;

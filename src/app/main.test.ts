@@ -8,7 +8,8 @@
  * given and stops the boot there, which the page reports through showFatal. Given a stub platform
  * instead, the boot goes on to the Renderer, which records its options and stops it: the M1 page
  * and `?hive` give it no RenderRandom (docs/v3 C10 design §2.5). `?replay=` loads the replay
- * route's chunk instead of the game, and only it does (§1.7).
+ * route's chunk instead of the game, and only it does (§1.7); `?enemies` loads the enemy grid's
+ * chunk the same way, and only it does (docs/v3 C7 design §2.9).
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -36,6 +37,9 @@ const boot = vi.hoisted(() => ({
   /** Loads of the replay route's chunk, and the searches it was started with. */
   routeLoads: 0,
   routes: [] as string[],
+  /** Loads of the enemy grid's chunk, and the searches it was started with. */
+  enemiesLoads: 0,
+  enemiesRoutes: [] as string[],
 }));
 
 vi.mock('pixi.js', async (importOriginal) => ({
@@ -101,6 +105,8 @@ async function loadPage(search: string): Promise<void> {
   boot.renderers.length = 0;
   boot.routeLoads = 0;
   boot.routes.length = 0;
+  boot.enemiesLoads = 0;
+  boot.enemiesRoutes.length = 0;
   vi.resetModules();
   // Registered afresh for each page, so that each page's load of the chunk counts (resetModules
   // keeps a mocked module).
@@ -109,6 +115,15 @@ async function loadPage(search: string): Promise<void> {
     return {
       startReplayRoute: (_root: unknown, search: string) => {
         boot.routes.push(search);
+        return Promise.reject(boot.stop);
+      },
+    };
+  });
+  vi.doMock('./enemies/route', () => {
+    boot.enemiesLoads++;
+    return {
+      startEnemiesRoute: (_root: unknown, search: string) => {
+        boot.enemiesRoutes.push(search);
         return Promise.reject(boot.stop);
       },
     };
@@ -198,6 +213,7 @@ describe('main.ts and the replay (docs/v3 C10 design §1.7, §2.5)', () => {
       expect(boot.renderers[0], search).not.toHaveProperty('random');
       expect(boot.renderers[0]?.construct, search).toBe(search === '' ? undefined : 'hive');
       expect(boot.routeLoads, search).toBe(0);
+      expect(boot.enemiesLoads, search).toBe(0);
     }
   });
 
@@ -212,5 +228,27 @@ describe('main.ts and the replay (docs/v3 C10 design §1.7, §2.5)', () => {
       expect(boot.routeLoads, search).toBe(0);
       expect(boot.setups, search).toHaveLength(1);
     }
+  });
+});
+
+describe('main.ts and the enemy grid (docs/v3 C7 design §2.9, the lead’s ruling P7)', () => {
+  it('loads the ?enemies chunk for ?enemies only, instead of the game and its platform', async () => {
+    for (const search of ['?enemies', '?lang=zh-TW&enemies&step=1', '?hive&enemies']) {
+      await loadPage(search);
+      expect([boot.enemiesLoads, boot.enemiesRoutes], search).toEqual([1, [search]]);
+      expect([boot.routeLoads, boot.setups, boot.renderers], search).toEqual([0, [], []]);
+    }
+    // The M1 page, ?hive and a replay never fetch it; a replay named beside it opens first.
+    for (const search of [
+      '',
+      '?hive',
+      '?enemy',
+      '?replay=renderStress',
+      '?enemies&replay=renderStress',
+    ]) {
+      await loadPage(search);
+      expect(boot.enemiesLoads, search).toBe(0);
+    }
+    expect(boot.routeLoads).toBe(1);
   });
 });

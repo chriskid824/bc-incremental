@@ -17,7 +17,7 @@ import type { SessionOptions } from './session';
 
 const data = loadGameData();
 const WAVE_CAP = 40;
-const NONE = { hive: false, wave: null, shards: null, replay: null };
+const NONE = { hive: false, wave: null, shards: null, replay: null, enemies: false };
 
 const flags = (search: string) => readDevFlags(search, WAVE_CAP);
 
@@ -34,13 +34,20 @@ describe('readDevFlags', () => {
 
   it('turns the prototype on with ?hive, with or without a value', () => {
     for (const search of ['?hive', 'hive', '?hive=1', '?hive=', '?lang=zh-TW&hive']) {
-      expect(flags(search), search).toEqual({ hive: true, wave: null, shards: null, replay: null });
+      expect(flags(search), search).toEqual({
+        hive: true,
+        wave: null,
+        shards: null,
+        replay: null,
+        enemies: false,
+      });
     }
     expect(flags('?hive&wave=30&shards=500')).toEqual({
       hive: true,
       wave: 30,
       shards: 500,
       replay: null,
+      enemies: false,
     });
   });
 
@@ -73,6 +80,7 @@ describe('readDevFlags', () => {
         wave: null,
         shards: null,
         replay: null,
+        enemies: false,
       });
     }
     // Digits too long for a number are not a whole number either.
@@ -88,12 +96,36 @@ describe('readDevFlags', () => {
       wave: null,
       shards: null,
       replay: 'preview:fire',
+      enemies: false,
     });
     // Without ?replay, or with an empty one, the page is the game, as before.
     expect(flags('?replay=')).toEqual(NONE);
     expect(flags('?replay')).toEqual(NONE);
     expect(flags('?hive&replay=').replay).toBeNull();
     expect(flags('?lang=zh-TW&replays=1').replay).toBeNull();
+  });
+
+  it('reads ?enemies as the enemy grid, with or without a value or ?hive (docs/v3 C7 §2.9)', () => {
+    for (const search of [
+      '?enemies',
+      'enemies',
+      '?enemies=1',
+      '?enemies=',
+      '?lang=zh-TW&enemies',
+    ]) {
+      expect(flags(search), search).toEqual({ ...NONE, enemies: true });
+    }
+    expect(flags('?enemies&step=1')).toEqual({ ...NONE, enemies: true });
+    expect(flags('?hive&enemies').enemies).toBe(true);
+    expect(flags('?enemies&replay=renderStress')).toEqual({
+      ...NONE,
+      replay: 'renderStress',
+      enemies: true,
+    });
+    // Not a prefix match: the page is the game.
+    expect(flags('?enemy').enemies).toBe(false);
+    expect(flags('?enemiesx=1').enemies).toBe(false);
+    expect(flags('?hive').enemies).toBe(false);
   });
 });
 

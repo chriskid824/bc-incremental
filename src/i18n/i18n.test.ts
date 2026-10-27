@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { characterGameData, loadGameData, reachableEnemies } from '../data';
 import { AFFIX_IDS } from '../data/affixes';
 import { STAT_IDS } from '../data/stats';
 import { TALENTS } from '../data/talents';
+import { BANNER_KEYS } from '../ui/banner';
 import { LOCALES, MESSAGES, fill, getLocale, isMessageKey, pickLocale, setLocale, t } from '.';
 import type { MessageKey } from '.';
 import en from './en.json';
@@ -72,6 +74,36 @@ describe('messages', () => {
       expect(MESSAGES[id][key as MessageKey]?.trim(), `${id} ${key}`).toBeTruthy();
     }
   });
+
+  it.each(LOCALES)(
+    '%s has the first-appearance line of every v3 type the waves bring (C7.8)',
+    (id) => {
+      // The types a v3 run can spawn and an M1 run cannot (docs/v3 C7 design §2.9, ruling P9).
+      const m1 = new Set(reachableEnemies(loadGameData()));
+      const fresh = reachableEnemies(characterGameData()).filter((enemy) => !m1.has(enemy));
+      expect(fresh).toEqual([
+        'shielder',
+        'regenerator',
+        'dasher',
+        'shooter',
+        'summoner',
+        'treasure',
+        'onion',
+      ]);
+      expect(BANNER_KEYS).toEqual(
+        Object.fromEntries(fresh.map((enemy) => [enemy, `banner.enemy.${enemy}`])),
+      );
+      for (const enemy of fresh) {
+        const key = `banner.enemy.${enemy}`;
+        expect(isMessageKey(key), key).toBe(true);
+        expect(MESSAGES[id][key as MessageKey]?.trim(), `${id} ${key}`).toBeTruthy();
+      }
+      // Exactly those: no line for a type only M1 brings, or one the waves never bring.
+      expect(keys.filter((key) => key.startsWith('banner.enemy.')).sort()).toEqual(
+        fresh.map((enemy) => `banner.enemy.${enemy}`).sort(),
+      );
+    },
+  );
 });
 
 describe('t', () => {

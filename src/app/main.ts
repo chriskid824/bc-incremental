@@ -424,6 +424,7 @@ function toResultInfo(report: RunReport, feedbackUrl: string | null): ResultInfo
     leaks: result.leaks,
     damageTaken: result.damageTaken,
     damageTakenBy: result.damageTakenBy,
+    bulletTakenBy: result.bulletTakenBy,
     killedBy: result.killedBy,
     shardsFromRun: settlement.shardsFromRun,
     coresFromRun: settlement.coresFromRun,
@@ -469,6 +470,12 @@ if (flags.replay !== null) {
   // it, and it writes no storage, sends no playtest event and calls no platform API.
   import('./replay/route')
     .then((route) => route.startReplayRoute(root, window.location.search))
+    .catch((error: unknown) => showFatal(root, error));
+} else if (flags.enemies) {
+  // The enemy grid (docs/v3 C7 design §2.9), a dev page in a chunk of its own on the replay's
+  // pattern: read-only, on characterGameData().
+  import('./enemies/route')
+    .then((route) => route.startEnemiesRoute(root, window.location.search))
     .catch((error: unknown) => showFatal(root, error));
 } else {
   main(root, locale, flags).catch((error: unknown) => showFatal(root, error));

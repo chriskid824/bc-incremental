@@ -181,6 +181,47 @@ describe('mainThreat', () => {
     expect(mainThreat(tallies({ square: [2, 30], hexagon: [1, 30] }))).toBe('square');
     expect(mainThreat(tallies())).toBeNull();
   });
+
+  it('adds each type’s bullets to its contacts (docs/v3 C7 design §2.9, the lead’s ruling P6)', () => {
+    const bullets = (hits: number, damage: number) => ({ shooter: { hits, damage } });
+    // Shooters that never touched the player: their bullets alone make them the threat.
+    expect(mainThreat(tallies({ triangle: [3, 24] }), bullets(9, 27))).toBe('shooter');
+    expect(mainThreat(tallies(), bullets(1, 3))).toBe('shooter');
+    // Contact and bullets summed: 20 + 12 beats 30.
+    expect(mainThreat(tallies({ square: [2, 30], shooter: [1, 20] }), bullets(4, 12))).toBe(
+      'shooter',
+    );
+    // Each counted once: 20 of contact loses to 25 of bullets, and 20 of bullets to 30 of contact.
+    expect(mainThreat(tallies({ square: [1, 20] }), bullets(5, 25))).toBe('shooter');
+    expect(mainThreat(tallies({ square: [2, 30] }), bullets(5, 20))).toBe('square');
+    // Without bullets (an M1 result has none of its own) or with none: contact alone, as before.
+    expect(mainThreat(tallies({ shooter: [1, 20], square: [2, 30] }))).toBe('square');
+    expect(mainThreat(tallies({ shooter: [1, 20], square: [2, 30] }), {})).toBe('square');
+    expect(mainThreat(tallies(), bullets(0, 0))).toBeNull();
+  });
+
+  it('names the shooters in the tip when their bullets did the most, and leaves the leaks alone', () => {
+    const text = describeRunEnd(
+      facts(
+        { killedBy: 'shooter', bulletTakenBy: { shooter: { hits: 10, damage: 30 } } },
+        { triangle: [2, 16] },
+      ),
+      SPEEDS,
+    );
+    // Bullets are not leaks: the leak line is the contacts' alone.
+    expect(text.leaks).toBe('2 enemies reached you for 16 damage');
+    expect(text.tip).toMatch(/^Shooters kept getting through\./);
+    expect(SPEEDS.shooter.speed).toBeLessThan(FAST_SPEED);
+    // Its per-hit share is bullets and contacts together: 3 a hit is no heavy hit.
+    const heavy = describeRunEnd(
+      facts(
+        { killedBy: 'shooter', bulletTakenBy: { shooter: { hits: 1, damage: 40 } } },
+        { shooter: [1, 30], triangle: [2, 16] },
+      ),
+      SPEEDS,
+    );
+    expect(heavy.tip).toMatch(/^One Shooter hit takes 35 of your 100 life\./);
+  });
 });
 
 describe('enemy names', () => {

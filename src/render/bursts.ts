@@ -9,15 +9,14 @@
 import type { FxGroup, FxParticles } from './fx';
 import { FX_DEBRIS, FX_EMBER, FX_FLAME, FX_FLASH, FX_SPARK, THEN_FLAME_PUFF } from './fx';
 import type { FxTextures } from './fxTextures';
+import { TIER_BOSS, TIER_ELITE, TIER_NORMAL } from './killTier';
 import { COLORS, mixColor } from './palette';
 import { defaultRandom } from './random';
 import type { RenderRandom } from './random';
 import type { RingLayer } from './rings';
 
-/** Enemy tier for kill explosions. */
-export const TIER_NORMAL = 0;
-export const TIER_ELITE = 1;
-export const TIER_BOSS = 2;
+/** Enemy tier for kill explosions: src/render/killTier.ts, where a def's tier is read. */
+export { TIER_BOSS, TIER_ELITE, TIER_NORMAL } from './killTier';
 
 /** Texture sizes in pixels (src/render/fxTextures.ts): scale = arena size / texture size. */
 const GLOW_SIZE = 64;
@@ -31,6 +30,16 @@ const FLAME_ROOT = mixColor(COLORS.burn, COLORS.burnHot, 0.35);
 
 /** Crit flares stop growing at this many orders of magnitude above the typical hit. */
 const CRIT_FLARE_DECADES = 1.5;
+
+/**
+ * A blocked hit (hitBlocked): a flash smaller and dimmer than a landed hit's puff (26, 0.8), as
+ * brief (90 ms), and one spark more than its 3, slower, glancing off.
+ */
+const BLOCKED_GLOW = 22;
+const BLOCKED_ALPHA = 0.75;
+const BLOCKED_MS = 90;
+const BLOCKED_SPARKS = 4;
+const BLOCKED_POWER = 0.7;
 
 export class Bursts {
   /** `fx` draws above the crowd; `under` (enemy flames and ember puffs) draws below it. */
@@ -109,6 +118,15 @@ export class Bursts {
     this.glow(FX_FLASH, x, y, 56 + 22 * d, COLORS.critHot, COLORS.crit, 0.85, 150);
     this.rings.shock(x, y, 40 + 18 * d, COLORS.crit, 4 + 2 * d, 220 + 40 * d);
     this.sparks(x, y, 0, 0, Math.round(5 + 3 * d), COLORS.critHot, COLORS.crit, 1.1 + 0.2 * d);
+  }
+
+  /**
+   * A hit the enemy's defences took in full (hitBlocked: 盾兵's shield, or a 守護 elite's on its
+   * neighbours): a dull flash and a few steel sparks glancing back along (dirX, dirY), no number.
+   */
+  blocked(x: number, y: number, dirX: number, dirY: number): void {
+    this.glow(FX_SPARK, x, y, BLOCKED_GLOW, 0xffffff, COLORS.blocked, BLOCKED_ALPHA, BLOCKED_MS);
+    this.sparks(x, y, dirX, dirY, BLOCKED_SPARKS, 0xffffff, COLORS.blocked, BLOCKED_POWER);
   }
 
   /** A chain jump landed: an electric pop at the target. */

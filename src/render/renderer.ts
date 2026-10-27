@@ -8,6 +8,13 @@
  * pandemic spreads as a fire nova, chains arc as flickering lightning. Shake and hit-stop are
  * budgeted so they punch instead of jitter, and every effect pool is capped so a crowded screen
  * sheds detail instead of frame rate. docs/ARCHITECTURE.md §10 lists the layers and budgets.
+ *
+ * A v3 run (data.waves.v3, docs/v3 C7 design §2.9) also draws the shooters' bullets, the player's
+ * shield arc, a spark where an enemy's defences took a hit whole (hitBlocked), a pop as an elite's
+ * ward breaks (wardBroken) and a ring as 洋蔥 sheds a shell (onionLayer); the enemy views draw
+ * the rest from the record. The kill tier reads the def's flags (killTier), and the core does not
+ * flash on a hit the shield took whole (CoreHitFilter). An M1 run has none of their inputs: the
+ * bullet and shield layers are not made, and its frames are as before.
  */
 
 import { Container, Graphics } from 'pixi.js';
@@ -19,7 +26,8 @@ import type { SimEvent, SimState } from '../sim';
 import { ArcLayer } from './arcs';
 import { createBackdrop } from './backdrop';
 import { BurnTally } from './burnTally';
-import { Bursts, TIER_BOSS, TIER_ELITE, TIER_NORMAL } from './bursts';
+import { Bursts } from './bursts';
+import { BulletLayer } from './bullets';
 import { HiveCoreView } from './core';
 import type { CoreView } from './core';
 import { CritStopGate } from './critStop';
@@ -28,16 +36,19 @@ import { DroneLayer } from './drones';
 import { EnemyLayer, HIT_PUNCH } from './enemies';
 import { FxParticles } from './fx';
 import { createFxTextures } from './fxTextures';
+import { killTier, TIER_BOSS, TIER_ELITE } from './killTier';
 import { hudSafeArea } from './numberLayout';
 import { COLORS } from './palette';
 import { ShardParticles } from './particles';
 import { PlayerView } from './player';
+import { CoreHitFilter } from './playerHits';
 import { PoolShotLayer } from './poolShots';
 import { ProjectileLayer } from './projectiles';
 import { defaultRandom } from './random';
 import type { RenderRandom } from './random';
 import { RingLayer } from './rings';
 import { ScreenShake } from './shake';
+import { PlayerShield } from './shieldArc';
 
 export interface RendererOptions {
   /** Disables screen shake (settings toggle later, docs/ARCHITECTURE.md §10). */
@@ -77,6 +88,13 @@ const EMBERS_PER_NOVA = 8;
 const MAX_PENDING_NOVAS = 8;
 /** Frame time cap for effects, so a long pause does not fast-forward them in one jump. */
 const MAX_EFFECT_DT_MS = 100;
+/** A ward's break: a small ring this much wider than the enemy, white as the shell it was. */
+const WARD_BREAK_SCALE = 1.5;
+const WARD_BREAK_WIDTH = 3;
+const WARD_BREAK_MS = 260;
+/** A shell 洋蔥 sheds: a ring out to the onion's radius, wider and longer than an impact's. */
+const SHELL_BREAK_WIDTH = 6;
+const SHELL_BREAK_MS = 420;
 
 const CENTER_X = ARENA_WIDTH / 2;
 const CENTER_Y = ARENA_HEIGHT / 2;
@@ -98,6 +116,12 @@ export class Renderer {
   private readonly drones: DroneLayer | null;
   /** The shot pool's homing shots, the turrets'; only with the hive construct. */
   private readonly poolShots: PoolShotLayer | null;
+  /** The shooters' bullets; only on v3 data. */
+  private readonly bullets: BulletLayer | null;
+  /** The player's shield arc; only on v3 data. */
+  private readonly playerShield: PlayerShield | null;
+  /** Which player hits flash the core: not one the shield took whole. */
+  private readonly coreHits = new CoreHitFilter();
   private readonly shards: ShardParticles;
   private readonly numbers: DamageNumbers;
   private readonly burnTally = new BurnTally();
@@ -137,6 +161,10 @@ export class Renderer {
       options.construct === 'hive' ? new DroneLayer(app.renderer, textures.streak) : null;
     this.poolShots = this.drones === null ? null : new PoolShotLayer(textures);
     this.core = this.drones === null ? new PlayerView() : new HiveCoreView(this.drones);
+    // An M1 run has no bullet and no shield: on M1 data neither layer exists.
+    const v3 = data.waves.v3 !== undefined;
+    this.bullets = v3 ? new BulletLayer(textures) : null;
+    this.playerShield = v3 ? new PlayerShield() : null;
     this.shake = new ScreenShake(options.reducedMotion, random);
     this.hitStop = options.hitStop ?? ((): void => undefined);
     // Static: one cached quad instead of grid lines, light pool and vignette every frame.
@@ -149,10 +177,12 @@ export class Renderer {
       this.enemies.view,
       this.rings.view,
       this.core.view,
+      ...(this.playerShield === null ? [] : [this.playerShield.view]),
       // The drones fly over the core and under the shots (docs/v3 C5 design §13.2).
       ...(this.drones === null ? [] : [this.drones.view]),
       this.projectiles.view,
       ...(this.poolShots === null ? [] : [this.poolShots.view]),
+      ...(this.bullets === null ? [] : [this.bullets.view]),
       this.arcs.view,
       this.fx.view,
       this.shards.view,
@@ -176,6 +206,9 @@ export class Renderer {
     this.core.reset();
     this.drones?.reset();
     this.poolShots?.reset();
+    this.bullets?.clear();
+    this.playerShield?.reset();
+    this.coreHits.reset();
     this.shake.reset();
     this.critStop.reset();
     this.critShakeCooldownMs = 0;
@@ -229,7 +262,21 @@ export class Renderer {
           this.drones?.turretFired(event.droneId, event.targetId);
           break;
         case 'playerHit':
-          this.core.hit();
+        case 'bulletHit':
+          if (this.coreHits.flashes(event)) this.core.hit();
+          break;
+        case 'shieldAbsorbed':
+          this.coreHits.flashes(event);
+          this.playerShield?.absorb();
+          break;
+        case 'hitBlocked':
+          this.bursts.blocked(event.x, event.y, CENTER_X - event.x, CENTER_Y - event.y);
+          break;
+        case 'wardBroken':
+          this.onWardBroken(event.targetId);
+          break;
+        case 'onionLayer':
+          this.onShellBroken(event.enemyId, event.x, event.y);
           break;
         default:
           break;
@@ -253,12 +300,14 @@ export class Renderer {
     this.drones?.update(state, alpha, this.enemies, dt);
     this.projectiles.update(state.projectiles, alpha);
     this.poolShots?.update(state.shots, state.shotCount, state.tick, alpha);
+    this.bullets?.update(state.bullets, state.bulletCount, alpha);
     this.arcs.update(dt);
     this.rings.update(dt);
     this.flames.update(dt);
     this.fx.update(dt);
     this.fx.drainFollowUps(this.flamePuff);
     this.core.update(state.player, dt);
+    this.playerShield?.update(state.player, dt);
     const absorbed = this.shards.update(dt, state.player.x, state.player.y, PLAYER_RADIUS * 1.5);
     if (absorbed > 0) this.core.pulse();
     this.burnTally.update(dt, this.showBurn);
@@ -300,7 +349,7 @@ export class Renderer {
   private onKill(event: Extract<SimEvent, { type: 'enemyKilled' }>): void {
     this.burnTally.flush(event.enemyId, this.showBurn);
     const def = this.data.enemies[event.enemy];
-    const tier = def.boss ? TIER_BOSS : def.tough ? TIER_ELITE : TIER_NORMAL;
+    const tier = killTier(def);
     this.killsThisFrame++;
     const crowd = 1 / (1 + Math.max(0, this.killsThisFrame - 1) / CROWD_KILLS);
     this.bursts.kill(event.x, event.y, def.color, def.radius, tier, crowd);
@@ -313,6 +362,30 @@ export class Renderer {
       this.shake.add(ELITE_SHAKE, ELITE_SHAKE_CEILING);
       this.hitStop(ELITE_HIT_STOP_MS);
     }
+  }
+
+  /** An elite's ward broke: a white ring pops off where it was drawn, if it has a view. */
+  private onWardBroken(enemyId: number): void {
+    const spot = this.enemies.positionOf(enemyId);
+    if (spot === null) return;
+    this.rings.shock(
+      spot.x,
+      spot.y,
+      spot.radius * WARD_BREAK_SCALE,
+      COLORS.hitFlash,
+      WARD_BREAK_WIDTH,
+      WARD_BREAK_MS,
+    );
+  }
+
+  /**
+   * 洋蔥 shed a shell at (x, y): a ring out to its radius, if it has a view. A boss's beat: it
+   * takes the oldest shock's place when the pool is full.
+   */
+  private onShellBroken(enemyId: number, x: number, y: number): void {
+    const spot = this.enemies.positionOf(enemyId);
+    if (spot === null) return;
+    this.rings.shock(x, y, spot.radius, COLORS.hitFlash, SHELL_BREAK_WIDTH, SHELL_BREAK_MS, true);
   }
 
   /** Sends each pending pandemic nova's embers to enemies inside its radius. */
