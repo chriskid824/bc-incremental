@@ -8,7 +8,8 @@
  * ailmentTick triggers fire. The ailments themselves live in src/sim/ailments/.
  *
  * A kill by damage over time carries the enemy's ailment depth (Enemy.ailDepth) and no origin:
- * rule 3 is about direct damage only.
+ * rule 3 is about direct damage only. A step that empties a v3 onion's shell with one left
+ * breaks it instead (src/sim/systems/onion.ts); the onion keeps its ailments.
  */
 
 import type { Num } from '../../core/num';
@@ -28,6 +29,7 @@ import { EVENT } from '../effects/types';
 import type { CompiledTrigger } from '../effects/types';
 import type { BurnStack, Enemy, RunContext } from './context';
 import { killEnemy } from './death';
+import { onionBreak } from './onion';
 
 const BURN = TAG.burn;
 const POISON = TAG.poison;
@@ -152,7 +154,9 @@ function stepDots(ctx: RunContext, enemy: Enemy, k: number, records: Num): boole
 
 /**
  * Deals one ailment's step, `raw` > 0, tagged `tag` (burn, poison or bleed), credited to
- * `credit`, or to RunContext.dotParts for −1. True when it killed the enemy.
+ * `credit`, or to RunContext.dotParts for −1. True when it killed the enemy. Its lethal test is
+ * one of the two (the other is a hit's, src/sim/combat/hit.ts applyHitDamage): a lethal step on
+ * a v3 onion with a shell left breaks that shell instead (onionBreak) and returns false.
  */
 function dealDot(ctx: RunContext, enemy: Enemy, tag: TagMask, raw: Num, credit: number): boolean {
   let amount = raw;
@@ -182,6 +186,10 @@ function dealDot(ctx: RunContext, enemy: Enemy, tag: TagMask, raw: Num, credit: 
     ctx.events.push({ type: 'dotTick', ailment, targetId, x, y, amount });
   }
   if (!lte(enemy.hp, ZERO)) return false;
+  // A v3 onion with a shell left loses it here and lives on (src/sim/systems/onion.ts), so the
+  // step goes on to its next ailment and its tick triggers. An M1 kill pays this one test.
+  const v3 = enemy.v3;
+  if (v3 !== null && v3.layersLeft > 0 && onionBreak(ctx, enemy)) return false;
   enemy.killDepth = enemy.ailDepth;
   enemy.killKind = tag === BURN ? KILL_BY_BURN : tag === POISON ? KILL_BY_POISON : KILL_BY_BLEED;
   killEnemy(ctx, enemy, -1, 0);

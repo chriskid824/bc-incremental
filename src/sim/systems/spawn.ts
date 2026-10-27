@@ -100,9 +100,10 @@ function delayFrom(ctx: RunContext, from: number, now: number, spawnTicks: numbe
 /**
  * Adds an enemy of `def` to wave `rec`, `dist` from the player along (ux, uy). Its def's flags
  * make it tough or a boss. In a v3 run (ctx.sys.enemyAi.enabled) it carries a record
- * (src/sim/systems/enemyRecord.ts) and takes `origin`'s hp and radius scales; an M1 run's
- * enemies take their def's and have none. A v3 enemy with a behaviour or regeneration joins the
- * enemy AI step's list (src/sim/systems/enemyAi.ts) last, which keeps the list in id order.
+ * (src/sim/systems/enemyRecord.ts) and takes `origin`'s hp and radius scales, and a layered def
+ * one layer's share of its hp (the onion, src/sim/systems/onion.ts); an M1 run's enemies take
+ * their def's and have none. A v3 enemy with a behaviour or regeneration joins the enemy AI
+ * step's list (src/sim/systems/enemyAi.ts) last, which keeps the list in id order.
  *
  * An elite (tough, not a boss: the hexagon in v3 data) draws its affixes here, unless its
  * `origin` gives them (a 增殖 child inherits its parent's, src/sim/systems/affixes.ts): their
@@ -129,7 +130,11 @@ export function addEnemy(
   let stepDist = def.speed * DT;
   let v3: EnemyV3 | null = null;
   if (ctx.sys.enemyAi.enabled) {
-    hp = mul(num(def.hpMult * (origin?.hpScale ?? 1)), rec.stdHp);
+    // A layered def (洋蔥) holds one shell's share of its hpMult, the total over its layers
+    // (C7.7); x / 1 is x, so every other def keeps its hp bit for bit.
+    const behaviour = def.behaviour;
+    const layers = behaviour?.kind === 'layers' ? behaviour.layers : 1;
+    hp = mul(num((def.hpMult * (origin?.hpScale ?? 1)) / layers), rec.stdHp);
     radius = def.radius * (origin?.radiusScale ?? 1);
     // Given bits (0 included) are taken as they are, whatever the def; −1, or no origin, draws
     // for an elite and leaves every other type without affixes.

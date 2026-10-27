@@ -559,7 +559,21 @@ export type SimEvent =
    * ward, pushed by `defend` for the hit that broke it, before that hit's own `hit` event. Never
    * in an M1 run.
    */
-  | { readonly type: 'wardBroken'; readonly targetId: number };
+  | { readonly type: 'wardBroken'; readonly targetId: number }
+  /**
+   * Onion `enemyId` at (x, y) lost a shell to a lethal hit or damage-over-time step, with
+   * `layersLeft` remaining (src/sim/systems/onion.ts): pushed after the damage's own hit,
+   * burnTick or dotTick event (a pulse's hit has none) and after its burst's enemySpawned events.
+   * While shells remain it lives on at full life; at 0 its enemyKilled follows. Never in an M1
+   * run.
+   */
+  | {
+      readonly type: 'onionLayer';
+      readonly enemyId: number;
+      readonly layersLeft: number;
+      readonly x: number;
+      readonly y: number;
+    };
 
 /**
  * Damage totals by kind of instance, for balance reporting: burn, poison and bleed by their

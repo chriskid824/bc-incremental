@@ -1723,6 +1723,29 @@ const affixData = (): GameData =>
     },
   });
 
+/**
+ * C7.7's onion boss (docs/v3 C7 design §2.8) on a v3 run of triangles from wave 1 with a boss
+ * every wave (bossEvery 1: TEST_V3_WAVES' rotation, the onion), and no affix, treasure or elite
+ * (§1.9; TEST_V3_WAVES.v3 spread, as v3TestData's merge is shallow). Damage 40 on BASE_STATS'
+ * volley, with poison at 0.5 and too much life to die, breaks the onions' shells within 20 s,
+ * some by its hits and some by damage over time (its poison, and BASE_STATS' ignites); each break
+ * sprays twelve triangles, and the last falls through to the kill and its drops.
+ */
+const ONION_STATS = makeStats({ damage: 40, poisonChance: 0.5, maxLife: 1e6 });
+const onionData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: [{ enemy: 'triangle', fromWave: 1, base: 6, perWave: 0.6, maxCount: 40 }],
+      eliteEvery: 1000,
+      bossEvery: 1,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2018,6 +2041,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: AFFIX_STATS, rules: [], startWave: 12 },
     data: affixData,
     expected: ['abc807c726a49210', '337c1909fca5b8d7'],
+  },
+  {
+    name: 'onion',
+    config: { stats: ONION_STATS, rules: [], startWave: 10 },
+    data: onionData,
+    expected: ['1d73c42d306cbd2d', 'da114191660d2463'],
   },
 ];
 
@@ -2617,6 +2646,79 @@ describe('golden C4 runs', () => {
           '迅捷 doubles its walk step',
         ],
       },
+    });
+  });
+
+  it('breaks each onion’s shells in onion one by one, by hits and damage over time, each spraying twelve triangles, and pays its drops once, at its kill (C7.7)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'onion') as GoldenC4Entry;
+    interface OnionSeen {
+      wave: number;
+      /** What broke each shell, and the layers it left. */
+      breaks: string[];
+      burst: number[];
+      kills: { shards: number; cores: number }[];
+    }
+    const bySeed: Record<number, string[]> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData());
+      const onions = new Map<number, OnionSeen>();
+      const shardsOf = new Map<number, number>();
+      while (!sim.state.finished) {
+        let cause = '';
+        // The enemySpawned events right before an onionLayer: its burst.
+        let spawned: number[] = [];
+        for (const event of sim.step(NO_INPUT)) {
+          if (event.type === 'enemySpawned') {
+            if (event.enemy === 'onion') {
+              const wave = sim.state.enemies.find((e) => e.id === event.enemyId)?.wave ?? 0;
+              onions.set(event.enemyId, { wave, breaks: [], burst: [], kills: [] });
+            }
+            spawned.push(event.enemyId);
+            continue;
+          }
+          if (event.type === 'onionLayer') {
+            const onion = onions.get(event.enemyId) as OnionSeen;
+            onion.breaks.push(`${cause} (${event.layersLeft} left, ${spawned.length} sprayed)`);
+            onion.burst.push(...spawned);
+          } else if (event.type === 'enemyKilled') {
+            shardsOf.set(event.enemyId, toNumber(event.shards));
+            onions
+              .get(event.enemyId)
+              ?.kills.push({ shards: toNumber(event.shards), cores: event.cores });
+          } else if (event.type === 'hit') cause = 'hit';
+          else if (event.type === 'burnTick') cause = 'burn';
+          else if (event.type === 'dotTick') cause = event.ailment;
+          spawned = [];
+        }
+      }
+      bySeed[seed] = [...onions].map(([id, onion]) => {
+        // A kill pays 16 ×: 32 × the 0.5 of a triangle its bursts sprayed into its wave.
+        const triangle = onion.burst
+          .map((child) => shardsOf.get(child))
+          .find((v) => v !== undefined);
+        const kills = onion.kills.map(({ shards, cores }) =>
+          triangle !== undefined && shards === toNumber(mul(num(32), triangle))
+            ? `killed: 32 × a burst triangle’s shards, ${cores} cores`
+            : `killed: ${shards} shards, ${cores} cores`,
+        );
+        return `onion ${id}, wave ${onion.wave}: ${[...onion.breaks, ...kills].join('; ')}`;
+      });
+    }
+    // Waves 10 and 11's onions lose all three shells and die; wave 12's loses one by the end.
+    // Seed 1's last shells go to burns, seed 2's to poison, which takes seed 2's first onion's
+    // second shell too.
+    expect(bySeed).toEqual({
+      1: [
+        'onion 5, wave 10: hit (2 left, 12 sprayed); hit (1 left, 12 sprayed); burn (0 left, 12 sprayed); killed: 32 × a burst triangle’s shards, 3 cores',
+        'onion 54, wave 11: hit (2 left, 12 sprayed); hit (1 left, 12 sprayed); burn (0 left, 12 sprayed); killed: 32 × a burst triangle’s shards, 3 cores',
+        'onion 90, wave 12: hit (2 left, 12 sprayed)',
+      ],
+      2: [
+        'onion 7, wave 10: hit (2 left, 12 sprayed); poison (1 left, 12 sprayed); poison (0 left, 12 sprayed); killed: 32 × a burst triangle’s shards, 3 cores',
+        'onion 60, wave 11: hit (2 left, 12 sprayed); hit (1 left, 12 sprayed); poison (0 left, 12 sprayed); killed: 32 × a burst triangle’s shards, 3 cores',
+        'onion 105, wave 12: burn (2 left, 12 sprayed)',
+      ],
     });
   });
 

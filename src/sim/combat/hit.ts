@@ -8,8 +8,9 @@
  * scaling modifiers apply per hit. Conversions split a hit's damage into parts with rows of
  * their own (src/sim/combat/convert.ts). A shocked or frozen enemy takes more (takenMult). A v3
  * run's enemy with a shield or armour then defends (src/sim/combat/defend.ts): a hit it blocks
- * in full deals nothing (blockedHit). Every damage instance, hits and damage-over-time steps
- * alike, goes into the run's tallies through tally.
+ * in full deals nothing (blockedHit). A lethal hit on a v3 onion with a shell left breaks the
+ * shell and the onion lives on (src/sim/systems/onion.ts). Every damage instance, hits and
+ * damage-over-time steps alike, goes into the run's tallies through tally.
  *
  * A hit raises the hit and crit trigger events and calls the onHit hooks (src/sim/effects/): a
  * surviving hit once its ailments are applied, so their conditions see them; a lethal one right
@@ -51,6 +52,7 @@ import type { Payload } from '../emitters/types';
 import { clamp01 } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { killEnemy } from '../systems/death';
+import { onionBreak } from '../systems/onion';
 import type { PulseAcc } from '../systems/systemState';
 import { convertHit } from './convert';
 import { blockedHit, bypassOf, defend } from './defend';
@@ -416,7 +418,11 @@ export function dispatchHit(
 /**
  * Deals a hit's `amount` to `enemy`: hp, the chain's hit mark, tallies (part by part for a
  * `converted` hit) and the hit event, or with `acc` (a pulse's hit) the pulse's tally instead;
- * a lethal hit raises its events (with KILLED) and kills it.
+ * a lethal hit raises its events (with KILLED) and kills it. It is one of the two lethal tests
+ * (the other is the damage-over-time step's, src/sim/systems/ailments.ts): a lethal hit on a v3
+ * onion with a shell left breaks that shell instead (onionBreak), with no KILLED events and no
+ * kill, and its caller goes on as after a surviving hit, the hit event and tallies keeping the
+ * full amount.
  */
 export function applyHitDamage(
   ctx: RunContext,
@@ -459,6 +465,10 @@ export function applyHitDamage(
     if (crit) acc.crits[acc.critCount++] = enemy.id;
   }
   if (lte(enemy.hp, ZERO)) {
+    // A v3 onion with a shell left loses it here and lives on (src/sim/systems/onion.ts): the
+    // hit goes on as a surviving one. An M1 kill pays this one test.
+    const v3 = enemy.v3;
+    if (v3 !== null && v3.layersLeft > 0 && onionBreak(ctx, enemy)) return;
     enemy.killDepth = depth;
     enemy.killKind = KILL_BY_HIT;
     // Its events see the victim as it was hit, before the kill releases it.

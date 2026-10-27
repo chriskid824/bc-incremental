@@ -1,7 +1,7 @@
 /**
  * Calibration (docs/v3 C6 design D26, §4.10; AMB15, S-2): φ on a hand-built result, split children
- * and a leak included, over waveHp; the probe's tracking of every enemy against the run's own
- * events, and its timeout flag; the search's bisection converging on a synthetic strength curve;
+ * and a leak included, over waveHp, and an onion's broken shells (C7.7); the probe's tracking of
+ * every enemy against the run's own events, and its timeout flag; the search's bisection converging on a synthetic strength curve;
  * each status (ok, spread, weak, strong, insensitive), a range end that reads 1.20 exactly being
  * neither weak nor strong, a seed at exactly 1 + SEED_BAND.min or 1 + SEED_BAND.max being in the
  * band (the lead's ruling R10); and eight seeds with one outlier giving their median, not their
@@ -71,6 +71,8 @@ describe('waveHp and frontierOf (AMB15)', () => {
       maxHp: unit * stdHp(wave),
       hp: hpUnit * stdHp(wave),
       end,
+      layers: 1,
+      layersLeft: 1,
     });
     const run: ProbeRun = {
       highestWaveCleared: 7,
@@ -99,6 +101,31 @@ describe('waveHp and frontierOf (AMB15)', () => {
     // Before wave 1 is cleared, φ is wave 1's.
     const early: ProbeRun = { ...run, highestWaveCleared: 0, enemies: [fate(1, 0.5, 0, 'killed')] };
     expect(frontierOf(early, data)).toBeCloseTo(1 / 45, 12);
+  });
+
+  it("credits an onion's broken shells: a killed one layers × maxHp, one alive at layersLeft 2 and half its shell 1.5 × maxHp (C7 §2.8 OWN test 9)", () => {
+    // Planted bug: per-layer maxHp only, as a fate without shells reads.
+    const shell = (28 / 3) * stdHp(8);
+    const onion = (hp: number, end: EnemyFate['end'], layersLeft: number): EnemyFate => ({
+      wave: 8,
+      maxHp: shell,
+      hp,
+      end,
+      layers: 3,
+      layersLeft,
+    });
+    /** What wave 8 lost of a run holding `fate` alone, in shells. */
+    const shells = (fate: EnemyFate): number =>
+      ((frontierOf({ highestWaveCleared: 7, ticks: 5000, timeout: false, enemies: [fate] }, data) -
+        7) *
+        waveHp(8, data)) /
+      shell;
+    expect(shells(onion(-0.5 * shell, 'killed', 0))).toBeCloseTo(3, 9);
+    expect(shells(onion(0.5 * shell, 'alive', 2))).toBeCloseTo(1.5, 9);
+    // At its last shell with a quarter of it left; leaked untouched; overhealed on its first.
+    expect(shells(onion(0.25 * shell, 'alive', 1))).toBeCloseTo(2.75, 9);
+    expect(shells(onion(shell, 'leaked', 3))).toBe(0);
+    expect(shells(onion(1.5 * shell, 'alive', 2))).toBeCloseTo(1, 9);
   });
 
   it("tracks every enemy of a probe run, split children included, as the run's events count them", () => {
@@ -246,6 +273,60 @@ describe('probeRun on a v3 run (docs/v3 C7 design §2.6, C7/F12; lead ruling Y8)
     expect(ids.leaked).toEqual([]);
     expect(run.enemies.filter((fate) => fate.end === 'leaked')).toEqual([]);
     expect(run.enemies.length).toBe(ids.spawned.length);
+  });
+
+  it('reads each onion’s shells into its fate, and none for its bursts, which are extra (C7.7)', () => {
+    // Planted bugs: fates without shells, or with the bursts kept.
+    const v3 = v3TestData({
+      waves: {
+        rules: [{ enemy: 'triangle', fromWave: 1, base: 6, perWave: 0.6, maxCount: 40 }],
+        eliteEvery: 1000,
+        bossEvery: 1,
+        v3: {
+          ...TEST_V3_WAVES.v3,
+          affixes: [],
+          treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+        },
+      },
+    });
+    const run = probeRun(web, progress, 777, v3, 20_000);
+    // The same run from its events: each break's burst is the twelve enemySpawned right before
+    // its onionLayer, while the cap skips none.
+    const sim = createSimulation(
+      { ...webRunConfig(webBuild(web, progress), 777, 1), maxTicks: 20_000 },
+      v3,
+      [((b) => void b.hook('onKill', () => undefined)) satisfies TestModule],
+    );
+    const spawned: number[] = [];
+    const onions = new Map<number, number>();
+    const bursts = new Set<number>();
+    let kills = 0;
+    while (!sim.state.finished) {
+      for (const event of sim.step(NO_INPUT)) {
+        if (event.type === 'enemySpawned') {
+          spawned.push(event.enemyId);
+          if (event.enemy === 'onion') onions.set(event.enemyId, 3);
+        } else if (event.type === 'onionLayer') {
+          onions.set(event.enemyId, event.layersLeft);
+          for (const id of spawned.slice(-12)) bursts.add(id);
+        } else if (event.type === 'enemyKilled' && onions.has(event.enemyId)) kills++;
+      }
+    }
+    expect(sim.result().counters.enemySpawnsSkipped).toBe(0);
+    expect(bursts.size).toBeGreaterThanOrEqual(36);
+    expect(kills).toBeGreaterThan(0);
+    expect(run.enemies.length).toBe(spawned.length - bursts.size);
+    const layered = run.enemies.filter((fate) => fate.layers !== 1);
+    expect(layered.map((fate) => fate.layers)).toEqual(Array<number>(onions.size).fill(3));
+    expect(layered.map((fate) => fate.layersLeft).sort()).toEqual([...onions.values()].sort());
+    expect(layered.filter((fate) => fate.end === 'killed').every((f) => f.layersLeft === 0)).toBe(
+      true,
+    );
+    expect(run.enemies.every((fate) => fate.layers !== 1 || fate.layersLeft === 1)).toBe(true);
+    // R-C7-6: φ stays below 1.
+    const x = frontierOf(run, v3);
+    expect(x).toBeGreaterThanOrEqual(run.highestWaveCleared);
+    expect(x).toBeLessThan(run.highestWaveCleared + 1);
   });
 });
 

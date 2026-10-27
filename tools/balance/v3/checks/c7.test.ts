@@ -49,13 +49,14 @@ describe('C7 parts live (§2.3)', () => {
     expect(formatC7Parts(c7PartsOf(view, result))).toMatch(/; pending: none$/);
   });
 
-  it("probes the engine once: C7.3's defence, C7.4a's state, C7.4b's bulletTakenBy, C7.5's counters and C7.6's affixes are live", () => {
+  it("probes the engine once: C7.3's defence, C7.4a's state, C7.4b's bulletTakenBy, C7.5's counters, C7.6's affixes and C7.7's layersLeft are live", () => {
     const parts = probeC7Parts();
     expect(parts['C7.3']).toBe(true);
     expect(parts['C7.4a']).toBe(true);
     expect(parts['C7.4b']).toBe(true);
     expect(parts['C7.5']).toBe(true);
     expect(parts['C7.6']).toBe(true);
+    expect(parts['C7.7']).toBe(true);
     expect(Object.keys(parts)).toEqual(C7_PARTS.map(({ part }) => part));
     expect(probeC7Parts()).toBe(parts);
   });

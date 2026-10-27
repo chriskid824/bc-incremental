@@ -58,13 +58,18 @@ export const CALIBRATION_ACCOUNT: AccountProgress = { singularityBeaten: false }
 /** How a probe run's enemy ended. */
 export type EnemyEnd = 'killed' | 'alive' | 'leaked';
 
-/** One enemy of a probe run: its wave, its HP and how it ended. */
+/** One enemy of a probe run: its wave, its HP, its shells and how it ended. */
 export interface EnemyFate {
   readonly wave: number;
+  /** Its max life: a layered enemy's (the onion's, docs/v3 C7 design §2.8) is one shell's. */
   readonly maxHp: number;
   /** Its hp when it was killed, when it reached the player, or at the run's end. */
   readonly hp: number;
   readonly end: EnemyEnd;
+  /** Its def's layer count for a layered enemy of a v3 run; 1 for every other. */
+  readonly layers: number;
+  /** Its record's layersLeft for a layered enemy of a v3 run as it ended; 1 for every other. */
+  readonly layersLeft: number;
 }
 
 /**
@@ -104,14 +109,22 @@ export function waveHp(wave: number, data: GameData): number {
   return units * stdHp(wave);
 }
 
-/** The HP an enemy lost: a killed one its whole maxHp, any other maxHp − hp, within [0, maxHp]. */
+/**
+ * The HP an enemy lost: a killed one all its shells, layers × maxHp; any other its broken shells,
+ * (layers − layersLeft) × maxHp, and maxHp − hp of the one it holds, within [0, maxHp]. An enemy
+ * with no shells has layers and layersLeft 1, so it loses maxHp or maxHp − hp as before C7.7.
+ */
 const lostHp = (fate: EnemyFate): number =>
-  fate.end === 'killed' ? fate.maxHp : Math.min(fate.maxHp, Math.max(0, fate.maxHp - fate.hp));
+  fate.end === 'killed'
+    ? fate.layers * fate.maxHp
+    : (fate.layers - fate.layersLeft) * fate.maxHp +
+      Math.min(fate.maxHp, Math.max(0, fate.maxHp - fate.hp));
 
 /**
  * A run's fractional frontier x = F + φ (AMB15): F its highest wave cleared, φ the HP that wave
  * F + 1's spawned enemies lost (killed ones whole, living ones and leaked ones what they lost
- * before the end or the player) over waveHp(F + 1).
+ * before the end or the player, an onion's broken shells included: lostHp) over waveHp(F + 1),
+ * which counts an onion's whole hpMult.
  */
 export function frontierOf(run: ProbeRun, data: GameData): number {
   const next = run.highestWaveCleared + 1;
@@ -126,13 +139,25 @@ export function frontierOf(run: ProbeRun, data: GameData): number {
  */
 export const isExtra = (enemy: EnemyState): boolean => enemy.v3 !== null && enemy.v3.extra;
 
-/** The fate of an enemy ending `end`, read off its state. */
-const fateOf = (enemy: EnemyState, end: EnemyEnd): EnemyFate => ({
-  wave: enemy.wave,
-  maxHp: toNumber(enemy.maxHp),
-  hp: toNumber(enemy.hp),
-  end,
-});
+/**
+ * The fate of an enemy of a run of `data` ending `end`, read off its state: a layered enemy (a
+ * v3 run's enemy whose def has a `layers` behaviour, the onion) has its def's layer count and its
+ * record's layersLeft, every other 1 and 1. greedy's probes (tools/balance/v3/visit.ts probeFrom)
+ * read their fates with it too.
+ */
+export function fateOf(enemy: EnemyState, end: EnemyEnd, data: GameData): EnemyFate {
+  const behaviour = data.enemies[enemy.type].behaviour;
+  const v3 = enemy.v3;
+  const layered = v3 !== null && behaviour?.kind === 'layers';
+  return {
+    wave: enemy.wave,
+    maxHp: toNumber(enemy.maxHp),
+    hp: toNumber(enemy.hp),
+    end,
+    layers: layered ? behaviour.layers : 1,
+    layersLeft: layered ? v3.layersLeft : 1,
+  };
+}
 
 /**
  * One probe run (D26, F4): `progress` on `web` from PROBE_START_WAVE until the build dies or
@@ -151,7 +176,7 @@ export function probeRun(
   const killed = new Map<number, EnemyFate>();
   const watch: TestModule = (b) =>
     void b.hook('onKill', (_ctx, victim) => {
-      if (!isExtra(victim)) killed.set(victim.id, fateOf(victim, 'killed'));
+      if (!isExtra(victim)) killed.set(victim.id, fateOf(victim, 'killed', data));
     });
   const config = {
     ...webRunConfig(
@@ -182,7 +207,7 @@ export function probeRun(
   }
   const fates: EnemyFate[] = [];
   for (const [id, enemy] of seen) {
-    if (!killed.has(id)) fates.push(fateOf(enemy, leaked.has(id) ? 'leaked' : 'alive'));
+    if (!killed.has(id)) fates.push(fateOf(enemy, leaked.has(id) ? 'leaked' : 'alive', data));
   }
   fates.push(...killed.values());
   const result = sim.result();

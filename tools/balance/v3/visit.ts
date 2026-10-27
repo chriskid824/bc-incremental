@@ -5,7 +5,6 @@
  * bookkeeping (src/meta/web/calibrate.ts).
  */
 
-import { toNumber } from '../../../src/core/num';
 import { deriveSeed } from '../../../src/core/rng';
 import type { Rng } from '../../../src/core/rng';
 import type { GameData } from '../../../src/data';
@@ -18,8 +17,8 @@ import type {
   WebEconomy,
   WebRun,
 } from '../../../src/meta/web';
-import { frontierOf, isExtra } from '../../../src/meta/web/calibrate';
-import type { EnemyEnd, EnemyFate, ProbeRun } from '../../../src/meta/web/calibrate';
+import { fateOf, frontierOf, isExtra } from '../../../src/meta/web/calibrate';
+import type { EnemyFate, ProbeRun } from '../../../src/meta/web/calibrate';
 import { createSimulation, NO_INPUT } from '../../../src/sim';
 import type { EnemyState, RunConfig } from '../../../src/sim';
 import type { TestModule } from '../../../src/sim/rules';
@@ -106,18 +105,12 @@ export function greedySeeds(session: number, run: number): number[] {
   );
 }
 
-const fateOf = (enemy: EnemyState, end: EnemyEnd): EnemyFate => ({
-  wave: enemy.wave,
-  maxHp: toNumber(enemy.maxHp),
-  hp: toNumber(enemy.hp),
-  end,
-});
-
 /**
  * probeRun's bookkeeping (src/meta/web/calibrate.ts) from `startWave` rather than wave 1: a watch
  * module records each kill as it happens, the enemies new at each tick's end are kept and the
  * playerHit events say which leaked (a bullet's bulletHit is no leak); an extra enemy (isExtra:
- * summons, the treasure) has no fate. The waves below the start wave count as cleared, so a run
+ * summons, onion bursts, the treasure) has no fate, and each fate is calibration's (fateOf: an
+ * onion's shells counted). The waves below the start wave count as cleared, so a run
  * that clears nothing reads F = startWave − 1 where the run's highestWaveCleared says 0.
  */
 export function probeFrom(
@@ -131,7 +124,7 @@ export function probeFrom(
   const killed = new Map<number, EnemyFate>();
   const watch: TestModule = (b) =>
     void b.hook('onKill', (_ctx, victim) => {
-      if (!isExtra(victim)) killed.set(victim.id, fateOf(victim, 'killed'));
+      if (!isExtra(victim)) killed.set(victim.id, fateOf(victim, 'killed', data));
     });
   const config = { ...cappedRunConfig(web, webBuild(web, progress), seed, startWave), maxTicks };
   const sim = createSimulation(config, data, [watch]);
@@ -154,7 +147,7 @@ export function probeFrom(
   }
   const fates: EnemyFate[] = [];
   for (const [id, enemy] of seen) {
-    if (!killed.has(id)) fates.push(fateOf(enemy, leaked.has(id) ? 'leaked' : 'alive'));
+    if (!killed.has(id)) fates.push(fateOf(enemy, leaked.has(id) ? 'leaked' : 'alive', data));
   }
   fates.push(...killed.values());
   const result = sim.result();

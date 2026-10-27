@@ -115,6 +115,12 @@ export interface EnemyV3 {
    * at 0 or below (src/sim/combat/defend.ts).
    */
   wardLeft: Num;
+  /**
+   * The shells a layered def (洋蔥, its `layers` behaviour) has yet to lose, its layer count at
+   * spawn; 0 for every other type. Each lethal hit or damage-over-time step breaks one
+   * (onionBreak, src/sim/systems/onion.ts), and the one that takes it to 0 kills.
+   */
+  layersLeft: number;
 }
 
 /**
@@ -132,8 +138,8 @@ export interface SpawnOrigin {
 
 /**
  * The origin of an enemy-made spawn at its def's own hp, radius and drops, outside composeWave's
- * count and with no affix: a summoner's children (summon, src/sim/systems/enemyAi.ts) and, from
- * C7.7, an onion's bursts. One frozen constant, passed as is.
+ * count and with no affix: a summoner's children (summon, src/sim/systems/enemyAi.ts) and an
+ * onion's bursts (onionBreak, src/sim/systems/onion.ts). One frozen constant, passed as is.
  */
 export const EXTRA_ORIGIN: SpawnOrigin = Object.freeze({
   hpScale: 1,
@@ -216,7 +222,8 @@ export function pickAffixes(rng: Rng, count: number): number {
  * are the AFFIX_* bits it carries (C7.6), drawn or inherited by its caller (addEnemy,
  * src/sim/systems/spawn.ts); `maxHp` its max life, which 元素護盾's counter starts from, and
  * `affixRegen` the life fraction a second 再生 gives, from the run's regenerator def. The three
- * default to no affix, so a caller that spawns without them gets today's record.
+ * default to no affix, so a caller that spawns without them gets today's record. A layered def
+ * starts with all its shells (C7.7).
  */
 export function createEnemyV3(
   def: EnemyDef,
@@ -252,5 +259,6 @@ export function createEnemyV3(
     nextAct: Infinity,
     affixes,
     wardLeft: warded ? mul(maxHp, WARD_BREAK_PCT) : ZERO,
+    layersLeft: def.behaviour?.kind === 'layers' ? def.behaviour.layers : 0,
   };
 }

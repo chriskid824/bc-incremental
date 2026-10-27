@@ -379,11 +379,16 @@ function ringsLeft(ctx: RunContext, enemy: Enemy, first: number): number {
 /**
  * The damage over time already on the enemy will kill it: shots should go elsewhere. Its burn
  * records with what they have pending (nothing without a live record; A2), its rings (likewise
- * nothing without a live stack) and its bleed; with only records this is M1's sum.
+ * nothing without a live stack) and its bleed; with only records this is M1's sum. A v3 onion
+ * with more than its last shell left is never doomed: emptying a shell only breaks it
+ * (src/sim/systems/onion.ts), so shots keep coming until its last one.
  */
 export function doomed(ctx: RunContext, enemy: Enemy): boolean {
   const records = enemy.burns.length !== 0;
   if (!records && enemy.dotRings === 0 && enemy.bleedUntil === 0) return false;
+  // An M1 enemy past the early return pays this one test.
+  const v3 = enemy.v3;
+  if (v3 !== null && v3.layersLeft > 1) return false;
   let left = records ? recordsLeft(ctx, enemy) : ZERO;
   if (enemy.dotRings !== 0) {
     left = add(left, num(ringsLeft(ctx, enemy, RING_BURN) + ringsLeft(ctx, enemy, RING_POISON)));
