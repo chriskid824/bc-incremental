@@ -77,12 +77,24 @@ export function deriveSeed(seed: number, stream: string): number {
 
 /**
  * `spawn`: wave shuffles and spawn positions. `split`: split children around their parent,
- * kept apart from `spawn` because how many split and when depends on combat. `combat`: hit
+ * kept apart from `spawn` because how many split and when depends on combat; a summoner's
+ * children and 增殖's draw their angles there too, being enemy-made spawns (C7/F8). `combat`: hit
  * rolls. `drops`: drop rolls. `trigger`: trigger chance conditions, rolled when the event
  * happens. `effects`: rolls inside the hits of triggered effects. A build without triggers never
- * draws from the last two, so the other sequences do not depend on them.
+ * draws from the last two, so the other sequences do not depend on them. `affixes`: an elite's
+ * affix picks alone (docs/v3 C7 design §1.5), so that what an elite draws does not depend on the
+ * fight before it, and only a v3 run draws from it. Each stream's seed comes from its own name,
+ * so a new one shifts no other.
  */
-export const RNG_STREAMS = ['spawn', 'split', 'combat', 'drops', 'trigger', 'effects'] as const;
+export const RNG_STREAMS = [
+  'spawn',
+  'split',
+  'combat',
+  'drops',
+  'trigger',
+  'effects',
+  'affixes',
+] as const;
 export type RngStreamName = (typeof RNG_STREAMS)[number];
 export type RngStreams = Readonly<Record<RngStreamName, Rng>>;
 
@@ -94,5 +106,6 @@ export function createStreams(seed: number): RngStreams {
     drops: createRng(deriveSeed(seed, 'drops')),
     trigger: createRng(deriveSeed(seed, 'trigger')),
     effects: createRng(deriveSeed(seed, 'effects')),
+    affixes: createRng(deriveSeed(seed, 'affixes')),
   };
 }

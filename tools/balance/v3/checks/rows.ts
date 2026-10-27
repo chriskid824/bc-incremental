@@ -10,9 +10,11 @@
  */
 
 import type { CharacterId, OuterId } from '../../../../src/data';
+import { AFFIX_IDS } from '../../../../src/data/affixes';
 import { ROW_ENEMIES } from '../../../../src/data/web';
 import type { AssembledWeb, Cover, Mark, RowEnemy, WebNode } from '../../../../src/data/web';
 import type { CharacterProgress } from '../../../../src/meta/web';
+import type { EnemyV3View } from '../../../../src/sim/types';
 import { median } from '../../../../src/meta/web/calibrate';
 import { GATED_KINDS, storedRank } from '../../../../src/meta/web/counts';
 import { shortestRoute } from '../../../../src/meta/web/path';
@@ -42,19 +44,10 @@ export const AFFIX_BOARDS_MIN = 3;
 /** Board b counters affix a when r_b(a) ≤ this (lead ruling L6; 初始值): at most half again the plain kill time. */
 export const AFFIX_RATIO_MAX = 1.5;
 /**
- * The affixes in gd:707-714's order, C7.6's AFFIX_IDS (C7D:428): an elite's `affixes` bit i is
- * AFFIX_ORDER[i]. C10.4 at the latest imports AFFIX_IDS and the typed field (design §2.3).
+ * The affixes in gd:707-714's order: C7.6's AFFIX_IDS itself (src/data/affixes.ts), now that it
+ * exists, so an elite's `affixes` bit i is AFFIX_ORDER[i] by construction and no copy can drift.
  */
-export const AFFIX_ORDER = [
-  'swift',
-  'armoured',
-  'regen',
-  'guardian',
-  'multiply',
-  'berserk',
-  'ward',
-  'frost',
-] as const;
+export const AFFIX_ORDER = AFFIX_IDS;
 export type AffixName = (typeof AFFIX_ORDER)[number];
 
 /**
@@ -88,13 +81,11 @@ export function pendingPart(parts: C7Parts, column: RowEnemy): string | null {
 }
 
 /**
- * An enemy view's affix bits, read structurally so the tools compile before C7.6 (K7): the
- * `affixes` number when the view holds one, else null.
+ * An enemy view's affix bits (EnemyV3View.affixes, C7.6): null for an enemy of an M1 run, which
+ * has no record. It read the field structurally until C7.6 added it (K7).
  */
-export function affixBitsOf(view: unknown): number | null {
-  if (typeof view !== 'object' || view === null || !('affixes' in view)) return null;
-  const bits = (view as { readonly affixes: unknown }).affixes;
-  return typeof bits === 'number' ? bits : null;
+export function affixBitsOf(view: EnemyV3View | null): number | null {
+  return view === null ? null : view.affixes;
 }
 
 /** The affixes `bits` hold, in AFFIX_ORDER. */

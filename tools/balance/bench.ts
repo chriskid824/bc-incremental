@@ -78,6 +78,14 @@
  *   fusion.fire.poison's explode trigger at coef 1.5, 20 s from wave 12 on the fixture data
  *   (makeTestData), whatever --start-wave says. It is not of the stress family and has no alive
  *   band: CI's ratio rule alone gates it.
+ * - enemies: the v3 crowd (C7.6, C7/F18, docs/v3 C7 design §2.7), M1's attack alone against
+ *   v3StressData (src/sim/testing.ts): 13 triangles, 8 squares, 3 pentagons, 2 shielders, 2
+ *   regenerators, 2 dashers, 1 shooter, 1 summoner and one 2-affix elite every wave, so the
+ *   defences, the enemy AI, the bullets and all eight affixes run at once, 30 s from
+ *   STRESS_START_WAVE with about 300–400 alive. It runs the stress family's build and length but
+ *   is not of the family: no alive band, no stress report. Its report adds its crowd workload
+ *   from one untimed run: its median against §6's 50 ms for a 30 s stress run (impl:517), its
+ *   average alive and its peak, printed and never a failure.
  *
  * hiveStress (C5.6, docs/v3 C5 design §7.4) is print-only: the stress fixture under 蜂巢's swarm
  * at 24 units with 螢火's pulse zones, timed only by --share and printed beside stress v4. It is
@@ -86,7 +94,7 @@
  *
  *   npm run bench --
  *     [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan|arc|hive|
- *       stressBase|grants|v3fire]
+ *       stressBase|grants|v3fire|enemies]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>] [--json <file>]
@@ -104,7 +112,8 @@
  * pins its workload, and prints a stress report line: its median, its ratio, the median of the
  * normal runs timed with it and its workload (the STRESS gate of docs/v3 C4 design §0.5). hive
  * prints a summon report line: its median against 50 ms, its ratio, the median of the normal
- * runs timed with it and the summon workload of its seed-1 run.
+ * runs timed with it and the summon workload of its seed-1 run; enemies prints an enemies report
+ * line in the same shape, with its seed-1 average alive and peak.
  *
  * --share is STRESS v4's gate (docs/v3 C5 design §7.3), run exactly as
  * `flock -x /home/claude/.bench.lock npm run bench -- --share`: SHARE_PROCS child processes, one
@@ -168,6 +177,7 @@ import {
   STRESS_START_WAVE,
   stressData,
   stressStats,
+  v3StressData,
 } from '../../src/sim/testing';
 import {
   ALIVE_MAX,
@@ -197,6 +207,7 @@ export const SCENARIO_IDS = [
   'stressBase',
   'grants',
   'v3fire',
+  'enemies',
 ] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
@@ -260,6 +271,13 @@ export interface Scenario {
    * run, never a failure (docs/v3 C5 design §7.4).
    */
   readonly summons?: boolean;
+  /**
+   * A crowd scenario (enemies, C7.6): --check and its local report add the alive counts of an
+   * untimed seed-1 run and print its median against §6's 50 ms for a 30 s stress run, never a
+   * failure. It is measured like a stress-family scenario's workload but gates no alive band,
+   * so it stays out of CheckTimings.workloads (docs/v3 C7 design §2.7).
+   */
+  readonly crowd?: boolean;
 }
 
 /**
@@ -472,6 +490,9 @@ const stressConfig = (seed: number, build: StressBuild): RunConfig => ({
   mode: 'auto',
   maxTicks: STRESS_SECONDS * TICK_RATE,
 });
+
+/** The enemies scenario's build (C7.6): the stress build, M1's attack alone, as stressM1's. */
+const CROWD_BUILD: StressBuild = () => ({ stats: stressStats(), rules: [] });
 
 /**
  * A stress-family scenario: `build`'s runs on the stress fixture, 20 timed and 3 warm-up runs
@@ -924,6 +945,19 @@ export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
       mode: 'auto',
       maxTicks: V3FIRE_SECONDS * TICK_RATE,
     }),
+  },
+  // C7.6: the v3 crowd (C7/F18), every v3 enemy and all eight affixes at once under M1's attack.
+  // The stress family's build, length and start wave on v3StressData, but not of the family: no
+  // alive band.
+  enemies: {
+    runs: 20,
+    warmup: 3,
+    seconds: STRESS_SECONDS,
+    targetMs: 50,
+    startWave: STRESS_START_WAVE,
+    data: v3StressData,
+    crowd: true,
+    config: (seed) => stressConfig(seed, CROWD_BUILD),
   },
 };
 
@@ -1606,10 +1640,19 @@ const summonText = (summons: SummonWorkload): string =>
   `firings (${summons.turretShots} shots), peak ${summons.peakShots} shots, ` +
   `${summons.kills} kills`;
 
-/** A summon scenario's median against §6's budget for a 3-minute run: printed, never gated. */
-const budgetText = (medianMs: number): string =>
-  `median ${medianMs.toFixed(2)} ms against §6's ${NORMAL_BUDGET_MS} ms for a 3-minute run ` +
+/**
+ * A scenario's median against §6's 50 ms budget for a run of `what`: a 3-minute run (hive's and
+ * normal's budget, NORMAL_BUDGET_MS) or, for the enemies scenario, a 30 s stress run, which
+ * impl:517 gives the same 50 ms. Printed, never gated.
+ */
+const budgetText = (medianMs: number, what = 'a 3-minute run'): string =>
+  `median ${medianMs.toFixed(2)} ms against §6's ${NORMAL_BUDGET_MS} ms for ${what} ` +
   `(${medianMs <= NORMAL_BUDGET_MS ? 'within' : 'OVER'}; printed, never a failure)`;
+
+/** The crowd workload as report text (the enemies line). */
+const crowdText = (workload: Workload): string =>
+  `average alive ${workload.averageAlive.toFixed(1)} over ticks ${ALIVE_FROM_TICK + 1}+, peak ` +
+  `${workload.peakAlive} alive, ${workload.kills} kills`;
 
 /**
  * segmentsAllShocked (docs/v3 C4 design §7.3): `runs` runs of `config(i)` with ALL_SHOCKED
@@ -1690,6 +1733,11 @@ export interface CheckTimings {
   readonly timings: BenchTimings;
   readonly workloads: ReadonlyMap<string, Workload>;
   readonly summons: ReadonlyMap<string, SummonWorkload>;
+  /**
+   * The alive counts of each crowd entry's untimed seed-1 run (C7.6's enemies), kept apart from
+   * `workloads` so that no alive band is checked against them.
+   */
+  readonly crowds?: ReadonlyMap<string, Workload>;
 }
 
 /**
@@ -1697,7 +1745,8 @@ export interface CheckTimings {
  * warm-up runs, then its timed rounds: in each, one normal run and one run of every variant,
  * the order reversed every other round, so the reference runs share the scenario's conditions.
  * Checking normal alone times its own runs only. A stress-family scenario first measures the
- * workload of an untimed seed-1 run of each variant, and a summon scenario its summon workload.
+ * workload of an untimed seed-1 run of each variant, a summon scenario its summon workload and a
+ * crowd scenario its alive counts.
  */
 function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
   const normal = SCENARIOS.normal;
@@ -1709,6 +1758,7 @@ function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
   const entries: EntryTimings[] = [];
   const workloads = new Map<string, Workload>();
   const summons = new Map<string, SummonWorkload>();
+  const crowds = new Map<string, Workload>();
   const others = ids.filter((id) => id !== 'normal');
   if (others.length === 0) {
     for (let i = 0; i < normal.runs; i++) reference.push(referenceRun(i));
@@ -1730,6 +1780,12 @@ function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
       for (const variant of variants) {
         const config = scenario.config(1, startWave, variant);
         summons.set(entryName(id, variant), summonWorkload(config, data, scenario.testModules));
+      }
+    }
+    if (scenario.crowd === true) {
+      for (const variant of variants) {
+        const config = scenario.config(1, startWave, variant);
+        crowds.set(entryName(id, variant), measureWorkload(config, data, scenario.testModules));
       }
     }
     for (const variant of variants) {
@@ -1757,16 +1813,16 @@ function timeCheck(ids: readonly ScenarioId[]): CheckTimings {
       });
     });
   }
-  return { timings: { reference, entries }, workloads, summons };
+  return { timings: { reference, entries }, workloads, summons, crowds };
 }
 
 /**
  * --check's report against the baseline `file`: the check `result` of `checked`'s timings, then
- * each stress-family entry's stress report line, each summon entry's summon report line and,
- * when it timed both, stress − stressBase.
+ * each stress-family entry's stress report line, each summon entry's summon report line, each
+ * crowd entry's enemies report line and, when it timed both, stress − stressBase.
  */
 export function checkLines(file: string, checked: CheckTimings, result: BenchCheck): string[] {
-  const { timings, workloads, summons } = checked;
+  const { timings, workloads, summons, crowds } = checked;
   const lines = [`bench check: ratio to normal's median run, against ${file}`, ...result.lines];
   for (const entry of timings.entries) {
     const workload = workloads.get(entry.id);
@@ -1785,6 +1841,15 @@ export function checkLines(file: string, checked: CheckTimings, result: BenchChe
       `summon report ${entry.id}: ${budgetText(median(entry.ms))}, ` +
         `ratio ${entryRatio(entry).toFixed(3)}, ` +
         `normal median ${median(entry.referenceMs).toFixed(2)} ms; seed 1: ${summonText(workload)}`,
+    );
+  }
+  for (const entry of timings.entries) {
+    const workload = crowds?.get(entry.id);
+    if (workload === undefined) continue;
+    lines.push(
+      `enemies report ${entry.id}: ${budgetText(median(entry.ms), 'a 30 s stress run')}, ` +
+        `ratio ${entryRatio(entry).toFixed(3)}, ` +
+        `normal median ${median(entry.referenceMs).toFixed(2)} ms; seed 1: ${crowdText(workload)}`,
     );
   }
   const v4 = timings.entries.find((entry) => entry.id === 'stress');
@@ -2485,6 +2550,13 @@ function main(): void {
     if (scenario.summons === true) {
       const summons = summonWorkload(configFor(variant, 0), data, modules);
       console.log(`summon workload (seed ${seed}): ${budgetText(p50)}; ${summonText(summons)}`);
+    }
+    if (scenario.crowd === true) {
+      const workload = measureWorkload(configFor(variant, 0), data, modules);
+      console.log(
+        `crowd workload (seed ${seed}): ${budgetText(p50, 'a 30 s stress run')}; ` +
+          `${crowdText(workload)}`,
+      );
     }
     return p50;
   });

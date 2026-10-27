@@ -107,7 +107,15 @@ describe('rngPositions', () => {
     const after = rngPositions(ctx);
     expect(after.combat).not.toEqual(before.combat);
     expect({ ...after, combat: before.combat }).toEqual(before);
-    expect(Object.keys(after)).toEqual(['spawn', 'split', 'combat', 'drops', 'trigger', 'effects']);
+    expect(Object.keys(after)).toEqual([
+      'spawn',
+      'split',
+      'combat',
+      'drops',
+      'trigger',
+      'effects',
+      'affixes',
+    ]);
   });
 });
 

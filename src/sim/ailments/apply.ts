@@ -22,6 +22,7 @@ import { orderNearest } from '../effects/select';
 import { slotRow } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
+import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
 import { bleedLeft } from './bleed';
 import { addBurn, addBurnIfStronger, recordsLeft, spreadBurns } from './records';
 import type { BurnSpread } from './records';
@@ -99,6 +100,10 @@ function addToRing(
   n: number,
   depth: number,
 ): void {
+  // 元素護盾 (C7.6): the ward × WARD_AILMENT_MULT on every ailment applied to the enemy. Only a
+  // v3 run's enemies have a record, so an M1 application pays this one test.
+  const v = enemy.v3;
+  if (v !== null && (v.defence & WARDED) !== 0) dps = mul(dps, WARD_AILMENT_MULT);
   const slot = first + (ctx.sources.cls[credit] as number);
   const r = ringFor(ctx, enemy, slot, credit);
   ctx.rings.apply(r, dps, ctx.now, end, n);
@@ -211,6 +216,8 @@ function spreadRings(
  * Gives `enemy` the burn or poison of `source`'s rings (first: RING_BURN or RING_POISON): `f`
  * of their damage left and floor(sf × their live stacks) stack counts, keeping each ring's
  * class and credit, at trigger depth `depth`. A ring whose stacks have all ended moves nothing.
+ * A warded receiver takes 元素護盾's share of the damage (C7.6), the stack counts as they are;
+ * the source keeps its own rings whole either way.
  */
 function moveRings(
   ctx: RunContext,
@@ -221,6 +228,10 @@ function moveRings(
   sf: number,
   depth: number,
 ): void {
+  // 元素護盾 (C7.6): the ward × WARD_AILMENT_MULT on every ailment applied to the enemy. Only a
+  // v3 run's enemies have a record, so an M1 application pays this one test.
+  const v = enemy.v3;
+  if (v !== null && (v.defence & WARDED) !== 0) f *= WARD_AILMENT_MULT;
   const pool = ctx.rings;
   const now = ctx.now;
   const from = source.rings;

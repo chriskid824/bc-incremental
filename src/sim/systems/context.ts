@@ -87,6 +87,7 @@ import { createShotPool } from './shots';
 import type { ShotHits, ShotPool } from './shots';
 import {
   compilePolicy,
+  createAffixState,
   createBulletPool,
   createChainState,
   createDronePool,
@@ -629,6 +630,16 @@ export const clamp01 = (value: number): number => Math.min(1, Math.max(0, value)
 export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
 
 /**
+ * The block a 守護 elite lends the enemies around it (AffixState.guardBlockPct, docs/v3 C7
+ * design §2.7): 「盾兵的護盾」, so the run data's shielder shield threshold, 0 for data whose
+ * shielder has no shield behaviour.
+ */
+function guardBlockOf(data: GameData): number {
+  const behaviour = data.enemies.shielder.behaviour;
+  return behaviour?.kind === 'shield' ? behaviour.blockBelowPct : 0;
+}
+
+/**
  * The payload of an effect that hits (explode, nova, detonate, projectiles, slashLine, coinHit,
  * chainBolt), applies an ailment (applyAilment) or makes a zone (groundZone), on the effects
  * stream: its tags and source, no flags, no chain policy, never chaining from an attack (a
@@ -748,6 +759,7 @@ export function createRunContext(
     drops: dropsRng,
     trigger: triggerRng,
     effects: effectsRng,
+    affixes: affixesRng,
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
@@ -1037,6 +1049,7 @@ export function createRunContext(
         effects.some((fx) => fx.kind === 'shield'),
       ),
       bullets,
+      affixes: createAffixState(affixesRng, guardBlockOf(data)),
     },
 
     enemies,

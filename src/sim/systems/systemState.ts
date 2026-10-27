@@ -10,6 +10,7 @@
 
 import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
+import type { Rng } from '../../core/rng';
 import type { EnemyId } from '../../data/types';
 import {
   CHAIN_HIT_CAP,
@@ -64,6 +65,8 @@ export interface SystemState {
   readonly defence: PlayerDefenceState;
   /** The shooters' bullets (src/sim/systems/bullets.ts), also SimState.bullets. */
   readonly bullets: BulletPool;
+  /** The elite affixes' stream, lists and cadence factor (src/sim/systems/affixes.ts). */
+  readonly affixes: AffixState;
 }
 
 /**
@@ -795,4 +798,31 @@ export function createBulletPool(ids: readonly EnemyId[]): BulletPool {
     ownerType: new Uint8Array(0),
     takenBy,
   };
+}
+
+/**
+ * The elite affixes' state (RunContext.sys.affixes, docs/v3 C7 design §1.4, §2.7): the stream an
+ * elite's picks are drawn on, the two lists the per-tick rules walk, and 冰霜's factor on every
+ * emitter's cadence. An M1 run never puts an enemy in either list and never draws a pick, so its
+ * factor stays 1 and `refreshCadence` never runs (src/sim/systems/affixes.ts).
+ */
+export interface AffixState {
+  /** The run's `affixes` stream (src/core/rng.ts), drawn only by an elite's picks. */
+  readonly rng: Rng;
+  /** The live 守護 elites, in id order; the AI step's start drops the dead ones. */
+  readonly guardians: Enemy[];
+  /** The live 冰霜 elites, in id order, compacted with the guardians. */
+  readonly frostElites: Enemy[];
+  /** Every emitter's cadence: 1, or FROST_CADENCE while a 冰霜 elite is within FROST_RANGE. */
+  frostFactor: number;
+  /** The block 守護 lends a neighbour: the run data's shielder blockBelowPct, 0 without one. */
+  readonly guardBlockPct: number;
+}
+
+/**
+ * The affix state of a run whose picks are drawn on `rng` and whose 守護 elites lend
+ * `guardBlockPct` (「盾兵的護盾」). Both lists start empty and the cadence factor at exactly 1.
+ */
+export function createAffixState(rng: Rng, guardBlockPct: number): AffixState {
+  return { rng, guardians: [], frostElites: [], frostFactor: 1, guardBlockPct };
 }

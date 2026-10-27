@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { mul, num, toNumber } from '../core/num';
+import { AFFIX_IDS, AFFIX_MULTIPLY } from '../data/affixes';
 import type { RuleSpec } from '../data/rules';
 import type { Modifier } from '../data/stats';
 import { TAG } from '../data/tags';
@@ -27,8 +28,17 @@ import { createPayload, ROWS } from './emitters/types';
 import type { Payload } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
+import { BERSERK_MULT, MULTIPLY_COUNT, SWIFT_MULT, WARDED } from './systems/affixes';
 import type { RunContext } from './systems/context';
-import { ARMOURED, CHARGING, DASHING, FLEEING, ORBITING, STOPPED } from './systems/enemyRecord';
+import {
+  ARMOURED,
+  CHARGING,
+  DASHING,
+  FLEEING,
+  ORBITING,
+  SHIELDED,
+  STOPPED,
+} from './systems/enemyRecord';
 import { MOTION_HOMING, MOTION_LOB, MOTION_STRAIGHT, spawnShot } from './systems/shots';
 import {
   GOLDEN_BUILDS,
@@ -1671,6 +1681,48 @@ const shooterSummonerData = (): GameData =>
     },
   });
 
+/**
+ * C7.6's elite affixes (docs/v3 C7 design §2.7) on a v3 run of triangles and squares from wave 1
+ * with an elite every wave (eliteEvery 1, bossEvery 1000) and three affixes from wave 1, and no
+ * treasure (§1.9; TEST_V3_WAVES.v3 spread, as v3TestData's merge is shallow): every wave releases
+ * one hexagon that draws three of the eight affixes on the `affixes` stream. §2.7's build —
+ * ignites, poisons and chills, with a turret granted on outer.summon beside M1's volley — reaches
+ * the ailment entries the ward shrinks and the cadence a frost elite slows, the turret's included.
+ */
+const AFFIX_STATS = makeStats(
+  {
+    damage: 12,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.3,
+    poisonChance: 0.2,
+    frostOnHit: 0.1,
+  },
+  [],
+  {
+    triggers: [],
+    conversions: [],
+    emitters: [{ source: 'outer.summon', grant: { kind: 'drone', turrets: 1 } }],
+  },
+);
+const affixData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: [
+        { enemy: 'triangle', fromWave: 1, base: 6, perWave: 0.6, maxCount: 40 },
+        { enemy: 'square', fromWave: 1, base: 2, perWave: 0.3, maxCount: 20 },
+      ],
+      eliteEvery: 1,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [{ fromWave: 1, count: 3 }],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -1960,6 +2012,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: SHOOTER_SUMMONER_STATS, rules: [], startWave: 12 },
     data: shooterSummonerData,
     expected: ['b0267c6a4aa2d8d1', '90a15c629a900259'],
+  },
+  {
+    name: 'affixes',
+    config: { stats: AFFIX_STATS, rules: [], startWave: 12 },
+    data: affixData,
+    expected: ['abc807c726a49210', '337c1909fca5b8d7'],
   },
 ];
 
@@ -2442,6 +2500,124 @@ describe('golden C4 runs', () => {
       'the field fills to the cap of 120',
     ];
     expect(bySeed).toEqual({ 1: pins, 2: pins });
+  });
+
+  it('draws three affixes an elite in affixes, and every affix fires across its seeds (C7.6)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'affixes') as GoldenC4Entry;
+    const names = (bits: number): string =>
+      AFFIX_IDS.filter((_, i) => (bits & (1 << i)) !== 0).join(', ');
+    const bySeed: Record<number, { drawn: string[]; children: string[]; fired: string[] }> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const fired = new Set<string>();
+      // Each affixed enemy's wave, bits and whether it is a 增殖 child (extra), first seen.
+      const carried = new Map<number, { wave: number; bits: number; extra: boolean }>();
+      const defence = new Map<number, number>();
+      const hp = new Map<number, number>();
+      const watch: TestModule = (b) =>
+        void b.hook('tick', (ctx) => {
+          const factor = ctx.sys.affixes.frostFactor;
+          if (factor !== 1) {
+            fired.add(`冰霜 holds frostFactor at ${factor}`);
+            if (ctx.emitters.every((em) => em.cadence === factor)) {
+              fired.add(`冰霜 holds every cadence at ${factor}`);
+            }
+          }
+        });
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const data = entry.data?.() ?? makeTestData();
+      const sim = createSimulation(config, data, [watch]);
+      while (!sim.state.finished) {
+        for (const enemy of sim.state.enemies) {
+          const v = enemy.v3;
+          if (v === null || !enemy.alive) continue;
+          defence.set(enemy.id, v.defence);
+          const was = hp.get(enemy.id);
+          const now = toNumber(enemy.hp);
+          if (was !== undefined && now > was) fired.add('再生 heals an elite');
+          hp.set(enemy.id, now);
+          if (v.affixes === 0) continue;
+          if (!carried.has(enemy.id)) {
+            carried.set(enemy.id, { wave: enemy.wave, bits: v.affixes, extra: v.extra });
+          }
+          if ((v.defence & ARMOURED) !== 0) fired.add('堅甲 armours an elite');
+          if ((v.defence & WARDED) !== 0) fired.add('元素護盾 wards an elite');
+          if (v.contactMult === BERSERK_MULT) fired.add('狂暴 doubles its contact damage');
+          if (v.baseStep === data.enemies[enemy.type].speed * DT * SWIFT_MULT) {
+            fired.add('迅捷 doubles its walk step');
+          }
+        }
+        for (const event of sim.step(NO_INPUT)) {
+          if (event.type === 'wardBroken') fired.add('元素護盾 breaks');
+          else if (event.type === 'hitBlocked') {
+            fired.add(
+              ((defence.get(event.targetId) ?? 0) & SHIELDED) === 0
+                ? '守護 blocks a hit on an enemy with no shield of its own'
+                : 'a shield of its own blocks a hit',
+            );
+          }
+        }
+      }
+      // Every child carries its parent's other affixes, never 增殖 itself.
+      const children = [...carried.values()].filter((e) => e.extra);
+      const parents = [...carried.values()].filter((e) => !e.extra);
+      if (children.length !== 0) {
+        const multiplying = parents.filter((p) => (p.bits & AFFIX_MULTIPLY) !== 0);
+        const inherited = children.every((child) =>
+          multiplying.some((p) => (p.bits & ~AFFIX_MULTIPLY) === child.bits),
+        );
+        fired.add(
+          children.length === multiplying.length * MULTIPLY_COUNT && inherited
+            ? `增殖 leaves ${MULTIPLY_COUNT} children carrying its other affixes`
+            : `增殖 leaves ${children.length} children of ${multiplying.length} elites`,
+        );
+      }
+      bySeed[seed] = {
+        drawn: parents.map((e) => `wave ${e.wave}: ${names(e.bits)}`),
+        children: children.map((e) => `wave ${e.wave}: ${names(e.bits)}`),
+        fired: [...fired].sort(),
+      };
+    }
+    // Each of the three waves releases one elite that draws three distinct affixes; seed 1's
+    // first multiplies, seed 2's third does. Between them the eight affixes all fire: seed 1 has
+    // 再生 and 冰霜, seed 2 守護, and both have 迅捷, 堅甲, 增殖, 狂暴 and 元素護盾.
+    expect(bySeed).toEqual({
+      1: {
+        drawn: [
+          'wave 12: regen, multiply, ward',
+          'wave 13: armoured, berserk, ward',
+          'wave 14: swift, ward, frost',
+        ],
+        children: ['wave 12: regen, ward', 'wave 12: regen, ward'],
+        fired: [
+          '元素護盾 breaks',
+          '元素護盾 wards an elite',
+          '再生 heals an elite',
+          '冰霜 holds every cadence at 0.75',
+          '冰霜 holds frostFactor at 0.75',
+          '堅甲 armours an elite',
+          '增殖 leaves 2 children carrying its other affixes',
+          '狂暴 doubles its contact damage',
+          '迅捷 doubles its walk step',
+        ],
+      },
+      2: {
+        drawn: [
+          'wave 12: swift, guardian, berserk',
+          'wave 13: armoured, guardian, ward',
+          'wave 14: guardian, multiply, ward',
+        ],
+        children: ['wave 14: guardian, ward', 'wave 14: guardian, ward'],
+        fired: [
+          '元素護盾 breaks',
+          '元素護盾 wards an elite',
+          '堅甲 armours an elite',
+          '增殖 leaves 2 children carrying its other affixes',
+          '守護 blocks a hit on an enemy with no shield of its own',
+          '狂暴 doubles its contact damage',
+          '迅捷 doubles its walk step',
+        ],
+      },
+    });
   });
 
   it.each(cases)('$id', ({ entry, seed, expected }) => {

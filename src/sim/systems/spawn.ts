@@ -8,12 +8,13 @@
 
 import type { Num } from '../../core/num';
 import { mul, num, ZERO } from '../../core/num';
-import type { EnemyDef } from '../../data/types';
+import { AFFIX_BERSERK, AFFIX_FROST, AFFIX_GUARDIAN, AFFIX_REGEN } from '../../data/affixes';
+import type { EnemyDef, V3WaveRules } from '../../data/types';
 import { RING_SLOTS } from '../ailments/rings';
 import { MAX_DEPTH } from '../effects/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, PLAYER_RADIUS } from '../types';
 import type { Enemy, RunContext, WaveRecord } from './context';
-import { AI_NONE, createEnemyV3 } from './enemyRecord';
+import { affixCount, AI_NONE, createEnemyV3, pickAffixes } from './enemyRecord';
 import type { EnemyV3, SpawnOrigin } from './enemyRecord';
 
 const TAU = Math.PI * 2;
@@ -102,6 +103,14 @@ function delayFrom(ctx: RunContext, from: number, now: number, spawnTicks: numbe
  * (src/sim/systems/enemyRecord.ts) and takes `origin`'s hp and radius scales; an M1 run's
  * enemies take their def's and have none. A v3 enemy with a behaviour or regeneration joins the
  * enemy AI step's list (src/sim/systems/enemyAi.ts) last, which keeps the list in id order.
+ *
+ * An elite (tough, not a boss: the hexagon in v3 data) draws its affixes here, unless its
+ * `origin` gives them (a 增殖 child inherits its parent's, src/sim/systems/affixes.ts): their
+ * count follows the wave the record belongs to (affixCount), so an elite the enemy cap released
+ * late draws its own wave's count, and the picks are the only draw on the `affixes` stream, in
+ * release order (C7/F8, C7/F21). The record holds every at-spawn effect but the three lists the
+ * per-tick rules walk, which the spawn joins last, after the enemy is in ctx.enemies, so all
+ * three stay in id order. 狂暴 or 再生 joins the AI step's list, each enemy at most once.
  */
 export function addEnemy(
   ctx: RunContext,
@@ -117,11 +126,32 @@ export function addEnemy(
   const y = player.y + uy * dist;
   let hp: Num;
   let radius = def.radius;
+  let stepDist = def.speed * DT;
   let v3: EnemyV3 | null = null;
   if (ctx.sys.enemyAi.enabled) {
     hp = mul(num(def.hpMult * (origin?.hpScale ?? 1)), rec.stdHp);
     radius = def.radius * (origin?.radiusScale ?? 1);
-    v3 = createEnemyV3(def, origin, ctx.sys.enemyAi.toughDropMult);
+    // Given bits (0 included) are taken as they are, whatever the def; −1, or no origin, draws
+    // for an elite and leaves every other type without affixes.
+    const given = origin?.affixes ?? -1;
+    const affixes =
+      given >= 0
+        ? given
+        : def.tough && !def.boss
+          ? pickAffixes(
+              ctx.sys.affixes.rng,
+              affixCount(rec.wave, (ctx.data.waves.v3 as V3WaveRules).affixes),
+            )
+          : 0;
+    v3 = createEnemyV3(
+      def,
+      origin,
+      ctx.sys.enemyAi.toughDropMult,
+      affixes,
+      hp,
+      (affixes & AFFIX_REGEN) !== 0 ? regenRateOf(ctx) : 0,
+    );
+    stepDist = v3.baseStep;
   } else hp = mul(num(def.hpMult), rec.stdHp);
   const enemy: Enemy = {
     id: ctx.nextEnemyId++,
@@ -141,7 +171,7 @@ export function addEnemy(
     ux,
     uy,
     dist,
-    stepDist: def.speed * DT,
+    stepDist,
     contactDist: PLAYER_RADIUS + radius,
     burns: [],
     burnPending: ZERO,
@@ -186,7 +216,27 @@ export function addEnemy(
   ctx.enemies.push(enemy);
   rec.alive++;
   ctx.events.push({ type: 'enemySpawned', enemyId: enemy.id, enemy: def.id });
-  if (v3 !== null && (v3.ai !== AI_NONE || v3.regen > 0)) ctx.sys.enemyAi.list.push(enemy);
+  if (v3 !== null) {
+    const affixes = v3.affixes;
+    if (v3.ai !== AI_NONE || v3.regen > 0 || (affixes & AFFIX_BERSERK) !== 0) {
+      ctx.sys.enemyAi.list.push(enemy);
+    }
+    if (affixes !== 0) {
+      const sys = ctx.sys.affixes;
+      if ((affixes & AFFIX_GUARDIAN) !== 0) sys.guardians.push(enemy);
+      if ((affixes & AFFIX_FROST) !== 0) sys.frostElites.push(enemy);
+    }
+  }
+}
+
+/**
+ * The life fraction a second 再生 regains: the run data's regenerator rate (gd:709 「和再生者
+ * 一樣」), 0 for data whose regenerator has no regen behaviour. Read once per elite that draws
+ * the affix.
+ */
+function regenRateOf(ctx: RunContext): number {
+  const behaviour = ctx.data.enemies.regenerator.behaviour;
+  return behaviour?.kind === 'regen' ? behaviour.lifePctPerSec : 0;
 }
 
 /**

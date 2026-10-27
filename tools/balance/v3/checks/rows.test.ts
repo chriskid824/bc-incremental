@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { num } from '../../../../src/core/num';
 import type { CharacterId } from '../../../../src/data';
+import { AFFIX_IDS } from '../../../../src/data/affixes';
 import { ROW_ENEMIES } from '../../../../src/data/web';
 import type { AssembledWeb, RowEnemy } from '../../../../src/data/web';
 import { fixtureContent } from '../../../../src/data/web/testing';
 import { emptyProgress } from '../../../../src/meta/web';
 import { auditStart } from '../../../../src/meta/web/invest';
+import { createEnemyV3 } from '../../../../src/sim/systems/enemyRecord';
+import { TEST_ENEMIES } from '../../../../src/sim/testing';
+import type { EnemyV3View } from '../../../../src/sim/types';
 import type { BalanceJob, JobResult } from '../../jobs';
 import { webOf } from '../content';
 import type {
@@ -269,13 +274,16 @@ describe('the row rules', () => {
     expect(affixVerdict(fireOnly.slice(0, 3), both).status).toBe('n/a');
   });
 
-  it('reads affix bits structurally and names them in AFFIX_ORDER', () => {
-    expect(affixBitsOf({ affixes: 5 })).toBe(5);
-    expect(affixBitsOf({ affixes: 0 })).toBe(0);
-    expect(affixBitsOf({ defence: 0 })).toBeNull();
-    expect(affixBitsOf({ affixes: undefined })).toBeNull();
+  it("reads an enemy record's affix bits and names them in AFFIX_ORDER", () => {
+    const record = (affixes: number): EnemyV3View =>
+      createEnemyV3(TEST_ENEMIES.hexagon, undefined, 1, affixes, num(100));
+    expect(affixBitsOf(record(5))).toBe(5);
+    expect(affixBitsOf(record(0))).toBe(0);
+    expect(affixBitsOf(createEnemyV3(TEST_ENEMIES.triangle, undefined, 1))).toBe(0);
+    // An M1 run's enemies have no record.
     expect(affixBitsOf(null)).toBeNull();
-    expect(affixBitsOf(3)).toBeNull();
+    // C7.6's AFFIX_IDS is the order itself, so the tools and the sim cannot drift apart.
+    expect(AFFIX_ORDER).toBe(AFFIX_IDS);
     expect(AFFIX_ORDER).toEqual([
       'swift',
       'armoured',

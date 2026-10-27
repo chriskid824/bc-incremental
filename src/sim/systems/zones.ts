@@ -408,8 +408,9 @@ export function hitPulse(
   if (build.hooks.modifyDamage.length !== 0) {
     amount = modifyDamage(ctx, enemy, amount, mask, source, crit, 0, depth, origin, flags);
   }
-  // Only a v3 run's enemies have a record: an M1 hit pays this one test.
-  if (enemy.v3 !== null && enemy.v3.defence !== 0) {
+  // Only a v3 run's enemies have a record: an M1 hit pays this one test. A live guardian lends
+  // its block to an enemy with no defence of its own (守護, C7.6).
+  if (enemy.v3 !== null && (enemy.v3.defence !== 0 || ctx.sys.affixes.guardians.length !== 0)) {
     const landed = defend(
       ctx,
       enemy,

@@ -219,6 +219,7 @@ describe('bench.baseline.json', () => {
       'stressBase',
       'grants',
       'v3fire',
+      'enemies',
     ]);
   });
 });

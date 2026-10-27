@@ -330,6 +330,7 @@ export function rngPositions(ctx: RunContext): Record<RngStreamName, ReturnType<
     drops: ctx.dropsRng.snapshot(),
     trigger: ctx.triggerRng.snapshot(),
     effects: ctx.effectsRng.snapshot(),
+    affixes: ctx.sys.affixes.rng.snapshot(),
   };
 }
 
@@ -589,6 +590,52 @@ export const stressData = (): GameData =>
       bossEvery: 1000,
       spawnDurationSec: 1,
       waveTimerSec: 1,
+    },
+    enemies: {
+      triangle: { speed: 110 },
+      square: { speed: 55 },
+      pentagon: { speed: 75 },
+      shard: { speed: 130 },
+      hexagon: { speed: 45 },
+    },
+  });
+
+/**
+ * The v3 crowd fixture of the `enemies` bench scenario (C7/F18, docs/v3 C7 design §2.7): every
+ * wave from wave 1 holds 13 triangles, 8 squares, 3 pentagons, 2 shielders, 2 regenerators, 2
+ * dashers, 1 shooter and 1 summoner, with one elite of two affixes, so every affix rule, every
+ * behaviour, the bullets and the defences run at once. A new wave every second as stressData,
+ * whose slower walkers it keeps, with the v3 enemy cap of 400, no boss and no treasure. Run with
+ * stressStats() from STRESS_START_WAVE for the stress family's 30 s it holds about 300–400 alive
+ * from tick 300 on: §2.7's own counts (10/6/2 walkers) held 266 at seed 1, so the three walker
+ * counts alone are scaled to reach the band, which the scenario's own numbers are tuned for
+ * (§2.7's Run line); every other count is §2.7's. It is not in the stress family, so no alive
+ * band is gated on it.
+ */
+export const v3StressData = (): GameData =>
+  v3TestData({
+    waves: {
+      ...TEST_V3_WAVES,
+      rules: [
+        { enemy: 'triangle', fromWave: 1, base: 13, perWave: 0, maxCount: 999 },
+        { enemy: 'square', fromWave: 1, base: 8, perWave: 0, maxCount: 999 },
+        { enemy: 'pentagon', fromWave: 1, base: 3, perWave: 0, maxCount: 999 },
+        { enemy: 'shielder', fromWave: 1, base: 2, perWave: 0, maxCount: 999 },
+        { enemy: 'regenerator', fromWave: 1, base: 2, perWave: 0, maxCount: 999 },
+        { enemy: 'dasher', fromWave: 1, base: 2, perWave: 0, maxCount: 999 },
+        { enemy: 'shooter', fromWave: 1, base: 1, perWave: 0, maxCount: 999 },
+        { enemy: 'summoner', fromWave: 1, base: 1, perWave: 0, maxCount: 999 },
+      ],
+      eliteEvery: 1,
+      bossEvery: 1000,
+      spawnDurationSec: 1,
+      waveTimerSec: 1,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        enemyCap: 400,
+        affixes: [{ fromWave: 1, count: 2 }],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
     },
     enemies: {
       triangle: { speed: 110 },

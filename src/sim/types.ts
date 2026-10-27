@@ -552,7 +552,14 @@ export type SimEvent =
    * Summoner `enemyId` summoned: `count` of its children spawned, the rest skipped at the enemy
    * cap (enemySpawnsSkipped), so 0 when the cap skipped them all. Never in an M1 run.
    */
-  | { readonly type: 'summoned'; readonly enemyId: number; readonly count: number };
+  | { readonly type: 'summoned'; readonly enemyId: number; readonly count: number }
+  /**
+   * The 元素護盾 of elite `targetId` broke: hits have taken WARD_BREAK_PCT of its max life off it
+   * (src/sim/combat/defend.ts), so ailments applied to it from now on are not shrunk. Once per
+   * ward, pushed by `defend` for the hit that broke it, before that hit's own `hit` event. Never
+   * in an M1 run.
+   */
+  | { readonly type: 'wardBroken'; readonly targetId: number };
 
 /**
  * Damage totals by kind of instance, for balance reporting: burn, poison and bleed by their

@@ -23,6 +23,7 @@ import { add, lt, mul, ZERO } from '../../core/num';
 import { SOURCE_CLASS_ORDINAL } from '../build/sources';
 import { BURN_RINGS_MAX_STACKS } from '../caps';
 import type { BurnStack, Enemy, RunContext } from '../systems/context';
+import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
 import { DT } from '../types';
 import { DOT_STEP_TICKS } from './rings';
 
@@ -124,6 +125,10 @@ export function addBurn(
   source: number,
 ): void {
   const now = ctx.now;
+  // 元素護盾 (C7.6): the ward × WARD_AILMENT_MULT on every ailment applied to the enemy. Only a
+  // v3 run's enemies have a record, so an M1 application pays this one test.
+  const v = enemy.v3;
+  if (v !== null && (v.defence & WARDED) !== 0) dps = mul(dps, WARD_AILMENT_MULT);
   if (now >= enemy.burnNextEnd) expireBurns(ctx, enemy);
   if (depth < enemy.ailDepth) enemy.ailDepth = depth;
   const cls = ctx.sources.cls[source] as number;
@@ -171,6 +176,8 @@ export function addBurn(
  * a zone or aura pulse hit's burn, or one stack of a zone's own burn term. At the cap it replaces
  * the stack with the least remaining damage only when its own, dps × (end − now), is larger.
  * Otherwise it returns false and changes nothing: no stack, banked damage, depth, credit or event.
+ * On a warded enemy it compares with the warded damage, which is what the stack would hold, and
+ * then hands addBurn the damage as it came, so 元素護盾 applies exactly once (C7.6).
  */
 export function addBurnIfStronger(
   ctx: RunContext,
@@ -191,7 +198,9 @@ export function addBurnIfStronger(
       const left = mul(stack.dps, stack.end - now);
       if (lt(left, weakestLeft)) weakestLeft = left;
     }
-    if (!lt(weakestLeft, mul(dps, end - now))) return false;
+    const v = enemy.v3;
+    const warded = v !== null && (v.defence & WARDED) !== 0 ? mul(dps, WARD_AILMENT_MULT) : dps;
+    if (!lt(weakestLeft, mul(warded, end - now))) return false;
   }
   addBurn(ctx, enemy, dps, end, depth, source);
   return true;

@@ -727,7 +727,12 @@ export interface EmitterRuntime {
   volley: number;
   /** Every shot of the current attack is steady (steadyAim counting attacks). */
   steadyAttack: boolean;
-  /** Ticks the accumulator gains per tick; exactly 1 until attack-speed buffs exist. */
+  /**
+   * Ticks the accumulator gains per tick: exactly 1, or AffixState.frostFactor while a 冰霜 elite
+   * is near the player (refreshCadence, src/sim/systems/affixes.ts). Every emitter that counts
+   * attacks by it is slowed by it; an aura's phase, a strike's timer and an orbit's cooldown are
+   * fixed periods that do not read it (lead ruling L5).
+   */
   cadence: number;
   /**
    * An orbit's per-orb cooldown memory (Hoshi's Q13 (B)), which createRunContext makes with the

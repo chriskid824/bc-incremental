@@ -7,6 +7,7 @@
  */
 
 import type { Enemy, RunContext } from '../systems/context';
+import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
 
 /** The enemy's shock stacks at tick `now`. */
 export function activeShockStacks(enemy: Enemy, now: number): number {
@@ -22,11 +23,21 @@ export function holdsShock(enemy: Enemy, now: number): boolean {
  * Damage the enemy takes per unit dealt: 1 + frozenDamageTaken while it is frozen (frost.ts)
  * + shockEffect × its shock stacks. Hits and damage over time take it once the enemy is shocked
  * or frozen (`(shockStacks !== 0 && shockUntil > now) || frozenUntil > now`).
+ *
+ * 元素護盾 (C7.6) is the seventh ailment entry: while the enemy holds the ward, the shock term
+ * alone is × WARD_AILMENT_MULT, the frozen term is not, and the stacks themselves keep their
+ * count (addShock applies them whole), so every other reader of the stacks sees them as they are.
+ * Only a v3 run's enemies have a record, and a caller reaches here only for a shocked or frozen
+ * enemy, so an M1 run pays this one test per such read.
  */
 export function takenMult(ctx: RunContext, enemy: Enemy): number {
   const now = ctx.now;
   const frozen = enemy.frozenUntil > now ? ctx.frozenDamageTaken : 0;
-  return 1 + frozen + ctx.shockEffect * activeShockStacks(enemy, now);
+  const shock = ctx.shockEffect * activeShockStacks(enemy, now);
+  const v = enemy.v3;
+  return v !== null && (v.defence & WARDED) !== 0
+    ? 1 + frozen + shock * WARD_AILMENT_MULT
+    : 1 + frozen + shock;
 }
 
 /**

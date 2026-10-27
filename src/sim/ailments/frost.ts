@@ -14,6 +14,7 @@
  */
 
 import type { Enemy, RunContext } from '../systems/context';
+import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
 
 /** How much less a boss is slowed at a full meter than a normal enemy (frostSlowCap − 0.15). */
 export const BOSS_SLOW_CAP_OFFSET = 0.15;
@@ -53,6 +54,10 @@ export function enemySlow(ctx: RunContext, enemy: Enemy, now: number): number {
 export function addFrost(ctx: RunContext, enemy: Enemy, amount: number, applier: number): boolean {
   const now = ctx.now;
   if (now < enemy.frostLockUntil) return false;
+  // 元素護盾 (C7.6): the ward × WARD_AILMENT_MULT on every ailment applied to the enemy. Only a
+  // v3 run's enemies have a record, so an M1 application pays this one test.
+  const v = enemy.v3;
+  if (v !== null && (v.defence & WARDED) !== 0) amount *= WARD_AILMENT_MULT;
   ctx.frostApplied = true;
   const frost = Math.min(1, enemy.frost + amount);
   if (frost < 1) {

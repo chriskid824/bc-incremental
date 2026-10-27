@@ -17,10 +17,20 @@
  * A hit blocked in full (blockedHit) deals nothing, raises no hit event or trigger, and applies
  * only its burn and the poison and bleed that ailmentOnBlock lets through (lead ruling L1); its hit
  * path returns false, so the shocks its caller adds after a hit skip it (lead ruling R1).
+ *
+ * C7.6 adds two affixes here (design §2.7). 守護: while the run holds a live guardian, an enemy
+ * with no shield of its own counts as shielded with the run's guardBlockPct for a hit that a
+ * guardian covers (guarded, src/sim/systems/affixes.ts), written nowhere on its record; the
+ * bypass bit, L1, L8 and blockedHit apply to such a block as to any shield block. 元素護盾:
+ * WARDED holds a counter (EnemyV3.wardLeft) of the hit damage left before the ward breaks, which
+ * every hit lowers by what it landed, 0 on a full block; at 0 or below the bit clears and one
+ * wardBroken event goes out. The ward never blocks a hit: only the shield does (lead ruling L2,
+ * reading A, which settles the question C7.3 left open), and the ailments the hit that breaks it
+ * applies are its own, unwarded, since they are applied after defend has run.
  */
 
 import type { Num } from '../../core/num';
-import { add, isZero, lt, mul, toNumber, ZERO } from '../../core/num';
+import { add, isZero, lt, lte, mul, sub, toNumber, ZERO } from '../../core/num';
 import { DOT_MASK } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { statAt } from '../build/eval';
@@ -37,12 +47,13 @@ import {
   slotRow,
 } from '../emitters/types';
 import type { Payload } from '../emitters/types';
+import { guarded } from '../systems/affixes';
 import type { Enemy, RunContext } from '../systems/context';
-import { ARMOURED, SHIELDED } from '../systems/enemyRecord';
+import { ARMOURED, SHIELDED, WARDED } from '../systems/enemyRecord';
 import type { EnemyV3 } from '../systems/enemyRecord';
 import { applyDots, applyHitBurn, BLEEDS, POISONS } from './hit';
 
-export { ARMOURED, SHIELDED };
+export { ARMOURED, SHIELDED, WARDED };
 
 /** The share of a hit part that passed its shield an ARMOURED enemy takes (gd:708 「−50%」). */
 export const ARMOUR_TAKEN = 0.5;
@@ -84,6 +95,19 @@ function landedPart(
 }
 
 /**
+ * Lowers 元素護盾's counter by the `landed` damage of a hit on `enemy`, whose record is `v` and
+ * holds WARDED: at 0 or below the ward breaks, which clears the bit and pushes one wardBroken
+ * (lead ruling L2, reading A). The counter is not clamped, so the event goes out exactly once.
+ */
+function wardHit(ctx: RunContext, enemy: Enemy, v: EnemyV3, landed: Num): void {
+  v.wardLeft = sub(v.wardLeft, landed);
+  if (lte(v.wardLeft, ZERO)) {
+    v.defence &= ~WARDED;
+    ctx.events.push({ type: 'wardBroken', targetId: enemy.id });
+  }
+}
+
+/**
  * What a hit of `amount` with tags `mask` lands on `enemy`, whose record is `v`, through its
  * defences that the hit's `bypass` bits (bypassOf) leave: the amount to deal, or null when it is
  * blocked in full, which takes all three of: the shield applies, no part is of a damage-over-time
@@ -93,7 +117,9 @@ function landedPart(
  * `amount`, since takenMult and the hooks scale every part alike; what each part landed is
  * written back into the parts, with their total, so the tallies take each part as it landed
  * (tallyParts, src/sim/combat/hit.ts). A converted hit with a part that landed is no full block
- * either: it deals what landed, and its ailments apply as any hit's.
+ * either: it deals what landed, and its ailments apply as any hit's. The shield is the enemy's
+ * own, or a guardian's where the enemy has none (守護); a warded enemy's counter takes what the
+ * hit landed, a hit no defence takes included.
  */
 export function defend(
   ctx: RunContext,
@@ -104,13 +130,31 @@ export function defend(
   converted: boolean,
   bypass: number,
 ): Num | null {
-  const shield = (v.defence & SHIELDED) !== 0 && (bypass & IGNORE_SHIELD) === 0;
-  const armour = (v.defence & ARMOURED) !== 0 && (bypass & IGNORE_ARMOUR) === 0;
-  if (!shield && !armour) return amount;
-  const threshold = shield ? mul(enemy.maxHp, v.blockPct) : ZERO;
+  const defence = v.defence;
+  const shielded = (bypass & IGNORE_SHIELD) === 0;
+  let shield = (defence & SHIELDED) !== 0 && shielded;
+  let blockPct = v.blockPct;
+  // An enemy that holds a shield tests its own and never scans; one that does not takes a live
+  // guardian's for this hit alone, and the bypass bit passes that block as it passes any shield.
+  if (!shield && shielded) {
+    const affixes = ctx.sys.affixes;
+    if (affixes.guardians.length !== 0 && guarded(ctx, enemy)) {
+      shield = true;
+      blockPct = affixes.guardBlockPct;
+    }
+  }
+  const armour = (defence & ARMOURED) !== 0 && (bypass & IGNORE_ARMOUR) === 0;
+  const warded = (defence & WARDED) !== 0;
+  if (!shield && !armour) {
+    if (warded) wardHit(ctx, enemy, v, amount);
+    return amount;
+  }
+  const threshold = shield ? mul(enemy.maxHp, blockPct) : ZERO;
   if (!converted) {
     const landed = landedPart(amount, mask, shield, armour, threshold);
-    return shield && (mask & DOT_MASK) === 0 && isZero(landed) ? null : landed;
+    if (shield && (mask & DOT_MASK) === 0 && isZero(landed)) return null;
+    if (warded) wardHit(ctx, enemy, v, landed);
+    return landed;
   }
   const parts = ctx.hitParts;
   // As in tallyParts, a hook can turn a hit of 0 into damage, which no share can scale: it is
@@ -129,7 +173,9 @@ export function defend(
     if ((partMask & DOT_MASK) !== 0 || !isZero(landed)) blocked = false;
   }
   parts.total = total;
-  return blocked ? null : total;
+  if (blocked) return null;
+  if (warded) wardHit(ctx, enemy, v, total);
+  return total;
 }
 
 /**

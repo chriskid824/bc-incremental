@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { AFFIX_IDS } from '../data/affixes';
 import { STAT_IDS } from '../data/stats';
 import { TALENTS } from '../data/talents';
 import { LOCALES, MESSAGES, fill, getLocale, isMessageKey, pickLocale, setLocale, t } from '.';
@@ -59,6 +60,14 @@ describe('messages', () => {
   it.each(LOCALES)('%s names every stat', (id) => {
     for (const stat of STAT_IDS) {
       const key = `stat.${stat}`;
+      expect(isMessageKey(key), key).toBe(true);
+      expect(MESSAGES[id][key as MessageKey]?.trim(), `${id} ${key}`).toBeTruthy();
+    }
+  });
+
+  it.each(LOCALES)('%s names every affix (C7.6)', (id) => {
+    for (const affix of AFFIX_IDS) {
+      const key = `affix.${affix}.name`;
       expect(isMessageKey(key), key).toBe(true);
       expect(MESSAGES[id][key as MessageKey]?.trim(), `${id} ${key}`).toBeTruthy();
     }

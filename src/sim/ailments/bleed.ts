@@ -15,6 +15,7 @@
 import type { Num } from '../../core/num';
 import { add, gt, mul, ZERO } from '../../core/num';
 import type { Enemy, RunContext } from '../systems/context';
+import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
 import { DT } from '../types';
 
 /** The enemy bleeds at tick `now`. Damage left from an ended bleed does not count. */
@@ -53,6 +54,10 @@ export function addBleed(
 ): boolean {
   const now = ctx.now;
   if (!(until > now)) return false;
+  // 元素護盾 (C7.6): the ward × WARD_AILMENT_MULT on every ailment applied to the enemy. Only a
+  // v3 run's enemies have a record, so an M1 application pays this one test.
+  const v = enemy.v3;
+  if (v !== null && (v.defence & WARDED) !== 0) dps = mul(dps, WARD_AILMENT_MULT);
   if (
     enemy.bleedUntil > now &&
     !gt(mul(dps, until - now), mul(enemy.bleedDps, enemy.bleedUntil - now))

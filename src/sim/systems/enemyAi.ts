@@ -25,9 +25,15 @@
  * movement fields the movement stage reads: stepDist (0 while an enemy stands, below 0 while it
  * flees) and an orbit's (ux, uy). treasuresDue schedules the treasures (startWave,
  * src/sim/systems/waves.ts). The step draws only the summons' angles, on the split stream.
+ *
+ * Two of C7.6's affixes run here. Before the walk, stepAffixes (src/sim/systems/affixes.ts)
+ * compacts the guardians and the frost elites and takes 冰霜's factor on every emitter's cadence.
+ * In the walk, 狂暴 (stepBerserk) runs for each live entry that holds it, frozen or not, right
+ * after that entry's regeneration, so it reads this tick's life.
  */
 
-import { add, min, mul } from '../../core/num';
+import { add, lt, min, mul } from '../../core/num';
+import { AFFIX_BERSERK } from '../../data/affixes';
 import type { EnemyBehaviour, V3WaveRules } from '../../data/types';
 import { releaseAilments } from '../ailments/apply';
 import { countBleedMove } from '../ailments/bleed';
@@ -37,6 +43,7 @@ import { statAt } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
 import { periodTicks } from '../emitters/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, TICK_RATE } from '../types';
+import { BERSERK_BELOW, BERSERK_MULT, stepAffixes } from './affixes';
 import { fireBullet, stepBullets } from './bullets';
 import type { Enemy, RunContext } from './context';
 import { removeEnemy } from './death';
@@ -92,6 +99,7 @@ export function treasuresDue(wave: number, rules: V3WaveRules, rate: number): nu
 
 /** Runs the enemy AI step of tick ctx.now (ctx.sys.enemyAi.enabled). */
 export function stepEnemyAi(ctx: RunContext): void {
+  stepAffixes(ctx);
   const ai = ctx.sys.enemyAi;
   ai.chargeStartCount = 0;
   const list = ai.list;
@@ -109,9 +117,11 @@ export function stepEnemyAi(ctx: RunContext): void {
       v.stateUntil++;
       v.nextAct++;
       if (v.regen > 0) regenerate(ctx, ai, enemy, v, now);
+      if ((v.affixes & AFFIX_BERSERK) !== 0) stepBerserk(enemy, v);
       continue;
     }
     if (v.regen > 0) regenerate(ctx, ai, enemy, v, now);
+    if ((v.affixes & AFFIX_BERSERK) !== 0) stepBerserk(enemy, v);
     switch (v.ai) {
       case AI_DASH:
         stepDasher(ctx, ai, enemy, v, now);
@@ -130,6 +140,19 @@ export function stepEnemyAi(ctx: RunContext): void {
   for (let i = n; i < list.length; i++) list[kept++] = list[i] as Enemy;
   list.length = kept;
   if (ctx.sys.bullets.count !== 0) stepBullets(ctx);
+}
+
+/**
+ * 狂暴 (gd:712, C7.6): strictly below BERSERK_BELOW of its max life the enemy walks and hits
+ * BERSERK_MULT × harder, and at or above it both are 1 again, so healing past half life ends the
+ * rage. It keeps no timer and runs every tick, frozen or not. It leaves the step alone while the
+ * enemy stands (STOPPED), and its own behaviour's step, written after this, wins: affixes go to
+ * elites, which have no behaviour. contactMult is read at contact (C7.2).
+ */
+function stepBerserk(enemy: Enemy, v: EnemyV3): void {
+  const raging = lt(enemy.hp, mul(enemy.maxHp, BERSERK_BELOW));
+  v.contactMult = raging ? BERSERK_MULT : 1;
+  if ((v.state & STOPPED) === 0) enemy.stepDist = raging ? v.baseStep * BERSERK_MULT : v.baseStep;
 }
 
 /**

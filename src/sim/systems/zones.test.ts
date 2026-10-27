@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { add, mul, num, sub, toNumber, ZERO } from '../../core/num';
 import type { Num } from '../../core/num';
 import { createStreams } from '../../core/rng';
+import { AFFIX_GUARDIAN } from '../../data/affixes';
 import type { RuleSpec } from '../../data/rules';
 import type { Modifier, StatBlock, StatId } from '../../data/stats';
 import type { GroundZoneSpec, TriggerSpec } from '../../data/triggers';
@@ -25,10 +26,11 @@ import type { PlacedEnemy } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import type { SimEvent } from '../types';
 import { updateAilments } from './ailments';
-import type { BurnStack, Enemy, RunContext } from './context';
+import type { BurnStack, Enemy, RunContext, WaveRecord } from './context';
 import { ARMOURED, SHIELDED } from './enemyRecord';
 import type { EnemyV3 } from './enemyRecord';
 import { moveEnemies } from './movement';
+import { addEnemy } from './spawn';
 import { addZone, hitPulse, hoistPulseRows, stepZones } from './zones';
 
 type PulseEvent = Extract<SimEvent, { type: 'pulse' }>;
@@ -559,6 +561,46 @@ describe('zone hits and terms', () => {
     const terms = (e: Enemy) => [e.poisonStacks, e.frost, e.zoneSlow];
     expect(terms(one)).toEqual([1, 0.25, 0.3]);
     expect(terms(one)).toEqual(terms(two));
+  });
+
+  it('lends a live guardian’s block to its hit on an enemy with no defence (C7.6 守護, lead ruling Z5)', () => {
+    // Plants hitPulse's guard left at `defence !== 0`: the guarded square would take the pulse.
+    const ctx = placedEnemies(
+      [near(10, 0, { type: 'square', hp: 1e6 }), near(-40, 0, { type: 'square', hp: 1e6 })],
+      { stats: zoneStats([idle(ZONE)]), data: v3TestData() },
+    );
+    const [one, two] = [enemy(ctx, 1), enemy(ctx, 2)];
+    // A guardian 140 from the first square and 190 from the second (GUARD_RADIUS is 160),
+    // outside the zone.
+    addEnemy(
+      ctx,
+      ctx.data.enemies.hexagon,
+      ctx.current as WaveRecord,
+      1,
+      0,
+      Z.x + 150 - ctx.player.x,
+      {
+        hpScale: 1,
+        radiusScale: 1,
+        dropScale: 1,
+        extra: false,
+        affixes: AFFIX_GUARDIAN,
+      },
+    );
+    const guardian = ctx.enemies.at(-1) as Enemy;
+    expect(ctx.sys.affixes.guardians).toEqual([guardian]);
+    expect([one.v3?.defence, two.v3?.defence]).toEqual([0, 0]);
+    runAt(ctx, effectOf(ctx, 0));
+    // The pulse hits for 100, below 15 % of 1e6: the guarded square's hit is blocked, the
+    // other's lands.
+    expect(pulsesOf(untilPulse(ctx))).toEqual([
+      { type: 'pulse', kind: 'zone', id: 1, hits: 1, total: num(100), crits: [] },
+    ]);
+    expect([toNumber(one.hp), toNumber(two.hp), toNumber(guardian.hp)]).toEqual([
+      1e6,
+      1e6 - 100,
+      toNumber(guardian.maxHp),
+    ]);
   });
 });
 

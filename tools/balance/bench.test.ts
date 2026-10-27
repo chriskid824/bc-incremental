@@ -9,12 +9,14 @@ import {
   stressV4Setup,
 } from '../../src/app/replay/presets';
 import { loadGameData, parseGameData, validateGameData } from '../../src/data';
+import { AFFIX_IDS } from '../../src/data/affixes';
 import type { GameData, TalentNode } from '../../src/data';
 import type { DroneGrant } from '../../src/data/emitters';
 import { createSimulation, DRONE_KIND_DRONE, DRONE_KIND_TURRET, NO_INPUT } from '../../src/sim';
 import type { RunConfig } from '../../src/sim';
 import { SUMMON_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../../src/sim/caps';
 import { BASE_ATTACK_SPEED } from '../../src/sim/emitters/types';
+import { affixNames } from './v3/checks/rows';
 import type { TestModule } from '../../src/sim/rules';
 import type { RunContext } from '../../src/sim/systems/context';
 import {
@@ -24,6 +26,8 @@ import {
   maskProbeMods,
   STRESS_START_WAVE,
   stressData,
+  stressStats,
+  v3StressData,
 } from '../../src/sim/testing';
 import {
   aliveTwin,
@@ -787,20 +791,22 @@ describe('grants (docs/v3 C4 design §7.3, §8.3 C4.21)', () => {
 });
 
 describe('v3fire (docs/v3 C6 design §5.4, §8 C6.6)', () => {
-  it('is a scenario with no alive band, last in SCENARIO_IDS and CHECK_ENTRIES, on GOLDEN-C4’s v3fire: a fire character run', () => {
+  it('is a scenario with no alive band, before enemies in SCENARIO_IDS and CHECK_ENTRIES, on GOLDEN-C4’s v3fire: a fire character run', () => {
     const v3fire = SCENARIOS.v3fire;
-    expect(SCENARIO_IDS.at(-1)).toBe('v3fire');
-    expect(CHECK_ENTRIES.at(-1)).toBe('v3fire');
+    // C7.6 appended enemies, so v3fire is now the one before it.
+    expect(SCENARIO_IDS.at(-2)).toBe('v3fire');
+    expect(CHECK_ENTRIES.at(-2)).toBe('v3fire');
     expect([v3fire.runs, v3fire.warmup, v3fire.seconds, v3fire.targetMs, v3fire.startWave]).toEqual(
       [50, 5, 20, 50, 12],
     );
     // Not of the stress family: --check measures no workload of it and checks no alive band.
-    expect([v3fire.stress, v3fire.summons, v3fire.variants, v3fire.testModules]).toEqual([
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-    ]);
+    expect([
+      v3fire.stress,
+      v3fire.summons,
+      v3fire.crowd,
+      v3fire.variants,
+      v3fire.testModules,
+    ]).toEqual([undefined, undefined, undefined, undefined, undefined]);
     expect(v3fire.data?.()).toEqual(makeTestData());
     const run = seedOne(v3fire);
     const { stats, ...rest } = run.config;
@@ -877,6 +883,83 @@ describe('v3fire (docs/v3 C6 design §5.4, §8 C6.6)', () => {
         },
       ),
     );
+  });
+});
+
+describe('enemies (docs/v3 C7 design §2.7, §8 C7.6)', () => {
+  it('is a crowd scenario with no alive band, last in SCENARIO_IDS and CHECK_ENTRIES, on the v3 crowd fixture', () => {
+    const enemies = SCENARIOS.enemies;
+    expect(SCENARIO_IDS.at(-1)).toBe('enemies');
+    expect(CHECK_ENTRIES.at(-1)).toBe('enemies');
+    // The stress family's runs, length and start wave, with §6's 50 ms budget printed.
+    expect([
+      enemies.runs,
+      enemies.warmup,
+      enemies.seconds,
+      enemies.targetMs,
+      enemies.startWave,
+    ]).toEqual([20, 3, 30, 50, STRESS_START_WAVE]);
+    // Not of the stress family: --check measures no workload of it and checks no alive band; it
+    // measures the crowd's alive counts instead (crowd).
+    expect([enemies.stress, enemies.summons, enemies.variants, enemies.testModules]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(enemies.crowd).toBe(true);
+    expect(enemies.data?.()).toEqual(v3StressData());
+    const { config } = seedOne(enemies);
+    const { stats, ...rest } = config;
+    expect(rest).toEqual({
+      seed: 1,
+      rules: [],
+      startWave: STRESS_START_WAVE,
+      mode: 'auto',
+      maxTicks: 1800,
+    });
+    expect(stats).toEqual(stressStats());
+  });
+
+  it('runs the v3 crowd: the cap holds, every behaviour and every affix appears, about 300–400 alive', () => {
+    const { config, data: runData } = seedOne(SCENARIOS.enemies);
+    const sim = createSimulation(config, runData);
+    const types = new Set<string>();
+    let bits = 0;
+    let peak = 0;
+    let sum = 0;
+    let ticks = 0;
+    while (!sim.state.finished) {
+      sim.step(NO_INPUT);
+      const alive = sim.state.enemies.length;
+      if (alive > peak) peak = alive;
+      if (sim.state.tick > 300) {
+        sum += alive;
+        ticks++;
+      }
+      for (const enemy of sim.state.enemies) {
+        types.add(enemy.type);
+        if (enemy.v3 !== null) bits |= enemy.v3.affixes;
+      }
+    }
+    expect([...types].sort()).toEqual([
+      'dasher',
+      'hexagon',
+      'pentagon',
+      'regenerator',
+      'shard',
+      'shielder',
+      'shooter',
+      'square',
+      'summoner',
+      'triangle',
+    ]);
+    // Every affix is drawn over the run's 30 elite waves, each elite taking two.
+    expect(affixNames(bits)).toEqual([...AFFIX_IDS]);
+    expect(peak).toBeLessThanOrEqual(400);
+    const average = sum / ticks;
+    expect(average).toBeGreaterThan(300);
+    expect(average).toBeLessThan(400);
   });
 });
 

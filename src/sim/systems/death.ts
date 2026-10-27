@@ -13,12 +13,14 @@
  */
 
 import { add, mul, num } from '../../core/num';
+import { AFFIX_MULTIPLY } from '../../data/affixes';
 import { releaseAilments, spreadPoisonToChildren } from '../ailments/apply';
 import { heldFlags } from '../build/eval';
 import { fireInlineKill, recordPendingKills } from '../effects/dispatch';
 import { HIT_BITS, KILL_KIND_SHIFT } from '../effects/flags';
 import { MAX_DEPTH } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
+import { multiply } from './affixes';
 import type { Enemy, Projectile, RunContext } from './context';
 import { split } from './spawn';
 import { toSplitOf } from './systemState';
@@ -36,7 +38,10 @@ export function removeEnemy(ctx: RunContext, enemy: Enemy): void {
  * trigger whose damage killed it, −1 for emitter hits and DoT kills; `hitFlags` the killing
  * hit's flags, 0 for a DoT kill. Its transfer triggers and the onKill hooks run first, while the
  * enemy is still alive and burning. A v3 enemy's shards and expected cores are × its record's
- * dropScale (src/sim/systems/enemyRecord.ts), before the cores are floored and rolled.
+ * dropScale (src/sim/systems/enemyRecord.ts), before the cores are floored and rolled; a 增殖
+ * elite leaves its children right after its split children, so a toSplitChildren transfer
+ * reaches them too (C7.6). Its affix bits are read inside C7.4a's one record test, so the kill
+ * path costs an M1 run one more test, on a local.
  */
 export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlags: number): void {
   // The kill's flags: the killing hit's, what the victim held, and what killed it.
@@ -62,9 +67,12 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlag
   let shards = mul(mul(num(def.dropMult), enemy.rec.shardsPerStd), ctx.shardGain);
   let expectedCores = def.cores * ctx.coreGain;
   const v3 = enemy.v3;
+  // The parent's bits when it holds 增殖 (never 0 then, the affix being one of them), else 0.
+  let multiplies = 0;
   if (v3 !== null) {
     shards = mul(shards, v3.dropScale);
     expectedCores *= v3.dropScale;
+    if ((v3.affixes & AFFIX_MULTIPLY) !== 0) multiplies = v3.affixes;
   }
   let cores = 0;
   if (expectedCores > 0) {
@@ -83,8 +91,9 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlag
     shards,
     cores,
   });
-  // The children are ctx.enemies[first ..].
+  // The children are ctx.enemies[first ..]: the split children, then 增殖's.
   const first = split(ctx, enemy);
+  if (multiplies !== 0) multiply(ctx, enemy);
   const ss = ctx.sys.split;
   if (ss.passedCount > 0) splitTransfers(ctx, enemy, first, ss);
   if (ctx.killPending.length !== 0) recordPendingKills(ctx, enemy, origin, flags, shards);

@@ -48,7 +48,7 @@ import type { PlacedEnemy } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import type { SimEvent } from '../types';
 import { beginAttack, chainAttack } from './chain';
-import { ARMOUR_TAKEN, ARMOURED, bypassOf, SHIELDED } from './defend';
+import { ARMOUR_TAKEN, ARMOURED, bypassOf, SHIELDED, WARDED } from './defend';
 import { hitWithPayload } from './hit';
 
 type HitEvent = Extract<SimEvent, { type: 'hit' }>;
@@ -314,6 +314,31 @@ describe('conversion parts', () => {
     hit(ctx, one, payload(ctx, 200));
     expect(dealt(ctx)).toEqual([[1, 150]]);
     expect(tallies(ctx)).toEqual({ hit: 50, poison: 100, source: 150 });
+  });
+
+  it('lowers a warded enemy’s counter by what landed, converted or not (C7.6, lead ruling Z8)', () => {
+    // Plants the ward's counter taking the hit before the armour, and the converted path's
+    // subtraction dropped: the counters would fall by 200 and by nothing.
+    const warded = (ctx: RunContext): EnemyV3 => {
+      const one = enemy(ctx, 1);
+      armour(one);
+      const v = record(one);
+      v.defence |= WARDED;
+      v.wardLeft = num(1000);
+      return v;
+    };
+    const plain = defended([square(300)]);
+    const v = warded(plain);
+    hit(plain, enemy(plain, 1), payload(plain, 200));
+    expect(dealt(plain)).toEqual([[1, 100]]);
+    expect(v.wardLeft).toBe(num(900));
+    // Cold 100 halved to 50 and poison 100 whole: the parts that landed, 150 in all.
+    const converted = defended([square(300)], { conversions: HALVES });
+    const w = warded(converted);
+    hit(converted, enemy(converted, 1), payload(converted, 200));
+    expect(dealt(converted)).toEqual([[1, 150]]);
+    expect(w.wardLeft).toBe(num(850));
+    expect(w.defence & WARDED).toBe(WARDED);
   });
 
   it('halves the hit parts that pass the shield of a shielded and armoured enemy, and no other part (L8)', () => {

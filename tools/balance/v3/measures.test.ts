@@ -9,6 +9,7 @@ import { auditBuy, auditStart } from '../../../src/meta/web/invest';
 import { runJob, runJobs } from '../jobs';
 import type { BalanceJob } from '../jobs';
 import { boardInvestment, boardPlan, deadBoardBase } from './checks/boards';
+import { affixNames } from './checks/rows';
 import { FRESH_ACCOUNT } from './checks/types';
 import { C10_SEED, webOf } from './content';
 import {
@@ -271,11 +272,12 @@ describe("C10.3's measures", () => {
     expect(helps.bought).toEqual([...route, ...boardPlan(web, 'poison')]);
   });
 
-  it("reads a board's elite wave, plain or affixed, and the elite's affix bits (none before C7.6)", () => {
+  it("reads a board's elite wave, plain or affixed, and the elite's affix bits", () => {
     const center = measureAffix({ ...affix, outer: null, affixed: false });
+    // C7.6: a plain elite wave sets affixes [], so its elite draws none and its bits are 0.
     expect(center).toMatchObject({
       outer: null,
-      bits: null,
+      bits: 0,
       bought: [],
       unpaid: [],
       refused: null,
@@ -286,7 +288,8 @@ describe("C10.3's measures", () => {
     expect(center.run.count).toBe(1);
     const outer = measureAffix(affix);
     expect(outer.bought).toEqual(invested('ice').bought);
-    expect(outer.bits).toBeNull();
+    // An affixed elite wave draws exactly one affix (count 1), so one bit of AFFIX_IDS is set.
+    expect(affixNames(outer.bits as number)).toHaveLength(1);
     expect(outer.run).toEqual(
       testWaveRun(web, invested('ice').progress, eliteWaveData(data, true), rowSeed('hexagon', 0)),
     );
