@@ -318,6 +318,22 @@ export function shatterEffect(radius: number): CompiledEffect {
   };
 }
 
+/**
+ * `fx` with its radius × `factor`, the build's area factor (BuildFlags.areaFactor; docs/v3 C4
+ * design D29): its radiusSq and a spreadAilment's spread, from its spec's radius. compileBuild
+ * sizes every compiled effect this way once, after the modules have run, so the executors read
+ * the sized radii as they are; groundZone's radiusSq, which nothing reads, follows too, while its
+ * executor sizes the spec's radius for its zone (sizeOf). `fx` itself at factor 1, or without a
+ * radius: the shatter's, sized as it is compiled (shatterEffect).
+ */
+export function sizedEffect(fx: CompiledEffect, factor: number): CompiledEffect {
+  const spec = fx.spec;
+  if (factor === 1 || !('radius' in spec) || spec.radius === undefined) return fx;
+  const radius = spec.radius * factor;
+  const spread = fx.spread === null ? null : { ...fx.spread, radius, radiusSq: radius ** 2 };
+  return { ...fx, radiusSq: radius ** 2, spread };
+}
+
 /** `spec` with its COEF_FIELDS × coef; a field left out counts as 1. */
 function withCoef(spec: EffectSpec, coef: number): EffectSpec {
   const fields = COEF_FIELDS[spec.kind] as readonly string[];

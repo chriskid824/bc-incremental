@@ -49,6 +49,9 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
         [String(rule.targets)],
         [signedPercent(rule.damageMult - 1), percent(rule.damageMult), `×${rule.damageMult}`],
       ];
+    case 'gigantism':
+      // gd:268's 「大小 ×2」; the halving is words.
+      return [[`×${rule.sizeMult}`]];
   }
 }
 

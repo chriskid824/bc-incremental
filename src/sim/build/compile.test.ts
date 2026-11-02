@@ -98,6 +98,9 @@ describe('compileBuild', () => {
       enemiesInAura: false,
       comboFull: 20,
       comboEcho: null,
+      sizeFactor: 1,
+      halveCounts: false,
+      areaFactor: 1,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

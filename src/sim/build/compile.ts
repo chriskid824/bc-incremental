@@ -39,6 +39,7 @@ import {
   SHATTER_TRIGGER,
   shatterEffect,
   shatterTrigger,
+  sizedEffect,
 } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import { grantEmitter } from '../emitters/types';
@@ -51,6 +52,7 @@ import type { CharacterRun } from '../types';
 import { statAt, staticInput } from './eval';
 import { compileConversions, compileMods, ModTable, rowValues } from './modTable';
 import type { CompiledConversion, CompiledMod } from './modTable';
+import { sizeOf } from './size';
 import {
   CENTER,
   createAttribution,
@@ -140,6 +142,20 @@ export interface BuildFlags {
    * delaySec must be positive and finite, damagePct in (0, 1].
    */
   comboEcho: { readonly delaySec: number; readonly damagePct: number } | null;
+  /**
+   * 巨大化 (gigantism, src/sim/rules/gigantism.ts): the factor on every area radius and on the
+   * straight shots' hit radius (src/sim/systems/shots.ts), 1 without it.
+   */
+  sizeFactor: number;
+  /** 巨大化: whether the four counts are halved (countOf, src/sim/build/size.ts); false without it. */
+  halveCounts: boolean;
+  /**
+   * The factor sizeOf (src/sim/build/size.ts) multiplies every area radius by:
+   * max(0, values.areaSize) × sizeFactor, which compileBuild sets once the modules have run and
+   * before it sizes the effects' radii; a module sets sizeFactor, never this. 1 for a build
+   * without either, whose radii stay as written bit for bit (r × 1 is r).
+   */
+  areaFactor: number;
 }
 
 /**
@@ -402,6 +418,9 @@ export function compileBuild(
     enemiesInAura: false,
     comboFull: null,
     comboEcho: null,
+    sizeFactor: 1,
+    halveCounts: false,
+    areaFactor: 1,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -569,9 +588,18 @@ export function compileBuild(
         fx.spec.kind === 'addFrost' ||
         (fx.spec.kind === 'groundZone' && (fx.spec.addFrostPerSec ?? 0) > 0),
     );
+  // The area factor (D29), now that every module has set its part: every effect's radius is
+  // sized here once, the shatter's as it is compiled, and the executors read them as they are.
+  // An areaSize below 0 is no area at all, never a negative radius whose square is positive.
+  flags.areaFactor = Math.max(0, values.areaSize) * flags.sizeFactor;
+  if (flags.areaFactor !== 1) {
+    for (let i = 0; i < effects.length; i++) {
+      effects[i] = sizedEffect(effects[i] as CompiledEffect, flags.areaFactor);
+    }
+  }
   if (canFreeze) {
     triggers[SHATTER_TRIGGER] = shatterTrigger(true, effects.length);
-    effects.push(shatterEffect(Math.max(0, values.shatterRadius)));
+    effects.push(shatterEffect(sizeOf({ flags }, Math.max(0, values.shatterRadius))));
   }
   // The run counts the combo stacks only for a build that reads or adds them (lead ruling K1),
   // 殘影 included, which reads them for 「滿層」, so every other build's run stays the same bit

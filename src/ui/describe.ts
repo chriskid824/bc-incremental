@@ -11,6 +11,7 @@ import type { DamageTag } from '../data/tags';
 import { t } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { centerDamage, compileBuild, signatureRows } from '../sim/build/compile';
+import { countOf } from '../sim/build/size';
 
 /** Flat values of these stats are fractions shown as percentages (0.05 → 5%). */
 const PERCENT_STATS: ReadonlySet<StatId> = new Set([
@@ -90,7 +91,8 @@ const pct = (value: number): string => `${trim(value * 100)}%`;
  * Nth attack. Hits read the signature attack's rows (signatureRows: M1's are hit and projectile),
  * so tagged modifiers (Searing Crits' non-crit half and Pandemic's hit cost included) and
  * rule-added ones (Glass Cannon's) count; the projectile count is the compiled one, 熔核's bombs
- * a firing. Each archetype's nodes move at least one line.
+ * a firing, and the projectile and chain counts read through countOf as the run does (巨大化
+ * halves them). Each archetype's nodes move at least one line.
  */
 export function describeBuild(
   stats: StatBlock,
@@ -114,7 +116,10 @@ export function describeBuild(
   return [
     { label: t('stat.damage.hit'), value: short(hit) },
     { label: t('stat.attackSpeed'), value: `${trim(values.attackSpeed)}/s` },
-    { label: t('stat.projectileCount'), value: trim(values.projectileCount) },
+    {
+      label: t('stat.projectileCount'),
+      value: trim(countOf(build, Math.max(1, values.projectileCount))),
+    },
     { label: t('stat.critChance'), value: crit },
     { label: t('stat.critMultiplier'), value: pct(values.critMultiplier) },
     { label: t('build.critHit'), value: short(critHit) },
@@ -130,7 +135,7 @@ export function describeBuild(
     },
     {
       label: t('stat.chainCount'),
-      value: trim(Math.max(0, values.chainCount)),
+      value: trim(countOf(build, Math.max(0, values.chainCount))),
     },
     { label: t('build.chainJump'), value: short(chainJump) },
     { label: t('stat.maxLife'), value: trim(flags.maxLife ?? values.maxLife) },

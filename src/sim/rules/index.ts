@@ -7,6 +7,7 @@
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { eternalFlame } from './eternalFlame';
 import { icicle, prism } from './fanForms';
+import { gigantism } from './gigantism';
 import { glassCannon } from './glassCannon';
 import { iceFan } from './iceFan';
 import { chainBlast, farThrow, volcano } from './lobForms';
@@ -47,6 +48,7 @@ export const RULE_MODULES: {
   icicle,
   prism,
   sixCoils,
+  gigantism,
 };
 
 export const SIGNATURES: {

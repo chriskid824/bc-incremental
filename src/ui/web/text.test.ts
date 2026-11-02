@@ -7,6 +7,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { EmitterGrant } from '../../data/emitters';
+import { mentions, quotedNumbers } from '../../data/ruleNumbers';
 import { ALWAYS_STATS, STAT_IDS } from '../../data/stats';
 import type { Modifier } from '../../data/stats';
 import { DAMAGE_TAGS } from '../../data/tags';
@@ -189,6 +190,8 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'enemyRegen',
       'toughDropMult',
       'treasureRate',
+      'areaSize',
+      'bombRadius',
     ]);
   });
 
@@ -1183,5 +1186,46 @@ describe('the per-tick variables and the kill shards (C6b.3)', () => {
       linesOf(withEffects(fire, NOTABLE, { triggers: [coin] }), NOTABLE, locale)[0] ?? '';
     expect(line('en')).toMatch(/, ignoring shields, ignoring armour$/);
     expect(line('zh-TW')).toMatch(/，無視護盾，無視堅甲$/);
+  });
+});
+
+describe('E1: areaSize, bombRadius and 巨大化 (docs/v3 C4 design D29)', () => {
+  it('writes 範圍 and 爆炸半徑 as percentages in both locales', () => {
+    const lines = (mod: Modifier): string[] =>
+      LOCALES.map((locale) => modifierLine(mod, lookups[locale]));
+    expect(lines(flat('areaSize', 0.2))).toEqual(['+20% Area size', '範圍 +20%']);
+    expect(lines(inc('areaSize', 0.15))).toEqual(['15% increased Area size', '範圍提高 15%']);
+    expect(lines(flat('bombRadius', 0.25))).toEqual(['+25% Explosion radius', '爆炸半徑 +25%']);
+    expect(lines(inc('bombRadius', 0.1))).toEqual([
+      '10% increased Explosion radius',
+      '爆炸半徑提高 10%',
+    ]);
+    expect(lines(more('areaSize', 0.5))).toEqual(['50% more Area size', '範圍總增 50%']);
+  });
+
+  it("writes 巨大化's rule line from gd:268 in both locales, its sizeMult as ×2, V17's number", () => {
+    const line = (sizeMult: number, locale: Locale): string =>
+      linesOf(
+        withEffects(fire, NOTABLE, { rules: [{ id: 'gigantism', sizeMult }] }),
+        NOTABLE,
+        locale,
+      )[0] ?? '';
+    expect(LOCALES.map((locale) => line(2, locale))).toEqual([
+      'Area, explosion, projectile and drone size ×2; projectile, ice cone, chain jump and drone counts halved, rounded down, at least 1',
+      '範圍、爆炸、投射物、無人機的大小 ×2；數量類（投射物、冰錐、連鎖跳數、無人機）減半，一律無條件捨去，最少 1',
+    ]);
+    expect(line(3, 'en')).toMatch(/ size ×3; /);
+    expect(line(2.5, 'zh-TW')).toMatch(/的大小 ×2\.5；/);
+    // V17's numbers (quotedNumbers): a 巨大化 node's hand description must quote its ×sizeMult,
+    // the one number the generated line quotes too.
+    for (const sizeMult of [2, 3, 2.5]) {
+      expect(quotedNumbers({ id: 'gigantism', sizeMult })).toEqual([[`×${sizeMult}`]]);
+      for (const locale of LOCALES) {
+        expect(mentions(line(sizeMult, locale), `×${sizeMult}`)).toBe(true);
+      }
+    }
+    // Every other rule keeps the fallback until its node's hand description names it.
+    const glass = withEffects(fire, NOTABLE, { rules: [{ id: 'glassCannon', damageMore: 1 }] });
+    expect(linesOf(glass, NOTABLE, 'en')).toEqual(['Special rule (glassCannon)']);
   });
 });

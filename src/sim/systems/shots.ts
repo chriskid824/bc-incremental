@@ -54,7 +54,10 @@ export interface ShotPool extends ShotPoolState {
   count: number;
   /** Straight shots among them. */
   straight: number;
-  /** Hit radius; 0 for a point. */
+  /**
+   * Hit radius; 0 for a point, which every shot is as spawned. A straight shot's collision
+   * (pathHits) reads it × 巨大化's sizeFactor (BuildFlags.sizeFactor), the one place it is read.
+   */
   readonly radius: Float64Array;
   /** Multiplier of its hits. */
   readonly scale: Float64Array;
@@ -431,7 +434,8 @@ function pathHits(
 ): number {
   const shots = ctx.shots;
   const grid = ctx.grid;
-  const radius = shots.radius[s] as number;
+  // Its hit radius as the build sizes projectiles: × 巨大化's sizeFactor, here alone.
+  const radius = (shots.radius[s] as number) * ctx.build.flags.sizeFactor;
   const pad = ctx.shotPad + radius;
   const minX = (ax < bx ? ax : bx) - pad;
   const maxX = (ax < bx ? bx : ax) + pad;

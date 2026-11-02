@@ -488,6 +488,7 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         damageMult: finite,
       })
       .readonly(),
+    z.strictObject({ id: z.literal('gigantism'), sizeMult: finite }).readonly(),
   ]),
 );
 

@@ -501,7 +501,13 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const nearest = spec.order === 'nearest';
     const x = centerX(ctx, fx, entry);
     const y = centerY(ctx, fx, entry);
-    ctx.events.push({ type: 'burst', kind: 'explode', x, y, radius: spec.radius });
+    ctx.events.push({
+      type: 'burst',
+      kind: 'explode',
+      x,
+      y,
+      radius: sizeOf(ctx.build, spec.radius),
+    });
     hitArea(ctx, fx, entry, x, y, max, nearest);
   },
   nova(ctx, spec, fx, entry) {
@@ -509,7 +515,7 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const player = ctx.player;
     const x = atEvent ? centerX(ctx, fx, entry) : player.x;
     const y = atEvent ? centerY(ctx, fx, entry) : player.y;
-    ctx.events.push({ type: 'burst', kind: 'nova', x, y, radius: spec.radius });
+    ctx.events.push({ type: 'burst', kind: 'nova', x, y, radius: sizeOf(ctx.build, spec.radius) });
     hitArea(ctx, fx, entry, x, y, Infinity, false);
   },
   push(ctx, spec, fx, entry) {

@@ -31,6 +31,7 @@ import type { Num } from '../../core/num';
 import { ZERO } from '../../core/num';
 import { CENTER_EVENTS } from '../../data/triggers';
 import type { CompiledBuild } from '../build/compile';
+import { sizeOf } from '../build/size';
 import { FREEZE_LIST_RADIUS, LIST_MAX } from '../caps';
 import type { Enemy, FreezeLimiter, RunContext } from '../systems/context';
 import { fire, fireExcept } from './dispatch';
@@ -39,7 +40,6 @@ import { EVENT } from './types';
 import type { CompiledTrigger } from './types';
 
 const FREEZE = EVENT.freeze;
-const FREEZE_LIST_RADIUS_SQ = FREEZE_LIST_RADIUS ** 2;
 
 /** Freezes whose fusion payloads run, at most, in any FREEZE_PAYLOAD_WINDOW ticks. */
 export const FREEZE_PAYLOADS = 8;
@@ -137,7 +137,8 @@ export function emitCenterEvent(
  * The freeze of `enemy`, whose chill meter just filled (a normal enemy froze, a boss's meter
  * emptied), raised at depth `depth` by damage of trigger `origin` carrying `flags`: its event,
  * then the freeze center event at the enemy, with its list when something reads it: the enemy,
- * then up to LIST_MAX − 1 other alive enemies within FREEZE_LIST_RADIUS of it, in id order.
+ * then up to LIST_MAX − 1 other alive enemies within FREEZE_LIST_RADIUS of it, as the build
+ * sizes it (sizeOf), in id order.
  */
 export function raiseFreeze(
   ctx: RunContext,
@@ -154,7 +155,9 @@ export function raiseFreeze(
     // A hit or an effect can freeze while its caller walks a list of its own: the query takes
     // freezeTargets, which nothing else writes, and the triggers only queue.
     const near = center.freezeTargets;
-    const count = ctx.grid.within(enemy.x, enemy.y, FREEZE_LIST_RADIUS_SQ, near);
+    // An area around the frozen enemy, which the build sizes (sizeOf).
+    const radius = sizeOf(ctx.build, FREEZE_LIST_RADIUS);
+    const count = ctx.grid.within(enemy.x, enemy.y, radius * radius, near);
     const list = scratch.list;
     list[0] = enemy;
     let n = 1;
@@ -163,7 +166,7 @@ export function raiseFreeze(
       if (other !== enemy && other.alive) list[n++] = other;
     }
     scratch.listCount = n;
-    scratch.radius = FREEZE_LIST_RADIUS;
+    scratch.radius = radius;
   }
   emitCenterEvent(ctx, FREEZE, depth, origin, enemy, enemy.x, enemy.y, flags);
 }

@@ -15,7 +15,10 @@
  * passes over the explosion's victims. Then the explode center event at the landing point, with
  * the first LIST_MAX enemies of the blast as its list (src/sim/effects/centerEvents.ts), and the
  * bomb's fire zone (火地), in the signature's share of the zone pool (src/sim/systems/zones.ts).
- * Aiming and landing draw nothing; ties go to the first in source (id) order.
+ * Aiming and landing draw nothing; ties go to the first in source (id) order. A bomb's radius R,
+ * which its aim, its separation (2R) and its explosion all read, and its fire zone's radius are
+ * read through lobRadius: as the build sizes them (sizeOf), × bombRadius (爆炸半徑) and × 火山's
+ * radiusMult for a giant bomb, once (docs/v3 C4 design D29).
  *
  * Its forms (LobParams, src/sim/rules/lobForms.ts) change that: under 遠投 every Nth bomb counted
  * (em.shots) aims at the farthest enemy in the arena that the firing has not aimed at (aimFar),
@@ -36,7 +39,7 @@
  */
 
 import { enemySlow } from '../ailments/frost';
-import type { LobParams } from '../build/compile';
+import type { CompiledBuild, LobParams } from '../build/compile';
 import { sizeOf } from '../build/size';
 import { LIST_MAX } from '../caps';
 import { beginAttack, chainFrom, endAttack } from '../combat/chain';
@@ -71,6 +74,17 @@ export const LOB_FAR = 2;
  * a cap.
  */
 export const SALVO_SEPARATION = 2;
+
+/**
+ * A radius `r` of the lob's (its explosion's, LobSpec.radius, or its fire zone's) in `build`, of
+ * a bomb `grow` times its size (火山's radiusMult for a giant bomb, else 1): r as the build sizes
+ * it (sizeOf), × bombRadius (擴散's 爆炸半徑, which reaches nothing else), × grow. A bomb is a
+ * projectile and an explosion at once, and is sized once (docs/v3 C4 design D29, Q3/F12): its
+ * aim, its separation, its landing's explosion and its fire zone all read this one R.
+ */
+export function lobRadius(build: CompiledBuild, r: number, grow: number): number {
+  return sizeOf(build, r) * Math.max(0, build.values.bombRadius) * grow;
+}
 
 /**
  * Whether the bomb that will be counted shot `s` of the lob (em.shots after it) is thrown far:
@@ -152,8 +166,11 @@ export function fireLobRepeat(
 export function beginAim(ctx: RunContext, em: EmitterRuntime): void {
   const ls = ctx.sys.lob;
   const volcano = (ctx.build.signature.lob as LobParams).volcano;
-  const radius =
-    sizeOf(ctx.build, (em.spec as LobSpec).radius) * (volcano === null ? 1 : volcano.radiusMult);
+  const radius = lobRadius(
+    ctx.build,
+    (em.spec as LobSpec).radius,
+    volcano === null ? 1 : volcano.radiusMult,
+  );
   const separation = SALVO_SEPARATION * radius;
   ls.radiusSq = radius * radius;
   ls.sepSq = separation * separation;
@@ -375,7 +392,7 @@ export function land(ctx: RunContext, s: number, spec: LobSpec): void {
   const lob = build.signature.lob as LobParams;
   const volcano = lob.volcano;
   const grow = shots.form[s] === LOB_VOLCANO && volcano !== null ? volcano.radiusMult : 1;
-  const radius = sizeOf(build, spec.radius) * grow;
+  const radius = lobRadius(build, spec.radius, grow);
   beginAttack(ctx);
   const ls = ctx.sys.lob;
   const blast = ls.blast;
@@ -450,7 +467,7 @@ export function land(ctx: RunContext, s: number, spec: LobSpec): void {
       true,
       x,
       y,
-      sizeOf(build, zone.radius) * grow,
+      lobRadius(build, zone.radius, grow),
       Math.max(1, Math.round(zone.durationSec * PULSES_PER_SECOND)),
       zonePayload,
       zone.damagePctPerSec / PULSES_PER_SECOND,

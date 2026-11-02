@@ -192,8 +192,8 @@ export interface CenterEventScratch {
   x: number;
   y: number;
   /**
-   * The radius its list was taken in: FREEZE_LIST_RADIUS (src/sim/caps.ts) for a freeze's, the
-   * explosion's for an explode's. Read it only with a list.
+   * The radius its list was taken in, as the build sizes it (sizeOf): FREEZE_LIST_RADIUS
+   * (src/sim/caps.ts) for a freeze's, the explosion's for an explode's. Read it only with a list.
    */
   radius: number;
   /**

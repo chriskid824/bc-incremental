@@ -167,6 +167,17 @@ export const STAT_IDS = [
    * (src/data/triggers.ts; src/sim/effects/types.ts compileEffect).
    */
   'barrageCount',
+  /**
+   * 範圍: the multiplier on every area radius the build's attacks, effects and zones create, e.g.
+   * 1.2 = 120% (docs/v3/game-design-v3.md §2.1's 回響). Read once a compile into
+   * BuildFlags.areaFactor, which sizeOf multiplies by (src/sim/build/size.ts).
+   */
+  'areaSize',
+  /**
+   * 爆炸半徑 (擴散): the multiplier on the magma bomb's radius and its fire zone's alone, on top of
+   * areaSize (src/sim/emitters/lob.ts lobRadius).
+   */
+  'bombRadius',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -231,6 +242,8 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   toughDropMult: 1,
   treasureRate: 1,
   barrageCount: 0,
+  areaSize: 1,
+  bombRadius: 1,
 };
 
 /**

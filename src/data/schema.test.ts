@@ -47,6 +47,7 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   icicle: { id: 'icicle', every: 4, damagePct: 4 },
   prism: { id: 'prism', perPierce: 0.2, maxBonus: 2 },
   sixCoils: { id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55 },
+  gigantism: { id: 'gigantism', sizeMult: 2 },
 };
 
 describe('ModifierSchema', () => {
@@ -952,6 +953,10 @@ describe('RuleSpecSchema', () => {
       'an arc form parameter that is not a number',
       { id: 'sixCoils', coils: 6, targets: '2', damageMult: 0.55 },
     ],
+    ['巨大化 without its sizeMult (E1)', { id: 'gigantism' }],
+    ['巨大化 with a sizeMult that is not a number (E1)', { id: 'gigantism', sizeMult: '2' }],
+    ['巨大化 with an unknown key (E1)', { id: 'gigantism', sizeMult: 2, countMult: 0.5 }],
+    ['巨大化 with a sizeMult that is not finite (E1)', { id: 'gigantism', sizeMult: Infinity }],
     ['a non-numeric parameter', { id: 'eternalFlame', durationMore: '-0.5' }],
     [
       'an undefined optional parameter',

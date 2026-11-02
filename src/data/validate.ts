@@ -720,6 +720,12 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`sixCoils.damageMult must be > 0 (got ${rule.damageMult})`);
       }
       break;
+    case 'gigantism':
+      // A giant never shrinks: its factor keeps every radius it scales at its size or larger.
+      if (!(rule.sizeMult >= 1)) {
+        issues.push(`gigantism.sizeMult must be >= 1 (got ${rule.sizeMult})`);
+      }
+      break;
   }
   return issues;
 }
@@ -1394,6 +1400,7 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'icicle':
     case 'prism':
     case 'sixCoils':
+    case 'gigantism':
       return [];
   }
 }

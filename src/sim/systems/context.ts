@@ -22,7 +22,7 @@ import { statAt, staticInput } from '../build/eval';
 import type { EvalInput } from '../build/eval';
 import type { ModTable } from '../build/modTable';
 import { SCOPED_INDEX } from '../build/modTable';
-import { countOf } from '../build/size';
+import { countOf, sizeOf } from '../build/size';
 import {
   ailmentCredit,
   jumpCredit,
@@ -360,7 +360,7 @@ export interface RunContext {
   readonly frostImmuneTicks: number;
   readonly bossFrostLockTicks: number;
   readonly frozenDamageTaken: number;
-  /** A shatter's share of the victim's max life, and its radius. */
+  /** A shatter's share of the victim's max life, and its radius as the build sizes it (sizeOf). */
   readonly shatterDamage: number;
   readonly shatterRadius: number;
   /**
@@ -373,6 +373,11 @@ export interface RunContext {
    * looking for their rows' conversion parts.
    */
   readonly converts: boolean;
+  /**
+   * An attack's chain jumps, and its projectiles (the volley's, the lob's bombs, the fan's cones,
+   * a turret's shots), after the signature's and the rules' changes, as the build counts them
+   * (countOf, src/sim/build/size.ts: halved under 巨大化); the one place each is read.
+   */
   readonly chainCount: number;
   readonly chainRetention: number;
   readonly projectileCount: number;
@@ -858,7 +863,8 @@ export function createRunContext(
   // contact stage the thorns, the segment stage the segments and the drone stage the drones. A
   // strike picks its target as a periodic trigger does, from the player; a fan's icicle cones
   // (冰柱) and an aura's corona (日冕) take a payload of their own; an orbit's orbs, counted
-  // once for the run, each remember the enemies they hit.
+  // once for the run and none of 巨大化's four counts (not halved), each remember the enemies
+  // they hit.
   const emitters = build.emitters.map((spec, index) => {
     const payload = emitterPayload(build, spec, combatRng, index === 0 ? policy : null);
     return createEmitterRuntime(
@@ -872,9 +878,7 @@ export function createRunContext(
         : spec.kind === 'aura'
           ? coronaPayload(build, spec, payload)
           : null,
-      spec.kind === 'orbit'
-        ? createOrbMemory(countOf(build, spec.count + Math.floor(values.orbitCount)))
-        : null,
+      spec.kind === 'orbit' ? createOrbMemory(spec.count + Math.floor(values.orbitCount)) : null,
     );
   });
   // The drone emitters' summons, placed once in emitter order up to the summon cap, which only a
@@ -1076,12 +1080,12 @@ export function createRunContext(
     bossFrostLockTicks: Math.max(0, flags.bossLockTicks, flags.bossMinGapTicks),
     frozenDamageTaken: values.frozenDamageTaken,
     shatterDamage: values.shatterDamage,
-    shatterRadius: Math.max(0, values.shatterRadius),
+    shatterRadius: sizeOf(build, Math.max(0, values.shatterRadius)),
     hitsFrost,
     converts: build.conversions.length !== 0,
-    chainCount: Math.max(0, values.chainCount),
+    chainCount: countOf(build, Math.max(0, values.chainCount)),
     chainRetention,
-    projectileCount: Math.max(1, values.projectileCount),
+    projectileCount: countOf(build, Math.max(1, values.projectileCount)),
     chainRangeSq: Math.max(0, values.chainRange) ** 2,
     projectileStep: values.projectileSpeed * DT,
     shardGain: values.shardGain,

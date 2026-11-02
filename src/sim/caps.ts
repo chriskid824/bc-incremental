@@ -37,7 +37,10 @@ export const SMALL_PROJECTILE_TICKS = 120;
  * the bomb's blast.
  */
 export const LIST_MAX = 5;
-/** How far from a frozen enemy the others of its freeze's list are (raiseFreeze). */
+/**
+ * How far from a frozen enemy the others of its freeze's list are (raiseFreeze), before the build
+ * sizes it (sizeOf, src/sim/build/size.ts).
+ */
 export const FREEZE_LIST_RADIUS = 90;
 /**
  * Effect zones live at once (groundZone, src/sim/systems/zones.ts). A new zone past it evicts
