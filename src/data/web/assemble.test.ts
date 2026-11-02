@@ -305,8 +305,9 @@ describe('loadContent (§4.8; N-6, P8)', () => {
     const content = web.loadContent();
     expect(vi.mocked(contentIssues)).toHaveBeenCalledTimes(1);
     expect(Object.keys(content.characters)).toEqual(['fire', 'ice', 'lightning', 'summon']);
-    // Every character's center is null until its batch: no web is assembled for any of them.
-    expect(vi.mocked(assembled)).not.toHaveBeenCalled();
+    // Validation assembles the web of each character with a center: from B1, 熔核's.
+    const characters = new Set(vi.mocked(assembled).mock.calls.map((call) => call[1]));
+    expect([...characters]).toEqual(['fire']);
     expect(web.loadContent()).toBe(content);
     expect(web.loadContent()).toBe(content);
     expect(vi.mocked(contentIssues)).toHaveBeenCalledTimes(1);

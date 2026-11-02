@@ -13,7 +13,11 @@ import { fixtureContent } from '../../data/web/testing';
 import { getLocale, setLocale } from '../../i18n';
 import type { Locale } from '../../i18n';
 import { textIssues } from './check';
-import { fixtureLookups, fixtureMessages } from './testing';
+import { fixtureLookups, fixtureMessages, shippedMessages } from './testing';
+
+/** The shipped messages without the registered content's keys, which name B1's nodes. */
+const shippedLookups = () =>
+  fixtureLookups({ en: shippedMessages('en'), 'zh-TW': shippedMessages('zh-TW') });
 
 const content = fixtureContent();
 const webs: AssembledWeb[] = SCOPES.flatMap((scope) =>
@@ -67,7 +71,7 @@ describe('textIssues on the fixture (§4.8, F45)', () => {
   });
 
   it('reports the shipped messages without the content keys on each key the content needs', () => {
-    const issues = textIssues([fire]);
+    const issues = textIssues([fire], shippedLookups());
     expect(issues).toContain(
       "key 'web.fusion.fire.poison.title' is missing in src/i18n/web.en.json; npm run content -- --stubs writes a TODO stub for each missing key",
     );
@@ -76,8 +80,8 @@ describe('textIssues on the fixture (§4.8, F45)', () => {
     );
   });
 
-  it("reads each locale's own merged messages by default (R6): only content keys are missing", () => {
-    const issues = textIssues([fire]);
+  it("reads each locale's own merged messages (R6): only content keys are missing", () => {
+    const issues = textIssues([fire], shippedLookups());
     expect(issues.length).toBeGreaterThan(0);
     for (const issue of issues) {
       expect(issue).toMatch(

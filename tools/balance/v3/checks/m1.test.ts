@@ -183,22 +183,17 @@ describe('m1 (the M1 diffs)', () => {
     ]);
   });
 
-  it('reports pass or FAIL on the registered content before B1, exempt from noCenter (lead ruling U15)', () => {
-    expect(plan.characters).toEqual([]);
-    expect(plan.units).toEqual(m1Units());
-    expect(plan.units.map((unit) => unit.id)).toEqual([m1UnitId('fingerprint'), m1UnitId('probe')]);
+  it('reports pass or FAIL on the registered content, alongside 熔核 from B1 (lead ruling U15)', () => {
+    expect(plan.characters).toEqual(['fire']);
+    expect(plan.units).toEqual(expect.arrayContaining(m1Units()));
+    expect(m1Units().map((unit) => unit.id)).toEqual([m1UnitId('fingerprint'), m1UnitId('probe')]);
     const rows = evaluate(plan, m1Results(stubTsx(BASELINE).run));
     expect(rows.filter((row) => row.id === 'm1').map((row) => [row.subject, row.status])).toEqual([
       ['fingerprint', 'pass'],
       ['probe', 'pass'],
       ['probe bytes', 'info'],
     ]);
-    // Every other check, the fuzz with no web to fuzz among them, waits for B1's center.
-    const others = rows.filter((row) => row.id !== 'm1');
-    expect(others.length).toBeGreaterThan(0);
-    expect(others.filter((row) => row.reason?.id !== 'noCenter')).toEqual([]);
-    expect(others.map((row) => row.id)).toContain('fuzz');
-    expect(exitCodeOf(rows)).toBe(0);
+    expect(rows.filter((row) => row.reason?.id === 'noCenter')).toEqual([]);
     const failed = evaluate(plan, m1Results(stubTsx(scaled(1.06)).run));
     expect(failed.find((row) => row.subject === 'probe')?.status).toBe('FAIL');
     expect(exitCodeOf(failed)).toBe(1);

@@ -125,18 +125,19 @@ describe('npm run checks', () => {
     expect(readdirSync(root)).toEqual([]);
   });
 
-  it('exits 0 on registered content before B1, every check n/a and why, its outputs written', async () => {
+  it('runs on the registered content from B1, no check noCenter, its outputs written', async () => {
     const io = capture();
-    expect(await main(['--out', root], io, fixed())).toBe(0);
+    const code = await main(['--out', root], io, fixed({ run: deathsAt(30) }));
     expect(readdirSync(root).sort()).toEqual(OUTPUTS);
-    const report = read('report.md');
-    expect(report).toContain('**0 FAIL · 0 pass · 0 info · 6 n/a**');
-    expect(report).toContain(
-      '- **noCenter** (6): until B1 registers 熔核, the first character with a center',
-    );
-    expect(report.match(/\| n\/a \(noCenter\) \|$/gm)).toHaveLength(6);
-    expect(read('runs.csv').trimEnd().split('\n')).toHaveLength(1);
-    expect(JSON.parse(read('checks.json')).header).toMatchObject({
+    const { header, results } = JSON.parse(read('checks.json')) as {
+      header: Record<string, unknown>;
+      results: { status: string; reason?: { id: string } }[];
+    };
+    expect(code).toBe(results.some((row) => row.status === 'FAIL') ? 1 : 0);
+    expect(results.filter((row) => row.reason?.id === 'noCenter')).toEqual([]);
+    expect(read('report.md')).not.toContain('noCenter');
+    expect(read('runs.csv').trimEnd().split('\n').length).toBeGreaterThan(1);
+    expect(header).toMatchObject({
       ref: 'claude/v3-engine',
       commit: '0123abc',
       content: 'registered',
@@ -206,7 +207,7 @@ describe('npm run checks', () => {
   it('appends report.md to --summary, cut at SUMMARY_MAX_BYTES with its note past it', async () => {
     const summary = join(root, 'summary.md');
     writeFileSync(summary, '## an earlier step\n');
-    expect(await main(['--out', root, '--summary', summary], capture(), fixed())).toBe(0);
+    expect(await main(['--out', root, '--summary', summary], capture(), fixed())).toBeLessThan(2);
     expect(readFileSync(summary, 'utf8')).toBe(`## an earlier step\n${read('report.md')}`);
 
     // A ref of 50,000 lines makes report.md longer than the summary may be.
@@ -214,7 +215,7 @@ describe('npm run checks', () => {
     writeFileSync(summary, '');
     expect(
       await main(['--out', root, '--summary', summary], capture(), fixed({ ref: () => ref })),
-    ).toBe(0);
+    ).toBeLessThan(2);
     const report = read('report.md');
     expect(Buffer.byteLength(report)).toBeGreaterThan(SUMMARY_MAX_BYTES);
     const cut = readFileSync(summary, 'utf8');
@@ -233,7 +234,7 @@ describe('npm run checks', () => {
     vi.stubEnv('GITHUB_HEAD_REF', '');
     vi.stubEnv('GITHUB_REF_NAME', '');
     const deps: ChecksDeps = { now: () => new Date(Date.UTC(2026, 9, 28, 3, 17)) };
-    expect(await main(['--out', root], capture(), deps)).toBe(0);
+    expect(await main(['--out', root], capture(), deps)).toBeLessThan(2);
     expect(JSON.parse(read('checks.json')).header).toMatchObject({
       commit: 'unknown',
       ref: 'unknown',

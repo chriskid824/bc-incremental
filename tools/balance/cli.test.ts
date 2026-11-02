@@ -218,14 +218,13 @@ describe('balance CLI', () => {
     expect(demo.every((config) => config.scope === 'demoA')).toBe(true);
   });
 
-  it('exits 2 for a character without a center in the registered content, 0 for all', async () => {
-    expect(characterOptions(['--character', 'fire']).content).toBe('registered');
+  it('exits 2 for a character without a center in the registered content', async () => {
+    expect(characterOptions(['--character', 'ice']).content).toBe('registered');
     const one = capture();
-    expect(await main(['--character', 'fire'], one)).toBe(2);
-    expect(one.lines.join('\n')).toMatch(/fire has no center.*before B1.*--content fixture/s);
-    const all = capture();
-    expect(await main(['--character', 'all'], all)).toBe(0);
-    expect(all.lines.join('\n')).toMatch(/^No character has a center in the registered content/);
+    expect(await main(['--character', 'ice'], one)).toBe(2);
+    expect(one.lines.join('\n')).toMatch(
+      /ice has no center in the registered content \(built: fire\).*--content fixture/s,
+    );
   });
 
   it('refuses what character sessions cannot run', async () => {

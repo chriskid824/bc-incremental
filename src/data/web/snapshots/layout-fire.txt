@@ -1,0 +1,136 @@
+fire.center.furnace.detonate -497 379
+fire.center.furnace.far-throw -577 241
+fire.center.furnace.heatwave -277 160
+fire.center.furnace.mastery -624 360
+fire.center.furnace.r1 -104 60
+fire.center.furnace.r2 -191 110
+fire.center.furnace.r3 -404 141
+fire.center.furnace.r4 -490 191
+fire.center.furnace.r5 -324 279
+fire.center.furnace.r6 -410 329
+fire.center.main.c1 410 -710
+fire.center.main.c2 820 0
+fire.center.main.c3 410 710
+fire.center.main.c4 -410 710
+fire.center.main.c5 -820 0
+fire.center.main.c6 -410 -710
+fire.center.main.eternal-flame 710 -410
+fire.center.main.signature 0 0
+fire.center.main.threshold 0 820
+fire.center.main.volcano -710 -410
+fire.center.spread.chain-blast 577 241
+fire.center.spread.ember-shot 497 379
+fire.center.spread.mastery 624 360
+fire.center.spread.pandemic 277 160
+fire.center.spread.r1 104 60
+fire.center.spread.r2 191 110
+fire.center.spread.r3 324 279
+fire.center.spread.r4 410 329
+fire.center.spread.r5 404 141
+fire.center.spread.r6 490 191
+fire.center.stoke.kindle 0 -320
+fire.center.stoke.mastery 0 -720
+fire.center.stoke.r1 0 -120
+fire.center.stoke.r2 0 -220
+fire.center.stoke.r3 80 -420
+fire.center.stoke.r4 80 -520
+fire.center.stoke.r5 -80 -420
+fire.center.stoke.r6 -80 -520
+fire.center.stoke.smoulder 80 -620
+fire.center.stoke.white-heat -80 -620
+fusion.fire.crit.core 592 905
+fusion.fire.crit.mastery 792 1252
+fusion.fire.crit.r1 642 992
+fusion.fire.crit.r2 692 1079
+fusion.fire.crit.r3 742 1165
+fusion.fire.poison.core 488 -965
+fusion.fire.poison.mastery 688 -1312
+fusion.fire.poison.r1 538 -1052
+fusion.fire.poison.r2 588 -1139
+fusion.fire.poison.r3 638 -1225
+hub.defense.r1 480 -831
+hub.defense.r2 831 -480
+hub.defense.r3 960 0
+hub.defense.r4 831 480
+hub.defense.r5 856 182
+hub.defense.second-life 585 -650
+hub.defense.wave-shield 832 -270
+hub.echo.echo -856 -182
+hub.echo.kill-blast -650 -585
+hub.echo.multicast -832 270
+hub.echo.nova -270 -832
+hub.echo.r1 -831 480
+hub.echo.r2 -960 0
+hub.echo.r3 -831 -480
+hub.echo.r4 -480 -831
+hub.economy.elite-bounty 270 832
+hub.economy.r1 480 831
+hub.economy.r2 0 960
+hub.economy.r3 -480 831
+hub.economy.r4 -182 856
+hub.economy.treasure-sense -585 650
+hub.might.might 0 -960
+hub.rules.gigantism 650 585
+hub.rules.glass-cannon 182 -856
+outer.crit.heavy.armour-break 1140 1824
+outer.crit.heavy.execute 1108 1670
+outer.crit.heavy.mastery 1258 1929
+outer.crit.heavy.r1 1008 1496
+outer.crit.heavy.r2 1058 1583
+outer.crit.heavy.r3 1202 1731
+outer.crit.heavy.r4 1252 1818
+outer.crit.main.entry 850 1472
+outer.crit.main.shatter-crit 1125 1949
+outer.crit.main.steady-aim 1242 2031
+outer.crit.main.threshold 1138 2091
+outer.crit.precision.first-blood 1010 1899
+outer.crit.precision.lock-on 892 1795
+outer.crit.precision.mastery 1042 2054
+outer.crit.precision.r1 792 1621
+outer.crit.precision.r2 842 1708
+outer.crit.precision.r3 898 1906
+outer.crit.precision.r4 948 1993
+outer.poison.contagion.contagion 1010 -1899
+outer.poison.contagion.mastery 1042 -2054
+outer.poison.contagion.r1 792 -1621
+outer.poison.contagion.r2 842 -1708
+outer.poison.contagion.r3 898 -1906
+outer.poison.contagion.r4 948 -1993
+outer.poison.contagion.toxic-cloud 892 -1795
+outer.poison.main.entry 850 -1472
+outer.poison.main.lethal-toxin 1138 -2091
+outer.poison.main.neurotoxin 1125 -1949
+outer.poison.main.threshold 1242 -2031
+outer.poison.virulence.double-dose 1108 -1670
+outer.poison.virulence.mastery 1258 -1929
+outer.poison.virulence.r1 1008 -1496
+outer.poison.virulence.r2 1058 -1583
+outer.poison.virulence.r3 1202 -1731
+outer.poison.virulence.r4 1252 -1818
+outer.poison.virulence.seep 1140 -1824
+board fire.center label 0 0
+board fusion.fire.aura label -588 1139
+board fusion.fire.barrage label -1139 -588
+board fusion.fire.bleed label 1079 -692
+board fusion.fire.combo label 1139 588
+board fusion.fire.crit label 692 1079
+board fusion.fire.greed label -692 -1079
+board fusion.fire.ice label 60 1280
+board fusion.fire.lightning label 1280 -60
+board fusion.fire.poison label 588 -1139
+board fusion.fire.summon label -1280 60
+board fusion.fire.thorns label -1079 692
+board hub label 0 -960
+board outer.aura label -975 1689 collapsed -975 1689 200
+board outer.barrage label -1689 -975 collapsed -1689 -975 200
+board outer.bleed label 1689 -975 collapsed 1689 -975 200
+board outer.combo label 1689 975 collapsed 1689 975 200
+board outer.crit label 975 1689 collapsed 975 1689 200
+board outer.greed label -975 -1689 collapsed -975 -1689 200
+board outer.ice label 0 1950 collapsed 0 1950 200
+board outer.lightning label 1950 0 collapsed 1950 0 200
+board outer.poison label 975 -1689 collapsed 975 -1689 200
+board outer.summon label -1950 0 collapsed -1950 0 200
+board outer.thorns label -1689 975 collapsed -1689 975 200
+edges 127
+bounds -2150 -2091 2150 2150

@@ -64,12 +64,13 @@ describe('npm run snapshots (D17, D24)', () => {
     });
   });
 
-  it('keeps the registered set, empty until B1, up to date', () => {
+  it('keeps the registered set up to date: from B1, the ids and the 熔核 layout', () => {
     const content = loadContent();
     const stored = storedSet(SNAPSHOTS);
-    expect(Object.fromEntries(snapshotTexts(content))).toEqual(
-      Object.fromEntries(FILES.map((name) => [name, ''])),
-    );
+    const texts = Object.fromEntries(snapshotTexts(content));
+    expect(texts['ids.txt']).not.toBe('');
+    expect(texts['layout-fire.txt']).not.toBe('');
+    for (const c of ['ice', 'lightning', 'summon']) expect(texts[`layout-${c}.txt`]).toBe('');
     expect(snapshotIssues(content, stored)).toEqual([]);
     expect(snapshotWrites(content, stored)).toEqual({ files: new Map(), refused: [] });
   });
