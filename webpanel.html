@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web panel</title>
+    <!-- Dev-only page of the v3 web panel (npm run dev, then /webpanel.html; see
+         src/app/webPanelDev.ts for its URL parameters). It is not a build input. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0d12;
+      }
+      #panel {
+        position: fixed;
+        inset: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="panel"></div>
+    <script type="module" src="/src/app/webPanelDev.ts"></script>
+  </body>
+</html>
