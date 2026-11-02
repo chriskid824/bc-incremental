@@ -209,8 +209,9 @@ export function createSimulation(
    *    pool's shots move and hit, all in id order (projectiles.ts, shots.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
    *    triggers, onKill hooks, drops and splits (death.ts) resolve inline.
-   * 8. segments: the segment emitters due judge, in emitter order, linking the shocked
-   *    enemies and hitting the enemies on the links (segments.ts).
+   * 8. segments: the segment emitters due judge, in emitter order, linking their endpoints (the
+   *    shocked enemies, or the drone pool's drones or rows) and hitting the enemies on the links
+   *    (segments.ts).
    * 9. zones: the ground zones due pulse, in id order, and the ended ones are released
    *    (zones.ts).
    * 10. ailments: burn records expire; every BURN_TICK_INTERVAL, damage over time (burn, poison,

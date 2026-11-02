@@ -21,18 +21,20 @@ export interface ThornsGrant {
 }
 
 /**
- * A segment (雷網): every periodSec, each endpoint links to its `links` nearest other endpoints
- * within `range`, and every enemy on a link takes one hit and shockStacks shock stacks
- * (src/sim/systems/segments.ts). The hit is tagged hit, lightning and area, can crit and rolls
- * no ailments.
+ * A segment (雷網, 雷射柵欄, 雷網蜂): every periodSec, each endpoint links to its `links` nearest
+ * other endpoints within `range`, and every enemy on a link takes one hit and shockStacks shock
+ * stacks (src/sim/systems/segments.ts). The hit is tagged hit, lightning and area, and minion
+ * too between drones or summons, can crit and rolls no ailments.
  */
 export interface SegmentGrant {
   readonly kind: 'segment';
   /**
-   * What the links join: the alive shocked enemies. Drones and summons come with them in C5,
-   * and validation rejects them until then.
+   * What the links join: 'shocked', the alive shocked enemies; 'drones', the drone pool's drones
+   * (every drone emitter's, the hive's signature drones among them, docked or flying; not its
+   * turrets or spirits); 'summons', every row of the pool: drones, turrets and the spirits that
+   * spawnDrone effects add, as the summon cap counts them.
    */
-  readonly endpoints: 'shocked';
+  readonly endpoints: 'shocked' | 'drones' | 'summons';
   /** Links each endpoint makes: 1 or 2; SEGMENT_DEFAULTS.links when omitted. */
   readonly links?: number;
   /** Longest link; SEGMENT_DEFAULTS.range when omitted. */
@@ -43,6 +45,13 @@ export interface SegmentGrant {
   readonly shockStacks?: number;
   /** Seconds between its judgements; SEGMENT_DEFAULTS.periodSec when omitted. */
   readonly periodSec?: number;
+  /**
+   * Seconds between its pairings, for drone or summon endpoints (雷網蜂's 0.5): a judgement
+   * between two pairings keeps the links the last one made while both their rows live, wherever
+   * they move. 0, SEGMENT_DEFAULTS.pairPeriodSec, pairs at every judgement; shocked endpoints
+   * come and go with their shock, so they always do.
+   */
+  readonly pairPeriodSec?: number;
 }
 
 /**
@@ -167,6 +176,7 @@ export const SEGMENT_DEFAULTS = {
   damagePct: 0.1,
   shockStacks: 1,
   periodSec: 0.25,
+  pairPeriodSec: 0,
 } as const;
 
 /** A strike grant's fields when it omits them: no area, no chain, no shock. */

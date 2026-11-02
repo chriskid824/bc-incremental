@@ -202,6 +202,7 @@ describe('segment grants', () => {
       range: 200,
       shockStacks: 1,
       periodSec: 0.25,
+      pairTicks: 0,
     });
     const full: SegmentGrant = {
       kind: 'segment',

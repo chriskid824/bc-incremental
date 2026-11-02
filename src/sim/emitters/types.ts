@@ -23,7 +23,7 @@ import {
   STRIKE_DEFAULTS,
   THORNS_DAMAGE_PCT,
 } from '../../data/emitters';
-import type { EmitterGrant } from '../../data/emitters';
+import type { EmitterGrant, SegmentGrant } from '../../data/emitters';
 import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { TargetSelector } from '../../data/triggers';
@@ -113,18 +113,25 @@ export interface ThornsSpec extends EmitterBase {
 }
 
 /**
- * A segment grant (雷網): every periodSec, the alive shocked enemies each link to their `links`
- * nearest others within `range`, and every enemy on a link takes one hit, then shockStacks shock
- * stacks (src/sim/systems/segments.ts).
+ * A segment grant (雷網, 雷射柵欄, 雷網蜂): every periodSec, its endpoints (the alive shocked
+ * enemies, the drone pool's drones, or every row of the pool) each link to their `links` nearest
+ * others within `range`, and every enemy on a link takes one hit, then shockStacks shock stacks
+ * (src/sim/systems/segments.ts).
  */
 export interface SegmentSpec extends EmitterBase {
   readonly kind: 'segment';
-  readonly endpoints: 'shocked';
+  readonly endpoints: SegmentGrant['endpoints'];
   /** 1 or 2. */
   readonly links: number;
   readonly range: number;
   readonly shockStacks: number;
   readonly periodSec: number;
+  /**
+   * Ticks between the pairings of drone or summon endpoints, periodTicks(1 / pairPeriodSec): its
+   * judgements keep the last pairing's links until EmitterRuntime.pairTimer reaches it. 0 pairs
+   * at every judgement, as shocked endpoints always do.
+   */
+  readonly pairTicks: number;
 }
 
 /**
@@ -226,14 +233,17 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
         rollsAilments: true,
         canCrit: true,
       };
-    case 'segment':
-      // Its hits roll no ailments: its shock is its own, given after each hit.
+    case 'segment': {
+      // Its hits roll no ailments: its shock is its own, given after each hit. Links between
+      // drones or summons are theirs, so their hits are minion hits too (D14: minion covers
+      // drones, turrets and spirits).
+      const pair = grant.pairPeriodSec ?? SEGMENT_DEFAULTS.pairPeriodSec;
       return {
         kind: 'segment',
         signature: false,
         source,
         damagePct: grant.damagePct ?? SEGMENT_DEFAULTS.damagePct,
-        tags: TAG.hit | TAG.lightning | TAG.area,
+        tags: TAG.hit | TAG.lightning | TAG.area | (grant.endpoints === 'shocked' ? 0 : TAG.minion),
         chains: false,
         rollsAilments: false,
         canCrit: true,
@@ -242,7 +252,9 @@ export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
         range: grant.range ?? SEGMENT_DEFAULTS.range,
         shockStacks: grant.shockStacks ?? SEGMENT_DEFAULTS.shockStacks,
         periodSec: grant.periodSec ?? SEGMENT_DEFAULTS.periodSec,
+        pairTicks: pair > 0 ? periodTicks(1 / pair) : 0,
       };
+    }
     case 'strike':
       return {
         kind: 'strike',
@@ -715,6 +727,12 @@ export interface EmitterRuntime {
    */
   timer: number;
   /**
+   * A segment's second timer (SegmentSpec.pairTicks > 0): the ticks since its last pairing,
+   * which each of its judgements advances by its interval before it tests it. 0 for the other
+   * kinds and for a segment that pairs at every judgement, whose judgements never touch it.
+   */
+  pairTimer: number;
+  /**
    * A strike's chain payload: its payload's, whose jump hits shock by its shockStacks
    * (Payload.shockOnHit), without a chain policy. Null for the other kinds.
    */
@@ -789,6 +807,7 @@ export function createEmitterRuntime(
     interval,
     acc: 0,
     timer: spec.kind === 'segment' ? -((3 + 4 * index) % PHASE_TICKS) : 0,
+    pairTimer: 0,
     chainPayload: spec.kind === 'strike' ? strikeChainPayload(payload, spec.shockStacks) : null,
     selector,
     targets: spec.kind === 'strike' || spec.kind === 'aura' || spec.kind === 'orbit' ? [] : null,

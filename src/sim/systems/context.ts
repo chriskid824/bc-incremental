@@ -919,9 +919,13 @@ export function createRunContext(
   const projectiles: Projectile[] = [];
   const shots = createShotPool();
   const zones = createZonePool(build);
-  const segments = createSegmentState(emitters.filter((em) => em.spec.kind === 'segment'));
   // Its turrets' targets go through ctx.shootable, read once ctx exists.
   const drones = createDronePool(layout, (enemy) => ctx.shootable(enemy));
+  // The pairs a segment keeps are sized by the pool's slots.
+  const segments = createSegmentState(
+    emitters.filter((em) => em.spec.kind === 'segment'),
+    drones.rows,
+  );
   const bullets = createBulletPool(
     ENEMY_IDS,
     values.reflectBullets > 0,
