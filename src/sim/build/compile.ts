@@ -31,6 +31,7 @@ import { jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import { TRIGGER_EVENTS } from '../../data/triggers';
 import type { EffectSpec, TriggerSpec } from '../../data/triggers';
+import { BLEED_RING_MAX_STACKS } from '../ailments/rings';
 import {
   compileEffect,
   compileTrigger,
@@ -76,6 +77,13 @@ export interface BuildFlags {
   /** Bleed damage multiplier while the bleeding enemy moves (docs/v3/game-design-v3.md §4.3). */
   bleedMoveMult: number;
   /**
+   * Bleed stacks (大出血, gd:401; C3D:1760-1767): bleeds live in DoT rings
+   * (src/sim/ailments/rings.ts RING_BLEED) instead of the strongest-only slot, at most
+   * bleedMaxStacks live stacks an enemy, read only when bleedRings is set.
+   */
+  bleedRings: boolean;
+  bleedMaxStacks: number;
+  /**
    * Frost (src/sim/ailments/frost.ts, docs/v3/game-design-v3.md §1.3): ticks after a freeze
    * during which frost adds nothing; ticks a boss's meter stays locked once it fills, at least
    * bossMinGapTicks; and a slow every enemy always has, 0 to 1. Absolute Zero sets them.
@@ -93,8 +101,9 @@ export interface BuildFlags {
   /**
    * The run keeps the combo stacks (RunContext.sys.combo, src/sim/systems/combo.ts;
    * docs/v3/game-design-v3.md §4.5): compileBuild sets it once the modules have run when a
-   * modifier scales on comboStacks or an effect is a comboStack, and a module that reads the
-   * stacks otherwise sets it itself. False: the stacks stay 0 and nothing counts them.
+   * modifier scales on comboStacks, an effect is a comboStack, the build has 殘影's comboEcho
+   * (C6b.4) or bulletDodgeCombo is above 0 (節奏閃避, C7b); a module that reads the stacks
+   * otherwise sets it itself. False: the stacks stay 0 and nothing counts them.
    */
   combo: boolean;
   /**
@@ -377,6 +386,8 @@ export function compileBuild(
     maxLife: null,
     burnRings: false,
     bleedMoveMult: 3,
+    bleedRings: false,
+    bleedMaxStacks: BLEED_RING_MAX_STACKS,
     frostImmuneTicks: 180,
     bossLockTicks: 252,
     bossMinGapTicks: 0,
@@ -564,11 +575,12 @@ export function compileBuild(
   }
   // The run counts the combo stacks only for a build that reads or adds them (lead ruling K1),
   // 殘影 included, which reads them for 「滿層」, so every other build's run stays the same bit
-  // for bit.
+  // for bit. 節奏閃避 reads them (C7b).
   flags.combo ||=
     scoped.some((mod) => mod.scaling?.per === 'comboStacks') ||
     effects.some((fx) => fx.spec.kind === 'comboStack') ||
-    flags.comboEcho !== null;
+    flags.comboEcho !== null ||
+    values.bulletDodgeCombo > 0;
   // So too the per-tick variables (lead ruling G2).
   flags.shardsHeld ||= scoped.some((mod) => mod.scaling?.per === 'shardsHeld');
   flags.enemiesInAura ||= scoped.some((mod) => mod.scaling?.per === 'enemiesInAura');

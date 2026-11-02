@@ -2,10 +2,11 @@
  * Ailments system (docs/v3/implementation-plan-v3.md §2.5, §2.15): burn records expire every
  * tick, and every BURN_TICK_INTERVAL ticks (step k = tick / 15) each alive enemy, in id order,
  * takes its damage over time: burn (its records and, under eternalFlame, its burn rings), then
- * poison (its rings), then bleed, each while it is still alive. Each kind's step is one damage
- * instance: × takenMult when shocked or frozen, through the modifyDamage hooks, then hp, the
- * tallies of the sources it is credited to and its event (burnTick, dotTick). Then the enemy's
- * ailmentTick triggers fire. The ailments themselves live in src/sim/ailments/.
+ * poison (its rings), then bleed (its strongest-only slot, or under 大出血's bleedRings its bleed
+ * rings, weighed by its moves in the step), each while it is still alive. Each kind's step is one
+ * damage instance: × takenMult when shocked or frozen, through the modifyDamage hooks, then hp,
+ * the tallies of the sources it is credited to and its event (burnTick, dotTick). Then the
+ * enemy's ailmentTick triggers fire. The ailments themselves live in src/sim/ailments/.
  *
  * A kill by damage over time carries the enemy's ailment depth (Enemy.ailDepth) and no origin:
  * rule 3 is about direct damage only. A step that empties a v3 onion's shell with one left
@@ -19,7 +20,7 @@ import type { TagMask } from '../../data/tags';
 import { syncRingStacks } from '../ailments/apply';
 import { stepBleed } from '../ailments/bleed';
 import { accrued, BURN_TICK_INTERVAL, expireBurns } from '../ailments/records';
-import { RING_BURN, RING_POISON } from '../ailments/rings';
+import { RING_BLEED, RING_BURN, RING_POISON } from '../ailments/rings';
 import { takenMult } from '../ailments/shock';
 import { AILMENT_ORDINAL, CENTER, SOURCE_CLASS_ORDINAL } from '../build/sources';
 import { tally } from '../combat/hit';
@@ -128,6 +129,40 @@ function stepRings(ctx: RunContext, enemy: Enemy, first: number, k: number): Num
 }
 
 /**
+ * Step k of the enemy's bleed rings under 大出血's bleedRings (C3D:1764): each ring's damage, as
+ * stepRings deals it, × (bleedStationaryMult × (15 − m) + bleedMoveMult × m) / 15 for the whole
+ * step, m the ticks the enemy moved in it while it held a bleed ring (Enemy.bleedMovedTicks,
+ * which this resets), and each ring's weighed share added to the step's parts. Exact when the
+ * two rates are equal, as under 大出血 (bleedMoveMult 1). A ring past its last step goes back to
+ * the pool; the enemy keeps no bleed end or stack count.
+ */
+function stepBleedRings(ctx: RunContext, enemy: Enemy, k: number): Num {
+  const m = enemy.bleedMovedTicks;
+  enemy.bleedMovedTicks = 0;
+  const w =
+    (ctx.bleedStationaryMult * (BURN_TICK_INTERVAL - m) + ctx.bleedMoveMult * m) /
+    BURN_TICK_INTERVAL;
+  const pool = ctx.rings;
+  const rings = enemy.rings;
+  let sum = ZERO;
+  for (let slot = RING_BLEED; slot < RING_BLEED + 3; slot++) {
+    const r = rings[slot] as number;
+    if (r < 0) continue;
+    const dealt = mul(pool.step(r, k), w);
+    if (gt(dealt, ZERO)) {
+      sum = add(sum, dealt);
+      addPart(ctx, pool.credit[r] as number, dealt);
+    }
+    if (pool.ended(r, k)) {
+      pool.release(r);
+      rings[slot] = -1;
+      enemy.dotRings--;
+    }
+  }
+  return sum;
+}
+
+/**
  * The step of an enemy with rings, a bleed or mixed burn credits: burn, poison, bleed, each
  * while it lives. `records` is its burn records' damage this step. True when it died.
  */
@@ -143,6 +178,11 @@ function stepDots(ctx: RunContext, enemy: Enemy, k: number, records: Num): boole
     parts.n = 0;
     const poison = stepRings(ctx, enemy, RING_POISON, k);
     if (gt(poison, ZERO) && dealDot(ctx, enemy, POISON, poison, -1)) return true;
+    if (ctx.build.flags.bleedRings) {
+      parts.n = 0;
+      const bleed = stepBleedRings(ctx, enemy, k);
+      if (gt(bleed, ZERO) && dealDot(ctx, enemy, BLEED, bleed, -1)) return true;
+    }
   }
   if (enemy.bleedUntil !== 0) {
     const source = enemy.bleedSource;

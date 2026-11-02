@@ -2,8 +2,9 @@
  * The per-tick run variables (docs/v3 C6 design §7.4 C6b.3, H19, H20; lead ruling G2): the
  * shards held and the alive enemies in the aura, which a modifier's scaling reads as shardsHeld
  * and enemiesInAura (src/data/triggers.ts), written into the run's EvalInput once a tick, right
- * after the grid is rebuilt and before the contact step, the first stage that can hit
- * (src/sim/simulation.ts). Every hit of a tick reads the values the step wrote: a kill's shards
+ * after the grid is rebuilt and before the contact step (src/sim/simulation.ts). Only stage 2b's
+ * C7b hooks (荊棘纏繞's rounds, 反射's arrivals) hit before it, and they read the previous tick's
+ * values (0 on tick 1). Every later hit of a tick reads the values the step wrote: a kill's shards
  * show from the next tick, as does an enemy pushed into the aura after the step. Only a run
  * whose BuildFlags.shardsHeld or BuildFlags.enemiesInAura is set calls the step; the others pay
  * one test a tick, and their runs stay the same bit for bit. The combo stacks are not here: they

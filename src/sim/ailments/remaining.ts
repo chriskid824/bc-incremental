@@ -11,7 +11,9 @@
  * the rate the enemy takes now: moving (walking in or out, dashing, or an orbit that turns), or
  * standing still, at its post, frozen or fully slowed (bleedRemaining, Hoshi's Q7 (A)). A victim
  * its burn or poison step killed never took that step's bleed, so its bleed still counts from the
- * previous step tick (Hoshi's Q7/F1).
+ * previous step tick (Hoshi's Q7/F1). Under 大出血's bleedRings (BuildFlags.bleedRings) bleed
+ * lives in rings, as poison does: their remaining at the rate the enemy takes now
+ * (bleedRingsRemaining), and a consume takes from them.
  *
  * A consume takes a share f of it: every stack keeps going, its damage × (1 − f), so the stack
  * counts stay (a ring scales each step, RingPool.consume); f = 1 takes it all and removes the
@@ -30,11 +32,15 @@ import { DT } from '../types';
 import { syncRingStacks } from './apply';
 import { accruedBleed, lastStep } from './bleed';
 import { enemySlow } from './frost';
-import { RING_BURN, RING_POISON } from './rings';
+import { RING_BLEED, RING_BURN, RING_POISON } from './rings';
 
 /** The damage the enemy's `ailment` has yet to deal. */
 export function remainingOf(ctx: RunContext, enemy: Enemy, ailment: DetonateAilment): Num {
-  if (ailment === 'bleed') return bleedRemaining(ctx, enemy);
+  if (ailment === 'bleed') {
+    return ctx.build.flags.bleedRings
+      ? bleedRingsRemaining(ctx, enemy)
+      : bleedRemaining(ctx, enemy);
+  }
   if (ailment === 'poison') return ringsRemaining(ctx, enemy, RING_POISON);
   return ctx.burnRings ? ringsRemaining(ctx, enemy, RING_BURN) : burnLeft(ctx, enemy);
 }
@@ -69,16 +75,32 @@ export function burnLeft(ctx: RunContext, enemy: Enemy): Num {
  */
 export function bleedRemaining(ctx: RunContext, enemy: Enemy): Num {
   const now = ctx.now;
-  const slow = enemySlow(ctx, enemy, now);
-  const v3 = enemy.v3;
-  const moving =
-    enemy.alive &&
-    slow < 1 &&
-    (enemy.stepDist !== 0 || (v3 !== null && v3.state === ORBITING && orbitTurn(enemy, slow) > 0));
-  const mult = moving ? ctx.bleedMoveMult : ctx.bleedStationaryMult;
+  const mult = bleedsMoving(ctx, enemy) ? ctx.bleedMoveMult : ctx.bleedStationaryMult;
   const ticks = Math.max(0, enemy.bleedUntil - Math.max(enemy.bleedStart, now));
   const future = mul(enemy.bleedDps, ticks * DT * mult);
   return add(add(enemy.bleedPending, accruedBleed(ctx, enemy, bleedDealtAt(ctx, enemy))), future);
+}
+
+/** The enemy's next tick, as it is now, counts as moving for its bleed (bleedRemaining). */
+function bleedsMoving(ctx: RunContext, enemy: Enemy): boolean {
+  const slow = enemySlow(ctx, enemy, ctx.now);
+  const v3 = enemy.v3;
+  return (
+    enemy.alive &&
+    slow < 1 &&
+    (enemy.stepDist !== 0 || (v3 !== null && v3.state === ORBITING && orbitTurn(enemy, slow) > 0))
+  );
+}
+
+/**
+ * Under bleedRings: what the enemy's bleed rings have yet to deal, × the rate it takes now,
+ * moving or standing still (bleedsMoving). The step weighs each step's sum by the ticks the
+ * enemy moved in it (src/sim/systems/ailments.ts), so this is exact when the two rates are equal,
+ * as under 大出血 (bleedMoveMult 1), and otherwise values the step under way at the rate of now.
+ */
+function bleedRingsRemaining(ctx: RunContext, enemy: Enemy): Num {
+  const left = ringsRemaining(ctx, enemy, RING_BLEED);
+  return mul(left, bleedsMoving(ctx, enemy) ? ctx.bleedMoveMult : ctx.bleedStationaryMult);
 }
 
 /**
@@ -95,7 +117,10 @@ function bleedDealtAt(ctx: RunContext, enemy: Enemy): number {
   return kind === KILL_BY_BURN || kind === KILL_BY_POISON ? ctx.lastBurnTick : lastStep(ctx, enemy);
 }
 
-/** What the enemy's rings of one ailment (first: RING_BURN or RING_POISON) have yet to deal. */
+/**
+ * What the enemy's rings of one ailment (first: RING_BURN, RING_POISON or RING_BLEED) have yet
+ * to deal.
+ */
 function ringsRemaining(ctx: RunContext, enemy: Enemy, first: number): Num {
   const rings = enemy.rings;
   const remaining = ctx.rings.remaining;
@@ -118,8 +143,10 @@ export function consumeAilment(
   f: number,
 ): Num {
   const left = remainingOf(ctx, enemy, ailment);
-  if (ailment === 'bleed') consumeBleed(enemy, f);
-  else if (ailment === 'poison') consumeRings(ctx, enemy, RING_POISON, f);
+  if (ailment === 'bleed') {
+    if (ctx.build.flags.bleedRings) consumeRings(ctx, enemy, RING_BLEED, f);
+    else consumeBleed(enemy, f);
+  } else if (ailment === 'poison') consumeRings(ctx, enemy, RING_POISON, f);
   else if (ctx.burnRings) consumeRings(ctx, enemy, RING_BURN, f);
   else consumeRecords(enemy, f);
   return f >= 1 ? left : mul(left, f);
@@ -127,7 +154,8 @@ export function consumeAilment(
 
 /**
  * The rings of one ailment keep 1 − f of what they deal (RingPool.consume); with f ≥ 1 they go
- * back to the pool and the enemy holds none of the ailment, as releaseAilments leaves it.
+ * back to the pool and the enemy holds none of the ailment, as releaseAilments leaves it. Bleed's
+ * rings (bleedRings) keep no end or stack count on the enemy, only the moves its step weighs.
  */
 function consumeRings(ctx: RunContext, enemy: Enemy, first: number, f: number): void {
   const pool = ctx.rings;
@@ -143,9 +171,10 @@ function consumeRings(ctx: RunContext, enemy: Enemy, first: number, f: number): 
   }
   if (f >= 1) {
     if (first === RING_BURN) enemy.burnRingEnd = 0;
-    else enemy.poisonRingEnd = 0;
+    else if (first === RING_POISON) enemy.poisonRingEnd = 0;
+    else enemy.bleedMovedTicks = 0;
   }
-  syncRingStacks(ctx, enemy, first);
+  if (first !== RING_BLEED) syncRingStacks(ctx, enemy, first);
 }
 
 /**

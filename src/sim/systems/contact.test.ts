@@ -453,16 +453,25 @@ describe('player defences (docs/v3 C7 design §2.2)', () => {
       contactTaken: 1,
       regenPerTick: 0,
       livesLeft: 0,
+      dodgeCombo: Infinity,
+      dodgeTicks: 0,
+      dodgeReadyAt: 0,
     });
     expect(createPlayerDefence({ ...values, contactDamageTaken: 0.8 }, 100, false)).toEqual({
       contactTaken: 0.8,
       regenPerTick: 0,
       livesLeft: 0,
+      dodgeCombo: Infinity,
+      dodgeTicks: 0,
+      dodgeReadyAt: 0,
     });
     expect(createPlayerDefence({ ...values, lifeRegen: 0.03 }, 40, false)).toEqual({
       contactTaken: 1,
       regenPerTick: 0.03 * 40 * DT,
       livesLeft: 0,
+      dodgeCombo: Infinity,
+      dodgeTicks: 0,
+      dodgeReadyAt: 0,
     });
     expect(createPlayerDefence({ ...values, extraLives: 1.5 }, 100, false)?.livesLeft).toBe(1);
     expect(createPlayerDefence({ ...values, extraLives: 0.5 }, 100, false)?.livesLeft).toBe(0);
@@ -504,6 +513,9 @@ describe('player defences (docs/v3 C7 design §2.2)', () => {
       contactTaken: 1.25,
       regenPerTick: 0,
       livesLeft: 0,
+      dodgeCombo: Infinity,
+      dodgeTicks: 0,
+      dodgeReadyAt: 0,
     });
     const ctx = placedEnemies([AT], { stats: defended({ contactDamageTaken: 1.25 }, []) });
     const [square] = ctx.enemies as [Enemy];
@@ -564,6 +576,9 @@ describe('player defences (docs/v3 C7 design §2.2)', () => {
       contactTaken: 0,
       regenPerTick: 0,
       livesLeft: 0,
+      dodgeCombo: Infinity,
+      dodgeTicks: 0,
+      dodgeReadyAt: 0,
     });
     const ctx = placedEnemies([AT], { stats: defended({ contactDamageTaken: -0.5 }, []) });
     const [square] = ctx.enemies as [Enemy];
@@ -581,6 +596,9 @@ describe('player defences (docs/v3 C7 design §2.2)', () => {
       contactTaken: 1,
       regenPerTick: 0,
       livesLeft: 0,
+      dodgeCombo: Infinity,
+      dodgeTicks: 0,
+      dodgeReadyAt: 0,
     });
     const ctx = placedEnemies([], { stats: defended({ maxLife: 60, lifeRegen: -0.02 }, []) });
     ctx.player.life = 30;

@@ -109,6 +109,36 @@ export const STAT_IDS = [
    */
   'extraLives',
   /**
+   * 拒馬: above 0, a dashing enemy that survives its touch's thorns is pushed back this far, in
+   * arena units, and charges again instead of hurting the player (src/sim/systems/contact.ts).
+   */
+  'dashRepel',
+  /**
+   * 荊棘纏繞: above 0, a boss that reaches the player is held there this many seconds, taking a
+   * thorns round every 0.25 s, before it hurts the player and leaks (src/sim/systems/contact.ts).
+   */
+  'bossHoldSec',
+  /**
+   * 節奏閃避: with bulletDodgeCombo also above 0, the first bullet to reach the player at that
+   * many combo stacks or more is dodged, then none for this many seconds
+   * (src/sim/systems/bullets.ts).
+   */
+  'bulletDodgeSec',
+  /** 節奏閃避: the combo stacks a dodge needs; its whole value counts (bulletDodgeSec). */
+  'bulletDodgeCombo',
+  /** 攔截軌道: above 0, the orbs of every orbit grant stop the bullets they touch. */
+  'orbitBlocksBullets',
+  /**
+   * 反射: above 0, a bullet that reaches the player deals nothing and flies back to its shooter,
+   * which takes a hit of the build's first thorns payload when it arrives.
+   */
+  'reflectBullets',
+  /**
+   * 集火: above 0, the hits that reach a shielded enemy within this many seconds of the first
+   * one are summed against its shield's threshold (src/sim/combat/defend.ts).
+   */
+  'shieldPoolSec',
+  /**
    * Above 0 on a hit's row, the hit passes an enemy's shield (src/sim/combat/defend.ts
    * bypassOf), as a coinHit with ignoreShield does.
    */
@@ -187,6 +217,13 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   contactDamageTaken: 1,
   lifeRegen: 0,
   extraLives: 0,
+  dashRepel: 0,
+  bossHoldSec: 0,
+  bulletDodgeSec: 0,
+  bulletDodgeCombo: 0,
+  orbitBlocksBullets: 0,
+  reflectBullets: 0,
+  shieldPoolSec: 0,
   ignoreShield: 0,
   ignoreArmour: 0,
   ailmentOnBlock: 0,

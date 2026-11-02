@@ -563,8 +563,8 @@ export interface BuffSpec {
  * - applyAilment: `stacks` (default 1) of the ailment on the event's enemy, or on up to
  *   `maxTargets` enemies within `radius` of the event (in `order`); each stack deals what a hit
  *   of damagePct (default 1) of the damage stat would apply. An enemy keeps only its strongest
- *   bleed, so more bleed stacks add nothing; shock stacks only change how much damage the enemy
- *   takes.
+ *   bleed, so more bleed stacks add nothing, except under 大出血's bleedRings (C7b), up to its
+ *   cap; shock stacks only change how much damage the enemy takes.
  * - spreadAilment: copies the event enemy's stacks of the ailment, at `effect` (default 1) of
  *   their damage, to every other enemy within `radius` of it. A transfer: it deals no damage.
  *   Poison only: `stacks` is the fraction of the stacks each enemy gets (default 1, the

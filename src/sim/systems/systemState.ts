@@ -27,7 +27,7 @@ import { MAX_SOURCES } from '../build/sources';
 import type { CompiledEffect } from '../effects/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import type { GridPoint, SpatialGrid } from '../grid';
-import { DRONE_DOCKED, DRONE_FIXED, DRONE_KIND_TURRET, DT } from '../types';
+import { DRONE_DOCKED, DRONE_FIXED, DRONE_KIND_TURRET, DT, TICK_RATE } from '../types';
 import type {
   BulletViewState,
   DroneViewState,
@@ -735,12 +735,26 @@ export interface EnemyAiState {
   readonly toughDropMult: number;
   /** × on the treasure schedule's rate (values.treasureRate). */
   readonly treasureRate: number;
+  /**
+   * C7b's hooks on v3 enemies (src/sim/systems/contact.ts, src/sim/combat/defend.ts), read only
+   * where a v3 record is: 拒馬's push-back of a dashing enemy at its touch, values.dashRepel (0:
+   * none); 荊棘纏繞's hold of a boss at its touch, round(values.bossHoldSec × TICK_RATE) ticks
+   * (−1: none, for a bossHoldSec of 0 or below); and 集火's window, round(values.shieldPoolSec ×
+   * TICK_RATE) ticks (−1: none, likewise).
+   */
+  readonly dashRepel: number;
+  readonly holdTicks: number;
+  readonly poolTicks: number;
 }
+
+/** round(sec × TICK_RATE) ticks for `sec` above 0, else −1: a C7b hook that is off. */
+const hookTicks = (sec: number): number => (sec > 0 ? Math.round(sec * TICK_RATE) : -1);
 
 /**
  * The state of a run that is a v3 run when `enabled`, holding at most `cap` enemies alive, whose
- * enemies read enemyRegen on row `regenRow` and drop × `toughDropMult` when tough, and whose
- * treasures come at `treasureRate` × the schedule's rate.
+ * enemies read enemyRegen on row `regenRow` and drop × `toughDropMult` when tough, whose
+ * treasures come at `treasureRate` × the schedule's rate, and whose build's 拒馬, 荊棘纏繞 and
+ * 集火 are `dashRepel`, `bossHoldSec` and `shieldPoolSec` (values').
  */
 export function createEnemyAiState(
   enabled: boolean,
@@ -748,6 +762,9 @@ export function createEnemyAiState(
   regenRow: number,
   toughDropMult: number,
   treasureRate: number,
+  dashRepel: number,
+  bossHoldSec: number,
+  shieldPoolSec: number,
 ): EnemyAiState {
   return {
     enabled,
@@ -758,6 +775,9 @@ export function createEnemyAiState(
     regenRow,
     toughDropMult,
     treasureRate,
+    dashRepel,
+    holdTicks: hookTicks(bossHoldSec),
+    poolTicks: hookTicks(shieldPoolSec),
   };
 }
 
@@ -772,6 +792,15 @@ export interface PlayerDefence {
   readonly regenPerTick: number;
   /** Revives left this run: floor(values.extraLives) at its start. */
   livesLeft: number;
+  /**
+   * 節奏閃避 (C7b, src/sim/systems/bullets.ts): the combo stacks a dodge needs,
+   * values.bulletDodgeCombo, or Infinity when the dodge is off (bulletDodgeSec or
+   * bulletDodgeCombo not above 0); its cooldown, round(values.bulletDodgeSec × TICK_RATE) ticks;
+   * and the first tick it can dodge again, 0 at the start.
+   */
+  readonly dodgeCombo: number;
+  readonly dodgeTicks: number;
+  dodgeReadyAt: number;
 }
 
 /** sys.defence: null is M1's fast path, where damagePlayer runs the life loss alone. */
@@ -779,17 +808,24 @@ export type PlayerDefenceState = PlayerDefence | null;
 
 /**
  * The defences of a build whose final stat values are `values`, for a player of `maxLife` (after
- * flags.maxLife). Null exactly when no defence stat moved from its base and `hasShieldEffect`, the
- * compiled build holding an effect of kind 'shield', is false: then nothing can block, reduce,
- * regain or revive, and contact keeps M1's statements.
+ * flags.maxLife). Null exactly when no defence stat moved from its base (節奏閃避's two included)
+ * and `hasShieldEffect`, the compiled build holding an effect of kind 'shield', is false: then
+ * nothing can block, reduce, regain, revive or dodge, and contact keeps M1's statements.
  */
 export function createPlayerDefence(
   values: CompiledBuild['values'],
   maxLife: number,
   hasShieldEffect: boolean,
 ): PlayerDefenceState {
-  const { contactDamageTaken, lifeRegen, extraLives } = values;
-  if (contactDamageTaken === 1 && lifeRegen === 0 && extraLives === 0 && !hasShieldEffect) {
+  const { contactDamageTaken, lifeRegen, extraLives, bulletDodgeSec, bulletDodgeCombo } = values;
+  if (
+    contactDamageTaken === 1 &&
+    lifeRegen === 0 &&
+    extraLives === 0 &&
+    !hasShieldEffect &&
+    bulletDodgeSec === 0 &&
+    bulletDodgeCombo === 0
+  ) {
     return null;
   }
   // Floored at 0 (the lead's ruling on C7.2): increased modifiers that sum past −100 % never
@@ -798,6 +834,9 @@ export function createPlayerDefence(
     contactTaken: Math.max(0, contactDamageTaken),
     regenPerTick: Math.max(0, lifeRegen * maxLife * DT),
     livesLeft: Math.floor(extraLives),
+    dodgeCombo: bulletDodgeSec > 0 && bulletDodgeCombo > 0 ? bulletDodgeCombo : Infinity,
+    dodgeTicks: Math.round(bulletDodgeSec * TICK_RATE),
+    dodgeReadyAt: 0,
   };
 }
 
@@ -827,15 +866,31 @@ export interface BulletPool extends BulletViewState {
   /** Its shooter's id, and type as its ENEMY_IDS ordinal. */
   owner: Int32Array;
   ownerType: Uint8Array;
+  /** 1 once 反射 has turned it back towards its shooter (C7b), else 0. */
+  reflected: Uint8Array;
   /**
    * The bullets that hit the player and their damage, by their shooter's type, every type present
    * (RunResult.bulletTakenBy is a copy, src/sim/systems/runEnd.ts).
    */
   readonly takenBy: Record<EnemyId, { hits: number; damage: number }>;
+  /** 反射 (values.reflectBullets above 0): a bullet that reaches the player flies back. */
+  readonly reflect: boolean;
+  /**
+   * 攔截軌道 (values.orbitBlocksBullets above 0): the build's orbit emitters, whose orbs stop the
+   * bullets they touch; none when it is off.
+   */
+  readonly blockers: readonly EmitterRuntime[];
 }
 
-/** An empty bullet pool, with a tally for each type of `ids` (ENEMY_IDS, passed in). */
-export function createBulletPool(ids: readonly EnemyId[]): BulletPool {
+/**
+ * An empty bullet pool, with a tally for each type of `ids` (ENEMY_IDS, passed in), whose
+ * bullets 反射 turns back when `reflect` and the orbs of `blockers` stop (攔截軌道).
+ */
+export function createBulletPool(
+  ids: readonly EnemyId[],
+  reflect = false,
+  blockers: readonly EmitterRuntime[] = [],
+): BulletPool {
   const takenBy = {} as Record<EnemyId, { hits: number; damage: number }>;
   for (const id of ids) takenBy[id] = { hits: 0, damage: 0 };
   return {
@@ -851,7 +906,10 @@ export function createBulletPool(ids: readonly EnemyId[]): BulletPool {
     damage: new Float64Array(0),
     owner: new Int32Array(0),
     ownerType: new Uint8Array(0),
+    reflected: new Uint8Array(0),
     takenBy,
+    reflect,
+    blockers,
   };
 }
 

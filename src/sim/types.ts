@@ -309,7 +309,10 @@ export type SimEvent =
     }
   /** A burn stack landed; `stacks` is the target's burn stacks now. */
   | { readonly type: 'ignite'; readonly targetId: number; readonly stacks: number }
-  /** Poison, bleed or shock landed; `stacks` is the target's stacks of it now (bleed: 1). */
+  /**
+   * Poison, bleed or shock landed; `stacks` is the target's stacks of it now (bleed: 1 in the
+   * strongest-only slot, under bleedRings the stacks it holds).
+   */
   | {
       readonly type: 'ailmentApplied';
       readonly targetId: number;
@@ -553,6 +556,28 @@ export type SimEvent =
       readonly enemy: EnemyId;
       readonly damage: number;
       readonly lifeLeft: number;
+    }
+  /**
+   * 節奏閃避 (C7b): bullet `bulletId` of shooter `enemyId`, of type `enemy`, reached the player
+   * at bulletDodgeCombo combo stacks or more with the dodge ready, and is gone without a hit
+   * (src/sim/systems/bullets.ts): no damage, no shield spent, no tally, no bulletHit or heroHit.
+   * Never in an M1 run.
+   */
+  | {
+      readonly type: 'bulletDodged';
+      readonly bulletId: number;
+      readonly enemyId: number;
+      readonly enemy: EnemyId;
+    }
+  /**
+   * 攔截軌道 (C7b): bullet `bulletId` of shooter `enemyId`, of type `enemy`, touched an orb of an
+   * orbit emitter and is gone (src/sim/systems/bullets.ts). Never in an M1 run.
+   */
+  | {
+      readonly type: 'bulletBlocked';
+      readonly bulletId: number;
+      readonly enemyId: number;
+      readonly enemy: EnemyId;
     }
   /**
    * Summoner `enemyId` summoned: `count` of its children spawned, the rest skipped at the enemy

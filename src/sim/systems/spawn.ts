@@ -10,7 +10,7 @@ import type { Num } from '../../core/num';
 import { mul, num, ZERO } from '../../core/num';
 import { AFFIX_BERSERK, AFFIX_FROST, AFFIX_GUARDIAN, AFFIX_REGEN } from '../../data/affixes';
 import type { EnemyDef, V3WaveRules } from '../../data/types';
-import { RING_SLOTS } from '../ailments/rings';
+import { RING_SLOTS, RING_SLOTS_BLEED } from '../ailments/rings';
 import { MAX_DEPTH } from '../effects/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, PLAYER_RADIUS } from '../types';
 import type { Enemy, RunContext, WaveRecord } from './context';
@@ -186,7 +186,8 @@ export function addEnemy(
     burnFusionCredit: -1,
     burnNextEnd: Infinity,
     burnSteppedAt: -1,
-    rings: new Int32Array(RING_SLOTS).fill(-1),
+    // Bleed's three slots only in a run with 大出血's bleedRings (src/sim/ailments/rings.ts).
+    rings: new Int32Array(ctx.build.flags.bleedRings ? RING_SLOTS_BLEED : RING_SLOTS).fill(-1),
     dotRings: 0,
     poisonStacks: 0,
     burnRingEnd: 0,

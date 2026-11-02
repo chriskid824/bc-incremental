@@ -21,6 +21,9 @@
  *   first got there, the shooter fires a bullet at the player (src/sim/systems/bullets.ts) and
  *   the summoner summons its children around itself (summon); pushed out past STOP_SLACK, it
  *   walks back in, its timer counting on, and acts on arrival if due.
+ * A boss that 荊棘纏繞 holds at the player (ENTANGLED, src/sim/systems/contact.ts) joined the list
+ * at its touch; the step runs its hold (stepHold) in place of its behaviour, and its frozen ticks
+ * push the hold's end back as they push every timer here.
  * Then the bullets in flight move and hit (stepBullets), after the walk. The step sets the
  * movement fields the movement stage reads: stepDist (0 while an enemy stands, below 0 while it
  * flees) and an orbit's (ux, uy). treasuresDue schedules the treasures (startWave,
@@ -38,6 +41,7 @@ import type { EnemyBehaviour, V3WaveRules } from '../../data/types';
 import { releaseAilments } from '../ailments/apply';
 import { countBleedMove } from '../ailments/bleed';
 import { enemySlow } from '../ailments/frost';
+import { countBleedRingMove } from '../ailments/rings';
 import { holdsBurn } from '../ailments/records';
 import { statAt } from '../build/eval';
 import { SCOPED_INDEX } from '../build/modTable';
@@ -45,6 +49,7 @@ import { periodTicks } from '../emitters/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, DT, TICK_RATE } from '../types';
 import { BERSERK_BELOW, BERSERK_MULT, stepAffixes } from './affixes';
 import { fireBullet, stepBullets } from './bullets';
+import { stepHold } from './contact';
 import type { Enemy, RunContext } from './context';
 import { removeEnemy } from './death';
 import {
@@ -54,6 +59,7 @@ import {
   AI_TREASURE,
   CHARGING,
   DASHING,
+  ENTANGLED,
   EXTRA_ORIGIN,
   FLEEING,
   ORBITING,
@@ -64,7 +70,7 @@ import type { EnemyV3 } from './enemyRecord';
 import { spawnOrSkip } from './spawn';
 import type { EnemyAiState } from './systemState';
 
-export { CHARGING, DASHING, FLEEING, ORBITING, STOPPED } from './enemyRecord';
+export { CHARGING, DASHING, ENTANGLED, FLEEING, ORBITING, STOPPED } from './enemyRecord';
 
 /**
  * How far past its post a standing enemy may be pushed before it walks back: an orbiting
@@ -122,6 +128,11 @@ export function stepEnemyAi(ctx: RunContext): void {
     }
     if (v.regen > 0) regenerate(ctx, ai, enemy, v, now);
     if ((v.affixes & AFFIX_BERSERK) !== 0) stepBerserk(enemy, v);
+    // 荊棘纏繞's held boss: its hold, not its behaviour.
+    if ((v.state & ENTANGLED) !== 0) {
+      stepHold(ctx, enemy, v, now, ai.holdTicks);
+      continue;
+    }
     switch (v.ai) {
       case AI_DASH:
         stepDasher(ctx, ai, enemy, v, now);
@@ -311,4 +322,5 @@ function orbit(ctx: RunContext, enemy: Enemy, v: EnemyV3, orbitDist: number, now
   enemy.ux = ux * cos - uy * sin;
   enemy.uy = ux * sin + uy * cos;
   if (enemy.bleedUntil !== 0) countBleedMove(enemy, now);
+  else if (ctx.build.flags.bleedRings) countBleedRingMove(ctx.rings, enemy, now);
 }

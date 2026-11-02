@@ -22,7 +22,7 @@ import type {
 import { holdsBleed } from '../ailments/bleed';
 import { frostMeter, holdsFrost, holdsFrozen } from '../ailments/frost';
 import { burnCapOf, holdsBurn, liveBurnStacks } from '../ailments/records';
-import { holdsPoison, livePoisonStacks } from '../ailments/rings';
+import { bleedRingEnd, holdsPoison, livePoisonStacks } from '../ailments/rings';
 import { activeShockStacks, holdsShock, shockCapOf } from '../ailments/shock';
 import {
   AILMENT_FLAG_MASK,
@@ -109,13 +109,22 @@ export const staticInput = (chainJump = 0): EvalInput => ({
   ctx: null,
 });
 
+/** A reader of HELD_READERS: the enemy holds the ailment at tick `now`, in run `ctx` if any. */
+type HeldReader = (enemy: Enemy, now: number, ctx: RunContext | null) => boolean;
+
+/**
+ * Bleed: its strongest-only slot, or under 大出血's bleedRings (BuildFlags.bleedRings) a bleed
+ * ring with a stack that has not ended, read in a run only (outside one, no enemy has a ring).
+ */
+const holdsAnyBleed: HeldReader = (enemy, now, ctx) =>
+  holdsBleed(enemy, now) ||
+  (ctx !== null && ctx.build.flags.bleedRings && bleedRingEnd(ctx.rings, enemy) > now);
+
 /** Whether the enemy holds each ailment a condition can name, at tick `now`. */
-const HELD_READERS: {
-  readonly [K in HeldAilment]: (enemy: Enemy, now: number) => boolean;
-} = {
+const HELD_READERS: { readonly [K in HeldAilment]: HeldReader } = {
   burn: holdsBurn,
   poison: holdsPoison,
-  bleed: holdsBleed,
+  bleed: holdsAnyBleed,
   shock: holdsShock,
   frost: holdsFrost,
   frozen: holdsFrozen,
@@ -150,11 +159,14 @@ const capReader = STACK_AILMENTS.map((ailment) => CAP_READERS[ailment]);
 export const liveStacks = (enemy: Enemy, a: number, now: number): number =>
   (stackReader[a] as (enemy: Enemy, now: number) => number)(enemy, now);
 
-/** The flags of the ailments `enemy` holds at tick `now` (src/sim/effects/flags.ts). */
-export function heldFlags(enemy: Enemy, now: number): number {
+/**
+ * The flags of the ailments `enemy` holds at tick `now` (src/sim/effects/flags.ts), in run `ctx`
+ * (bleed's rings under bleedRings) or outside one.
+ */
+export function heldFlags(enemy: Enemy, now: number, ctx: RunContext | null = null): number {
   let flags = 0;
   for (let a = 0; a < heldReader.length; a++) {
-    if ((heldReader[a] as (enemy: Enemy, now: number) => boolean)(enemy, now)) {
+    if ((heldReader[a] as HeldReader)(enemy, now, ctx)) {
       flags |= 1 << (HELD_SHIFT + a);
     }
   }
@@ -355,9 +367,7 @@ export function conditionsMet(
     if (target === null) return false;
     switch (c.code) {
       case TARGET_HAS:
-        if (!(heldReader[c.a] as (enemy: Enemy, now: number) => boolean)(target, now)) {
-          return false;
-        }
+        if (!(heldReader[c.a] as HeldReader)(target, now, ctx)) return false;
         break;
       case TARGET_KIND:
         if (kindOf(target) !== c.a) return false;

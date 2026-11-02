@@ -27,6 +27,15 @@
  * wardBroken event goes out. The ward never blocks a hit: only the shield does (lead ruling L2,
  * reading A, which settles the question C7.3 left open), and the ailments the hit that breaks it
  * applies are its own, unwarded, since they are applied after defend has run.
+ *
+ * C7b's 集火 (gd:491 「0.2 秒內打中同一隻的多發合併計算護盾門檻」, values.shieldPoolSec; its window
+ * is EnemyAiState.poolTicks): where the shield applies, each part of a kind other than damage over
+ * time joins the enemy's pool (EnemyV3.poolStart, poolSum) when it arrives at most the window
+ * after the pool started, and starts a new pool at itself otherwise; the shield compares the
+ * pool's sum, the amounts it would have compared (before the armour, L8), with its threshold.
+ * So a part lands once the pool reaches the threshold, the parts it blocked before stay blocked,
+ * and a landing leaves the pool as it is: the later parts within the window land too. A converted
+ * hit's parts join in part order. A bypassed shield, or none, leaves the pool alone.
  */
 
 import type { Num } from '../../core/num';
@@ -81,17 +90,36 @@ export function bypassOf(
   return bypass;
 }
 
-/** What a hit part of `amount` with tags `mask` lands through the defences that apply. */
+/**
+ * What a hit part of `amount` with tags `mask` lands through the defences that apply, the shield
+ * comparing `compared` with its threshold: the part's amount, or 集火's pooled sum (pooled).
+ */
 function landedPart(
   amount: Num,
+  compared: Num,
   mask: number,
   shield: boolean,
   armour: boolean,
   threshold: Num,
 ): Num {
   if ((mask & DOT_MASK) !== 0) return amount;
-  if (shield && lt(amount, threshold)) return ZERO;
+  if (shield && lt(compared, threshold)) return ZERO;
   return armour ? mul(amount, ARMOUR_TAKEN) : amount;
+}
+
+/**
+ * 集火: a part of `amount`, of a kind other than damage over time, reaches the shield of the
+ * enemy whose record is `v` on tick `now`: it joins the pool when it arrives at most `window`
+ * ticks after the pool started, else it starts a new one at itself. Returns the pool's sum, which
+ * the shield compares.
+ */
+function pooled(v: EnemyV3, amount: Num, now: number, window: number): Num {
+  if (now - v.poolStart <= window) v.poolSum = add(v.poolSum, amount);
+  else {
+    v.poolStart = now;
+    v.poolSum = amount;
+  }
+  return v.poolSum;
 }
 
 /**
@@ -150,8 +178,13 @@ export function defend(
     return amount;
   }
   const threshold = shield ? mul(enemy.maxHp, blockPct) : ZERO;
+  // 集火's window where the shield applies, else −1: no pool.
+  const window = shield ? ctx.sys.enemyAi.poolTicks : -1;
+  const now = ctx.now;
   if (!converted) {
-    const landed = landedPart(amount, mask, shield, armour, threshold);
+    const compared =
+      window >= 0 && (mask & DOT_MASK) === 0 ? pooled(v, amount, now, window) : amount;
+    const landed = landedPart(amount, compared, mask, shield, armour, threshold);
     if (shield && (mask & DOT_MASK) === 0 && isZero(landed)) return null;
     if (warded) wardHit(ctx, enemy, v, landed);
     return landed;
@@ -167,7 +200,9 @@ export function defend(
     const share = whole ? (i === 0 ? amount : ZERO) : (parts.amount[i] as Num);
     const part = scale === 1 ? share : mul(share, scale);
     const partMask = parts.mask[i] as number;
-    const landed = landedPart(part, partMask, shield, armour, threshold);
+    const compared =
+      window >= 0 && (partMask & DOT_MASK) === 0 ? pooled(v, part, now, window) : part;
+    const landed = landedPart(part, compared, partMask, shield, armour, threshold);
     parts.amount[i] = landed;
     total = i === 0 ? landed : add(total, landed);
     if ((partMask & DOT_MASK) !== 0 || !isZero(landed)) blocked = false;

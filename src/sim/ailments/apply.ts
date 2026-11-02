@@ -2,7 +2,8 @@
  * Applying and moving ailments (docs/v3/implementation-plan-v3.md §2.5): the one place that
  * knows where each ailment lives. Burn goes to capped records (records.ts), or to DoT rings
  * under eternalFlame (BuildFlags.burnRings); poison always to rings (rings.ts); bleed to its
- * strongest-only slot (bleed.ts); shock to its stacks (shock.ts). Each ailment's damage is
+ * strongest-only slot (bleed.ts), or to rings under 大出血 (BuildFlags.bleedRings), up to
+ * bleedMaxStacks live stacks; shock to its stacks (shock.ts). Each ailment's damage is
  * credited through ailmentCredit, from the source of what applied it, and a ring of each source
  * class holds it (a fusion ring credits the first fusion that applied to it).
  *
@@ -23,10 +24,10 @@ import { slotRow } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
 import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
-import { bleedLeft } from './bleed';
+import { addBleed, bleedLeft } from './bleed';
 import { addBurn, addBurnIfStronger, recordsLeft, spreadBurns } from './records';
 import type { BurnSpread } from './records';
-import { RING_BURN, RING_POISON, RING_SLOTS } from './rings';
+import { bleedRingEnd, liveBleedStacks, RING_BLEED, RING_BURN, RING_POISON } from './rings';
 
 const DAMAGE = SCOPED_INDEX.damage;
 
@@ -174,6 +175,42 @@ export function applyPoison(
     ailment: 'poison',
     stacks: enemy.poisonStacks,
   });
+}
+
+/**
+ * `n` bleed stacks of `dps` until tick `until`, credited to `credit`, at trigger depth `depth`;
+ * returns the stacks the enemy holds once they are applied, 0 when none is. Without bleedRings
+ * the strongest-only slot takes one when it is stronger (addBleed), and that is 1. With it
+ * (大出血, BuildFlags.bleedRings) the stacks go to the enemy's bleed ring for credit's class, as
+ * poison's do, up to bleedMaxStacks live stacks (liveBleedStacks): at the cap none is applied,
+ * and below it as many as there is room for. The strongest-only fields stay as they are.
+ */
+export function applyBleed(
+  ctx: RunContext,
+  enemy: Enemy,
+  dps: Num,
+  until: number,
+  depth: number,
+  credit: number,
+  n: number,
+): number {
+  const flags = ctx.build.flags;
+  if (!flags.bleedRings) return addBleed(ctx, enemy, dps, until, depth, credit) ? 1 : 0;
+  const now = ctx.now;
+  if (!(until > now)) return 0;
+  const live = liveBleedStacks(ctx.rings, enemy, now);
+  const room = flags.bleedMaxStacks - live;
+  if (room <= 0) return 0;
+  const stacks = n < room ? n : room;
+  // 元素護盾 (C7.6), as addToRing.
+  const v = enemy.v3;
+  if (v !== null && (v.defence & WARDED) !== 0) dps = mul(dps, WARD_AILMENT_MULT);
+  const r = ringFor(ctx, enemy, RING_BLEED + (ctx.sources.cls[credit] as number), credit);
+  ctx.rings.apply(r, dps, now, until, stacks);
+  // Movement counts the moves of enemies that hold a bleed ring from now on (countBleedRingMove).
+  ctx.bleedApplied = true;
+  if (depth < enemy.ailDepth) enemy.ailDepth = depth;
+  return live + stacks;
 }
 
 /**
@@ -341,11 +378,14 @@ export function spreadPoison(
   });
 }
 
-/** A dead or leaked enemy gives its DoT rings back to the pool. */
+/**
+ * A dead or leaked enemy gives its DoT rings back to the pool: every slot of its array, so
+ * bleed's too in a run with bleedRings.
+ */
 export function releaseAilments(ctx: RunContext, enemy: Enemy): void {
   if (enemy.dotRings === 0) return;
   const rings = enemy.rings;
-  for (let slot = 0; slot < RING_SLOTS; slot++) {
+  for (let slot = 0; slot < rings.length; slot++) {
     const r = rings[slot] as number;
     if (r < 0) continue;
     ctx.rings.release(r);
@@ -377,11 +417,28 @@ function ringsLeft(ctx: RunContext, enemy: Enemy, first: number): number {
 }
 
 /**
+ * With bleedRings, what the enemy's bleed rings have yet to deal, as ringsLeft counts it: their
+ * remaining, unweighted (C3D:1765's Σ), nothing once all their stacks have ended.
+ */
+function bleedRingsLeft(ctx: RunContext, enemy: Enemy): number {
+  if (!(bleedRingEnd(ctx.rings, enemy) > ctx.now - 1)) return 0;
+  const rings = enemy.rings;
+  const remaining = ctx.rings.remaining;
+  let left = 0;
+  for (let slot = RING_BLEED; slot < RING_BLEED + 3; slot++) {
+    const r = rings[slot] as number;
+    if (r >= 0) left += remaining[r] as number;
+  }
+  return left;
+}
+
+/**
  * The damage over time already on the enemy will kill it: shots should go elsewhere. Its burn
  * records with what they have pending (nothing without a live record; A2), its rings (likewise
- * nothing without a live stack) and its bleed; with only records this is M1's sum. A v3 onion
- * with more than its last shell left is never doomed: emptying a shell only breaks it
- * (src/sim/systems/onion.ts), so shots keep coming until its last one.
+ * nothing without a live stack), bleed's under bleedRings included (bleedRingsLeft), and its
+ * strongest-only bleed; with only records this is M1's sum. A v3 onion with more than its last
+ * shell left is never doomed: emptying a shell only breaks it (src/sim/systems/onion.ts), so
+ * shots keep coming until its last one.
  */
 export function doomed(ctx: RunContext, enemy: Enemy): boolean {
   const records = enemy.burns.length !== 0;
@@ -392,6 +449,7 @@ export function doomed(ctx: RunContext, enemy: Enemy): boolean {
   let left = records ? recordsLeft(ctx, enemy) : ZERO;
   if (enemy.dotRings !== 0) {
     left = add(left, num(ringsLeft(ctx, enemy, RING_BURN) + ringsLeft(ctx, enemy, RING_POISON)));
+    if (ctx.build.flags.bleedRings) left = add(left, num(bleedRingsLeft(ctx, enemy)));
   }
   if (enemy.bleedUntil !== 0) left = add(left, bleedLeft(ctx, enemy));
   return lte(enemy.hp, left);

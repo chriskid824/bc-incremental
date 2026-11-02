@@ -24,6 +24,7 @@ import { ENEMY_IDS } from '../data/types';
 import type { EnemyId, GameData } from '../data/types';
 import { frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
+import { liveBleedStacks } from './ailments/rings';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { REPEAT } from './effects/flags';
 import { createPayload, ROWS } from './emitters/types';
@@ -36,6 +37,7 @@ import {
   ARMOURED,
   CHARGING,
   DASHING,
+  ENTANGLED,
   FLEEING,
   ORBITING,
   SHIELDED,
@@ -55,7 +57,7 @@ import {
   v3TestData,
 } from './testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, NO_INPUT } from './types';
-import type { ContactTally, CounterId, EnemyState, RunConfig } from './types';
+import type { ContactTally, CounterId, EnemyState, RunConfig, SimEvent } from './types';
 
 const GOLDEN_C4_TICKS = 1200;
 const GOLDEN_C4_SEEDS = [1, 2] as const;
@@ -1840,6 +1842,167 @@ const GREED_STATS = makeStats(
   },
 );
 
+/**
+ * C7b's bleedRings (docs/v3 C7 design §2.10, lead ruling W2): 大出血's module (bleedRings, the
+ * 8-stack cap, bleedMoveMult 1) on a volley of three projectiles that bleed at 0.8, in a v3 run
+ * of three squares and a dasher a wave, both at 6 × their life, from wave 1 (no affix, treasure,
+ * elite or boss; TEST_V3_WAVES.v3 spread, as v3TestData's merge is shallow). The walkers and the
+ * dashing dashers bleed as they come, many enemies reach the cap, and none holds a bleed in the
+ * strongest-only slot.
+ */
+const BLEED_RINGS_MODULE: TestModule = (b) => {
+  b.flags.bleedRings = true;
+  b.flags.bleedMoveMult = 1;
+};
+const BLEED_RINGS_STATS = makeStats({
+  damage: 4,
+  bleedChance: 0.8,
+  igniteChance: 0,
+  critChance: 0.1,
+  maxLife: 1e6,
+  projectileCount: 3,
+});
+const bleedRingsData = (): GameData =>
+  v3TestData({
+    enemies: { square: { hpMult: 6 }, dasher: { hpMult: 6 } },
+    waves: {
+      rules: [
+        { enemy: 'square', fromWave: 1, base: 3, perWave: 0, maxCount: 3 },
+        { enemy: 'dasher', fromWave: 1, base: 1, perWave: 0, maxCount: 1 },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
+/**
+ * C7b's contact hooks (§2.10, lead rulings W3 and W4): thorns (outer.thorns, 300 % of damage 4)
+ * with 拒馬's ×3 as B4 writes it (a thorns `damage more 2` on a dashing target), dashRepel 80 and
+ * bossHoldSec 1, in a v3 run of three dashers at 4 × their life and an onion a wave from wave 1
+ * (bossEvery 1; no affix, treasure or elite). Every dasher that dashes into the player is pushed
+ * back or dies to the thorns, and the first onion to walk in is held for a second.
+ */
+const CONTACT_HOOKS_STATS = makeStats(
+  { damage: 4, maxLife: 1e6, critChance: 0, igniteChance: 0, dashRepel: 80, bossHoldSec: 1 },
+  [
+    {
+      stat: 'damage',
+      kind: 'more',
+      value: 2,
+      tags: ['thorns'],
+      when: [{ targetState: 'dashing' }],
+    },
+  ],
+  {
+    triggers: [],
+    conversions: [],
+    emitters: [{ source: 'outer.thorns', grant: { kind: 'thorns' } }],
+  },
+);
+const contactHooksData = (): GameData =>
+  v3TestData({
+    enemies: { dasher: { hpMult: 4 } },
+    waves: {
+      rules: [{ enemy: 'dasher', fromWave: 1, base: 3, perWave: 0, maxCount: 3 }],
+      eliteEvery: 1000,
+      bossEvery: 1,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
+/**
+ * C7b's bullet hooks (§2.10, lead rulings W5 and W6), the dodge and the orbit's block: 節奏閃避
+ * as B4 writes it (3 s, at 15 stacks), the combo stacks topped up by 10 every 0.25 s (so a hit's
+ * halving leaves them short only briefly), and an orbit of two orbs with orbitBlocksBullets, in
+ * a v3 run of eight shooters at 8 × their life and six triangles a wave from wave 1 (no affix,
+ * treasure, elite or boss). 反射 turns every bullet at the player before the dodge could take it
+ * (W7's order), so one build cannot show it with the dodge: bulletHooks/reflect does.
+ */
+const DODGE_BLOCK_STATS = makeStats(
+  { damage: 10, maxLife: 1e6, bulletDodgeSec: 3, bulletDodgeCombo: 15, orbitBlocksBullets: 1 },
+  [],
+  {
+    triggers: [
+      {
+        source: 'center',
+        spec: { on: 'periodic', every: 0.25, do: [{ kind: 'comboStack', stacks: 10 }] },
+      },
+    ],
+    conversions: [],
+    emitters: [{ source: 'outer.aura', grant: { kind: 'orbit', count: 2 } }],
+  },
+);
+const shooterWaves = (shooters: number, triangles: number, hpMult: number) => (): GameData =>
+  v3TestData({
+    enemies: { shooter: { hpMult } },
+    waves: {
+      rules: [
+        { enemy: 'shooter', fromWave: 1, base: shooters, perWave: 0, maxCount: shooters },
+        { enemy: 'triangle', fromWave: 1, base: triangles, perWave: 0, maxCount: triangles },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
+/**
+ * C7b's 反射 (§2.10, lead ruling W7): reflectBullets with thorns (outer.thorns, 300 % of damage
+ * 6) for the hit a bullet brings home, in a v3 run of eight shooters at 2 × their life and four
+ * triangles a wave from wave 1. Every bullet turns at the player; most reach their shooter, and
+ * those whose shooter died first (the life is low so that some do) are gone on the way.
+ */
+const REFLECT_STATS = makeStats({ damage: 6, maxLife: 1e6, reflectBullets: 1 }, [], {
+  triggers: [],
+  conversions: [],
+  emitters: [{ source: 'outer.thorns', grant: { kind: 'thorns' } }],
+});
+
+/**
+ * C7b's 集火 (§2.10, lead ruling W8): shieldPoolSec 0.2 as B3 writes it on a volley of six
+ * projectiles at 6 attacks a second, damage 3, against three shielders and two squares a wave
+ * from wave 12's life (no affix, treasure, elite or boss): each projectile's hit is below the
+ * shield's 15 % alone, and the pool lets through those that come close enough together.
+ */
+const SHIELD_POOL_STATS = makeStats({
+  damage: 3,
+  projectileCount: 6,
+  attackSpeed: 6,
+  critChance: 0,
+  igniteChance: 0,
+  maxLife: 1e6,
+  shieldPoolSec: 0.2,
+});
+const shieldPoolData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: [
+        { enemy: 'shielder', fromWave: 1, base: 3, perWave: 0, maxCount: 3 },
+        { enemy: 'square', fromWave: 1, base: 2, perWave: 0, maxCount: 2 },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2163,6 +2326,37 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     data: comboData,
     modules: () => [afterimageModule()],
     expected: ['a67d786a39587fd2', 'b73235919ad0dcfd'],
+  },
+  {
+    name: 'bleedRings',
+    config: { stats: BLEED_RINGS_STATS, rules: [], startWave: 12 },
+    data: bleedRingsData,
+    modules: () => [BLEED_RINGS_MODULE],
+    expected: ['56bd3a17d7b12a16', '4cd2dc1d06f2d90a'],
+  },
+  {
+    name: 'contactHooks',
+    config: { stats: CONTACT_HOOKS_STATS, rules: [], startWave: 12 },
+    data: contactHooksData,
+    expected: ['034c8a78b68bffbf', '6d218d4ce2d2a26d'],
+  },
+  {
+    name: 'bulletHooks/dodgeBlock',
+    config: { stats: DODGE_BLOCK_STATS, rules: [], startWave: 12 },
+    data: shooterWaves(8, 6, 8),
+    expected: ['d0083cfeac7b78d3', '4aeaf3b5cca17ac5'],
+  },
+  {
+    name: 'bulletHooks/reflect',
+    config: { stats: REFLECT_STATS, rules: [], startWave: 12 },
+    data: shooterWaves(8, 4, 2),
+    expected: ['12b75a15202fef53', '3036598cf40af0fb'],
+  },
+  {
+    name: 'shieldPool',
+    config: { stats: SHIELD_POOL_STATS, rules: [], startWave: 12 },
+    data: shieldPoolData,
+    expected: ['b361cfcf7b157fab', '9fb1b544c7c05ef4'],
   },
 ];
 
@@ -3107,6 +3301,309 @@ describe('golden C4 runs', () => {
         pending: 2,
         afterHalving: ['394 → 412', '404 → 422'],
       },
+    });
+  });
+
+  /**
+   * A run of `entry` at `seed` with the entry's modules and a hook that keeps the run's context:
+   * `each` sees each tick's number, events and context once the tick is over.
+   */
+  function watchRun(
+    entry: GoldenC4Entry,
+    seed: number,
+    each: (now: number, events: readonly SimEvent[], ctx: RunContext) => void,
+  ): void {
+    const watched: { ctx: RunContext | null } = { ctx: null };
+    const grab: TestModule = (b) =>
+      void b.hook('tick', (ctx) => {
+        watched.ctx = ctx;
+      });
+    const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+    const modules = [...(entry.modules?.() ?? []), grab];
+    const sim = createSimulation(config, entry.data?.() ?? makeTestData(), modules);
+    while (!sim.state.finished) {
+      const now = sim.state.tick + 1;
+      const events = sim.step(NO_INPUT);
+      each(now, events, watched.ctx as RunContext);
+    }
+  }
+
+  it('holds at most 8 live bleed stacks an enemy in bleedRings, its walkers and dashers bleeding in rings, the strongest-only slot unused (C7b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'bleedRings') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const types = new Map<number, EnemyId>();
+      const capped = new Set<number>();
+      const applied: number[] = Array(9).fill(0);
+      const steps: Record<string, number> = {};
+      const lengths = new Set<number>();
+      let maxLive = 0;
+      let capTicks = 0;
+      let slotUsed = 0;
+      watchRun(entry, seed, (now, events, ctx) => {
+        for (const event of events) {
+          if (event.type === 'enemySpawned') types.set(event.enemyId, event.enemy);
+          else if (event.type === 'ailmentApplied' && event.ailment === 'bleed') {
+            applied[event.stacks] = (applied[event.stacks] ?? 0) + 1;
+          } else if (event.type === 'dotTick' && event.ailment === 'bleed') {
+            const type = types.get(event.targetId) ?? 'none';
+            steps[type] = (steps[type] ?? 0) + 1;
+          }
+        }
+        for (const e of ctx.enemies) {
+          if (!e.alive) continue;
+          lengths.add(e.rings.length);
+          if (e.bleedUntil !== 0) slotUsed++;
+          const live = liveBleedStacks(ctx.rings, e, now);
+          maxLive = Math.max(maxLive, live);
+          if (live === 8) {
+            capTicks++;
+            capped.add(e.id);
+          }
+        }
+      });
+      bySeed[seed] = {
+        maxLive,
+        capped: capped.size,
+        capTicks,
+        applied: applied.join(' '),
+        steps,
+        lengths: [...lengths],
+        slotUsed,
+      };
+    }
+    // The cap holds: no enemy ever holds 9 live stacks, and the 8th stack's applications are the
+    // most common (`applied` counts each application's stacks after it, from 0 to 8). Every ring
+    // is 9 long, both walkers and dashers bleed, and no bleed takes the strongest-only slot.
+    expect(bySeed).toEqual({
+      1: {
+        maxLive: 8,
+        capped: 9,
+        capTicks: 1236,
+        applied: '0 15 14 13 13 15 14 12 26',
+        steps: { square: 173, dasher: 27 },
+        lengths: [9],
+        slotUsed: 0,
+      },
+      2: {
+        maxLive: 8,
+        capped: 10,
+        capTicks: 1019,
+        applied: '0 12 12 11 11 11 13 12 22',
+        steps: { square: 156, dasher: 37 },
+        lengths: [9],
+        slotUsed: 0,
+      },
+    });
+  });
+
+  it('pushes every dashing dasher 80 back after thorns ×3 in contactHooks, none leaking, and holds an onion for 60 ticks with 4 thorns rounds and its life loss at the end (C7b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'contactHooks') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const types = new Map<number, EnemyId>();
+      const last = new Map<number, { state: number; dist: number; step: number }>();
+      const pushes = new Set<string>();
+      const thorns: Record<string, Set<number>> = {};
+      const holds = new Map<
+        number,
+        { touch: number; until: number; rounds: number[]; hit: string }
+      >();
+      const leaks: Record<string, number> = {};
+      let repels = 0;
+      watchRun(entry, seed, (now, events, ctx) => {
+        for (const event of events) {
+          if (event.type === 'enemySpawned') types.set(event.enemyId, event.enemy);
+          else if (event.type === 'hit' && (event.tags & TAG.thorns) !== 0) {
+            const type = types.get(event.targetId) ?? 'none';
+            (thorns[type] ??= new Set()).add(toNumber(event.amount));
+            holds.get(event.targetId)?.rounds.push(now);
+          } else if (event.type === 'playerHit') {
+            const type = types.get(event.enemyId) ?? 'none';
+            leaks[type] = (leaks[type] ?? 0) + 1;
+            const hold = holds.get(event.enemyId);
+            if (hold !== undefined) hold.hit = `${now} for ${event.damage}`;
+          }
+        }
+        for (const e of ctx.enemies) {
+          const v = e.v3;
+          if (v === null || !e.alive) continue;
+          const was = last.get(e.id);
+          if (was !== undefined && was.state === DASHING && v.state === 0) {
+            repels++;
+            pushes.add(`+${Math.round((e.dist - (was.dist - was.step)) * 1e6) / 1e6}`);
+          }
+          if (v.state === ENTANGLED && !holds.has(e.id)) {
+            // Its touch's thorns hit came before the hold began: this tick's.
+            holds.set(e.id, { touch: now, until: v.stateUntil, rounds: [now], hit: '' });
+          }
+          last.set(e.id, { state: v.state, dist: e.dist, step: e.stepDist });
+        }
+      });
+      bySeed[seed] = {
+        repels,
+        pushes: [...pushes],
+        thorns: Object.fromEntries(Object.entries(thorns).map(([k, v]) => [k, [...v]])),
+        leaks,
+        holds: [...holds].map(
+          ([id, h]) =>
+            `${types.get(id)} ${id}: touch ${h.touch}, until ${h.until}, rounds ${[...new Set(h.rounds)].join('/')}, life loss ${h.hit}`,
+        ),
+      };
+    }
+    // Every repel puts the dasher back 80 past where its dash step left it, its thorns hit 36
+    // (12 × 3 on a dashing target) against the onion's 12; no dasher's contact costs life. The
+    // onion is held from its touch for 60 ticks, takes thorns at the touch and each 15 ticks after,
+    // 4 rounds, and costs its 100 only at the release: its one playerHit.
+    expect(bySeed).toEqual({
+      1: {
+        repels: 55,
+        pushes: ['+80'],
+        thorns: { dasher: [36], onion: [12] },
+        leaks: { onion: 1 },
+        holds: ['onion 1: touch 939, until 999, rounds 939/954/969/984, life loss 999 for 100'],
+      },
+      2: {
+        repels: 57,
+        pushes: ['+80'],
+        thorns: { dasher: [36], onion: [12] },
+        leaks: { onion: 1 },
+        holds: ['onion 2: touch 716, until 776, rounds 716/731/746/761, life loss 776 for 100'],
+      },
+    });
+  });
+
+  it('dodges a bullet at most every 180 ticks at 15 stacks or more in bulletHooks/dodgeBlock, lands the others, and blocks those an orb touches (C7b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'bulletHooks/dodgeBlock') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const dodged: string[] = [];
+      let stacks = 0;
+      let blocked = 0;
+      let hits = 0;
+      let cooling = 0;
+      let missed = 0;
+      let readyAt = 0;
+      watchRun(entry, seed, (now, events, ctx) => {
+        for (const event of events) {
+          if (event.type === 'bulletDodged') {
+            dodged.push(`${now} at ${stacks}`);
+            readyAt = now + 180;
+          } else if (event.type === 'bulletBlocked') blocked++;
+          else if (event.type === 'bulletHit') {
+            hits++;
+            if (stacks >= 15 && now < readyAt) cooling++;
+            else if (stacks >= 15) missed++;
+          }
+        }
+        // The stacks the next tick's bullets meet.
+        stacks = ctx.sys.combo.stacks;
+      });
+      bySeed[seed] = { dodged, blocked, hits, cooling, missed };
+    }
+    // Each dodge comes at 15 stacks or more and at least 180 ticks after the one before; the hits
+    // at 15 stacks or more all land in a dodge's cooldown (`missed` 0), and the orbs block some.
+    expect(bySeed).toEqual({
+      1: {
+        dodged: ['359 at 20', '550 at 20', '738 at 18', '924 at 20', '1116 at 20'],
+        blocked: 26,
+        hits: 41,
+        cooling: 35,
+        missed: 0,
+      },
+      2: {
+        dodged: ['348 at 20', '539 at 20', '731 at 19', '928 at 20', '1131 at 17'],
+        blocked: 22,
+        hits: 46,
+        cooling: 27,
+        missed: 0,
+      },
+    });
+  });
+
+  it('turns every bullet at the player in bulletHooks/reflect, brings the first thorns payload’s hit home to each live shooter and drops those whose shooter died (C7b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'bulletHooks/reflect') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const types = new Map<number, EnemyId>();
+      const reflected = new Set<number>();
+      const amounts = new Set<number>();
+      let flying = new Set<number>();
+      let arrivals = 0;
+      let vanished = 0;
+      let bulletHits = 0;
+      watchRun(entry, seed, (_now, events, ctx) => {
+        for (const event of events) {
+          if (event.type === 'enemySpawned') types.set(event.enemyId, event.enemy);
+          else if (event.type === 'bulletHit') bulletHits++;
+          else if (
+            event.type === 'hit' &&
+            (event.tags & TAG.thorns) !== 0 &&
+            types.get(event.targetId) === 'shooter'
+          ) {
+            arrivals++;
+            amounts.add(toNumber(event.amount));
+          }
+        }
+        const pool = ctx.sys.bullets;
+        const now = new Set<number>();
+        for (let s = 0; s < pool.count; s++) {
+          if (pool.reflected[s] === 1) {
+            reflected.add(pool.id[s] as number);
+            now.add(pool.id[s] as number);
+          }
+        }
+        for (const id of flying) if (!now.has(id)) vanished++;
+        flying = now;
+      });
+      bySeed[seed] = {
+        reflected: reflected.size,
+        arrivals,
+        amounts: [...amounts].sort((a, b) => a - b),
+        gone: vanished - arrivals,
+        flying: flying.size,
+        bulletHits,
+      };
+    }
+    // No bullet hits the player; each reflected bullet arrives (a thorns hit of 18, 27 on a crit),
+    // is gone with its dead shooter, or is still in flight at the end: 50 + 3 + 5 and 45 + 3 + 10.
+    expect(bySeed).toEqual({
+      1: { reflected: 58, arrivals: 50, amounts: [18, 27], gone: 3, flying: 5, bulletHits: 0 },
+      2: { reflected: 58, arrivals: 45, amounts: [18, 27], gone: 3, flying: 10, bulletHits: 0 },
+    });
+  });
+
+  it('lands the shielders’ hits below their shield’s 15 % only as a pool in shieldPool (C7b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'shieldPool') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const pools = new Set<string>();
+      let pooled = 0;
+      let alone = 0;
+      let blocked = 0;
+      watchRun(entry, seed, (_now, events, ctx) => {
+        const byId = new Map(ctx.enemies.map((e) => [e.id, e]));
+        for (const event of events) {
+          if (event.type !== 'hit' && event.type !== 'hitBlocked') continue;
+          const e = byId.get(event.targetId);
+          if (e === undefined || e.type !== 'shielder') continue;
+          if (event.type === 'hitBlocked') blocked++;
+          else if (toNumber(event.amount) < 0.15 * toNumber(e.maxHp)) pooled++;
+          else alone++;
+        }
+        for (const e of ctx.enemies) {
+          const v = e.v3;
+          if (e.type === 'shielder' && v !== null && v.poolStart >= 0)
+            pools.add(`${e.id}@${v.poolStart}`);
+        }
+      });
+      bySeed[seed] = { pooled, alone, blocked, pools: pools.size };
+    }
+    // Without the pool every hit on a shielder is blocked; with it, some land below 15 % of the
+    // shielder's life, and none of the build's hits is 15 % alone.
+    expect(bySeed).toEqual({
+      1: { pooled: 49, alone: 0, blocked: 480, pools: 163 },
+      2: { pooled: 63, alone: 0, blocked: 469, pools: 156 },
     });
   });
 

@@ -38,12 +38,23 @@ const STEP_SEC = W * DT;
 
 /**
  * Enemy.rings layout: a ring per source class (SOURCE_CLASS_ORDINAL center 0, outer 1,
- * fusion 2) from each ailment's first slot.
+ * fusion 2) from each ailment's first slot. Bleed has its three only in a run with 大出血's
+ * bleedRings (BuildFlags.bleedRings), whose enemies' arrays are RING_SLOTS_BLEED long; every
+ * other run's are RING_SLOTS long, and nothing reads past them.
  */
 export const RING_BURN = 0;
 export const RING_POISON = 3;
-/** Ailments kept in rings. */
+export const RING_BLEED = 6;
+/** Ailments kept in rings: burn and poison. */
 export const RING_SLOTS = 6;
+/** With bleedRings: burn, poison and bleed. */
+export const RING_SLOTS_BLEED = 9;
+
+/**
+ * 大出血's cap on an enemy's live bleed stacks (gd:401 「流血最多疊 8 層」), BuildFlags.bleedMaxStacks'
+ * value.
+ */
+export const BLEED_RING_MAX_STACKS = 8;
 
 /**
  * The enemy holds poison at tick `now`: one of its poison stacks has not ended yet. Damage left
@@ -56,6 +67,44 @@ export function holdsPoison(enemy: Enemy, now: number): boolean {
 /** The enemy's poison stacks at tick `now`: none once every stack has ended. */
 export function livePoisonStacks(enemy: Enemy, now: number): number {
   return enemy.poisonRingEnd > now ? enemy.poisonStacks : 0;
+}
+
+/**
+ * With bleedRings, the latest tick any of the enemy's bleed stacks ends at, from its bleed
+ * rings' headers (RingPool.end); 0 without one. Read only in such a run.
+ */
+export function bleedRingEnd(pool: RingPool, enemy: Enemy): number {
+  const rings = enemy.rings;
+  let end = 0;
+  for (let slot = RING_BLEED; slot < RING_SLOTS_BLEED; slot++) {
+    const r = rings[slot] as number;
+    if (r >= 0 && (pool.end[r] as number) > end) end = pool.end[r] as number;
+  }
+  return end;
+}
+
+/**
+ * With bleedRings, the enemy's live bleed stacks at tick `now`, from its bleed rings' headers:
+ * each ring's stacks (RingPool.stacks, counted until their last step) while one of them has not
+ * ended, none once all have, as livePoisonStacks reads poison's. Read only in such a run.
+ */
+export function liveBleedStacks(pool: RingPool, enemy: Enemy, now: number): number {
+  const rings = enemy.rings;
+  let live = 0;
+  for (let slot = RING_BLEED; slot < RING_SLOTS_BLEED; slot++) {
+    const r = rings[slot] as number;
+    if (r >= 0 && (pool.end[r] as number) > now) live += pool.stacks[r] as number;
+  }
+  return live;
+}
+
+/**
+ * With bleedRings: the enemy moved on tick `now` (movement, or a treasure's orbit turn), which
+ * counts for its bleed rings' next step (Enemy.bleedMovedTicks, src/sim/systems/ailments.ts) when
+ * one of their stacks runs through the tick, ending after tick now − 1.
+ */
+export function countBleedRingMove(pool: RingPool, enemy: Enemy, now: number): void {
+  if (bleedRingEnd(pool, enemy) > now - 1) enemy.bleedMovedTicks++;
 }
 
 /** Rings a pool holds before its first growth. */

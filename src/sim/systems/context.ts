@@ -914,7 +914,11 @@ export function createRunContext(
   const segments = createSegmentState(emitters.filter((em) => em.spec.kind === 'segment'));
   // Its turrets' targets go through ctx.shootable, read once ctx exists.
   const drones = createDronePool(layout, (enemy) => ctx.shootable(enemy));
-  const bullets = createBulletPool(ENEMY_IDS);
+  const bullets = createBulletPool(
+    ENEMY_IDS,
+    values.reflectBullets > 0,
+    values.orbitBlocksBullets > 0 ? emitters.filter((em) => em.spec.kind === 'orbit') : [],
+  );
   let shotPad = 0;
   for (const id of reachableEnemies(data)) {
     const def = data.enemies[id];
@@ -1148,6 +1152,9 @@ export function createRunContext(
         data.waves.v3 !== undefined ? table.row(rowKey(0, 0)) : -1,
         values.toughDropMult,
         values.treasureRate,
+        values.dashRepel,
+        values.bossHoldSec,
+        values.shieldPoolSec,
       ),
       defence: createPlayerDefence(
         values,

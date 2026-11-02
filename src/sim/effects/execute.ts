@@ -64,13 +64,13 @@ import type { SignatureId } from '../../data/rules';
 import type { AppliedAilment } from '../../data/triggers';
 import {
   ailmentDps,
+  applyBleed,
   applyBurn,
   applyPoison,
   creditOf,
   spreadBurn,
   spreadPoison,
 } from '../ailments/apply';
-import { addBleed } from '../ailments/bleed';
 import { addFrost } from '../ailments/frost';
 import { consumeAilment, remainingOf } from '../ailments/remaining';
 import { addShock } from '../ailments/shock';
@@ -148,10 +148,11 @@ const centerY = (ctx: RunContext, fx: CompiledEffect, entry: Readonly<EffectEntr
 
 /**
  * `stacks` stacks of `ailment` from payload `p` on `enemy`, each as a hit of damage `base` would
- * apply it, through p's rows and credit (bleed keeps the strongest, so more stacks add nothing),
- * then its ailmentApplied event, at `depth` from trigger `origin`. The applyAilment executor
- * passes its payload's base damage; a zone's poison, bleed or shock term, its payload's base ×
- * ailmentDamagePct (src/sim/systems/zones.ts, whose burn term takes applyBurnTerm instead).
+ * apply it, through p's rows and credit (bleed keeps the strongest, so more stacks add nothing,
+ * but for 大出血's bleedRings, up to its cap), then its ailmentApplied event, at `depth` from
+ * trigger `origin`. The applyAilment executor passes its payload's base damage; a zone's
+ * poison, bleed or shock term, its payload's base × ailmentDamagePct (src/sim/systems/zones.ts,
+ * whose burn term takes applyBurnTerm instead).
  */
 export function applyStacks(
   ctx: RunContext,
@@ -187,9 +188,11 @@ export function applyStacks(
     case 'bleed': {
       const dps = ailmentDps(ctx, enemy, p, SLOT_BLEED, base, ctx.bleedDamage);
       const source = creditOf(ctx, 'bleed', p);
-      applied = addBleed(ctx, enemy, dps, now + ctx.bleedTicks, depth, source);
+      // 1 in the strongest-only slot; under bleedRings, the stacks it holds (0: at the cap).
+      const held = applyBleed(ctx, enemy, dps, now + ctx.bleedTicks, depth, source, stacks);
+      applied = held > 0;
       if (applied) {
-        ctx.events.push({ type: 'ailmentApplied', targetId: enemy.id, ailment, stacks: 1 });
+        ctx.events.push({ type: 'ailmentApplied', targetId: enemy.id, ailment, stacks: held });
       }
       break;
     }

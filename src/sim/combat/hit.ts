@@ -23,8 +23,14 @@ import type { Num } from '../../core/num';
 import { add, assertFinite, gt, lte, mul, sub, toNumber, ZERO } from '../../core/num';
 import { DOT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
-import { ailmentDps, applyBurn, applyPoison, applyPulseBurn, creditOf } from '../ailments/apply';
-import { addBleed } from '../ailments/bleed';
+import {
+  ailmentDps,
+  applyBleed,
+  applyBurn,
+  applyPoison,
+  applyPulseBurn,
+  creditOf,
+} from '../ailments/apply';
 import { addFrost } from '../ailments/frost';
 import { addShock, takenMult } from '../ailments/shock';
 import { pctMaxHpFactor, statAt } from '../build/eval';
@@ -177,8 +183,10 @@ export function applyDots(
     const slot = crit ? SLOT_BLEED_CRIT : SLOT_BLEED;
     const dps = ailmentDps(ctx, enemy, p, slot, base, ctx.bleedDamage);
     const source = creditOf(ctx, 'bleed', p);
-    if (addBleed(ctx, enemy, dps, now + ctx.bleedTicks, depth, source)) {
-      ctx.events.push({ type: 'ailmentApplied', targetId: enemy.id, ailment: 'bleed', stacks: 1 });
+    // 1 in the strongest-only slot; under bleedRings, the stacks it holds (0: at the cap).
+    const stacks = applyBleed(ctx, enemy, dps, now + ctx.bleedTicks, depth, source, 1);
+    if (stacks > 0) {
+      ctx.events.push({ type: 'ailmentApplied', targetId: enemy.id, ailment: 'bleed', stacks });
       if (ctx.appliedListeners) fireApplied(ctx, enemy, 'bleed', depth, origin, p.flags);
     }
   }

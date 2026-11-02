@@ -82,6 +82,8 @@ describe('compileBuild', () => {
       maxLife: null,
       burnRings: false,
       bleedMoveMult: 3,
+      bleedRings: false,
+      bleedMaxStacks: 8,
       frostImmuneTicks: 180,
       bossLockTicks: 252,
       bossMinGapTicks: 0,

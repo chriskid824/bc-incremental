@@ -108,6 +108,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       affixes: 0,
       wardLeft: ZERO,
       layersLeft: 0,
+      poolStart: -Infinity,
+      poolSum: ZERO,
     });
     expect(createEnemyV3(square, ORIGIN, 1)).toEqual({
       ai: AI_NONE,
@@ -125,6 +127,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       affixes: 0,
       wardLeft: ZERO,
       layersLeft: 0,
+      poolStart: -Infinity,
+      poolSum: ZERO,
     });
     expect(createEnemyV3(square, { ...ORIGIN, extra: false }, 1).extra).toBe(false);
     expect(createEnemyV3(treasure, undefined, 1)).toEqual({
@@ -143,6 +147,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       affixes: 0,
       wardLeft: ZERO,
       layersLeft: 0,
+      poolStart: -Infinity,
+      poolSum: ZERO,
     });
     expect(createEnemyV3(treasure, { ...ORIGIN, extra: false }, 1).extra).toBe(true);
   });
@@ -167,6 +173,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
         affixes: 0,
         wardLeft: ZERO,
         layersLeft: 0,
+        poolStart: -Infinity,
+        poolSum: ZERO,
       });
     }
     // A square given each behaviour acts as the type that has it, at the square's speed.
@@ -194,6 +202,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       affixes: 0,
       wardLeft: ZERO,
       layersLeft: 0,
+      poolStart: -Infinity,
+      poolSum: ZERO,
     });
   });
 
@@ -216,6 +226,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       affixes: 0,
       wardLeft: ZERO,
       layersLeft: 0,
+      poolStart: -Infinity,
+      poolSum: ZERO,
     });
     // The shielder's id on a square's def, which has no behaviour: no defence.
     expect(createEnemyV3({ ...square, id: 'shielder' }, undefined, 1)).toMatchObject({
@@ -240,6 +252,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       affixes: 0,
       wardLeft: ZERO,
       layersLeft: 0,
+      poolStart: -Infinity,
+      poolSum: ZERO,
     });
     // Every other v3 behaviour holds none.
     for (const def of Object.values(V3_ENEMIES)) {
@@ -341,6 +355,8 @@ describe('addEnemy: the v3 record (docs/v3 C7 design §1.3)', () => {
       affixes: 0,
       wardLeft: ZERO,
       layersLeft: 0,
+      poolStart: -Infinity,
+      poolSum: ZERO,
     });
     expect([child.tough, child.boss, child.stepDist]).toEqual([true, false, plain.stepDist]);
   });

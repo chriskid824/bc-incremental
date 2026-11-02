@@ -59,14 +59,17 @@ export const WARD_AILMENT_MULT = 0.25;
  * Bits of EnemyV3.state (docs/v3 C7 design §2.5): the phase of a behaviour
  * (src/sim/systems/enemyAi.ts, which exports them too), 0 while the enemy walks in. A dasher
  * charges as CHARGING | STOPPED, then dashes as DASHING; a treasure circles as ORBITING, then
- * flees as FLEEING. The targetState condition reads DASHING and STOPPED
- * (src/sim/build/eval.ts), so they are defined here, outside every import cycle, as SHIELDED is.
+ * flees as FLEEING. A boss that 荊棘纏繞 holds at the player is ENTANGLED alone (C7b,
+ * src/sim/systems/contact.ts), whatever it did before. The targetState condition reads DASHING
+ * and STOPPED (src/sim/build/eval.ts), so they are defined here, outside every import cycle, as
+ * SHIELDED is.
  */
 export const STOPPED = 1;
 export const CHARGING = 2;
 export const DASHING = 4;
 export const ORBITING = 8;
 export const FLEEING = 16;
+export const ENTANGLED = 32;
 
 /** A v3 run's enemy record (Enemy.v3). */
 export interface EnemyV3 {
@@ -83,9 +86,15 @@ export interface EnemyV3 {
   blockPct: number;
   /** × on its contact damage (src/sim/systems/contact.ts); 1, or BERSERK_MULT while 狂暴 rages. */
   contactMult: number;
-  /** Its behaviour's state bits (STOPPED … FLEEING); 0 while it walks in, and for a walker. */
+  /**
+   * Its behaviour's state bits (STOPPED … FLEEING), or ENTANGLED while 荊棘纏繞 holds it; 0 while
+   * it walks in, and for a walker.
+   */
   state: number;
-  /** The tick its current phase ends (a charge, an orbit); each frozen tick pushes it back one. */
+  /**
+   * The tick its current phase ends (a charge, an orbit, a hold); each frozen tick pushes it
+   * back one.
+   */
   stateUntil: number;
   /** Its walk step per tick: its def's speed × DT, × SWIFT_MULT with 迅捷. */
   baseStep: number;
@@ -121,6 +130,12 @@ export interface EnemyV3 {
    * (onionBreak, src/sim/systems/onion.ts), and the one that takes it to 0 kills.
    */
   layersLeft: number;
+  /**
+   * 集火 (C7b, src/sim/combat/defend.ts): the tick the hits pooled against its shield started
+   * at, −Infinity before any, and their sum, the amounts the shield compared (before the armour).
+   */
+  poolStart: number;
+  poolSum: Num;
 }
 
 /**
@@ -260,5 +275,7 @@ export function createEnemyV3(
     affixes,
     wardLeft: warded ? mul(maxHp, WARD_BREAK_PCT) : ZERO,
     layersLeft: def.behaviour?.kind === 'layers' ? def.behaviour.layers : 0,
+    poolStart: -Infinity,
+    poolSum: ZERO,
   };
 }

@@ -166,8 +166,8 @@ describe('computeStatBlock', () => {
     for (const mod of rejected) expect(() => block([mod]), JSON.stringify(mod)).toThrow(/Tags/);
   });
 
-  it("appends C6b.1's barrageCount: last of 50, base 0, unscoped, its flat values summed", () => {
-    expect(STAT_IDS).toHaveLength(50);
+  it("appends C6b.1's barrageCount: last of 57, base 0, unscoped, its flat values summed", () => {
+    expect(STAT_IDS).toHaveLength(57);
     expect(STAT_IDS.slice(-2)).toEqual(['treasureRate', 'barrageCount']);
     expect(BASE_STATS.barrageCount).toBe(0);
     expect(isScopedStat('barrageCount')).toBe(false);

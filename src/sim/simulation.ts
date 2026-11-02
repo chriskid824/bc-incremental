@@ -173,16 +173,22 @@ export function createSimulation(
    * 2b. enemyAI: in a v3 run, the enemies with work, in id order, regenerate and act: dashers
    *    charge and dash, treasures circle and flee, and an escaped treasure leaves the field,
    *    shooters fire and summoners summon at their posts; frozen ones pause their timers and only
-   *    regenerate (enemyAi.ts). Then the bullets in flight move, and hit the player, through its
-   *    defences, before any contact, halving the combo stacks and raising heroHit (bullets.ts).
+   *    regenerate (enemyAi.ts). A boss held by 荊棘纏繞 takes a round of the thorns hits every
+   *    HOLD_ROUND_TICKS and at the hold's end deals its contact damage and leaks (stepHold,
+   *    contact.ts). Then the bullets in flight move: an orb of 攔截軌道 blocks one it reaches; at
+   *    the player a bullet is turned back (反射), dodged (節奏閃避) or hits it, through its
+   *    defences, before any contact, halving the combo stacks and raising heroHit; a turned bullet
+   *    that reaches its shooter hits it with the first thorns payload (bullets.ts). The hits of
+   *    this stage read the previous tick's globals (4b).
    * 3. movement: every enemy walks towards the player, or out for a fleeing treasure, by the
    *    step the enemy AI left it (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
    * 4b. globals: in a run whose build reads them, the shards held and the alive enemies an aura
-   *    pulse would reach, into the run's EvalInput for every hit of the tick (globals.ts).
+   *    pulse would reach, into the run's EvalInput for every later hit of the tick (globals.ts).
    * 5. contact: enemies that reached the player hit it, through its defences (damage taken,
    *    shield, extra lives), and leak, halving the combo stacks (combo.ts) and raising heroHit
-   *    and contact; then the player regenerates (contact.ts).
+   *    and contact; under 拒馬 a dashing one is pushed back out instead, and under 荊棘纏繞 a boss
+   *    is held (2b); then the player regenerates (contact.ts).
    * 6. emitters: in a run that keeps combo stacks or has a buff, the combo step first: the
    *    idle ticks without a target for the signature emitter and their decay, and the buff
    *    windows that are over (combo.ts); then, while any waits, the delayed repeats whose tick

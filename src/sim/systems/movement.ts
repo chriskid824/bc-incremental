@@ -4,14 +4,16 @@
  * (src/sim/systems/contact.ts). A slowed enemy walks only the part of its step its slow leaves
  * (enemySlow in src/sim/ailments/frost.ts: nothing while frozen; frost, a global slow or a
  * zone's). Once a bleed has been applied in the run (RunContext.bleedApplied), a bleeding enemy
- * that moves counts the tick for its bleed (src/sim/ailments/bleed.ts), so a frozen one bleeds
- * as if standing still. The enemy AI step (src/sim/systems/enemyAi.ts) sets a v3 behaviour's
- * step before this stage: 0 for an enemy that stands, a dash's, or below 0 for a fleeing
- * treasure, which walks out and counts its bleed too.
+ * that moves counts the tick for its bleed (src/sim/ailments/bleed.ts), or under 大出血's
+ * bleedRings for its bleed rings' step (countBleedRingMove, src/sim/ailments/rings.ts), so a
+ * frozen one bleeds as if standing still. The enemy AI step (src/sim/systems/enemyAi.ts) sets a
+ * v3 behaviour's step before this stage: 0 for an enemy that stands, a dash's, or below 0 for a
+ * fleeing treasure, which walks out and counts its bleed too.
  */
 
 import { countBleedMove } from '../ailments/bleed';
 import { enemySlow } from '../ailments/frost';
+import { countBleedRingMove } from '../ailments/rings';
 import type { Enemy, RunContext } from './context';
 
 export function moveEnemies(ctx: RunContext): void {
@@ -44,6 +46,7 @@ function moveSlowedOrBleeding(ctx: RunContext): void {
   const py = ctx.player.y;
   const now = ctx.now;
   const slowsAll = ctx.globalSlow !== 0;
+  const bleedRings = ctx.build.flags.bleedRings;
   for (let i = 0; i < enemies.length; i++) {
     const enemy = enemies[i] as Enemy;
     enemy.prevX = enemy.x;
@@ -58,5 +61,6 @@ function moveSlowedOrBleeding(ctx: RunContext): void {
     enemy.x = px + enemy.ux * enemy.dist;
     enemy.y = py + enemy.uy * enemy.dist;
     if (enemy.bleedUntil !== 0 && enemy.dist !== before) countBleedMove(enemy, now);
+    else if (bleedRings && enemy.dist !== before) countBleedRingMove(ctx.rings, enemy, now);
   }
 }

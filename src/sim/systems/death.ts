@@ -50,7 +50,9 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlag
   let flags = 0;
   if (ctx.killListeners) {
     flags =
-      (hitFlags & HIT_BITS) | heldFlags(enemy, ctx.now) | (1 << (KILL_KIND_SHIFT + enemy.killKind));
+      (hitFlags & HIT_BITS) |
+      heldFlags(enemy, ctx.now, ctx) |
+      (1 << (KILL_KIND_SHIFT + enemy.killKind));
     if (ctx.killInline.length !== 0) fireInlineKill(ctx, enemy, origin, flags);
     const onKill = ctx.build.hooks.onKill;
     if (onKill.length !== 0) {
