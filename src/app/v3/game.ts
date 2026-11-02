@@ -146,7 +146,11 @@ export class GamePage {
       if (this.screen === 'run') this.setSpeed(speed);
     });
     window.addEventListener('keydown', (event) => this.key(event));
-    window.addEventListener('pagehide', () => this.save());
+    // Not before the first pick: a fresh profile written by a visit that picked nothing would
+    // take the place of the M1 save's one-time import (profileStore.ts' fresh path).
+    window.addEventListener('pagehide', () => {
+      if (this.character !== null) this.save();
+    });
     this.app.stage.visible = false;
     this.showSelect();
     this.app.ticker.add((ticker) => this.loop.tick(ticker.elapsedMS));
