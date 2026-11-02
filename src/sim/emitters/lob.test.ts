@@ -2079,14 +2079,15 @@ describe('連環爆 (chainBlast; C12, R25)', () => {
       triggers: [IDLE_REPEAT, IDLE_CHARGE],
     };
     const now = bombs(placed, options);
-    fireLobRepeat(now, lobOf(now), repeatPayloadOf(now), 1, 9);
+    // From IDLE_REPEAT, trigger 1: a kill reads its origin's killShards (C6b.3).
+    fireLobRepeat(now, lobOf(now), repeatPayloadOf(now), 1, 1);
     expect(now.shots.count).toBe(1);
     landAll(now);
     expect(now.enemies.every((e) => !e.alive)).toBe(true);
     expect(now.effectQueue.size).toBe(0);
     // A counted bomb of the same build queues its 2; a charge drained after it, none more.
     const counted = bombs(placed, options);
-    runRepeatEffect(counted, 1);
+    runRepeatEffect(counted, 1, 1, 1);
     fire(counted);
     expect(counted.shots.count).toBe(2);
     expect(counted.shots.payload[1]).toBe(repeatPayloadOf(counted, 1));

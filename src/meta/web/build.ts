@@ -5,6 +5,7 @@
  * was.
  */
 
+import type { Num } from '../../core/num';
 import type { SourcedEmitter } from '../../data/emitters';
 import type { SignatureSpec } from '../../data/rules';
 import { sourceOfNode } from '../../data/sources';
@@ -30,6 +31,8 @@ export interface WebRun {
   readonly stats: StatBlock;
   readonly signature: SignatureSpec;
   readonly character: CharacterRun;
+  /** The wallet's shards when the run starts, which shardsHeld adds the run's to (H20). */
+  readonly walletShards: Num;
 }
 
 /**
@@ -47,7 +50,8 @@ function merged(mod: Modifier, rank: number): Modifier {
  * modifier without a scaling goes in once, merged (P4), while one with a scaling goes in r times,
  * its cap applying per copy; triggers and conversions r times and emitter grants once, each with
  * its node's source; a fusion board's triggers with the fusion's coef. Rules go in once each, as
- * { source, spec, coef }, coef 1 off fusion boards (D9, D10).
+ * { source, spec, coef }, coef 1 off fusion boards (D9, D10). The wallet's shards, as
+ * settleWebRun reads them, go to the run's config (webRunConfig).
  */
 export function webBuild(web: AssembledWeb, progress: CharacterProgress): WebRun {
   const modifiers: Modifier[] = [];
@@ -80,10 +84,14 @@ export function webBuild(web: AssembledWeb, progress: CharacterProgress): WebRun
     stats: computeStatBlock(modifiers, { triggers, conversions, emitters }),
     signature: web.def.signature,
     character: { id: web.def.id, rules },
+    walletShards: progress.wallet.shards,
   };
 }
 
-/** The run's config (§5.1): no M1 rules, the character's signature and rules, auto mode. */
+/**
+ * The run's config (§5.1): no M1 rules, the character's signature and rules, auto mode, and the
+ * wallet's shards the run started with (RunConfig.walletShards; lead ruling G3).
+ */
 export function webRunConfig(
   run: WebRun,
   seed: number,
@@ -99,6 +107,7 @@ export function webRunConfig(
     startWave,
     mode: 'auto',
     ...(waveCap === undefined ? {} : { waveCap }),
+    walletShards: run.walletShards,
   };
 }
 

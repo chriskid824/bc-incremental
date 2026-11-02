@@ -157,12 +157,15 @@ export function effectNumbers(effect: EffectSpec): string[][] {
   }
 }
 
-/** The numbers a trigger's node text must quote: its interval, conditions and effects. */
+/**
+ * The numbers a trigger's node text must quote: its interval, conditions, effects and kill shards.
+ */
 export function triggerNumbers(trigger: TriggerSpec): string[][] {
   return [
     ...(trigger.every === undefined ? [] : [[String(trigger.every)]]),
     ...(trigger.when ?? []).flatMap(conditionNumbers),
     ...trigger.do.flatMap(effectNumbers),
+    ...(trigger.killShards === undefined ? [] : [[percent(trigger.killShards)]]),
   ];
 }
 

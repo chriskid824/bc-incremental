@@ -219,6 +219,18 @@ export const SCALING_TEXT: Readonly<
     other: 'web.scaling.comboStacks.other',
     every: 'number',
   },
+  shardsHeld: {
+    name: 'web.scaling.shardsHeld.name',
+    one: 'web.scaling.shardsHeld.one',
+    other: 'web.scaling.shardsHeld.other',
+    every: 'number',
+  },
+  enemiesInAura: {
+    name: 'web.scaling.enemiesInAura.name',
+    one: 'web.scaling.enemiesInAura.one',
+    other: 'web.scaling.enemiesInAura.other',
+    every: 'number',
+  },
 };
 
 /** powFactor: 「×（{x}的 {e} 次方），最多 ×{cap}」 (H17). */
@@ -813,9 +825,14 @@ function triggerText(
     list.length === 0
       ? ''
       : say(lookup, 'web.conds', { list: list.join(say(lookup, 'web.join.clause')) });
-  const effects = trigger.do
-    .map((effect) => effectText(lookup, effect, coef))
-    .join(say(lookup, 'web.join.effects'));
+  // Its kills' shards follow its effects (TriggerSpec.killShards; greed's +1%).
+  const effects =
+    trigger.do
+      .map((effect) => effectText(lookup, effect, coef))
+      .join(say(lookup, 'web.join.effects')) +
+    (trigger.killShards === undefined
+      ? ''
+      : say(lookup, 'web.trigger.killShards', { pct: signedPercent(trigger.killShards) }));
   if (type !== null && isCenterEvent(trigger.on)) {
     return say(lookup, FANOUT_TEXT[trigger.on][type], {
       ...values,

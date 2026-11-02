@@ -1,5 +1,9 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { posix, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { num, ZERO } from '../../core/num';
+import { mul, num, ZERO } from '../../core/num';
+import type { Num } from '../../core/num';
 import { loadGameData } from '../../data';
 import type { RuleSpec } from '../../data/rules';
 import type { CharacterId, OuterId } from '../../data/sources';
@@ -16,6 +20,7 @@ import { statAt } from '../../sim/build/eval';
 import type { EvalInput } from '../../sim/build/eval';
 import { modTableFor, SCOPED_INDEX } from '../../sim/build/modTable';
 import { CENTER, rowKey } from '../../sim/build/sources';
+import type { TestModule } from '../../sim/rules';
 import { createSimulation } from '../../sim/simulation';
 import type { Enemy } from '../../sim/systems/context';
 import { PANDEMIC_TRIGGER, placedEnemies } from '../../sim/testing';
@@ -119,6 +124,8 @@ describe('webBuild (§5.1)', () => {
       chainJump: 0,
       playerLifeFrac: 1,
       comboStacks: 0,
+      shardsHeld: 0,
+      enemiesInAura: 0,
       ctx: null,
     };
     const tables = [modTableFor(merged), modTableFor(unmerged)] as const;
@@ -204,9 +211,116 @@ describe('webRunConfig', () => {
       character: run.character,
       startWave: 3,
       mode: 'auto',
+      // The wallet's shards, an empty wallet's 0 (C6b.3, G3).
+      walletShards: 0,
     });
     expect('waveCap' in webRunConfig(run, 7, 3)).toBe(false);
     expect(webRunConfig(run, 7, 3, 40).waveCap).toBe(40);
+  });
+
+  it('starts the run with the wallet’s shards (C6b.3, G3)', () => {
+    // Planted bug: webRunConfig dropping the wallet.
+    const wallet = { shards: num(12345), cores: 2, resonance: 1 };
+    const run = webBuild(fire, { ...owning({ [R1]: 1 }), wallet });
+    expect(run.walletShards).toBe(num(12345));
+    expect(webRunConfig(run, 7, 3).walletShards).toBe(num(12345));
+    expect(webRunConfig(run, 7, 3, 40).walletShards).toBe(num(12345));
+  });
+
+  it('is what every character run’s config comes from, its run from webBuild (C6b.3, G3)', () => {
+    // Every non-test caller in src/ and tools/ of webRunConfig, or of tools/balance's
+    // cappedRunConfig, which passes its run on: the run argument is webBuild's or a name bound
+    // to webBuild's (or a WebRun parameter), and nothing outside src/meta/web/build.ts writes
+    // walletShards over it.
+    const root = fileURLToPath(new URL('../../../', import.meta.url));
+    const files = ['src', 'tools'].flatMap((dir) =>
+      readdirSync(resolve(root, dir), { recursive: true, encoding: 'utf8' })
+        .map((name) => posix.join(dir, name.replaceAll('\\', '/')))
+        .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts')),
+    );
+    const code = (source: string): string =>
+      source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|\s)\/\/.*$/gm, '$1');
+    /** The top-level arguments of the call whose `(` ends at `from`. */
+    const args = (source: string, from: number): string[] => {
+      const out: string[] = [];
+      let depth = 0;
+      let start = from;
+      for (let i = from; i < source.length; i++) {
+        const ch = source[i] as string;
+        if (ch === ',' && depth === 0) {
+          out.push(source.slice(start, i).trim());
+          start = i + 1;
+        } else if ('([{'.includes(ch)) {
+          depth++;
+        } else if (')]}'.includes(ch) && depth-- === 0) {
+          return [...out, source.slice(start, i).trim()];
+        }
+      }
+      throw new Error('unclosed call');
+    };
+    const callers: string[] = [];
+    for (const file of files) {
+      const source = code(readFileSync(resolve(root, file), 'utf8'));
+      if (file !== 'src/meta/web/build.ts') {
+        expect(/\bwalletShards\s*:/.test(source) && /RunConfig/.test(source), file).toBe(false);
+      }
+      for (const match of source.matchAll(/(?<!function )\b(webRunConfig|cappedRunConfig)\(/g)) {
+        const all = args(source, (match.index as number) + match[0].length);
+        const run = (match[1] === 'webRunConfig' ? all[0] : all[1]) as string;
+        const fromBuild =
+          run.startsWith('webBuild(') ||
+          new RegExp(`\\b${run}\\s*=\\s*webBuild\\(|\\b${run}\\s*:\\s*WebRun\\b`).test(source);
+        expect(fromBuild, `${file}: ${match[1]}(${all.join(', ')})`).toBe(true);
+        callers.push(`${file} ${match[1]}`);
+      }
+    }
+    // A new caller shows here, to be read.
+    expect(callers.sort()).toEqual([
+      'src/app/replay/build.ts webRunConfig',
+      'src/meta/web/calibrate.ts webRunConfig',
+      'src/meta/web/fuzz.ts webRunConfig',
+      'tools/balance/v3/checks/c7.ts cappedRunConfig',
+      'tools/balance/v3/measures.ts webRunConfig',
+      'tools/balance/v3/session.ts cappedRunConfig',
+      'tools/balance/v3/testWave.ts webRunConfig',
+      'tools/balance/v3/visit.ts cappedRunConfig',
+      'tools/balance/v3/visit.ts webRunConfig',
+    ]);
+  });
+
+  it('credits the greed fusion’s kills × 1.01 on a character run, and no other kill (C6b.3, G4)', () => {
+    // Planted bugs: the kill bonus on every kill, or none on the fusion's trigger.
+    const web = assembleWeb(content, 'fire', FULL_SCOPE);
+    const invested = unlockInvestment(web, account, 'greed');
+    const rich = { ...invested, wallet: { shards: num(1e40), cores: 9, resonance: 0 } };
+    const bought = buy(web, rich, account, 'fusion.fire.greed.core');
+    const run = webBuild(web, { ...bought, wallet: { ...bought.wallet, shards: ZERO } });
+    expect(run.stats.triggers.filter((t) => t.spec.killShards === 0.01)).toHaveLength(1);
+    const kills = { greed: 0, other: 0 };
+    const credit = new Map<number, Num>();
+    const watch: TestModule = (b) =>
+      void b.hook('onKill', (ctx, victim, kill) => {
+        const trigger = kill.origin < 0 ? undefined : ctx.build.triggers[kill.origin];
+        const greed =
+          trigger !== undefined && ctx.build.sources.names[trigger.source] === 'fusion.fire.greed';
+        kills[greed ? 'greed' : 'other']++;
+        let drop = mul(mul(num(victim.def.dropMult), victim.rec.shardsPerStd), ctx.shardGain);
+        if (victim.v3 !== null) drop = mul(drop, victim.v3.dropScale);
+        credit.set(victim.id, greed ? mul(drop, 1.01) : drop);
+      });
+    const sim = createSimulation({ ...webRunConfig(run, 1, 10), maxTicks: 3600 }, loadGameData(), [
+      watch,
+    ]);
+    while (!sim.state.finished) {
+      for (const event of sim.step(NO_INPUT)) {
+        if (event.type === 'enemyKilled') {
+          expect(event.shards, `kill of ${event.enemyId}`).toBe(credit.get(event.enemyId));
+        }
+      }
+    }
+    // Seed 1 from wave 10: 5 kills by the coin, 42 by the rest.
+    expect(kills.greed).toBeGreaterThan(0);
+    expect(kills.other).toBeGreaterThan(kills.greed);
   });
 
   /** A template fusion and a hand fusion of each character: 固定投入, then the core. */

@@ -131,6 +131,11 @@ export interface CompiledTrigger {
    * CHAIN_JUMP_EVENT_CAP on chainJump, 0 (no cap) on every other event.
    */
   readonly perAttackCap: number;
+  /**
+   * TriggerSpec.killShards: an enemy its effects' damage kills drops × (1 + killShards) shards
+   * (killEnemy, src/sim/systems/death.ts); 0 without it, and on every module and shatter entry.
+   */
+  readonly killShards: number;
 }
 
 /** The built-in shatter's effect (SHATTER_TRIGGER), which no data can name. */
@@ -252,6 +257,7 @@ export function compileTrigger(
     detonateAilment:
       dead && detonate !== undefined ? DETONATE_AILMENTS.indexOf(detonate.ailment) : -1,
     perAttackCap: chainJump ? CHAIN_JUMP_EVENT_CAP : 0,
+    killShards: spec.killShards ?? 0,
   };
 }
 
@@ -276,6 +282,7 @@ export function moduleTrigger(index: number, source: number): CompiledTrigger {
     selector: null,
     detonateAilment: -1,
     perAttackCap: 0,
+    killShards: 0,
   };
 }
 

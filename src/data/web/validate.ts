@@ -1274,6 +1274,10 @@ function payloadIssues(outer: OuterDef): ContentIssue[] {
     return issues;
   }
   const effects = [...payload.effects, ...Object.values(payload.perEvent ?? {}).flat()];
+  const killShards = payload.killShards;
+  if (killShards !== undefined && !(killShards > 0 && killShards <= 1)) {
+    push(`killShards must be in (0, 1] (got ${killShards})`);
+  }
   const bonus = payload.bonus;
   if (bonus?.form === 'status') {
     const fits = effects.some(

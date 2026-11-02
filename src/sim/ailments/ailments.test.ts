@@ -187,6 +187,8 @@ describe('shock', () => {
     chainJump: 0,
     playerLifeFrac: 1,
     comboStacks: 0,
+    shardsHeld: 0,
+    enemiesInAura: 0,
     ctx: null,
   });
 
@@ -274,6 +276,8 @@ describe('poison', () => {
       chainJump: 0,
       playerLifeFrac: 1,
       comboStacks: 0,
+      shardsHeld: 0,
+      enemiesInAura: 0,
       ctx: null,
     };
     expect(scaling.read(ev)).toBe(5);

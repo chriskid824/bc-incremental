@@ -395,12 +395,19 @@ const OUTER_CARDS: Readonly<Record<OuterId, OuterCard>> = {
   greed: {
     skin: { accent: 0xffd23f, shape: 'coin' },
     covers: { shielder: 'answer', regenerator: 'answer', treasure: 'helps' },
-    // No bonus until C6b's shardsHeld (F42).
+    // The C6 design's payload row: the held-shard factor, × shardsHeld^0.06 (C6b.3; 錢包's
+    // exponent, gd:499) as a center bonus, and its kills' shards +1% (gd:571).
     payload: {
       type: 'placement',
       effects: [{ kind: 'coinHit', multiplier: 10, ignoreShield: true }],
-      bonus: null,
+      bonus: {
+        form: 'scaling',
+        kind: 'more',
+        value: 1,
+        scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06 },
+      },
       ranks: RANKS,
+      killShards: 0.01,
     },
   },
 };

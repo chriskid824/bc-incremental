@@ -121,6 +121,14 @@ describe('rule descriptions', () => {
         ],
       }),
     ).toEqual([['2%'], ['30%'], ['20%']]);
+    // Its kill shards last (C6b.3).
+    expect(
+      triggerNumbers({
+        on: 'explode',
+        do: [{ kind: 'coinHit', multiplier: 10, ignoreShield: true }],
+        killShards: 0.01,
+      }),
+    ).toEqual([['×10', '1000%'], ['1%']]);
   });
 
   it('matches whole numbers only', () => {

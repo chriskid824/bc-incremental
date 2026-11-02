@@ -22,10 +22,14 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
  * target's chill meter, 0 to 1 (a frozen enemy reads 1). `targetDistance`: how far the target is
  * from the player, in arena units.
  * `lifeLostPct`: the fraction of the player's max life missing, 0 to 1. `comboStacks`: the run's
- * combo stacks as they are at the instance (src/sim/systems/combo.ts), a run variable that needs
- * no target. A target variable reads 0 without a target, and comboStacks 0 outside a run
- * (estimates). The simulation reads each variable through a registry typed over this list
- * (src/sim/build/eval.ts), so a new variable lands with its reader.
+ * combo stacks as they are at the instance (src/sim/systems/combo.ts). `shardsHeld`: the shards
+ * the player holds, the wallet the run started with (RunConfig.walletShards) plus the run's own
+ * (SimState.shards). `enemiesInAura`: the alive enemies an aura pulse of the build would reach, 0
+ * without an aura emitter (src/sim/emitters/aura.ts). Both are computed once a tick, after the
+ * enemies move and before the first stage that can hit (src/sim/systems/globals.ts). The last
+ * three are run variables that need no target. A target variable reads 0 without a target, and a
+ * run variable 0 outside a run (estimates). The simulation reads each variable through a registry
+ * typed over this list (src/sim/build/eval.ts), so a new variable lands with its reader.
  */
 export const SCALING_VARS = [
   'chainJump',
@@ -36,6 +40,8 @@ export const SCALING_VARS = [
   'targetShockStacks',
   'targetFrost',
   'comboStacks',
+  'shardsHeld',
+  'enemiesInAura',
 ] as const;
 export type ScalingVar = (typeof SCALING_VARS)[number];
 
@@ -703,6 +709,12 @@ export interface TriggerSpec {
    */
   readonly target?: TargetSelector;
   readonly do: readonly EffectSpec[];
+  /**
+   * The shards of an enemy its effects' damage kills, × (1 + killShards): a fraction in (0, 1],
+   * greed's +1% (docs/v3/game-design-v3.md §4.12). A kill by damage over time, even of an ailment
+   * its effects applied, is no kill of its own and gets none (src/sim/systems/death.ts).
+   */
+  readonly killShards?: number;
 }
 
 /** What a conversion turns part of a hit into: a damage-over-time kind or an element. */

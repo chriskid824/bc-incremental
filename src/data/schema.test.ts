@@ -1121,3 +1121,46 @@ describe('parseGameData schema errors', () => {
     expect(() => parseGameData(data)).toThrow(`talents.${i}.rules.0.id: Invalid discriminator`);
   });
 });
+
+describe('the per-tick variables and killShards (C6b.3)', () => {
+  const coin = { kind: 'coinHit', multiplier: 10, ignoreShield: true } as const;
+
+  it.each(['shardsHeld', 'enemiesInAura'])('takes %s as a scaling’s per, on any curve', (per) => {
+    for (const mod of [
+      {
+        stat: 'damage',
+        kind: 'more',
+        value: 1,
+        scaling: { per, curve: 'powFactor', exponent: 0.06 },
+      },
+      { stat: 'damage', kind: 'increased', value: 0.02, scaling: { per, cap: 0.2 } },
+      { stat: 'critChance', kind: 'flat', value: 0.01, scaling: { per, every: 5, curve: 'log10' } },
+    ]) {
+      expect(ModifierSchema.parse(mod)).toEqual(mod);
+    }
+    expect(
+      ModifierSchema.safeParse({
+        stat: 'damage',
+        kind: 'more',
+        value: 1,
+        scaling: { per: 'shardHeld' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('takes a trigger’s killShards as a finite number, and refuses NaN, Infinity, a string and an unknown key', () => {
+    const trigger = { on: 'explode', do: [coin], killShards: 0.01 };
+    expect(TriggerSpecSchema.parse(trigger)).toEqual(trigger);
+    for (const killShards of [Number.NaN, Infinity, -Infinity, '1%', null]) {
+      const result = TriggerSpecSchema.safeParse({ ...trigger, killShards });
+      expect(
+        result.error?.issues.map((issue) => issue.path),
+        String(killShards),
+      ).toEqual([['killShards']]);
+    }
+    const typo = TriggerSpecSchema.safeParse({ on: 'explode', do: [coin], killShard: 0.01 });
+    expect(typo.error?.issues.map((issue) => [issue.code, issue.path])).toEqual([
+      ['unrecognized_keys', []],
+    ]);
+  });
+});

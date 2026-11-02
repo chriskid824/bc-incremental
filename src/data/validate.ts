@@ -8,7 +8,7 @@ import { grantKey } from './emitters';
 import type { EmitterGrant } from './emitters';
 import type { RuleSpec } from './rules';
 import { ARCHETYPE_TAGS, SOURCE_CLASSES, sourceOfNode } from './sources';
-import { attackSpeedIssues, isBehaviourModifier } from './stats';
+import { attackSpeedIssues, isBehaviourModifier, powFactorIssues } from './stats';
 import type { Modifier } from './stats';
 import { DELIVERY_MASK, DOT_MASK, TAG } from './tags';
 import {
@@ -748,24 +748,12 @@ function modifierIssues(mod: Modifier): string[] {
   if (scaling.every !== undefined && !(scaling.every > 0)) {
     issues.push(`scaling.every must be > 0 (got ${scaling.every})`);
   }
-  // A positive exponent keeps pow's g(0) = 0, so the primary hit gets no contribution, and
-  // makes powFactor's factor grow with x.
-  if (scaling.exponent !== undefined && !(scaling.exponent > 0)) {
+  // A positive exponent keeps pow's g(0) = 0, so the primary hit gets no contribution;
+  // powFactor's checks, its exponent's among them, are D30's (powFactorIssues).
+  if (scaling.curve !== 'powFactor' && scaling.exponent !== undefined && !(scaling.exponent > 0)) {
     issues.push(`scaling.exponent must be > 0 (got ${scaling.exponent})`);
   }
-  // powFactor's contribution is its factor − 1 (src/sim/build/eval.ts): only a more of value 1
-  // multiplies by the factor itself, and a cap below 1 would make it a penalty at every x.
-  if (scaling.curve === 'powFactor') {
-    if (mod.kind !== 'more') {
-      issues.push(`kind must be 'more' with scaling.curve 'powFactor' (got '${mod.kind}')`);
-    }
-    if (mod.value !== 1) {
-      issues.push(`value must be 1 with scaling.curve 'powFactor' (got ${mod.value})`);
-    }
-    if (scaling.cap !== undefined && !(scaling.cap >= 1)) {
-      issues.push(`scaling.cap must be >= 1 with curve 'powFactor' (got ${scaling.cap})`);
-    }
-  }
+  issues.push(...powFactorIssues(mod));
   return issues;
 }
 
@@ -919,6 +907,10 @@ function triggerIssues(trigger: TriggerSpec, zonesRead: boolean): string[] {
   if (target !== undefined) issues.push(...selectorIssues(on, runsAtKill(trigger), target));
 
   if (trigger.do.length === 0) issues.push('needs at least one effect');
+  const killShards = trigger.killShards;
+  if (killShards !== undefined && !(killShards > 0 && killShards <= 1)) {
+    issues.push(`killShards must be in (0, 1] (got ${killShards})`);
+  }
   const kill = KILL_EVENTS.includes(on);
   const transfers = trigger.do.filter((effect) => TRANSFER_EFFECTS.has(effect.kind)).length;
   // A kill trigger runs at the kill only when all of its effects are transfers.

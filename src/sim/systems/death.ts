@@ -41,7 +41,9 @@ export function removeEnemy(ctx: RunContext, enemy: Enemy): void {
  * dropScale (src/sim/systems/enemyRecord.ts), before the cores are floored and rolled; a 增殖
  * elite leaves its children right after its split children, so a toSplitChildren transfer
  * reaches them too (C7.6). Its affix bits are read inside C7.4a's one record test, so the kill
- * path costs an M1 run one more test, on a local.
+ * path costs an M1 run one more test, on a local. A kill by a trigger's damage then drops
+ * × (1 + its killShards) shards (greed's +1%, TriggerSpec.killShards), which the kill event and
+ * its pending kills carry: one test on `origin`, and × 1 for a trigger without it.
  */
 export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlags: number): void {
   // The kill's flags: the killing hit's, what the victim held, and what killed it.
@@ -73,6 +75,9 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlag
     shards = mul(shards, v3.dropScale);
     expectedCores *= v3.dropScale;
     if ((v3.affixes & AFFIX_MULTIPLY) !== 0) multiplies = v3.affixes;
+  }
+  if (origin >= 0) {
+    shards = mul(shards, 1 + (ctx.build.triggers[origin] as CompiledTrigger).killShards);
   }
   let cores = 0;
   if (expectedCores > 0) {

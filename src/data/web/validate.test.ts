@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ModifierSchema } from '../schema';
+import { CHARACTER_IDS } from '../sources';
 import { assembleWeb } from './assemble';
 import { ContentError, loadContent, parseContent } from './index';
 import { BATCH_COUNTS, DEMO_SCOPE_A, DEMO_SCOPE_B, FULL_SCOPE, SCOPES } from './scope';
@@ -805,6 +806,45 @@ describe('one golden message per load-time check (D23)', () => {
       }, 'B5'),
     ).toEqual([
       "outer 'combo' (src/data/outer/combo.ts): coefScalesBonus with a powFactor bonus, which the coef cannot scale; drop coefScalesBonus",
+    ]);
+  });
+
+  it('V12: a payload’s killShards in (0, 1], NaN and Infinity refused at the schema, no unknown key (C6b.3)', () => {
+    const greed = (killShards: unknown): string[] =>
+      plant(
+        (content) => set(content.outers.greed?.payload as object, 'killShards', killShards),
+        'B5',
+      );
+    // V12 on the payload, and V1 on each core the generator copied it onto.
+    expect([0, -0.01, 1.5].map(greed)).toEqual(
+      ['0', '-0.01', '1.5'].map((got) => [
+        ...CHARACTER_IDS.map(
+          (c) =>
+            `node 'fusion.${c}.greed.core' (src/data/fusion/overrides.ts): triggers[0] killShards must be in (0, 1] (got ${got})`,
+        ),
+        `outer 'greed' (src/data/outer/greed.ts): killShards must be in (0, 1] (got ${got})`,
+      ]),
+    );
+    expect(greed(0.5)).toEqual([]);
+    // zodIssueText writes the value as JSON, where NaN and Infinity are null.
+    expect([Number.NaN, Infinity].map(greed)).toEqual([
+      ["outer 'greed' (src/data/outer/greed.ts): payload.killShards null is not a number"],
+      ["outer 'greed' (src/data/outer/greed.ts): payload.killShards null is not a number"],
+    ]);
+    expect(
+      plant((content) => set(content.outers.greed?.payload as object, 'killShard', 0.01), 'B5'),
+    ).toEqual([
+      "outer 'greed' (src/data/outer/greed.ts): payload 'killShard' is not a key; did you mean 'killShards'?",
+    ]);
+    // A generated trigger's key is the schema's too: an override's trigger with a typo.
+    expect(
+      plant((content) => {
+        set(content.overrides, 'fire.greed', {
+          addTriggers: [{ on: 'kill', do: [{ kind: 'heal', lifePct: 0.01 }], killshards: 0.01 }],
+        });
+      }, 'B5'),
+    ).toEqual([
+      "override 'fire.greed' (src/data/fusion/overrides.ts): addTriggers[0] 'killshards' is not a key; did you mean 'killShards'?",
     ]);
   });
 

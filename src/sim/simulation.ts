@@ -25,6 +25,7 @@
 
 import { CHARACTER_SIGNATURE } from '../data/rules';
 import type { RuleId } from '../data/rules';
+import { isFiniteNum, lt, ZERO } from '../core/num';
 import { STAT_IDS } from '../data/stats';
 import type { SourcedRule } from '../data/stats';
 import { COEF_MAX, COEF_MIN } from '../data/triggers';
@@ -35,6 +36,7 @@ import { updateAilments } from './systems/ailments';
 import { stepCombo } from './systems/combo';
 import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
+import { stepGlobals } from './systems/globals';
 import type { TestModule } from './rules';
 import { compact } from './systems/death';
 import { stepDrones } from './systems/drones';
@@ -70,6 +72,10 @@ function validateConfig(config: RunConfig): void {
     (!Number.isInteger(config.maxTicks) || config.maxTicks < 1)
   ) {
     throw new RangeError(`maxTicks must be an integer >= 1, got ${config.maxTicks}`);
+  }
+  const wallet = config.walletShards;
+  if (wallet !== undefined && !(isFiniteNum(wallet) && !lt(wallet, ZERO))) {
+    throw new RangeError(`walletShards must be finite and >= 0, got ${wallet}`);
   }
   const { base, values, scoped } = config.stats;
   for (const id of STAT_IDS) {
@@ -145,6 +151,14 @@ export function createSimulation(
   const segments = ctx.sys.segments.emitters.length !== 0;
   const enemyAi = ctx.sys.enemyAi.enabled;
   const combo = ctx.sys.combo.ticks;
+  // So is whether the globals step has work (src/sim/systems/globals.ts): a build that reads the
+  // shards held, or the enemies in the aura while it has an aura emitter. The wallet is the run
+  // config's, 0 without one.
+  const flags = ctx.build.flags;
+  const held = flags.shardsHeld;
+  const inAura = flags.enemiesInAura && ctx.emitters.some((em) => em.spec.kind === 'aura');
+  const globals = held || inAura;
+  const wallet = config.walletShards ?? ZERO;
 
   /**
    * Advances one tick. The systems run in the tick order of
@@ -162,6 +176,8 @@ export function createSimulation(
    * 3. movement: every enemy walks towards the player, or out for a fleeing treasure, by the
    *    step the enemy AI left it (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
+   * 4b. globals: in a run whose build reads them, the shards held and the alive enemies an aura
+   *    pulse would reach, into the run's EvalInput for every hit of the tick (globals.ts).
    * 5. contact: enemies that reached the player hit it, through its defences (damage taken,
    *    shield, extra lives), and leak, halving the combo stacks (combo.ts) and raising heroHit
    *    and contact; then the player regenerates (contact.ts).
@@ -191,9 +207,10 @@ export function createSimulation(
    * 13. waveControl: record cleared waves (waves.ts).
    * 14. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
-   * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 6's combo step in a run
-   * that keeps combo stacks or has a buff, 6b only while there is a drone, 8 in a run with
-   * segment emitters and 9 while there is a zone (a run of M1's content has none of them).
+   * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 4b in a run whose build
+   * reads shardsHeld or enemiesInAura, 6's combo step in a run that keeps combo stacks or has a
+   * buff, 6b only while there is a drone, 8 in a run with segment emitters and 9 while there is
+   * a zone (a run of M1's content has none of them).
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -205,6 +222,7 @@ export function createSimulation(
     if (enemyAi) stepEnemyAi(ctx);
     moveEnemies(ctx);
     rebuildGrid(ctx);
+    if (globals) stepGlobals(ctx, wallet, held, inAura);
     resolveContacts(ctx);
     if (ctx.player.life > 0) {
       if (combo) stepCombo(ctx);

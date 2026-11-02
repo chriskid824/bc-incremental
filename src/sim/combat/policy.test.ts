@@ -1097,7 +1097,8 @@ describe('shock on hit (C4.17)', () => {
       3,
       false,
       2,
-      7,
+      // SHATTER_TRIGGER, the build's one trigger: a kill reads its origin's killShards (C6b.3).
+      0,
     );
     expect(eventsOf([ctx.events], 'hit').map((hit) => hit.targetId)).toEqual([1, 2, 3, 4]);
     expect(ctx.enemies.map((e) => [e.alive, e.shockStacks, e.ailDepth])).toEqual([

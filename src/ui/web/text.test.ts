@@ -1110,3 +1110,78 @@ describe('buyCheckText', () => {
     );
   });
 });
+
+describe('the per-tick variables and the kill shards (C6b.3)', () => {
+  const greedCore = (c: 'fire' | 'summon', locale: Locale): readonly string[] =>
+    linesOf(assembleWeb(content, c, FULL_SCOPE), `fusion.${c}.greed.core`, locale);
+
+  it('writes shardsHeld and enemiesInAura in both locales', () => {
+    const mods = [
+      inc('damage', 0.02, { scaling: { per: 'enemiesInAura', cap: 0.2 } }),
+      flat('critChance', 0.01, { scaling: { per: 'shardsHeld', every: 1000 } }),
+      more('damage', 0.1, { scaling: { per: 'enemiesInAura', curve: 'log10' } }),
+      more('damage', 1, { scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06 } }),
+    ];
+    expect(LOCALES.map((locale) => mods.map((mod) => modifierLine(mod, lookups[locale])))).toEqual([
+      [
+        '2% increased Damage (per enemy in your aura, at most 20%)',
+        '+1% Crit chance (per 1000 shards you hold)',
+        '10% more Damage (rising with the enemies in your aura at a slowing rate (log₁₀))',
+        'Damage ×(the shards you hold to the power 0.06)',
+      ],
+      [
+        '傷害提高 2%（光環內每隻敵人，最多 20%）',
+        '暴擊率 +1%（每持有 1000 碎片）',
+        '傷害總增 10%（隨光環內的敵人數成長，越來越慢（log₁₀））',
+        '傷害 ×（持有的碎片的 0.06 次方）',
+      ],
+    ]);
+  });
+
+  it('writes greed’s core: its coin with the kill shards, and its held-shard factor', () => {
+    expect([
+      greedCore('fire', 'en'),
+      greedCore('fire', 'zh-TW'),
+      greedCore('summon', 'en'),
+    ]).toEqual([
+      [
+        'Each explosion, where it lands: a coin hit for 10× hit damage, ignoring shields; the enemies it kills drop +1% shards',
+        'Center damage ×(the shards you hold to the power 0.06)',
+      ],
+      [
+        '每次爆炸，在落點：金幣擊中，10 倍擊中，無視護盾；它造成的擊殺碎片 +1%',
+        '中心傷害 ×（持有的碎片的 0.06 次方）',
+      ],
+      [
+        'Each drone impact, at its target: a coin hit for 10× hit damage, ignoring shields; the enemies it kills drop +1% shards',
+        'Center damage ×(the shards you hold to the power 0.06)',
+      ],
+    ]);
+  });
+
+  it('writes the kill shards after a plain trigger’s effects, and none without them', () => {
+    const heal: TriggerSpec = { on: 'kill', do: [{ kind: 'heal', lifePct: 0.05 }] };
+    const line = (trigger: TriggerSpec, locale: Locale): string =>
+      linesOf(withEffects(fire, NOTABLE, { triggers: [trigger] }), NOTABLE, locale)[0] ?? '';
+    expect(
+      LOCALES.map((locale) => [line({ ...heal, killShards: 0.25 }, locale), line(heal, locale)]),
+    ).toEqual([
+      [
+        'When enemies are killed: heal 5% of max life; the enemies it kills drop +25% shards',
+        'When enemies are killed: heal 5% of max life',
+      ],
+      ['敵人死亡時：回復 5% 生命；它造成的擊殺碎片 +25%', '敵人死亡時：回復 5% 生命'],
+    ]);
+  });
+
+  it('names the armour a coin ignores 堅甲, as the stat and the affix do', () => {
+    const coin: TriggerSpec = {
+      on: 'hit',
+      do: [{ kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true }],
+    };
+    const line = (locale: Locale): string =>
+      linesOf(withEffects(fire, NOTABLE, { triggers: [coin] }), NOTABLE, locale)[0] ?? '';
+    expect(line('en')).toMatch(/, ignoring shields, ignoring armour$/);
+    expect(line('zh-TW')).toMatch(/，無視護盾，無視堅甲$/);
+  });
+});

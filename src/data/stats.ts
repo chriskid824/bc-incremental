@@ -301,6 +301,33 @@ export function attackSpeedIssues(mod: Modifier): string[] {
 }
 
 /**
+ * Why a modifier on scaling.curve 'powFactor' is not legal, if it is not (docs/v3 C6 design
+ * D30): its contribution is its factor − 1 (src/sim/build/eval.ts), so only a more of value 1
+ * multiplies by the factor itself; a positive exponent makes the factor grow with x, and a cap
+ * below 1 would make it a penalty at every x. Data validation and a rule module's addModifier
+ * both read it.
+ */
+export function powFactorIssues(mod: Modifier): string[] {
+  const scaling = mod.scaling;
+  if (scaling?.curve !== 'powFactor') return [];
+  const issues: string[] = [];
+  const exponent = scaling.exponent;
+  if (!(exponent !== undefined && exponent > 0)) {
+    issues.push(`scaling.exponent must be > 0 (got ${exponent})`);
+  }
+  if (mod.kind !== 'more') {
+    issues.push(`kind must be 'more' with scaling.curve 'powFactor' (got '${mod.kind}')`);
+  }
+  if (mod.value !== 1) {
+    issues.push(`value must be 1 with scaling.curve 'powFactor' (got ${mod.value})`);
+  }
+  if (scaling.cap !== undefined && !(scaling.cap >= 1)) {
+    issues.push(`scaling.cap must be >= 1 with curve 'powFactor' (got ${scaling.cap})`);
+  }
+  return issues;
+}
+
+/**
  * A modifier that changes how hits play out rather than a number the player reads off the
  * stat list: tags on a stat other than damage, notTags, conditions, a scaling, or an
  * ALWAYS_STATS stat. The talent screen leaves it to its node's descKey text, which data

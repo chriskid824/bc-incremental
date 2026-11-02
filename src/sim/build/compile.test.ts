@@ -11,7 +11,7 @@ import { SCOPED_STATS } from '../../data/stats';
 import type { Modifier, SourcedRule, StatBlock } from '../../data/stats';
 import { jumpMask, TAG } from '../../data/tags';
 import { AILMENT_KINDS } from '../../data/triggers';
-import type { TriggerSpec } from '../../data/triggers';
+import type { ScalingSpec, TriggerSpec } from '../../data/triggers';
 import { SHATTER_TRIGGER, shatterTrigger } from '../effects/types';
 import {
   emitterPayload,
@@ -92,6 +92,8 @@ describe('compileBuild', () => {
       comboIdleTicks: 60,
       comboIdleKeep: 0,
       comboHitKeep: 0.5,
+      shardsHeld: false,
+      enemiesInAura: false,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,
@@ -904,6 +906,57 @@ describe('signatureRows on a character run (docs/v3 C6 design D8)', () => {
       ).toEqual(slots);
       // 雷塔's hits and jumps share their rows (A32).
       expect(new Set(slots).size, id).toBe(id === 'lightning' ? 2 : 4);
+    }
+  });
+});
+
+describe('a module’s powFactor obeys D30 (R15, lead ruling G5)', () => {
+  /** A powFactor damage more of value 1 on shardsHeld, `mod` and `scaling` over it. */
+  const factor = (mod: Partial<Modifier> = {}, scaling: Partial<ScalingSpec> = {}): Modifier => ({
+    stat: 'damage',
+    kind: 'more',
+    value: 1,
+    ...mod,
+    scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06, ...scaling },
+  });
+  const added = (mod: Modifier) => () => compileWith(makeStats(), (b) => b.addModifier(mod));
+
+  it('throws at compile on each bad powFactor, with the data’s message', () => {
+    // Planted bug: one of R15's four checks missing.
+    const cases: [Modifier, string][] = [
+      [
+        factor({ kind: 'increased' }),
+        "kind must be 'more' with scaling.curve 'powFactor' (got 'increased')",
+      ],
+      [factor({ value: 0.5 }), "value must be 1 with scaling.curve 'powFactor' (got 0.5)"],
+      [factor({}, { exponent: 0 }), 'scaling.exponent must be > 0 (got 0)'],
+      [factor({}, { exponent: -0.5 }), 'scaling.exponent must be > 0 (got -0.5)'],
+      [
+        {
+          stat: 'damage',
+          kind: 'more',
+          value: 1,
+          scaling: { per: 'shardsHeld', curve: 'powFactor' },
+        },
+        'scaling.exponent must be > 0 (got undefined)',
+      ],
+      [factor({}, { cap: 0.5 }), "scaling.cap must be >= 1 with curve 'powFactor' (got 0.5)"],
+      // On a scoped stat other than damage too, the first issue named.
+      [
+        factor({ stat: 'critMultiplier', kind: 'flat', value: 2, scope: 'center' }),
+        "kind must be 'more' with scaling.curve 'powFactor' (got 'flat')",
+      ],
+    ];
+    for (const [mod, message] of cases) {
+      expect(added(mod)).toThrow(`addModifier: ${JSON.stringify(mod)} ${message}`);
+    }
+  });
+
+  it('compiles a good one, uncapped or capped at 1 or more, and reads it in a run’s rows', () => {
+    for (const mod of [factor(), factor({}, { cap: 1 }), factor({ scope: 'center' }, { cap: 9 })]) {
+      const build = added(mod)();
+      expect(build.mods.at(-1)).toMatchObject({ stat: SCOPED_INDEX.damage, kind: 2, value: 1 });
+      expect(build.flags.shardsHeld).toBe(true);
     }
   });
 });

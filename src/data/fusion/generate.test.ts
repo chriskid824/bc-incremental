@@ -210,9 +210,11 @@ describe('generate on the fixture', () => {
       const event = EVENT_OF[c];
       const placed = payload.effects.map((effect) => place(effect, event));
       const def = fusion(key);
+      // Greed's payload carries killShards (C6b.3), which its template and trigger carry.
+      const kill = payload.killShards === undefined ? {} : { killShards: payload.killShards };
       expect(content.characters[c].centerEvent).toBe(event);
-      expect(def.template).toEqual({ on: event, do: placed, bonus: payload.bonus });
-      expect(coreOf(def).effects.triggers[0]).toEqual({ on: event, do: placed });
+      expect(def.template).toEqual({ on: event, do: placed, bonus: payload.bonus, ...kill });
+      expect(coreOf(def).effects.triggers[0]).toEqual({ on: event, do: placed, ...kill });
       expect(coreOf(def).effects.modifiers).toEqual(
         bonusModifiers(payload.bonus, `fusion.${key}`, 1),
       );
@@ -239,7 +241,17 @@ describe('generate on the fixture', () => {
         scaling: { per: 'comboStacks', every: 5 },
       },
     ]);
-    for (const o of ['crit', 'thorns', 'barrage', 'greed'] as const) {
+    // Greed's held-shard factor since C6b.3 (G7).
+    expect(at('lightning.greed')).toEqual([
+      {
+        stat: 'damage',
+        kind: 'more',
+        value: 1,
+        scope: 'center',
+        scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06 },
+      },
+    ]);
+    for (const o of ['crit', 'thorns', 'barrage'] as const) {
       expect(at(`lightning.${o}`)).toEqual([]);
     }
   });
@@ -730,5 +742,77 @@ describe('fusionDigest', () => {
       generate(content.characters.ice, outerOf('aura'), undefined, 1).digest,
     ];
     expect(new Set([base, ...digests]).size).toBe(6);
+  });
+});
+
+describe('killShards (C6b.3, lead ruling G4)', () => {
+  const coin = { kind: 'coinHit', multiplier: 10, ignoreShield: true } as const;
+  /** The fixture's greed payload with `killShards`, or without one. */
+  const greedy = (killShards?: number): OuterPayload => {
+    const payload: Record<string, unknown> = { ...outerOf('greed').payload };
+    delete payload.killShards;
+    return { ...payload, ...(killShards === undefined ? {} : { killShards }) } as OuterPayload;
+  };
+  const heal: TriggerSpec = { on: 'kill', do: [{ kind: 'heal', lifePct: 0.01 }] };
+
+  it('copies the payload’s killShards onto the template and the core’s trigger', () => {
+    for (const c of CHARACTER_IDS) {
+      const def = fusion(`${c}.greed`);
+      expect(def.template?.killShards).toBe(0.01);
+      expect(coreOf(def).effects.triggers).toEqual([
+        { on: EVENT_OF[c], do: [coin], killShards: 0.01 },
+      ]);
+      // The trigger's do is the template's own list, which the text finds by identity.
+      expect(coreOf(def).effects.triggers[0]?.do).toBe(def.template?.do);
+    }
+  });
+
+  it('copies it onto every trigger of the core, an override’s triggers and addTriggers too, keeping a trigger’s own', () => {
+    const own: TriggerSpec = { ...heal, killShards: 0.5 };
+    const replaced = generate(
+      content.characters.fire,
+      outerWith(greedy(0.01), 'greed'),
+      { triggers: [heal], addTriggers: [heal, own] },
+      1,
+    );
+    expect(coreOf(replaced).effects.triggers).toEqual([
+      { ...heal, killShards: 0.01 },
+      { ...heal, killShards: 0.01 },
+      own,
+    ]);
+  });
+
+  it('adds none without it, nor on a hand pair, whose core the payload does not make', () => {
+    const plain = generate(content.characters.fire, outerWith(greedy(), 'greed'), undefined, 1);
+    expect('killShards' in (plain.template as object)).toBe(false);
+    expect(coreOf(plain).effects.triggers).toEqual([{ on: 'explode', do: [coin] }]);
+    const bleed = fusion('fire.bleed');
+    expect('killShards' in (bleed.template as object)).toBe(false);
+    expect(coreOf(bleed).effects.triggers.every((t) => !('killShards' in t))).toBe(true);
+    const hand = generate(
+      content.characters.fire,
+      outerWith(greedy(0.01), 'ice'),
+      content.overrides['fire.ice'],
+      1,
+    );
+    expect(hand.template).toBeNull();
+    // V11: a hand pair's core has no trigger to carry it.
+    expect(coreOf(hand).effects.triggers).toEqual([]);
+  });
+
+  it('compiles it as written at any coef: COEF_FIELDS gains nothing (G4)', () => {
+    // Planted bug: killShards × the fusion's coefficient at compile.
+    const def = generate(content.characters.fire, outerWith(greedy(0.01), 'greed'), undefined, 2);
+    expect(def.coef).toBe(2);
+    const trigger = coreOf(def).effects.triggers[0] as TriggerSpec;
+    expect(compileTrigger(0, trigger, 0, def.coef, 0).killShards).toBe(0.01);
+  });
+
+  it('moves the digest with it, through the template (F28)', () => {
+    const at = (killShards?: number): string =>
+      generate(content.characters.fire, outerWith(greedy(killShards), 'greed'), undefined, 1)
+        .digest;
+    expect(at(0.01)).toBe(fusion('fire.greed').digest);
+    expect(new Set([at(), at(0.01), at(0.02), at(1)]).size).toBe(4);
   });
 });

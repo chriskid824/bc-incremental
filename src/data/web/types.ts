@@ -282,6 +282,11 @@ export interface OuterPayload {
   readonly ranks: FusionRanks;
   /** Q2 (A): coef also multiplies the bonus and r3; only with no COEF field above 0 (V12). */
   readonly coefScalesBonus?: true;
+  /**
+   * The kill shards of every trigger its template fusions make (TriggerSpec.killShards), a
+   * fraction in (0, 1] (V12): greed's +1% (gd:571).
+   */
+  readonly killShards?: number;
 }
 
 export interface OuterDef {
@@ -305,6 +310,8 @@ export interface FusionTemplate {
   /** The payload placed for `on`, or its perEvent entry. */
   readonly do: readonly EffectSpec[];
   readonly bonus: BonusSpec | null;
+  /** The payload's killShards, which generate copies onto every trigger of the core. */
+  readonly killShards?: number;
 }
 
 export interface FusionOverride {

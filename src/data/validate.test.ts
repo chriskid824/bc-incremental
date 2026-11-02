@@ -2223,6 +2223,26 @@ describe('trigger validation', () => {
       "talent 'vitality': a node with rules, triggers, conversions, emitters or behaviour modifiers needs a descKey",
     ]);
   });
+
+  it('takes killShards in (0, 1] and rejects 0, a negative, above 1, NaN and Infinity (C6b.3)', () => {
+    const coin = { kind: 'coinHit', multiplier: 10, ignoreShield: true } as const;
+    expect(
+      triggerIssues(
+        { on: 'hit', do: [coin], killShards: 0.01 },
+        { on: 'kill', do: [explode], killShards: 1 },
+        { on: 'periodic', every: 2, do: [heal], killShards: 1e-9 },
+      ),
+    ).toEqual([]);
+    const bad = [0, -0.01, 1.01, Number.NaN, Infinity, -Infinity];
+    expect(bad.map((killShards) => triggerIssues({ on: 'hit', do: [coin], killShards }))).toEqual([
+      [`${at} killShards must be in (0, 1] (got 0)`],
+      [`${at} killShards must be in (0, 1] (got -0.01)`],
+      [`${at} killShards must be in (0, 1] (got 1.01)`],
+      [`${at} killShards must be in (0, 1] (got NaN)`],
+      [`${at} killShards must be in (0, 1] (got Infinity)`],
+      [`${at} killShards must be in (0, 1] (got -Infinity)`],
+    ]);
+  });
 });
 
 describe('conversion validation', () => {
@@ -2915,6 +2935,80 @@ describe('validateTalents, whole output (docs/v3 C6 design D2: the extraction mo
       "talent 'scorch': descKey describes rules, triggers, conversions, emitters and behaviour modifiers; this node has none",
       "talents: emitter thorns '' is granted twice by source 'center' with different fields; keep it on one node",
       "talent 'island': not reachable from the start node",
+    ]);
+  });
+});
+
+describe('the per-tick variables (C6b.3)', () => {
+  /** A powFactor damage more of value 1 on shardsHeld at 錢包's exponent, `mod` and `scaling` over it. */
+  const held = (
+    mod: Partial<Mutable<Modifier>> = {},
+    scaling: Partial<ScalingSpec> = {},
+  ): Mutable<Modifier> => ({
+    stat: 'damage',
+    kind: 'more',
+    value: 1,
+    ...mod,
+    scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06, ...scaling },
+  });
+
+  it('accepts shardsHeld and enemiesInAura on any scoped stat, without a target', () => {
+    expect(
+      issuesAfter((d) => {
+        talent(d, 'staticFocus').modifiers.push(
+          held(),
+          held({ scope: 'center' }, { cap: 5 }),
+          {
+            stat: 'damage',
+            kind: 'increased',
+            value: 0.02,
+            scaling: { per: 'enemiesInAura', cap: 0.2 },
+          },
+          {
+            stat: 'critChance',
+            kind: 'flat',
+            value: 0.01,
+            scaling: { per: 'shardsHeld', curve: 'log10' },
+          },
+          {
+            stat: 'igniteChance',
+            kind: 'flat',
+            value: 0.01,
+            scaling: { per: 'enemiesInAura', every: 2 },
+          },
+        );
+      }),
+    ).toEqual([]);
+  });
+
+  it('accepts a powFactor on shardsHeld only as D30 allows', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'staticFocus').modifiers.push(
+        held({ kind: 'increased' }),
+        held({ value: 0.5 }),
+        held({}, { exponent: 0 }),
+        held({}, { cap: 0.99 }),
+      );
+    });
+    expect(issues).toEqual([
+      "talent 'staticFocus': modifiers[3] kind must be 'more' with scaling.curve 'powFactor' (got 'increased')",
+      "talent 'staticFocus': modifiers[4] value must be 1 with scaling.curve 'powFactor' (got 0.5)",
+      "talent 'staticFocus': modifiers[5] scaling.exponent must be > 0 (got 0)",
+      "talent 'staticFocus': modifiers[6] scaling.cap must be >= 1 with curve 'powFactor' (got 0.99)",
+    ]);
+  });
+
+  it('keeps attackSpeed scaled on comboStacks alone', () => {
+    const issues = issuesAfter((d) => {
+      talent(d, 'staticFocus').modifiers.push({
+        stat: 'attackSpeed',
+        kind: 'more',
+        value: 0.01,
+        scaling: { per: 'enemiesInAura' },
+      });
+    });
+    expect(issues).toEqual([
+      "talent 'staticFocus': modifiers[3] attackSpeed scales only on 'comboStacks' (got 'enemiesInAura'): its emitters' cadence is recomputed only when the stacks change",
     ]);
   });
 });

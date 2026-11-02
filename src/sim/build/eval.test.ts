@@ -356,6 +356,8 @@ const on = (ctx: RunContext, target: Enemy | null): EvalInput => ({
   chainJump: 0,
   playerLifeFrac: 1,
   comboStacks: 0,
+  shardsHeld: 0,
+  enemiesInAura: 0,
   ctx: null,
 });
 
@@ -408,6 +410,29 @@ describe('scaling variables', () => {
     for (const tick of seen.slice(0, first)) expect(tick.lost).toBe(0);
     for (const tick of seen.slice(first)) expect(tick.lost).toBe(1 - tick.life / tick.maxLife);
     expect(seen[first]?.lost).toBeGreaterThan(0);
+  });
+
+  it('reads shardsHeld and enemiesInAura from EvalInput, and 0 outside a run (C6b.3, G1)', () => {
+    // Planted bugs: the readers swapped, or an estimate reading a held shard or an aura enemy.
+    const table = modTableFor(
+      makeStats({}, [
+        {
+          stat: 'damage',
+          kind: 'more',
+          value: 1,
+          scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.12 },
+        },
+        { stat: 'damage', kind: 'increased', value: 0.02, scaling: { per: 'enemiesInAura' } },
+      ]),
+    );
+    const row = table.row(rowKey(TAG.hit, CENTER));
+    // No target needed: a run variable.
+    const inRun: EvalInput = { ...staticInput(), shardsHeld: 1e4, enemiesInAura: 3 };
+    expect(statAt(table, row, DAMAGE, inRun)).toBeCloseTo(1.06 * 1e4 ** 0.12, 12);
+    expect(statAt(table, row, DAMAGE, { ...inRun, shardsHeld: 0 })).toBeCloseTo(1.06, 12);
+    // Outside a run (estimates, describe, the DPS preview): × 1 and + 0.
+    expect([staticInput().shardsHeld, staticInput().enemiesInAura]).toEqual([0, 0]);
+    expect(statAt(table, row, DAMAGE, staticInput())).toBe(1);
   });
 });
 

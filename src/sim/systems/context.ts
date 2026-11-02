@@ -409,7 +409,8 @@ export interface RunContext {
   // ---- Triggers and effects (src/sim/effects/) ----
   /**
    * The input of every stat read and condition check (src/sim/build/eval.ts): hits set its
-   * target and chain jump; the contact step sets the player's life fraction once per tick.
+   * target and chain jump; the contact step sets the player's life fraction once per tick, and
+   * the globals step the shards held and the enemies in the aura (src/sim/systems/globals.ts).
    */
   readonly evalInput: EvalInput;
   /** Per trigger index: nthAttack counts, cooldowns, periodic firings. */
@@ -1073,7 +1074,16 @@ export function createRunContext(
     thornsEmitters,
 
     // Its run is this context, set once the literal is built.
-    evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1, comboStacks: 0, ctx: null },
+    evalInput: {
+      now: 0,
+      target: null,
+      chainJump: 0,
+      playerLifeFrac: 1,
+      comboStacks: 0,
+      shardsHeld: 0,
+      enemiesInAura: 0,
+      ctx: null,
+    },
     triggerState: {
       count: new Int32Array(triggers.length),
       readyAt: new Float64Array(triggers.length),

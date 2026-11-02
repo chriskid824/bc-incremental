@@ -65,6 +65,12 @@ export interface RunConfig {
   readonly waveCap?: number;
   /** Defaults to MAX_RUN_SECONDS × TICK_RATE. */
   readonly maxTicks?: number;
+  /**
+   * The shards the player's wallet held when the run started (webRunConfig, src/meta/web/
+   * build.ts), finite and at least 0; 0 when omitted, as on every M1 run. Only shardsHeld reads
+   * it (src/sim/systems/globals.ts): the run's own shards stay in SimState.shards.
+   */
+  readonly walletShards?: Num;
 }
 
 export interface EnemyState {

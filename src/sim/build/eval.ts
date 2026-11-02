@@ -63,7 +63,9 @@ const CURVE_CODE: Readonly<Record<ScalingCurve, CompiledScaling['curve']>> = {
  * What a read of a dynamic entry or a condition looks at; one reused object per run
  * (RunContext.evalInput). `now`, `target` and `chainJump` are set before each damage instance
  * reads its stats; `playerLifeFrac`, life / max life, once per tick after the contact step;
- * `comboStacks` wherever the stacks change (src/sim/systems/combo.ts).
+ * `comboStacks` wherever the stacks change (src/sim/systems/combo.ts); `shardsHeld` and
+ * `enemiesInAura` once per tick before the contact step, in a run whose build reads them
+ * (src/sim/systems/globals.ts).
  */
 export interface EvalInput {
   now: number;
@@ -75,6 +77,17 @@ export interface EvalInput {
   /** The run's combo stacks as they are now; 0 at a run's start and outside a run. */
   comboStacks: number;
   /**
+   * The shards held at this tick's globals step, the wallet's and the run's; 0 outside a run and
+   * in a run whose build reads no shardsHeld (BuildFlags.shardsHeld).
+   */
+  shardsHeld: number;
+  /**
+   * The alive enemies an aura pulse would reach at this tick's globals step; 0 outside a run,
+   * without an aura emitter and in a run whose build reads no enemiesInAura
+   * (BuildFlags.enemiesInAura).
+   */
+  enemiesInAura: number;
+  /**
    * The run, whose stack caps stacksAtLeast 'max' reads; null outside a run, where no such
    * condition is met.
    */
@@ -83,7 +96,7 @@ export interface EvalInput {
 
 /**
  * An input for estimates outside a run: no target (target conditions are not met, target
- * variables read 0), full life, no combo stacks and no run.
+ * variables read 0), full life, no combo stacks, no shards held, no enemy in an aura and no run.
  */
 export const staticInput = (chainJump = 0): EvalInput => ({
   now: 0,
@@ -91,6 +104,8 @@ export const staticInput = (chainJump = 0): EvalInput => ({
   chainJump,
   playerLifeFrac: 1,
   comboStacks: 0,
+  shardsHeld: 0,
+  enemiesInAura: 0,
   ctx: null,
 });
 
@@ -159,6 +174,8 @@ const SCALING_READERS: { readonly [K in ScalingVar]: (ev: Readonly<EvalInput>) =
   targetShockStacks: (ev) => (ev.target === null ? 0 : activeShockStacks(ev.target, ev.now)),
   targetFrost: (ev) => (ev.target === null ? 0 : frostMeter(ev.target, ev.now)),
   comboStacks: (ev) => ev.comboStacks,
+  shardsHeld: (ev) => ev.shardsHeld,
+  enemiesInAura: (ev) => ev.enemiesInAura,
 };
 
 /** A ScalingSpec compiled for per-instance evaluation. */

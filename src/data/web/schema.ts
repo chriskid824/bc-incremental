@@ -302,6 +302,7 @@ export const OuterPayloadSchema = exact<OuterPayload>()(
       bonus: BonusSpecSchema.nullable(),
       ranks: FusionRanksSchema,
       coefScalesBonus: z.literal(true).exactOptional(),
+      killShards: finite.exactOptional(),
     })
     .readonly(),
 );

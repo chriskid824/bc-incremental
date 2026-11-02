@@ -25,7 +25,7 @@ import { grantKey } from '../../data/emitters';
 import type { SourcedEmitter } from '../../data/emitters';
 import { M1_SIGNATURE, RULE_COEF_FIELDS, scaleRuleSpec } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
-import { attackSpeedIssues, isScopedStat, STAT_IDS } from '../../data/stats';
+import { attackSpeedIssues, isScopedStat, powFactorIssues, STAT_IDS } from '../../data/stats';
 import type { Modifier, SourcedRule, StatBlock, StatId } from '../../data/stats';
 import { jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
@@ -108,6 +108,14 @@ export interface BuildFlags {
   comboIdleTicks: number;
   comboIdleKeep: number;
   comboHitKeep: number;
+  /**
+   * The run computes the shards held, and the alive enemies an aura pulse would reach, once a
+   * tick into EvalInput (src/sim/systems/globals.ts): compileBuild sets each once the modules
+   * have run when a modifier scales on shardsHeld (enemiesInAura), and a module that reads the
+   * variable otherwise sets it itself. False: the variable stays 0 and nothing computes it.
+   */
+  shardsHeld: boolean;
+  enemiesInAura: boolean;
 }
 
 /** Parameters of the signature attack. */
@@ -267,14 +275,17 @@ function compileRule<K extends RuleId>(
  */
 function addedModifierIssue(mod: Modifier): string | null {
   if (!isScopedStat(mod.stat)) return 'is not a scoped stat; use scaleStat or offsetStat';
-  if (mod.stat === 'damage') return mod.kind === 'flat' ? 'is flat damage' : null;
-  const untagged =
-    (mod.tags?.length ?? 0) === 0 && (mod.notTags?.length ?? 0) === 0 && mod.scope === undefined;
-  if (untagged && mod.scaling === undefined) {
-    return 'applies to every instance; use scaleStat or offsetStat';
+  if (mod.stat === 'damage') {
+    if (mod.kind === 'flat') return 'is flat damage';
+  } else {
+    const untagged =
+      (mod.tags?.length ?? 0) === 0 && (mod.notTags?.length ?? 0) === 0 && mod.scope === undefined;
+    if (untagged && mod.scaling === undefined) {
+      return 'applies to every instance; use scaleStat or offsetStat';
+    }
   }
-  // A module's cadence factor obeys the data's rules (src/data/stats.ts).
-  return attackSpeedIssues(mod)[0] ?? null;
+  // A module's cadence factor and powFactor obey the data's rules (src/data/stats.ts; R15).
+  return attackSpeedIssues(mod)[0] ?? powFactorIssues(mod)[0] ?? null;
 }
 
 function signatureEmitter<K extends SignatureId>(
@@ -355,6 +366,8 @@ export function compileBuild(
     comboIdleTicks: 60,
     comboIdleKeep: 0,
     comboHitKeep: 0.5,
+    shardsHeld: false,
+    enemiesInAura: false,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -531,6 +544,9 @@ export function compileBuild(
   flags.combo ||=
     scoped.some((mod) => mod.scaling?.per === 'comboStacks') ||
     effects.some((fx) => fx.spec.kind === 'comboStack');
+  // So too the per-tick variables (lead ruling G2).
+  flags.shardsHeld ||= scoped.some((mod) => mod.scaling?.per === 'shardsHeld');
+  flags.enemiesInAura ||= scoped.some((mod) => mod.scaling?.per === 'enemiesInAura');
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
   );

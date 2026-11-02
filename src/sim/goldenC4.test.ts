@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { mul, num, toNumber } from '../core/num';
+import type { Num } from '../core/num';
 import { AFFIX_IDS, AFFIX_MULTIPLY } from '../data/affixes';
 import type { RuleSpec } from '../data/rules';
 import type { Modifier } from '../data/stats';
@@ -1797,6 +1798,46 @@ const comboData = (): GameData =>
     },
   });
 
+/**
+ * C6b.3's per-tick run variables and greed's kill shards (docs/v3 C6 design §7.4 C6b.3, H19,
+ * H20) on C7.3's squares and shielders from wave 12 (enemyDefenceData; armouredSquares armours
+ * the squares): a wallet of 1e4 shards and a damage more of × (held shards)^0.12, which starts
+ * at 1e4^0.12 = 3.02 and rises with the shards the run collects, and +2 % damage increased per
+ * enemy an aura pulse of radius 240 reaches, at most +20 %. Every 0.5 s a coin of ×10 that passes
+ * the shield and the armour hits the enemy with the most life, credited to outer.greed, and its
+ * kills drop × 1.01 shards; the volley's, the aura's and the burns' kills do not. The volley's
+ * hits of 4 × the held-shard factor stay under a shielder's 15 % from wave 12, so its shield
+ * blocks them, while the coins land whole on shielders and armoured squares alike.
+ */
+const GREED_STATS = makeStats(
+  { damage: 4, maxLife: 1e6, igniteChance: 0.2, auraRadius: 240 },
+  [
+    {
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.12 },
+    },
+    { stat: 'damage', kind: 'increased', value: 0.02, scaling: { per: 'enemiesInAura', cap: 0.2 } },
+  ],
+  {
+    triggers: [
+      {
+        source: 'outer.greed',
+        spec: {
+          on: 'periodic',
+          every: 0.5,
+          target: { pick: 'highestHp' },
+          do: [{ kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true }],
+          killShards: 0.01,
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [{ source: 'outer.aura', grant: { kind: 'aura' } }],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2104,6 +2145,13 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: COMBO_STATS, rules: [], startWave: 12 },
     data: comboData,
     expected: ['dbcf015be087c6c0', '95856d903901563c'],
+  },
+  {
+    name: 'greed',
+    config: { stats: GREED_STATS, rules: [], startWave: 12, walletShards: num(1e4) },
+    data: enemyDefenceData,
+    modules: () => [armouredSquares()],
+    expected: ['02eeaeab6f5845d4', '9b4b4349d77245df'],
   },
 ];
 
@@ -2842,6 +2890,94 @@ describe('golden C4 runs', () => {
         halved: ['406: 20 → 10'],
         cleared: ['528 (wave 13, 3 to release): 18 → 0', '635 (wave 13, 2 to release): 5 → 0'],
         buffed: ['603–722'],
+      },
+    });
+  });
+
+  it('reads the held-shard factor from 1e4^0.12 = 3.02 rising with the run’s shards, counts the aura’s enemies, credits the coin’s kills × 1.01 and no other kill, and lets the coins through shields and armour in greed (C6b.3)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'greed') as GoldenC4Entry;
+    const COIN = 1; // the coin trigger's index, after SHATTER_TRIGGER
+    const bySeed: Record<number, Record<string, unknown>> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const held: number[] = [];
+      const aura = new Set<number>();
+      const kills: Record<string, number> = {};
+      // Each victim's drop before the kill shards, and what its kill must credit.
+      const credit = new Map<number, Num>();
+      const watch: TestModule = (b) => {
+        b.hook('tick', (ctx) => {
+          held.push(ctx.evalInput.shardsHeld);
+          aura.add(ctx.evalInput.enemiesInAura);
+        });
+        b.hook('onKill', (ctx, victim, kill) => {
+          const base = mul(
+            mul(mul(num(victim.def.dropMult), victim.rec.shardsPerStd), ctx.shardGain),
+            victim.v3?.dropScale ?? 1,
+          );
+          const by = kill.origin === COIN ? 'coin' : victim.killKind === 0 ? 'hit' : 'dot';
+          kills[by] = (kills[by] ?? 0) + 1;
+          credit.set(victim.id, by === 'coin' ? mul(base, 1.01) : base);
+        });
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [
+        ...(entry.modules?.() ?? []),
+        watch,
+      ]);
+      const types = new Map<number, EnemyId>();
+      const seen = new Set<string>();
+      let credited = 0;
+      while (!sim.state.finished) {
+        for (const event of sim.step(NO_INPUT)) {
+          if (event.type === 'enemySpawned') types.set(event.enemyId, event.enemy);
+          else if (event.type === 'hitBlocked') seen.add(`${types.get(event.targetId)} blocks`);
+          else if (event.type === 'hit' && event.source !== 0) {
+            seen.add(`${types.get(event.targetId)} takes source ${event.source}`);
+          } else if (event.type === 'pulse') {
+            seen.add(`${event.kind} pulse`);
+          } else if (event.type === 'enemyKilled') {
+            expect(event.shards, `kill of ${event.enemyId}`).toBe(credit.get(event.enemyId));
+            credited++;
+          }
+        }
+      }
+      const factor = (x: number): number => Math.max(1, x) ** 0.12;
+      expect(credited).toBe(credit.size);
+      bySeed[seed] = {
+        start: factor(held[0] as number).toFixed(4),
+        end: factor(held.at(-1) as number).toFixed(4),
+        rising: held.every((x, i) => i === 0 || x >= (held[i - 1] as number)),
+        aura: [Math.min(...aura), Math.max(...aura)],
+        kills,
+        seen: [...seen].sort(),
+      };
+    }
+    // The factor starts at 1e4^0.12 and only rises, by 0.01 over the run's shards; the coins
+    // (source 1) kill most, landing on shielders, whose shields block the volley, and on armoured
+    // squares; the aura pulses, and reaches at most 3 enemies at once; burns and the volley's or
+    // the aura's hits kill the rest, each credited its plain drop.
+    const seen = [
+      'aura pulse',
+      'shielder blocks',
+      'shielder takes source 1',
+      'square takes source 1',
+    ];
+    expect(bySeed).toEqual({
+      1: {
+        start: '3.0200',
+        end: '3.0308',
+        rising: true,
+        aura: [0, 3],
+        kills: { coin: 18, dot: 13, hit: 2 },
+        seen,
+      },
+      2: {
+        start: '3.0200',
+        end: '3.0300',
+        rising: true,
+        aura: [0, 2],
+        kills: { coin: 19, dot: 8, hit: 4 },
+        seen,
       },
     });
   });

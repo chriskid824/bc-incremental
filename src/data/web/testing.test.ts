@@ -243,7 +243,7 @@ const OUTER_CARDS = {
   thorns: [0x8a8f98, 'inPayload'],
   summon: [0x9bf25c, null],
   barrage: [0xffb627, 'inPayload'],
-  greed: [0xffd23f, 'none'],
+  greed: [0xffd23f, 'scaling'],
 } as const;
 
 describe('fixtureContent() writes every slot of the full web (F26)', () => {

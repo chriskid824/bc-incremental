@@ -426,6 +426,7 @@ export const TriggerSpecSchema = exact<TriggerSpec>()(
       when: z.array(ConditionSchema).readonly().exactOptional(),
       target: TargetSelectorSchema.exactOptional(),
       do: z.array(EffectSpecSchema).readonly(),
+      killShards: finite.exactOptional(),
     })
     .readonly(),
 );

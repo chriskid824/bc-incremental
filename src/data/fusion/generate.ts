@@ -15,7 +15,7 @@ import { digest } from '../../core/digest';
 import { CHARACTER_IDS } from '../sources';
 import type { Modifier } from '../stats';
 import { defaultMasteryTarget, fusionRank, inc, mastery, rankedMods } from '../templates';
-import type { CenterEvent, EffectSpec } from '../triggers';
+import type { CenterEvent, EffectSpec, TriggerSpec } from '../triggers';
 import { FUSION_SLOTS, nodeId } from '../web/ids';
 import type {
   BoardDef,
@@ -88,8 +88,8 @@ export function place(effect: PayloadEffect, event: CenterEvent): EffectSpec {
 
 /**
  * A template core before its override's triggers (impl:316-322 without coef): `payload` placed
- * for `event`, or its perEvent entry, and the payload's bonus, which the override replaces or,
- * with null, drops.
+ * for `event`, or its perEvent entry, the payload's bonus, which the override replaces or, with
+ * null, drops, and the payload's killShards when it has one.
  */
 export function templateOf(
   event: CenterEvent,
@@ -100,7 +100,18 @@ export function templateOf(
     on: event,
     do: payload.perEvent?.[event] ?? payload.effects.map((effect) => place(effect, event)),
     bonus: override?.bonus === undefined ? payload.bonus : override.bonus,
+    ...(payload.killShards === undefined ? {} : { killShards: payload.killShards }),
   };
+}
+
+/**
+ * `trigger` with the template's killShards (greed's +1%, gd:571), unless it has its own; as it
+ * is without one.
+ */
+function withKillShards(trigger: TriggerSpec, killShards: number | undefined): TriggerSpec {
+  return killShards === undefined || trigger.killShards !== undefined
+    ? trigger
+    : { ...trigger, killShards };
 }
 
 /**
@@ -224,7 +235,8 @@ export function fusionDigest(parts: FusionDigestParts): string {
 /**
  * The fusion of `def` and `outer` at `coef` (§4.1). The core holds the bonus's modifiers then the
  * override's; the template trigger, or the override's triggers in its place, then its
- * addTriggers; on a hand pair the override's rule, elsewhere its addRules. r1–r3 are the
+ * addTriggers, each with the payload's killShards on a template pair; on a hand pair the
+ * override's rule, elsewhere its addRules. r1–r3 are the
  * override's ranks, else HAND_RANKS on a hand pair, else the payload's (EMPTY_RANKS without one).
  * The coef scales nothing here but, under the payload's coefScalesBonus on a template pair, the
  * bonus and r3 (Q2 (A)); the compile scales the triggers and rules (D10).
@@ -247,10 +259,11 @@ export function generate(
       ...bonusModifiers(template?.bonus ?? null, source, k),
       ...(override?.modifiers ?? []),
     ],
+    // Every trigger of a template core carries the payload's killShards (lead ruling G4).
     triggers: [
       ...(template === null ? [] : (override?.triggers ?? [{ on: template.on, do: template.do }])),
       ...(override?.addTriggers ?? []),
-    ],
+    ].map((trigger) => withKillShards(trigger, template?.killShards)),
     conversions: [],
     emitters: [],
     rules: hand
