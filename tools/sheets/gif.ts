@@ -1,20 +1,22 @@
 /**
  * The PR GIF (docs/v3 C10 design §2.6; F7, F14; impl:546, :569): the replay page captured frame by
  * frame in step mode, encoded by ffmpeg into a GIF of at most GIF_MAX_BYTES and an H.264 MP4 beside
- * it (G11). `--character <c>` captures `gif:<c>`, c's typical build for 15 s from wave 30 (B1's PR
- * GIF, also marketing); `--fusion <c>.<o>` captures the fusion's clip `clip:<c>.<o>` for as long,
- * a hand fusion's GIF (impl:569's 「GIF；Hoshi 每條玩 5 分鐘」; the template fusions' 3 s clips are
- * the wall's, tools/sheets/clips.ts).
+ * it (G11). `--character <c>` captures `gif:<c>`, c's whole defaultOrder for 15 s from GIF_WAVE,
+ * wave 28 (B1's PR GIF, also marketing); `--fusion <c>.<o>` captures the fusion's clip
+ * `clip:<c>.<o>` for as long, from CLIP_WAVE, a hand fusion's GIF (impl:569's 「GIF；Hoshi 每條玩
+ * 5 分鐘」; the template fusions' 3 s clips are the wall's, tools/sheets/clips.ts). `--wave <n>`
+ * starts either at wave n instead: the page's own `&wave=`, which overrides any form's start wave.
  *
- *   npx tsx tools/sheets/gif.ts --character <c> | --fusion <c>.<o> [--seconds 15] [--fps 30]
- *       [--width 640] [--out out/gif] [--fixture] [--max-bytes <n>]
+ *   npx tsx tools/sheets/gif.ts --character <c> | --fusion <c>.<o> [--wave <n>] [--seconds 15]
+ *       [--fps 30] [--width 640] [--out out/gif] [--fixture] [--max-bytes <n>]
  *
  * (1) A Vite dev server and headless Chromium with capture.ts' SwiftShader flags at device scale
- * factor 1. (2) The page `/?replay=gif:<c>` or `clip:<c>.<o>` with `&seconds=`, `&fps=`, `&width=`
- * and `&step=1` (and `&fixture`): a clip of seconds × TICK_RATE ticks stepped TICK_RATE ÷ fps
- * ticks a frame (the lead's ruling H8). (3) Per frame `window.__replay.step(1)`, then the canvas's
- * PNG, as replaySmoke.ts reads it, to <out>/frames/<name>-<fps>fps/NNNN.png from 0000: seconds ×
- * fps frames, so the last shows the clip's last tick and no loop restart falls inside the capture.
+ * factor 1. (2) The page `/?replay=gif:<c>` or `clip:<c>.<o>` with `&wave=`, `&seconds=`, `&fps=`,
+ * `&width=` and `&step=1` (and `&fixture`): a clip of seconds × TICK_RATE ticks from that wave,
+ * stepped TICK_RATE ÷ fps ticks a frame (the lead's ruling H8). (3) Per frame
+ * `window.__replay.step(1)`, then the canvas's PNG, as replaySmoke.ts reads it, to
+ * <out>/frames/<name>-<fps>fps/NNNN.png from 0000: seconds × fps frames, so the last shows the
+ * clip's last tick and no loop restart falls inside the capture.
  * (4) ffmpeg: palettegen=stats_mode=diff, then paletteuse=dither=bayer:bayer_scale=5 with that
  * palette, for <out>/<name>.gif; libx264 -pix_fmt yuv420p -crf 23 -movflags +faststart for
  * <out>/<name>.mp4, from the first capture, at --width and --fps. (5) The size ladder, stopping at
@@ -40,7 +42,14 @@ import { delimiter, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createServer } from 'vite';
-import { GIF_FPS, GIF_SECONDS, GIF_WIDTH, parseReplayRoute } from '../../src/app/replay/specs';
+import {
+  CLIP_WAVE,
+  GIF_FPS,
+  GIF_SECONDS,
+  GIF_WAVE,
+  GIF_WIDTH,
+  parseReplayRoute,
+} from '../../src/app/replay/specs';
 import type { CharacterId } from '../../src/data/sources';
 import type { FusionKey } from '../../src/data/web';
 import { TICK_RATE } from '../../src/sim';
@@ -72,6 +81,8 @@ export type GifTarget =
 
 export interface GifOptions {
   readonly target: GifTarget;
+  /** The run's start wave, `&wave=`: `--wave`, else the target's own (defaultWave). */
+  readonly wave: number;
   readonly seconds: number;
   readonly fps: number;
   /** The canvas's CSS width at device scale 1; its height is 16:9, as the route makes it. */
@@ -86,18 +97,25 @@ export interface GifOptions {
 export const targetName = (target: GifTarget): string =>
   target.kind === 'character' ? target.character : target.key;
 
+/** A target's wave without `--wave`: its form's own, GIF_WAVE for gif: and CLIP_WAVE for clip:. */
+export const defaultWave = (target: GifTarget): number =>
+  target.kind === 'character' ? GIF_WAVE : CLIP_WAVE;
+
 /** The canvas's height at `width`: 16:9, as the route's `&width=` (src/app/replay/route.ts). */
 export const heightOf = (width: number): number => Math.round((width * 9) / 16);
 
-/** The replay page's path for `target` at this length, rate and width (the lead's ruling H8). */
+/**
+ * The replay page's path for `target` from this wave at this length, rate and width (the lead's
+ * ruling H8).
+ */
 export function replayQuery(
   target: GifTarget,
-  at: Pick<GifOptions, 'seconds' | 'fps' | 'width' | 'fixture'>,
+  at: Pick<GifOptions, 'wave' | 'seconds' | 'fps' | 'width' | 'fixture'>,
 ): string {
   const form = target.kind === 'character' ? `gif:${target.character}` : `clip:${target.key}`;
   return (
-    `/?replay=${form}&seconds=${at.seconds}&fps=${at.fps}&width=${at.width}&step=1` +
-    (at.fixture ? '&fixture' : '')
+    `/?replay=${form}&wave=${at.wave}&seconds=${at.seconds}&fps=${at.fps}&width=${at.width}` +
+    `&step=1${at.fixture ? '&fixture' : ''}`
   );
 }
 
@@ -312,8 +330,8 @@ export async function makeGif(options: GifOptions, deps: GifDeps): Promise<GifRe
 }
 
 const USAGE =
-  'usage: npx tsx tools/sheets/gif.ts --character <c> | --fusion <c>.<o> [--seconds 15] ' +
-  '[--fps 30] [--width 640] [--out out/gif] [--fixture] [--max-bytes <n>]';
+  'usage: npx tsx tools/sheets/gif.ts --character <c> | --fusion <c>.<o> [--wave <n>] ' +
+  '[--seconds 15] [--fps 30] [--width 640] [--out out/gif] [--fixture] [--max-bytes <n>]';
 
 export const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -325,8 +343,10 @@ function whole(text: string, flag: string): number {
 }
 
 /**
- * gif.ts' flags. The replay page's own grammar checks the target, the length (1–60 s), the rate (a
- * divisor of TICK_RATE) and the width; the MP4's yuv420p needs an even width and height.
+ * gif.ts' flags. The replay page's own grammar checks the target, the wave (from 1), the length
+ * (1–60 s), the rate (a divisor of TICK_RATE) and the width; the MP4's yuv420p needs an even width
+ * and height. `--wave` defaults to the target's own wave (defaultWave), and a wave the page refuses
+ * is an error naming `--wave`.
  */
 export function parseGifArgs(argv: readonly string[]): GifOptions | { readonly error: string } {
   try {
@@ -335,6 +355,7 @@ export function parseGifArgs(argv: readonly string[]): GifOptions | { readonly e
       options: {
         character: { type: 'string' },
         fusion: { type: 'string' },
+        wave: { type: 'string' },
         seconds: { type: 'string', default: String(GIF_SECONDS) },
         fps: { type: 'string', default: String(GIF_FPS) },
         width: { type: 'string', default: String(GIF_WIDTH) },
@@ -353,6 +374,7 @@ export function parseGifArgs(argv: readonly string[]): GifOptions | { readonly e
         : { kind: 'character', character: character as CharacterId };
     const options: GifOptions = {
       target,
+      wave: values.wave === undefined ? defaultWave(target) : whole(values.wave, '--wave'),
       seconds: whole(values.seconds, '--seconds'),
       fps: whole(values.fps, '--fps'),
       width: whole(values.width, '--width'),
@@ -363,7 +385,11 @@ export function parseGifArgs(argv: readonly string[]): GifOptions | { readonly e
     if (options.maxBytes < 1) throw new Error(`--max-bytes ${options.maxBytes}: at least 1`);
     const query = replayQuery(target, options);
     const route = parseReplayRoute(query.slice(1));
-    if ('error' in route) throw new Error(`the replay page refuses ${query}: ${route.error}`);
+    if ('error' in route) {
+      // A wave the page refuses is named by its flag, as whole() names a flag's non-number.
+      const flag = route.error.startsWith('&wave=') ? `--wave ${options.wave}: ` : '';
+      throw new Error(`${flag}the replay page refuses ${query}: ${route.error}`);
+    }
     const [c, o] = targetName(target).split('.');
     if (c === o)
       throw new Error(`--fusion ${targetName(target)}: a character has no fusion with itself`);

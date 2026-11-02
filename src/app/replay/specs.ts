@@ -11,8 +11,12 @@ import { TICK_RATE } from '../../sim';
 import { STRESS_START_WAVE } from '../../sim/testing';
 import type { ReplaySpec } from './types';
 
-/** The PR GIF's wave, 「約第 30 波的 15 秒 GIF」 (F14; impl:546) (初始值). */
-export const GIF_WAVE = 30;
+/**
+ * The PR GIF's start wave (初始值): impl:546's 「約第 30 波的 15 秒 GIF」 (F14), two waves under 30.
+ * On B1's seed-1 probe 熔核's whole default order holds from wave 28 to 31, while a cold start at
+ * 30, the boss wave, dies within 7 s, which left the 15 s clip on a frozen overrun screen.
+ */
+export const GIF_WAVE = 28;
 /** The PR GIF's length in seconds (F14; impl:546) (初始值). */
 export const GIF_SECONDS = 15;
 /** The PR GIF's frames a second (F14) (初始值). */
@@ -29,9 +33,12 @@ export const PREVIEW_SECONDS = 10;
  */
 export const CLIP_WAVE = 18;
 export const CLIP_WARMUP_TICKS = 300;
-/** The select card's wave and purchases (初始值): gd:318's typical build at the first prestige. */
-export const PREVIEW_WAVE = 30;
-export const PREVIEW_PURCHASES = 68;
+/**
+ * The select card's start wave (初始值), the GIF's: impl:546's 「約第 30 波」, two waves under 30.
+ * On B1's seed-1 probe 熔核's whole default order holds from wave 28 to 31, while a cold start at
+ * 30, the boss wave, dies within 7 s.
+ */
+export const PREVIEW_WAVE = 28;
 /** Every replay's seed unless `&seed=` names one (初始值): impl:530's 「固定 seed」, the stress readings' 1. */
 export const REPLAY_SEED = 1;
 /**
@@ -56,10 +63,10 @@ export function fusionClipSpec(key: FusionKey, o: Partial<ReplaySpec> = {}): Rep
   };
 }
 
-/** B1's select card: c's typical build at the first prestige, a 10 s loop at PREVIEW_WAVE. */
+/** B1's select card: c's whole defaultOrder, a 10 s loop from PREVIEW_WAVE. */
 export function previewSpec(c: CharacterId, o: Partial<ReplaySpec> = {}): ReplaySpec {
   return {
-    build: { kind: 'default', character: c, count: PREVIEW_PURCHASES },
+    build: { kind: 'default', character: c },
     content: 'registered',
     seed: REPLAY_SEED,
     startWave: PREVIEW_WAVE,
@@ -70,10 +77,10 @@ export function previewSpec(c: CharacterId, o: Partial<ReplaySpec> = {}): Replay
   };
 }
 
-/** The PR GIF: the preview's build, GIF_SECONDS from GIF_WAVE, once. */
+/** The PR GIF: the preview's build, c's whole defaultOrder, GIF_SECONDS from GIF_WAVE, once. */
 export function gifSpec(c: CharacterId, o: Partial<ReplaySpec> = {}): ReplaySpec {
   return {
-    build: { kind: 'default', character: c, count: PREVIEW_PURCHASES },
+    build: { kind: 'default', character: c },
     content: 'registered',
     seed: REPLAY_SEED,
     startWave: GIF_WAVE,
