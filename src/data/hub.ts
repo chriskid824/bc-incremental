@@ -6,11 +6,8 @@
 import { defineHub, flat, inc, keystone, might, notable, ranked, rankedMods } from './templates';
 import type { HubDef } from './web/types';
 
-/**
- * 範圍 ranks. The area stat of the C4 Q2 (A) engine item is not on the branch yet, so this rank
- * raises area hits until it lands and the rank switches to it.
- */
-const area = () => ranked('damage', 0.06, 3, 'increased', { tags: ['area'] });
+/** 範圍 ranks: every area radius the build creates, the bomb's included (E1's areaSize). */
+const area = () => ranked('areaSize', 0.08, 3);
 
 export const HUB: HubDef | null = defineHub({
   // 強化∞ (M1): every rank ×1.10 to all damage.
@@ -98,9 +95,9 @@ export const HUB: HubDef | null = defineHub({
     keystones: [
       // 玻璃大砲 (M1): all damage ×2 (more); max life becomes 1.
       keystone('glass-cannon', { rules: [{ id: 'glassCannon', damageMore: 1 }] }),
-      // 巨大化: its rule (radii ×2, counts halved) is the C4 Q2 (A) engine item; until it lands
-      // the node holds no effect.
-      keystone('gigantism', {}),
+      // 巨大化: every area radius and the projectiles' size ×2; projectiles, cones, chain jumps
+      // and drones halved, rounded down, at least 1.
+      keystone('gigantism', { rules: [{ id: 'gigantism', sizeMult: 2 }] }),
     ],
   },
 });

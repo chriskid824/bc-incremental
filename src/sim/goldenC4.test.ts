@@ -27,6 +27,7 @@ import { holdsBurn } from './ailments/records';
 import { liveBleedStacks } from './ailments/rings';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { REPEAT } from './effects/flags';
+import { enemiesInAura } from './emitters/aura';
 import { createPayload, ROWS } from './emitters/types';
 import type { EmitterRuntime, Payload } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
@@ -71,6 +72,11 @@ interface GoldenC4Entry {
   readonly data?: () => GameData;
   /** createSimulation's test modules. */
   readonly modules?: () => readonly TestModule[];
+  /**
+   * A second run at the same seed and length, hashed after the first into the same digest:
+   * E1's `gigantism`, whose two builds (magma bombs and the swarm) are one entry.
+   */
+  readonly also?: Pick<GoldenC4Entry, 'config' | 'data' | 'modules'>;
   /** The hash recorded for each seed of GOLDEN_C4_SEEDS, in order. */
   readonly expected: readonly [string, string];
 }
@@ -2003,6 +2009,41 @@ const shieldPoolData = (): GameData =>
     },
   });
 
+/**
+ * E1's area factors (docs/v3 C4 design D29; Hoshi's Q2 (A); lead ruling G5). `areaSize`: C4.7's
+ * magma bombs (MAGMA_STATS' values, triggers and probes) at areaSize 1.5 and bombRadius 1.2, with
+ * an aura of 120 on the hub: each bomb's R and its fire zone 60 × 1.5 × 1.2, the explode
+ * trigger's novas (100), the fire kill trigger's explosions (80), the shatter (90) and the aura's
+ * reach × 1.5 alone. `gigantism`: 巨大化 (sizeMult 2) on two runs hashed as one: C4.7's magma
+ * bombs at raw projectileCount 5, two bombs a firing (4 halved, no fraction rolled), chainCount 2
+ * halved to 1 and every radius × 2; then the swarm, its 3 drones halved to 1 beside a grant's 4
+ * halved to 2, every turret kept (its own and the grant's 2), each splash × 2.
+ */
+const AREA_SIZE_STATS = makeStats(
+  { ...MAGMA_STATS.values, areaSize: 1.5, bombRadius: 1.2, auraRadius: 120 },
+  [...maskProbeMods(), PROJECTILE_PROBE],
+  {
+    triggers: MAGMA_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [{ source: 'hub', grant: { kind: 'aura', damagePct: 0.15 } }],
+  },
+);
+const GIGANTISM: RuleSpec = { id: 'gigantism', sizeMult: 2 };
+const GIANT_MAGMA_STATS = makeStats(
+  { ...MAGMA_STATS.values, projectileCount: 5, chainCount: 2 },
+  [...maskProbeMods(), PROJECTILE_PROBE],
+  {
+    triggers: MAGMA_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+const GIANT_SWARM_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
+  triggers: [{ source: 'center', spec: SWARM_POISON }],
+  conversions: [],
+  emitters: [{ source: 'outer.summon', grant: { kind: 'drone', drones: 4, turrets: 2 } }],
+});
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2358,6 +2399,29 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     data: shieldPoolData,
     expected: ['b361cfcf7b157fab', '9fb1b544c7c05ef4'],
   },
+  {
+    name: 'areaSize',
+    config: { stats: AREA_SIZE_STATS, rules: [], signature: { id: 'magmaBomb' }, startWave: 12 },
+    expected: ['9ec3827e275369ce', 'aec284f0f823af1d'],
+  },
+  {
+    name: 'gigantism',
+    config: {
+      stats: GIANT_MAGMA_STATS,
+      rules: [GIGANTISM],
+      signature: { id: 'magmaBomb' },
+      startWave: 12,
+    },
+    also: {
+      config: {
+        stats: GIANT_SWARM_STATS,
+        rules: [GIGANTISM],
+        signature: { id: 'swarm' },
+        startWave: 12,
+      },
+    },
+    expected: ['ad16c2f0388397f6', '6a2634374d2084b6'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -2373,26 +2437,44 @@ function goldenC4Hash(
   config: RunConfig,
   data: GameData,
   modules: readonly TestModule[] = [],
+  also: readonly (readonly [RunConfig, GameData, readonly TestModule[]])[] = [],
 ): string {
-  const sim = createSimulation(config, data, modules);
   const hash = createHash('sha256');
-  while (!sim.state.finished) hash.update(JSON.stringify(sim.step(NO_INPUT)));
-  const result = sim.result();
-  hash.update(
-    JSON.stringify([
-      projectResult(result),
-      result.damageBySource,
-      nonzeroCounters(result.counters),
-    ]),
-  );
+  // A second run (GoldenC4Entry.also) goes on in the same hash, after the first's result.
+  for (const [runConfig, runData, runModules] of [[config, data, modules] as const, ...also]) {
+    const sim = createSimulation(runConfig, runData, runModules);
+    while (!sim.state.finished) hash.update(JSON.stringify(sim.step(NO_INPUT)));
+    const result = sim.result();
+    hash.update(
+      JSON.stringify([
+        projectResult(result),
+        result.damageBySource,
+        nonzeroCounters(result.counters),
+      ]),
+    );
+  }
   return hash.digest('hex').slice(0, 16);
 }
 
 /** One entry at one seed, hashed twice. */
 function runCase(entry: GoldenC4Entry, seed: number): [string, string] {
   const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+  const also = entry.also;
   const once = (): string =>
-    goldenC4Hash(config, entry.data?.() ?? makeTestData(), entry.modules?.() ?? []);
+    goldenC4Hash(
+      config,
+      entry.data?.() ?? makeTestData(),
+      entry.modules?.() ?? [],
+      also === undefined
+        ? []
+        : [
+            [
+              makeConfig({ ...also.config, seed, maxTicks: GOLDEN_C4_TICKS }),
+              also.data?.() ?? makeTestData(),
+              also.modules?.() ?? [],
+            ],
+          ],
+    );
   return [once(), once()];
 }
 
@@ -3604,6 +3686,134 @@ describe('golden C4 runs', () => {
     expect(bySeed).toEqual({
       1: { pooled: 49, alone: 0, blocked: 480, pools: 163 },
       2: { pooled: 63, alone: 0, blocked: 469, pools: 156 },
+    });
+  });
+
+  it('sizes the bombs and their 火地 × 1.5 × 1.2, the novas, the kill explosions, the shatters and the aura × 1.5 in areaSize (E1)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'areaSize') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const radii = new Map<string, Set<number>>();
+      const counts = new Map<string, number>();
+      const seen = (kind: string, radius: number): void => {
+        radii.set(kind, (radii.get(kind) ?? new Set()).add(radius));
+        counts.set(kind, (counts.get(kind) ?? 0) + 1);
+      };
+      let pulses = 0;
+      let past120 = 0;
+      watchRun(entry, seed, (_now, events, ctx) => {
+        for (const event of events) {
+          if (event.type === 'explosion') seen('explosion', event.radius);
+          else if (event.type === 'zone') seen(event.signature ? 'fireZone' : 'zone', event.radius);
+          else if (event.type === 'burst') seen(event.kind, event.radius);
+          else if (event.type === 'shatter') seen('shatter', event.radius);
+          else if (event.type === 'pulse' && event.kind === 'aura') pulses++;
+        }
+        // The aura reaches 180: the grid's count within it, more than within 120 at times.
+        const { x, y } = ctx.player;
+        expect(enemiesInAura(ctx)).toBe(ctx.grid.countWithin(x, y, 180 * 180));
+        if (enemiesInAura(ctx) > ctx.grid.countWithin(x, y, 120 * 120)) past120++;
+      });
+      bySeed[seed] = {
+        radii: Object.fromEntries([...radii].map(([kind, set]) => [kind, [...set]])),
+        counts: Object.fromEntries(counts),
+        pulses,
+        past120: past120 > 0,
+      };
+    }
+    // R = 60 × 1.5 × 1.2 = 108 for the bombs and their 火地; 100, 80 and 90 × 1.5 for the rest.
+    const radii = {
+      explode: [120],
+      explosion: [108],
+      fireZone: [108],
+      nova: [150],
+      shatter: [135],
+    };
+    expect(bySeed).toEqual({
+      1: {
+        radii,
+        counts: { explode: 20, explosion: 84, fireZone: 84, nova: 25, shatter: 47 },
+        pulses: 13,
+        past120: true,
+      },
+      2: {
+        radii,
+        counts: { explode: 17, explosion: 94, fireZone: 94, nova: 26, shatter: 55 },
+        pulses: 27,
+        past120: true,
+      },
+    });
+  });
+
+  it('throws two bombs a firing from raw 5, chains once and doubles every radius, then halves the swarm’s and the grant’s drones and keeps their turrets in gigantism (E1)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'gigantism') as GoldenC4Entry;
+    const swarm: GoldenC4Entry = {
+      name: 'gigantism/swarm',
+      config: (entry.also as GoldenC4Entry).config,
+      expected: entry.expected,
+    };
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const radii = new Map<string, Set<number>>();
+      const seen = (kind: string, radius: number): void => {
+        radii.set(kind, (radii.get(kind) ?? new Set()).add(radius));
+      };
+      const firings = new Map<number, number>();
+      let maxChain = 0;
+      let projectileCount = 0;
+      watchRun(entry, seed, (now, events, ctx) => {
+        projectileCount = ctx.projectileCount;
+        for (const event of events) {
+          if (event.type === 'lob' && event.form === 0)
+            firings.set(now, (firings.get(now) ?? 0) + 1);
+          else if (event.type === 'explosion') seen('explosion', event.radius);
+          else if (event.type === 'zone') seen(event.signature ? 'fireZone' : 'zone', event.radius);
+          else if (event.type === 'burst') seen(event.kind, event.radius);
+          else if (event.type === 'shatter') seen('shatter', event.radius);
+          else if (event.type === 'hit') maxChain = Math.max(maxChain, event.chainIndex);
+        }
+      });
+      const impacts = new Map<number, number>();
+      const turrets = new Map<number, number>();
+      let layout: number[] = [];
+      watchRun(swarm, seed, (_now, events, ctx) => {
+        const ds = ctx.sys.drones;
+        layout = Array.from(ds.kind.slice(0, ds.count));
+        for (const event of events) {
+          if (event.type === 'impact') {
+            seen('impact', event.radius);
+            impacts.set(event.droneId, (impacts.get(event.droneId) ?? 0) + 1);
+          } else if (event.type === 'turretFire') {
+            turrets.set(event.droneId, (turrets.get(event.droneId) ?? 0) + 1);
+          }
+        }
+      });
+      const perFiring = new Map<number, number>();
+      for (const n of firings.values()) perFiring.set(n, (perFiring.get(n) ?? 0) + 1);
+      bySeed[seed] = {
+        projectileCount,
+        perFiring: Object.fromEntries(perFiring),
+        maxChain,
+        radii: Object.fromEntries([...radii].map(([kind, set]) => [kind, [...set]])),
+        layout,
+        impactDrones: [...impacts.keys()].sort((a, b) => a - b),
+        turretDrones: [...turrets.keys()].sort((a, b) => a - b),
+      };
+    }
+    // Every radius × 2 once: R 120 and its 火地, novas 200, kill explosions 160, shatters 180,
+    // the drones' splash 80. The swarm's row: a drone and its turret, then the grant's 2 and 2.
+    const radii = {
+      explode: [160],
+      explosion: [120],
+      fireZone: [120],
+      impact: [80],
+      nova: [200],
+      shatter: [180],
+    };
+    const drones = { layout: [0, 1, 0, 0, 1, 1], impactDrones: [1, 3, 4], turretDrones: [2, 5, 6] };
+    expect(bySeed).toEqual({
+      1: { projectileCount: 2, perFiring: { 1: 8, 2: 36 }, maxChain: 1, radii, ...drones },
+      2: { projectileCount: 2, perFiring: { 1: 11, 2: 33 }, maxChain: 1, radii, ...drones },
     });
   });
 

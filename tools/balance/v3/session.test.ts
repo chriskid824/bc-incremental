@@ -236,7 +236,10 @@ describe('runCharacterSession', () => {
     const row = stopped.rows[0] as CharacterRunRow;
     expect(stopped.stop).toBe('prestigePoint');
     expect(stopped.rows).toHaveLength(1);
-    expect(stopped.milestones.prestigePoint).toEqual({ minutes: row.minutes, purchases: 0 });
+    expect(stopped.milestones.prestigePoint).toEqual({
+      minutes: row.minutes,
+      purchases: row.purchases,
+    });
     expect(stopped.snapshots.map((snapshot) => snapshot.minutes)).toEqual(['prestige']);
     expect(stopped.endMinutes).toBeCloseTo(row.minutes + 20 / 60, 9);
 

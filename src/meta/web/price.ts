@@ -20,9 +20,9 @@ export { PRICE_CURVE_OF } from './counts';
  * ratio and skip reward as DEFAULT_ECONOMY's.
  */
 export const DEFAULT_WEB_ECONOMY: WebEconomy = {
-  step: { base: 180, growth: 1.31 },
-  mastery: { base: 300, growth: 1.4 },
-  might: { base: 300, growth: 1.4 },
+  step: { base: 2, growth: 1.1 },
+  mastery: { base: 50, growth: 1.15 },
+  might: { base: 50, growth: 1.15 },
   cores: {
     signature: 0,
     ranked: 0,

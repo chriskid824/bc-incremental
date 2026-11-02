@@ -19,12 +19,8 @@ import {
   threshold,
 } from '../templates';
 
-/**
- * 爆炸半徑 (擴散) ranks. The area stat of the C4 Q2 (A) engine item is not on the branch yet, so
- * these ranks raise the signature's area hits until it lands and the ranks switch to it.
- */
-const blast = (perRank: number, ranks: 3 | 4) =>
-  ranked('damage', perRank, ranks, 'increased', { scope: 'center', tags: ['area'] });
+/** 爆炸半徑 (擴散) ranks: the bomb's radius and its 火地's (E1's bombRadius). */
+const blast = (perRank: number, ranks: 3 | 4) => ranked('bombRadius', perRank, ranks);
 
 /** `id` repeated `n` times: n ranks of it in a purchase order. */
 const ranks = (id: string, n: number): string[] => Array.from({ length: n }, () => id);
@@ -36,17 +32,18 @@ const C = 'fire.center.';
  * 火暴, 無盡烈焰, the poison outer and 火毒, and the 火環 threshold.
  */
 const DEFAULT_ORDER: readonly string[] = [
+  // The bombs' reach first: early waves die to one bomb, so coverage is what holds them back.
+  ...ranks(`${C}spread.r1`, 2),
+  ...ranks(`${C}furnace.r1`, 2),
+  ...ranks(`${C}spread.r1`, 2),
   ...ranks(`${C}stoke.r1`, 2),
   ...ranks(`${C}furnace.r1`, 2),
-  ...ranks(`${C}stoke.r1`, 2),
+  ...ranks(`${C}spread.r2`, 2),
   `${C}stoke.r2`,
   ...ranks(`${C}furnace.r2`, 2),
-  ...ranks(`${C}furnace.r1`, 2),
-  ...ranks(`${C}spread.r1`, 2),
-  `${C}spread.r2`,
+  ...ranks(`${C}stoke.r1`, 2),
   `${C}stoke.r2`,
-  ...ranks(`${C}spread.r1`, 2),
-  ...ranks(`${C}spread.r2`, 3),
+  ...ranks(`${C}spread.r2`, 2),
   // A core comes about once a run from the elite every 5 waves: each ◆ is followed by ranks that
   // cost shards only, so a visit waiting for a core still spends its shards.
   `${C}spread.pandemic`,
@@ -124,7 +121,7 @@ export const FIRE = defineCharacter({
       }),
       // 擴散: blast radius and spread.
       centerBranch('spread', {
-        r1: blast(0.08, 4),
+        r1: blast(0.1, 4),
         r2: ranked('burnDamage', 0.12, 4),
         // 瘟疫: a burning enemy that dies spreads 40% of its burns within 250 (答案：三角).
         a: answers(

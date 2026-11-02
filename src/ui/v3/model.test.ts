@@ -168,7 +168,7 @@ describe('planClick and the path preview (gd §8 item 5)', () => {
   });
 
   it('names the step a path stops at when the wallet runs out on the way', () => {
-    const poor = { ...start(0), wallet: { shards: num(200), cores: 0, resonance: 0 } };
+    const poor = { ...start(0), wallet: { shards: num(3), cores: 0, resonance: 0 } };
     const plan = planClick(web, poor, account, 'fire.center.alpha.alpha-one');
     expect(plan).toMatchObject({ kind: 'refused', reason: 'notEnoughShards' });
     if (plan.kind === 'refused') expect(plan.at).not.toBe(plan.id);

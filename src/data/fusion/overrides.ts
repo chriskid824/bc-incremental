@@ -27,7 +27,17 @@ export const OVERRIDES: Readonly<Partial<Record<FusionKey, FusionOverride>>> = {
 };
 
 /** Fusions accepted outside the band, each with the reason the batch PR quotes (F21). */
-export const ACCEPTED_FAILS: Readonly<Partial<Record<FusionKey, string>>> = {};
+export const ACCEPTED_FAILS: Readonly<Partial<Record<FusionKey, string>>> = {
+  // B1: 熔核's probe investment (8 center nodes at rank 1 + 6 outer) reaches only wave ~4, where
+  // the bombs' coverage holds the frontier and every enemy a bomb reaches dies to its hit; what a
+  // payload adds after the hit cannot move it. 前線節奏 passes at 10, 20 and 40 min without it.
+  'fire.crit':
+    'B1: one seed of 8 reads 0.99 at coef 0.458 (median 1.21); the probe sits at wave ~4, where 熔核 is held by bomb coverage, not damage',
+  'fire.poison':
+    'B1: insensitive at the probe (wave ~4): every enemy a bomb reaches dies to its hit, so poison and 瘟爆 have nothing left to kill there',
+  'fire.ice':
+    'B1: weak at the probe (median 1.14 at the top of its range): at wave ~4 the burn cap and the frost-fire slow matter little; 霜焰 keeps the gd numbers',
+};
 
 /**
  * The template pairs whose override may add rules (F12): 冰光's 永凍 and 雷光's 雷暴環, which

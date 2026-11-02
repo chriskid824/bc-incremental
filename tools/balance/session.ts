@@ -34,6 +34,7 @@ import type {
   SimEvent,
   SimState,
 } from '../../src/sim';
+import { countOf } from '../../src/sim/build/size';
 import { spend } from './strategies';
 import type { StrategyId } from './strategies';
 
@@ -175,7 +176,7 @@ export function effectiveHit(
 function attackValue(build: CompiledBuild): number {
   const { values } = build;
   const rows = signatureRows(build);
-  const jumps = Math.max(0, values.chainCount);
+  const jumps = countOf(build, Math.max(0, values.chainCount));
   const retention = clamp01(values.chainRetention);
   const whole = Math.floor(jumps);
   let total = hitValue(build, rows, 0);
@@ -200,7 +201,8 @@ export function attackDamage(
  * Damage per second against a crowd: attackDamage × attacks per second × projectiles, as if
  * every projectile and jump found a target. Ignores overkill and pandemic spread. The
  * projectiles are the compiled projectileCount, after the signature's and the rules' changes
- * (熔核 throws projectileCount − 1 bombs a firing).
+ * (熔核 throws projectileCount − 1 bombs a firing), read through countOf as the run reads it
+ * (巨大化 halves it, and the chain jumps in attackDamage).
  */
 export function crowdDps(
   stats: StatBlock,
@@ -208,7 +210,7 @@ export function crowdDps(
   signature: SignatureSpec = M1_SIGNATURE,
 ): number {
   const build = compileBuild(stats, rules, signature);
-  const projectiles = Math.max(1, build.values.projectileCount);
+  const projectiles = countOf(build, Math.max(1, build.values.projectileCount));
   return attackValue(build) * stats.values.attackSpeed * projectiles;
 }
 

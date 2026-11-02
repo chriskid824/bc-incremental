@@ -99,8 +99,10 @@ export const TRIPLE_PARTS = 1;
 /** A shard's target wall time in minutes (初始值): far under GitHub's 6 h a job (G3); never gated. */
 export const SHARD_TARGET_MINUTES = 45;
 /**
- * The scopes the nightly's sessions play (初始值): checkSet's `full` until B2 adds `demoA` for the
- * Demo's wave-40 pacing rows (design §3.2).
+ * The scopes the plan names (初始值): checkSet's `full`. Printed only, on the plan's first line
+ * (planText); no shard, unit or session reads it, so editing it changes nothing that runs. The
+ * Demo's wave-40 checks (which sessions, which rows, which targets) get their own design before
+ * B2, and B2 builds to it (Q9 (A)).
  */
 export const NIGHTLY_SCOPES: readonly ScopeName[] = ['full'];
 

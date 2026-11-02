@@ -389,6 +389,8 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   toughDropMult: 'percent',
   treasureRate: 'percent',
   barrageCount: 'number',
+  areaSize: 'percent',
+  bombRadius: 'percent',
 };
 
 /**
@@ -1196,6 +1198,20 @@ function chanceLine(lookup: TextLookup, node: WebNode, fusion: FusionDef | undef
 }
 
 /**
+ * A rule's generated line: `web.rule.<id>` for a rule with a text of its own (巨大化's, gd:268,
+ * its sizeMult as ×2), else `web.ruleFallback` naming it, until its node's hand description
+ * (V17) does.
+ */
+function ruleText(lookup: TextLookup, rule: RuleSpec): string {
+  switch (rule.id) {
+    case 'gigantism':
+      return say(lookup, 'web.rule.gigantism', { mult: `×${trim(rule.sizeMult)}` });
+    default:
+      return say(lookup, 'web.ruleFallback', { rule: rule.id });
+  }
+}
+
+/**
  * A node's generated lines (§4.7): a template core's fan-out and bonus first, then its other
  * modifiers, triggers, conversions, grants and rules; a ranked node's modifiers per rank, its
  * triggers and conversions once a rank.
@@ -1233,7 +1249,7 @@ function generatedLines(
   }
   for (const conversion of conversions) lines.push(repeated(conversionText(lookup, conversion)));
   for (const grant of emitters) lines.push(grantText(lookup, grant));
-  for (const rule of rules) lines.push(say(lookup, 'web.ruleFallback', { rule: rule.id }));
+  for (const rule of rules) lines.push(ruleText(lookup, rule));
   return lines.map(sentence);
 }
 

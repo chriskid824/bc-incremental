@@ -7,6 +7,10 @@
  * particle layer under the crowd, and shed flames that rise and cool, also drawn under the
  * crowd so the enemy's own outline and color stay on top; both grow with the stack count up to
  * a low cap. Flame emission shares one budget per second across all burning enemies.
+ * The stack count is the burn's live stacks at the tick the frame shows (liveBurnStacks,
+ * src/sim/ailments/records.ts): the records that have not ended, or the burn rings' stacks while
+ * one of them has not. Not Enemy.burnStacks, which a damage-over-time step's ring recount sets to
+ * 0 while a burn record still burns on an enemy that also holds a ring (burn plus poison).
  */
 
 import { Container, Particle, ParticleContainer } from 'pixi.js';
@@ -14,6 +18,8 @@ import type { Texture } from 'pixi.js';
 import { div, toNumber } from '../core/num';
 import type { EnemyId, GameData } from '../data/types';
 import type { EnemyState } from '../sim';
+import { liveBurnStacks } from '../sim/ailments/records';
+import type { Enemy } from '../sim/systems/context';
 import type { Bursts } from './bursts';
 import type { EnemySpot } from './drones';
 import { EnemyView, HIT_PUNCH } from './enemyView';
@@ -104,8 +110,17 @@ export class EnemyLayer {
     this.timeMs = 0;
   }
 
-  /** Positions and tints every live enemy; burning ones glow and shed flames via `bursts`. */
-  update(enemies: readonly EnemyState[], alpha: number, dtMs: number, bursts: Bursts): void {
+  /**
+   * Positions and tints every live enemy; burning ones glow and shed flames via `bursts`. `tick`
+   * is the tick the frame shows (SimState.tick): the burns are read at it, never at the clock.
+   */
+  update(
+    enemies: readonly EnemyState[],
+    tick: number,
+    alpha: number,
+    dtMs: number,
+    bursts: Bursts,
+  ): void {
     this.frame++;
     this.timeMs += dtMs;
     const seconds = this.timeMs / 1000;
@@ -133,8 +148,12 @@ export class EnemyLayer {
       view.draw(enemy, seconds);
 
       let tint = view.tintOf(enemy);
-      if (enemy.burnStacks > 0) {
-        const heat = Math.min(enemy.burnStacks, BURN_VISUAL_STACKS) / BURN_VISUAL_STACKS;
+      // SimState.enemies are the run's Enemy records (src/sim/systems/context.ts). One scan of its
+      // burn records, at most RunContext.burnCap of them; none under eternalFlame, whose burns are
+      // rings.
+      const stacks = liveBurnStacks(enemy as Enemy, tick);
+      if (stacks > 0) {
+        const heat = Math.min(stacks, BURN_VISUAL_STACKS) / BURN_VISUAL_STACKS;
         const flicker = 0.5 + 0.5 * Math.sin(seconds * 23 + enemy.id * 1.7);
         const flutter = 0.5 + 0.5 * Math.sin(seconds * 37 + enemy.id * 0.9);
         // A warm cast only: the enemy keeps its own color and outline over its fire.
@@ -161,8 +180,7 @@ export class EnemyLayer {
         );
         glowChildren[glowCount++] = glow;
 
-        const rate =
-          FLAME_RATE + FLAME_RATE_PER_STACK * (Math.min(enemy.burnStacks, BURN_VISUAL_STACKS) - 1);
+        const rate = FLAME_RATE + FLAME_RATE_PER_STACK * (Math.min(stacks, BURN_VISUAL_STACKS) - 1);
         demand += rate;
         view.flameDebt += rate * flameShare * dt;
         while (view.flameDebt >= 1) {

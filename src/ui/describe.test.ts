@@ -121,6 +121,25 @@ describe('describeBuild', () => {
     expect(BASE_STATS.projectileCount - 1).toBe(1);
   });
 
+  it('shows the projectile and chain counts 巨大化 halves, as the run reads them (gd:268)', () => {
+    const giant: RuleSpec[] = [{ id: 'gigantism', sizeMult: 2 }];
+    const stats = makeStats({ projectileCount: 5, chainCount: 3 });
+    expect(build([], stats)[t('stat.projectileCount')]).toBe('5');
+    expect(build([], stats)[t('stat.chainCount')]).toBe('3');
+    expect(build(giant, stats)[t('stat.projectileCount')]).toBe('2');
+    expect(build(giant, stats)[t('stat.chainCount')]).toBe('1');
+    // 熔核: 5 − 1 = 4 bombs first, then halved to 2 (C4 D29).
+    expect(build(giant, stats, MAGMA_BOMB)[t('stat.projectileCount')]).toBe('2');
+    // Rounded down, at least 1: 3.5 projectiles and 2.5 jumps show 1 each.
+    const fractions = makeStats({ projectileCount: 3.5, chainCount: 2.5 });
+    expect(build(giant, fractions)[t('stat.projectileCount')]).toBe('1');
+    expect(build(giant, fractions)[t('stat.chainCount')]).toBe('1');
+    // 熔核 at 1 projectile: 1 − 1 is 0, and the run still fires 1 bomb (max(1, …)), 巨大化 or not.
+    const one = makeStats({ projectileCount: 1 });
+    expect(build([], one, MAGMA_BOMB)[t('stat.projectileCount')]).toBe('1');
+    expect(build(giant, one, MAGMA_BOMB)[t('stat.projectileCount')]).toBe('1');
+  });
+
   it('shows 蜂巢’s swarm: minion area impacts, and one projectile, a turret’s firing, at base (F16, F18)', () => {
     expect(build([], makeStats(), SWARM)).toEqual({
       [t('stat.damage.hit')]: '10',

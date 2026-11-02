@@ -181,6 +181,8 @@
   "stat.toughDropMult": "Elite and boss drops",
   "stat.treasureRate": "Treasure appearance rate",
   "stat.barrageCount": "Small projectiles",
+  "stat.areaSize": "Area size",
+  "stat.bombRadius": "Explosion radius",
   "enemy.triangle.name": "Triangle",
   "enemy.triangle.plural": "Triangles",
   "enemy.square.name": "Square",

@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { num } from '../core/num';
 import type { GameData } from '../data/types';
 import type { EnemyState } from '../sim';
+import type { BurnStack, Enemy } from '../sim/systems/context';
 import { makeTestData } from '../sim/testing';
 import { HiveCoreView } from './core';
 import type { CoreView } from './core';
@@ -37,6 +38,7 @@ interface EnemiesModule {
     readonly burnGlow: { readonly particleChildren: readonly { color: number; scaleX: number }[] };
     update(
       enemies: readonly EnemyState[],
+      tick: number,
       alpha: number,
       dtMs: number,
       bursts: { flame(x: number, y: number, radius: number, heat: number): void },
@@ -89,7 +91,8 @@ describe('Renderer.restart (docs/v3 C10 design §1.7, C10.5a)', () => {
   it('rewinds the enemies’ clock: a rewound layer spins and flickers as a new one', () => {
     const data = makeTestData();
     const bursts = { flame: (): void => undefined };
-    const crowd = [1, 2, 3].map((id): EnemyState => ({
+    // Enemy id − 1 burn records each, live through tick 1, the tick every frame shows.
+    const crowd = [1, 2, 3].map((id): EnemyState & Pick<Enemy, 'burns' | 'burnRingEnd'> => ({
       id,
       type: 'triangle',
       wave: 1,
@@ -103,11 +106,13 @@ describe('Renderer.restart (docs/v3 C10 design §1.7, C10.5a)', () => {
       burnStacks: id - 1,
       alive: true,
       v3: null,
+      burns: Array.from({ length: id - 1 }, () => ({ end: 100 }) as BurnStack),
+      burnRingEnd: 0,
     }));
     const layer = () => new EnemyLayer(data, Texture.WHITE, () => 0.5);
     const played = (rewind: boolean) => {
       const enemies = layer();
-      for (let f = 0; f < PLAYED_FRAMES; f++) enemies.update(crowd, 1, FRAME_MS, bursts);
+      for (let f = 0; f < PLAYED_FRAMES; f++) enemies.update(crowd, 1, 1, FRAME_MS, bursts);
       enemies.clear();
       if (rewind) enemies.rewind();
       return enemies;
@@ -118,8 +123,8 @@ describe('Renderer.restart (docs/v3 C10 design §1.7, C10.5a)', () => {
       enemies.burnGlow.particleChildren.map((glow) => [glow.color, glow.scaleX]),
     ];
     for (const enemies of [rewound, cleared, fresh]) {
-      enemies.update(crowd, 1, FRAME_MS, bursts);
-      enemies.update(crowd, 1, FRAME_MS, bursts);
+      enemies.update(crowd, 1, 1, FRAME_MS, bursts);
+      enemies.update(crowd, 1, 1, FRAME_MS, bursts);
     }
     expect(drawn(rewound)).toEqual(drawn(fresh));
     expect(drawn(cleared)).not.toEqual(drawn(fresh));

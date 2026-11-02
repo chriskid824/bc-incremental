@@ -57,6 +57,9 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
         [String(rule.bossGapSec)],
         [signedPercent(rule.attackSpeedMore)],
       ];
+    case 'gigantism':
+      // gd:268's 「大小 ×2」; the halving is words.
+      return [[`×${rule.sizeMult}`]];
   }
 }
 

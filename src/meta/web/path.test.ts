@@ -10,6 +10,8 @@ import { DEFAULT_WEB_ECONOMY } from './price';
 import { buy, canBuy, CHALLENGE_RULES, emptyProgress } from './rules';
 import type { AccountProgress, CharacterProgress, Wallet } from './types';
 
+const { step: STEP, might: MIGHT } = DEFAULT_WEB_ECONOMY;
+
 const fire = assembleWeb(fixtureContent(), 'fire', FULL_SCOPE);
 const account: AccountProgress = { singularityBeaten: false };
 const RICH: Wallet = { shards: num(1e12), cores: 1000, resonance: 1000 };
@@ -24,7 +26,7 @@ const start = (extra: Partial<CharacterProgress> = {}): CharacterProgress => ({
 const bought = (ids: readonly string[], from = start()): CharacterProgress =>
   ids.reduce((progress, id) => buy(fire, progress, account, id), from);
 const relative = (a: number, b: number): number => Math.abs(a - b) / Math.abs(b);
-const steps = (k: number): number => (180 * (1.31 ** k - 1)) / 0.31;
+const steps = (k: number): number => (STEP.base * (STEP.growth ** k - 1)) / (STEP.growth - 1);
 
 const C = 'fire.center';
 const ROUTE_C1 = [
@@ -45,7 +47,7 @@ describe('planPath (gd:807)', () => {
       price: { cores: 1, resonance: 0 },
     });
     if (!plan.ok) return;
-    expect(relative(toNumber(plan.price.shards), steps(6) + 300)).toBeLessThan(1e-12);
+    expect(relative(toNumber(plan.price.shards), steps(6) + MIGHT.base)).toBeLessThan(1e-12);
   });
 
   it('never passes through a threshold, core, ★ or ascendancy node', () => {
@@ -177,7 +179,11 @@ describe('planPath (gd:807)', () => {
   it('returns the first failing step and its reason', () => {
     // A wallet for three steps: the fourth fails.
     const three = start({
-      wallet: { shards: num(180 + 180 * 1.31 + 180 * 1.31 ** 2 + 50), cores: 1, resonance: 0 },
+      wallet: {
+        shards: num(steps(3) + (STEP.base * STEP.growth ** 3) / 2),
+        cores: 1,
+        resonance: 0,
+      },
     });
     expect(planPath(fire, three, account, 'hub.might.might')).toEqual({
       ok: false,

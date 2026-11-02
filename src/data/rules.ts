@@ -111,7 +111,14 @@ export type RuleSpec =
       readonly globalSlow: number;
       readonly bossGapSec: number;
       readonly attackSpeedMore: number;
-    };
+    }
+  /**
+   * 巨大化 (gd:268): every area radius the build creates, the bomb's included, and the projectiles'
+   * hit radius × sizeMult; the four counts (projectiles, ice cones, chain jumps, drones) halved,
+   * rounded down, at least 1 (src/sim/rules/gigantism.ts, src/sim/build/size.ts). The first
+   * instance's.
+   */
+  | { readonly id: 'gigantism'; readonly sizeMult: number };
 
 export type RuleId = RuleSpec['id'];
 
@@ -128,6 +135,7 @@ export const RULE_IDS: readonly RuleId[] = [
   'sixCoils',
   'frostflame',
   'absoluteZero',
+  'gigantism',
 ];
 
 /**

@@ -166,9 +166,8 @@ describe('computeStatBlock', () => {
     for (const mod of rejected) expect(() => block([mod]), JSON.stringify(mod)).toThrow(/Tags/);
   });
 
-  it("appends C6b.1's barrageCount: last of 57, base 0, unscoped, its flat values summed", () => {
-    expect(STAT_IDS).toHaveLength(57);
-    expect(STAT_IDS.slice(-2)).toEqual(['treasureRate', 'barrageCount']);
+  it("appends C6b.1's barrageCount: base 0, unscoped, its flat values summed", () => {
+    expect(STAT_IDS.slice(-4, -2)).toEqual(['treasureRate', 'barrageCount']);
     expect(BASE_STATS.barrageCount).toBe(0);
     expect(isScopedStat('barrageCount')).toBe(false);
     expect(SCOPED_STATS).toHaveLength(18);
@@ -180,6 +179,29 @@ describe('computeStatBlock', () => {
     expect(stats.scoped).toEqual([]);
     const tagged = { stat: 'barrageCount', kind: 'flat', value: 1, tags: ['projectile'] } as const;
     expect(() => block([tagged])).toThrow(/Tags/);
+  });
+
+  it("appends E1's areaSize and bombRadius: last of 59, base 1, unscoped multipliers that increased raises and more multiplies", () => {
+    expect(STAT_IDS).toHaveLength(59);
+    expect(STAT_IDS.slice(-3)).toEqual(['barrageCount', 'areaSize', 'bombRadius']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    for (const stat of ['areaSize', 'bombRadius'] as const) {
+      expect(BASE_STATS[stat], stat).toBe(1);
+      expect(isScopedStat(stat), stat).toBe(false);
+      expect(block([]).values[stat], stat).toBe(1);
+      // (1 + 0.2 + 0.3) × 1.5: the 範圍 and 爆炸半徑 ranks are increased, a ★ may be more.
+      const stats = block([
+        { stat, kind: 'increased', value: 0.2 },
+        { stat, kind: 'increased', value: 0.3 },
+        { stat, kind: 'more', value: 0.5 },
+      ]);
+      expect(stats.values[stat], stat).toBeCloseTo(2.25, 12);
+      expect(stats.scoped).toEqual([]);
+      const tagged = { stat, kind: 'increased', value: 0.2, tags: ['area'] } as const;
+      expect(() => block([tagged]), stat).toThrow(/Tags/);
+      const scoped = { stat, kind: 'increased', value: 0.2, scope: 'hub' } as const;
+      expect(() => block([scoped]), stat).toThrow(/Tags/);
+    }
   });
 
   it('passes the triggers and conversions through', () => {

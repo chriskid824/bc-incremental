@@ -8,13 +8,15 @@
  * PICK_TICKS), so the launches stagger. Turret j of its T sits in a seat at the turret radius, at
  * angle π/D + 2πj/T, between the drones, or 2πj/T when the emitter has no drone; a turret never
  * picks, so its row's first pick, by the same rule from j, is never read. An emitter's turrets
- * fire its turret payload (turretPayload, src/sim/emitters/types.ts). Draws nothing.
+ * fire its turret payload (turretPayload, src/sim/emitters/types.ts). An emitter's drones are
+ * counted (countOf, halved under 巨大化) and its splash sized (sizeOf) here, once for the run;
+ * its turrets are not halved. Draws nothing.
  */
 
 import type { Rng } from '../../core/rng';
 import { DRONE_DEFAULTS } from '../../data/emitters';
 import type { CompiledBuild } from '../build/compile';
-import { sizeOf } from '../build/size';
+import { countOf, sizeOf } from '../build/size';
 import { PICK_TICKS } from '../caps';
 import type { ChainPolicy, DroneLayout } from '../systems/systemState';
 import {
@@ -81,7 +83,8 @@ export function droneLayout(
     // Emitter 0, a drone emitter, is the swarm: its rules change its SwarmParams in place.
     const swarm = i === 0 ? build.signature.swarm : null;
     const params = swarm ?? DRONE_DEFAULTS;
-    const drones = swarm === null ? spec.drones : swarm.drones;
+    // 巨大化 halves the drones, here at the fill, and never the turrets (countOf).
+    const drones = countOf(build, swarm === null ? spec.drones : swarm.drones);
     const turrets = swarm === null ? spec.turrets : swarm.turrets;
     for (let k = 0; k < drones; k++) {
       place(DRONE_KIND_DRONE, i, k, (2 * Math.PI * k) / drones, DRONE_DEFAULTS.dockRadius);

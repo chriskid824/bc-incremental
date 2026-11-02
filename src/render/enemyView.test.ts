@@ -54,6 +54,7 @@ interface EnemiesModule {
     readonly burnGlow: { readonly particleChildren: readonly { scaleX: number }[] };
     update(
       enemies: readonly EnemyState[],
+      tick: number,
       alpha: number,
       dtMs: number,
       bursts: { flame(x: number, y: number, radius: number, heat: number): void },
@@ -449,8 +450,14 @@ describe('EnemyLayer with 增殖’s children (docs/v3 C7 design §2.9: views by
       const bursts = {
         flame: (_x: number, _y: number, r: number) => void flames.push(r),
       };
-      const enemy = { ...enemyOf(def, { affixes: AFFIX_SWIFT }, { radius }), burnStacks: 2 };
-      layer.update([enemy], 1, 1000, bursts);
+      // Two burn records live through tick 1, the tick the frame shows.
+      const enemy = {
+        ...enemyOf(def, { affixes: AFFIX_SWIFT }, { radius }),
+        burnStacks: 2,
+        burns: [{ end: 100 }, { end: 100 }],
+        burnRingEnd: 0,
+      };
+      layer.update([enemy], 1, 1, 1000, bursts);
       const glow = layer.burnGlow.particleChildren[0] as { scaleX: number };
       return { spot: layer.positionOf(enemy.id)?.radius, glow: glow.scaleX, flames };
     };

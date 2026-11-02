@@ -245,6 +245,7 @@
   "web.conversion": "{from}的 {pct} 轉為{to}",
   "web.conversion.all": "擊中傷害",
   "web.ruleFallback": "特殊規則（{rule}）",
+  "web.rule.gigantism": "範圍、爆炸、投射物、無人機的大小 {mult}；數量類（投射物、冰錐、連鎖跳數、無人機）減半，一律無條件捨去，最少 1",
   "web.centerDamage": "中心傷害",
   "web.bonus.status": "{enemies}受到中心傷害 {value}",
   "web.bonus.inZone": "區內的敵人受到中心傷害 {value}",

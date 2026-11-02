@@ -317,7 +317,7 @@ describe('orbit: its emitter', () => {
     }
   });
 
-  it('builds its memory once for the run: countOf(count + floor(orbitCount)) orbs of ORB_MEMORY entries', () => {
+  it('builds its memory once for the run: count + floor(orbitCount) orbs of ORB_MEMORY entries', () => {
     expect(ORB_MEMORY).toBe(64);
     const ctx = fixture([], {
       values: { orbitCount: 2.9 },

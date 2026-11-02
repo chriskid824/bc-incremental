@@ -149,6 +149,24 @@ describe("the estimators on the signature attack's rows", () => {
     expect(crowdDps(fewer, [], MAGMA_BOMB)).toBe(attackDamage(fewer, [], MAGMA_BOMB) * 3 * 1);
   });
 
+  it('count the projectiles and the chain jumps 巨大化 halves, as the run reads them (gd:268)', () => {
+    const giant = [{ id: 'gigantism', sizeMult: 2 }] as const;
+    const values = { ...noCrit, attackSpeed: 3, chainRetention: 0.5 } as const;
+    const stats = makeStats({ ...values, projectileCount: 5, chainCount: 3 });
+    // Without the rule: 3 jumps and 5 projectiles.
+    expect(attackDamage(stats)).toBe(10 * (1 + 0.5 + 0.25 + 0.125));
+    expect(crowdDps(stats)).toBe(attackDamage(stats) * 3 * 5);
+    // floor(3 / 2) = 1 jump and floor(5 / 2) = 2 projectiles, no fraction left to count.
+    expect(attackDamage(stats, giant)).toBe(10 * (1 + 0.5));
+    expect(crowdDps(stats, giant)).toBe(attackDamage(stats, giant) * 3 * 2);
+    // 熔核: 5 − 1 = 4 bombs first, then halved to 2 (C4 D29).
+    expect(crowdDps(stats, giant, MAGMA_BOMB)).toBe(attackDamage(stats, giant, MAGMA_BOMB) * 3 * 2);
+    // A fraction rounds down: 2.5 jumps are 1, 3.5 projectiles are 1, never below 1.
+    const fractions = makeStats({ ...values, projectileCount: 3.5, chainCount: 2.5 });
+    expect(attackDamage(fractions, giant)).toBe(10 * (1 + 0.5));
+    expect(crowdDps(fractions, giant)).toBe(attackDamage(fractions, giant) * 3 * 1);
+  });
+
   it('read the primary hit from the hit row and the jumps from the jump row', () => {
     // ×2 on projectile hits, ×3 on area hits, ×5 on chain hits.
     const stats = makeStats({ ...noCrit, chainCount: 1, chainRetention: 0.5 }, [

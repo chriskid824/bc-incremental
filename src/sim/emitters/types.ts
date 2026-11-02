@@ -811,8 +811,8 @@ export function createEmitterRuntime(
  */
 export interface OrbMemory {
   /**
-   * Orbs on the ring, fixed for the run: countOf(build, spec.count + floor(values.orbitCount)),
-   * none below 0.
+   * Orbs on the ring, fixed for the run: spec.count + floor(values.orbitCount), none below 0;
+   * not one of 巨大化's four counts, so never halved (src/sim/build/size.ts countOf).
    */
   readonly n: number;
   /** n × ORB_MEMORY: the id of each enemy remembered. */

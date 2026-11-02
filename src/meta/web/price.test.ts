@@ -14,6 +14,8 @@ import {
 import { buy, emptyProgress } from './rules';
 import type { AccountProgress, CharacterProgress, Price, WebEconomy } from './types';
 
+const { step: STEP, mastery: MASTERY, might: MIGHT } = DEFAULT_WEB_ECONOMY;
+
 const fire = assembleWeb(fixtureContent(), 'fire', FULL_SCOPE);
 const account: AccountProgress = { singularityBeaten: false };
 
@@ -78,14 +80,14 @@ describe('step prices (D19)', () => {
     const a = buyAll(ORDER_A);
     const b = buyAll(ORDER_B);
     expect(a.progress.ranks).toEqual(b.progress.ranks);
-    const k10 = closed(180, 1.31, 10);
+    const k10 = closed(STEP.base, STEP.growth, 10);
     for (const { progress } of [a, b]) {
       expect(relative(toNumber(progress.spent.shards), k10)).toBeLessThan(1e-12);
       expect(progress.spent.cores).toBe(1);
       expect(relative(toNumber(canonicalCost(fire, progress).shards), k10)).toBeLessThan(1e-12);
     }
     // Purchase k costs base × growth^k, whatever node it is.
-    a.paid.forEach((price, k) => expect(toNumber(price.shards)).toBe(1.31 ** k * 180));
+    a.paid.forEach((price, k) => expect(toNumber(price.shards)).toBe(STEP.growth ** k * STEP.base));
   });
 
   it('make canonicalCost the sum of the nextPrices that built it', () => {
@@ -130,15 +132,15 @@ describe('nextPrice', () => {
     [`${C}.beta.mastery`]: 1,
     'hub.might.might': 1,
   });
-  const step = 1.31 ** 3 * 180;
+  const step = STEP.growth ** 3 * STEP.base;
   const PRICES: readonly (readonly [WebNodeKind, string, number, number, number])[] = [
     ['ranked', `${C}.beta.r1`, step, 0, 0],
     ['notable', `${C}.beta.beta-one`, step, 1, 0],
     ['threshold', `${C}.main.threshold`, step, 2, 0],
     ['entry', 'outer.poison.main.entry', step, 0, 0],
     ['core', 'fusion.fire.poison.core', step, 1, 0],
-    ['mastery', `${C}.gamma.mastery`, 1.4 ** 3 * 300, 0, 0],
-    ['might', 'hub.might.might', 1.4 ** 1 * 300, 0, 0],
+    ['mastery', `${C}.gamma.mastery`, MASTERY.growth ** 3 * MASTERY.base, 0, 0],
+    ['might', 'hub.might.might', MIGHT.growth ** 1 * MIGHT.base, 0, 0],
     ['keystone', `${C}.main.star-one`, 0, 3, 0],
     ['asc', 'fire.asc.path-one.n1', 0, 0, 1],
     ['ascFinal', 'fire.asc.path-two.final', 0, 0, 1],
@@ -197,9 +199,10 @@ describe('economyIssues (V16, S-3)', () => {
 
   it('passes DEFAULT_WEB_ECONOMY and its 初始值', () => {
     expect(economyIssues(DEFAULT_WEB_ECONOMY)).toEqual([]);
-    expect(DEFAULT_WEB_ECONOMY.step).toEqual({ base: 180, growth: 1.31 });
-    expect(DEFAULT_WEB_ECONOMY.mastery).toEqual({ base: 300, growth: 1.4 });
-    expect(DEFAULT_WEB_ECONOMY.might).toEqual({ base: 300, growth: 1.4 });
+    // B1's values, chosen with the simulator (前線節奏 at 10, 20 and 40 min).
+    expect(DEFAULT_WEB_ECONOMY.step).toEqual({ base: 2, growth: 1.1 });
+    expect(DEFAULT_WEB_ECONOMY.mastery).toEqual({ base: 50, growth: 1.15 });
+    expect(DEFAULT_WEB_ECONOMY.might).toEqual({ base: 50, growth: 1.15 });
     expect(DEFAULT_WEB_ECONOMY.startWaveRatio).toBe(0.5);
     expect(DEFAULT_WEB_ECONOMY.skipRewardRate).toBe(1);
   });

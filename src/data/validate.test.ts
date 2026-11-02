@@ -469,6 +469,19 @@ describe('validateGameData: talents', () => {
     expect([coils(1, 1, 0.01), coils(6, 2, 0.55)]).toEqual([[], []]);
   });
 
+  it('rejects a 巨大化 sizeMult below 1, and takes 1 and 2 (E1)', () => {
+    const giant = (sizeMult: number) =>
+      issuesAfter((d) => {
+        talent(d, 'steadyAim').rules = [{ id: 'gigantism', sizeMult }];
+      });
+    expect([giant(0.5), giant(0), giant(Number.NaN)]).toEqual([
+      ["talent 'steadyAim': rule 'gigantism' gigantism.sizeMult must be >= 1 (got 0.5)"],
+      ["talent 'steadyAim': rule 'gigantism' gigantism.sizeMult must be >= 1 (got 0)"],
+      ["talent 'steadyAim': rule 'gigantism' gigantism.sizeMult must be >= 1 (got NaN)"],
+    ]);
+    expect([giant(1), giant(2)]).toEqual([[], []]);
+  });
+
   it('rejects invalid costs', () => {
     const issues = issuesAfter((d) => {
       talent(d, 'precision').coreCost = 1.5;

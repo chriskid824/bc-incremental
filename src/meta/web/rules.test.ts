@@ -32,6 +32,8 @@ import type {
   WebEconomy,
 } from './types';
 
+const { step: STEP } = DEFAULT_WEB_ECONOMY;
+
 const content = fixtureContent();
 const fire = assembleWeb(content, 'fire', FULL_SCOPE);
 const fireA = assembleWeb(content, 'fire', DEMO_SCOPE_A);
@@ -54,8 +56,8 @@ const bought = (ids: readonly string[], start = owning({}), acc = account): Char
   ids.reduce((progress, id) => buy(fire, progress, acc, id), start);
 
 const relative = (a: number, b: number): number => Math.abs(a - b) / Math.abs(b);
-/** k step purchases: 180 × (1.31^k − 1) / 0.31. */
-const steps = (k: number): number => (180 * (1.31 ** k - 1)) / 0.31;
+/** k step purchases: base × (growth^k − 1) / (growth − 1). */
+const steps = (k: number): number => (STEP.base * (STEP.growth ** k - 1)) / (STEP.growth - 1);
 
 const C = 'fire.center';
 const MIGHT = 'hub.might.might';
@@ -265,11 +267,11 @@ const ROWS: readonly Row[] = [
   {
     reason: 'notEnoughShards',
     fails: {
-      progress: owning({}, { wallet: { ...EMPTY, shards: num(179.99) } }),
+      progress: owning({}, { wallet: { ...EMPTY, shards: num(STEP.base - 0.01) } }),
       id: `${C}.alpha.r1`,
     },
     passes: {
-      progress: owning({}, { wallet: { ...EMPTY, shards: num(180) } }),
+      progress: owning({}, { wallet: { ...EMPTY, shards: num(STEP.base) } }),
       id: `${C}.alpha.r1`,
     },
   },
@@ -849,15 +851,15 @@ describe('buy', () => {
     const start = owning({}, { wallet: { shards: num(10000), cores: 5, resonance: 0 } });
     const one = buy(fire, start, account, `${C}.alpha.r1`);
     expect(one.ranks).toEqual({ [`${C}.alpha.r1`]: 1 });
-    expect(one.wallet).toEqual({ shards: 9820, cores: 5, resonance: 0 });
-    expect(one.spent).toEqual({ shards: 180, cores: 0, resonance: 0 });
+    expect(one.wallet).toEqual({ shards: 10000 - STEP.base, cores: 5, resonance: 0 });
+    expect(one.spent).toEqual({ shards: STEP.base, cores: 0, resonance: 0 });
     const two = bought([`${C}.alpha.r1`, `${C}.alpha.r2`, `${C}.alpha.alpha-one`], one);
     expect(two.ranks).toEqual({
       [`${C}.alpha.r1`]: 2,
       [`${C}.alpha.r2`]: 1,
       [`${C}.alpha.alpha-one`]: 1,
     });
-    const paid = 180 + 180 * 1.31 + 180 * 1.31 ** 2 + 180 * 1.31 ** 3;
+    const paid = steps(4);
     expect(relative(toNumber(two.spent.shards), paid)).toBeLessThan(1e-12);
     expect(relative(toNumber(two.wallet.shards), 10000 - paid)).toBeLessThan(1e-12);
     expect(two.wallet.cores).toBe(4);
@@ -902,8 +904,8 @@ describe('refunds (F16)', () => {
     const a = bought(ORDER_A);
     const b = bought(ORDER_B);
     for (const [id, refund] of [
-      [`${C}.beta.r1`, 180 * 1.31 ** 4],
-      [`${C}.gamma.r2`, 180 * 1.31 ** 4],
+      [`${C}.beta.r1`, STEP.base * STEP.growth ** 4],
+      [`${C}.gamma.r2`, STEP.base * STEP.growth ** 4],
       [`${C}.alpha.r1`, steps(5) - steps(3)],
     ] as const) {
       const fromA = refundPreview(fire, a, account, id);
@@ -925,17 +927,17 @@ describe('refunds (F16)', () => {
     expect(after.wallet.cores - progress.wallet.cores).toBe(3);
     expect(after.spent.cores).toBe(1);
     // Never more than was spent.
-    const unpaid = { ...progress, spent: { shards: num(100), cores: 1, resonance: 0 } };
+    const unpaid = { ...progress, spent: { shards: num(1), cores: 1, resonance: 0 } };
     const capped = refundPreview(fire, unpaid, account, `${C}.main.c1`).refund;
-    expect(capped).toEqual({ shards: 100, cores: 1, resonance: 0 });
+    expect(capped).toEqual({ shards: 1, cores: 1, resonance: 0 });
   });
 
   it('price what drops on the economy given', () => {
-    const cheap: WebEconomy = { ...DEFAULT_WEB_ECONOMY, step: { base: 100, growth: 1.31 } };
+    const cheap: WebEconomy = { ...DEFAULT_WEB_ECONOMY, step: { base: 1, growth: 1.05 } };
     const progress = bought(ORDER_A);
     const preview = refundPreview(fire, progress, account, `${C}.beta.r1`, cheap);
     expect(preview.dropped).toEqual([`${C}.beta.r1`]);
-    expect(relative(toNumber(preview.refund.shards), 100 * 1.31 ** 4)).toBeLessThan(1e-12);
+    expect(relative(toNumber(preview.refund.shards), 1.05 ** 4)).toBeLessThan(1e-12);
     expect(refundNode(fire, progress, account, `${C}.beta.r1`, cheap).wallet.shards).toBe(
       add(progress.wallet.shards, preview.refund.shards),
     );
@@ -1110,7 +1112,10 @@ describe('legalize (R4)', () => {
     const { progress: after, dropped } = legalize(fire, progress, account);
     expect(dropped).toEqual([THRESHOLD]);
     expect(
-      relative(toNumber(after.wallet.shards) - toNumber(progress.wallet.shards), 180 * 1.31 ** 11),
+      relative(
+        toNumber(after.wallet.shards) - toNumber(progress.wallet.shards),
+        STEP.base * STEP.growth ** 11,
+      ),
     ).toBeLessThan(1e-9);
     expect(after.wallet.cores - progress.wallet.cores).toBe(2);
   });

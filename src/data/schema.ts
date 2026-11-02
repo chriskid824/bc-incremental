@@ -504,6 +504,7 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         attackSpeedMore: finite,
       })
       .readonly(),
+    z.strictObject({ id: z.literal('gigantism'), sizeMult: finite }).readonly(),
   ]),
 );
 
