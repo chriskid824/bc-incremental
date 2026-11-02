@@ -5,8 +5,10 @@
  */
 
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
+import { absoluteZero } from './absoluteZero';
 import { eternalFlame } from './eternalFlame';
 import { icicle, prism } from './fanForms';
+import { frostflame } from './frostflame';
 import { glassCannon } from './glassCannon';
 import { iceFan } from './iceFan';
 import { chainBlast, farThrow, volcano } from './lobForms';
@@ -47,6 +49,8 @@ export const RULE_MODULES: {
   icicle,
   prism,
   sixCoils,
+  frostflame,
+  absoluteZero,
 };
 
 export const SIGNATURES: {

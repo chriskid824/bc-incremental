@@ -93,6 +93,11 @@ export interface BuildFlags {
   bossMinGapTicks: number;
   globalSlow: number;
   /**
+   * Burn stacks an enemy holding frost can carry beyond the records cap (霜焰, frostflame); read
+   * by burnCapOf. Under burnRings the cap stays BURN_RINGS_MAX_STACKS.
+   */
+  frostBurnCap: number;
+  /**
    * The only build-wide factor on shatter damage, which takes no untagged more such as 強化∞
    * (docs/v3/game-design-v3.md §2.1): glassCannon multiplies it by 1 + damageMore as it adds
    * its more.
@@ -392,6 +397,7 @@ export function compileBuild(
     bossLockTicks: 252,
     bossMinGapTicks: 0,
     globalSlow: 0,
+    frostBurnCap: 0,
     shatterMult: 1,
     combo: false,
     comboCap: DEFAULT_COMBO_CAP,

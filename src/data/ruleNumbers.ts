@@ -49,6 +49,14 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
         [String(rule.targets)],
         [signedPercent(rule.damageMult - 1), percent(rule.damageMult), `×${rule.damageMult}`],
       ];
+    case 'frostflame':
+      return [[percent(rule.frostPct)], [`+${rule.burnCapBonus}`], [percent(rule.zoneSlow)]];
+    case 'absoluteZero':
+      return [
+        [percent(rule.globalSlow)],
+        [String(rule.bossGapSec)],
+        [signedPercent(rule.attackSpeedMore)],
+      ];
   }
 }
 

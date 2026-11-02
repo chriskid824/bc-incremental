@@ -88,6 +88,7 @@ describe('compileBuild', () => {
       bossLockTicks: 252,
       bossMinGapTicks: 0,
       globalSlow: 0,
+      frostBurnCap: 0,
       shatterMult: 1,
       combo: false,
       comboCap: 20,

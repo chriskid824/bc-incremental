@@ -25,6 +25,7 @@ import { BURN_RINGS_MAX_STACKS } from '../caps';
 import type { BurnStack, Enemy, RunContext } from '../systems/context';
 import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
 import { DT } from '../types';
+import { holdsFrost } from './frost';
 import { DOT_STEP_TICKS } from './rings';
 
 /** Burn damage is dealt on a global cadence of this many ticks (0.25 s). */
@@ -76,11 +77,14 @@ export function liveBurnStacks(enemy: Enemy, now: number): number {
 
 /**
  * The burn stacks the enemy can hold: the records cap (RunContext.burnCap, at least 1), which
- * addBurn reads; under eternalFlame, whose rings refuse no stack, BURN_RINGS_MAX_STACKS. What
- * stacksAtLeast 'max' compares with (src/sim/build/eval.ts).
+ * addBurn reads, plus RunContext.frostBurnCap while the enemy holds frost (霜焰); under
+ * eternalFlame, whose rings refuse no stack, BURN_RINGS_MAX_STACKS. What stacksAtLeast 'max'
+ * compares with (src/sim/build/eval.ts).
  */
-export function burnCapOf(ctx: RunContext, _enemy: Enemy): number {
-  return ctx.burnRings ? BURN_RINGS_MAX_STACKS : ctx.burnCap;
+export function burnCapOf(ctx: RunContext, enemy: Enemy): number {
+  if (ctx.burnRings) return BURN_RINGS_MAX_STACKS;
+  if (ctx.frostBurnCap === 0 || !holdsFrost(enemy, ctx.now)) return ctx.burnCap;
+  return ctx.burnCap + ctx.frostBurnCap;
 }
 
 /** Adds `amount`, the damage of an ended or replaced stack, to burnPending. */

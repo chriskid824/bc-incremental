@@ -21,6 +21,9 @@ export const OVERRIDES: Readonly<Partial<Record<FusionKey, FusionOverride>>> = {
       },
     ],
   },
+  // 火冰「霜焰」 (gd §5.2): explosions add 30% chill; an enemy holding frost carries 3 more burn
+  // stacks; the fire zones turn to frost-fire zones that slow by 30%.
+  'fire.ice': { rule: { id: 'frostflame', frostPct: 0.3, burnCapBonus: 3, zoneSlow: 0.3 } },
 };
 
 /** Fusions accepted outside the band, each with the reason the batch PR quotes (F21). */

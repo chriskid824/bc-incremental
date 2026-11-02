@@ -398,5 +398,18 @@
   "web.node.outer.crit.main.shatter-crit.name": "Shatter Crit",
   "web.node.outer.crit.main.steady-aim.name": "Steady Aim",
   "web.node.outer.crit.main.steady-aim.desc": "Every 3rd attack always crits; crit multiplier ×1.5, crit damage +120% and attack speed +25% (all more). No random crits.",
-  "web.node.outer.crit.main.threshold.name": "Beheading Line"
+  "web.node.outer.crit.main.threshold.name": "Beheading Line",
+  "web.fusion.fire.ice.title": "Frostflame",
+  "web.node.outer.ice.main.entry.name": "Chill Touch",
+  "web.branch.outer.ice.cold-front": "Cold Front",
+  "web.node.outer.ice.cold-front.frostbite.name": "Frostbite",
+  "web.node.outer.ice.cold-front.deep-freeze.name": "Deep Freeze",
+  "web.branch.outer.ice.shatter": "Shatter",
+  "web.node.outer.ice.shatter.cold-snap.name": "Cold Snap",
+  "web.node.outer.ice.shatter.chilblain.name": "Chilblain",
+  "web.node.outer.ice.main.frost-path.name": "Frost Path",
+  "web.node.outer.ice.main.absolute-zero.name": "Absolute Zero",
+  "web.node.outer.ice.main.absolute-zero.desc": "Every enemy is always slowed 30%; freezes leave no immunity, and a boss's freeze events stay at least 1 s apart; your attack speed −25%.",
+  "web.node.outer.ice.main.threshold.name": "Cold Wave",
+  "web.node.fusion.fire.ice.core.desc": "Explosions add {frostPct} chill; an enemy holding chill can carry +3 burn stacks; your fire zones turn to frost-fire zones that slow by {zoneSlow}."
 }

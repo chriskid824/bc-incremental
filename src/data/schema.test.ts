@@ -47,6 +47,8 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   icicle: { id: 'icicle', every: 4, damagePct: 4 },
   prism: { id: 'prism', perPierce: 0.2, maxBonus: 2 },
   sixCoils: { id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55 },
+  frostflame: { id: 'frostflame', frostPct: 0.3, burnCapBonus: 3, zoneSlow: 0.3 },
+  absoluteZero: { id: 'absoluteZero', globalSlow: 0.3, bossGapSec: 1, attackSpeedMore: -0.25 },
 };
 
 describe('ModifierSchema', () => {

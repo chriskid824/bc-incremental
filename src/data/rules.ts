@@ -88,6 +88,29 @@ export type RuleSpec =
       readonly coils: number;
       readonly targets: number;
       readonly damageMult: number;
+    }
+  /**
+   * 霜焰 (magmaBomb, 火冰's hand core): each bomb explosion adds frostPct chill to the enemies it
+   * hits; an enemy holding frost carries burnCapBonus more burn stacks; the fire zones slow the
+   * enemies in them by zoneSlow. Frost and the cap bonus add up over instances, the slow takes
+   * the largest.
+   */
+  | {
+      readonly id: 'frostflame';
+      readonly frostPct: number;
+      readonly burnCapBonus: number;
+      readonly zoneSlow: number;
+    }
+  /**
+   * 絕對零度 (the ice outer's ★ and 霜晶's): every enemy always carries globalSlow, a freeze leaves
+   * no immunity, a boss's freeze events stay at least bossGapSec apart, and attack speed gets
+   * (1 + attackSpeedMore). The largest slow and gap; the attack speed factors multiply.
+   */
+  | {
+      readonly id: 'absoluteZero';
+      readonly globalSlow: number;
+      readonly bossGapSec: number;
+      readonly attackSpeedMore: number;
     };
 
 export type RuleId = RuleSpec['id'];
@@ -103,6 +126,8 @@ export const RULE_IDS: readonly RuleId[] = [
   'icicle',
   'prism',
   'sixCoils',
+  'frostflame',
+  'absoluteZero',
 ];
 
 /**
@@ -181,7 +206,10 @@ export const RULE_COEF_FIELDS: {
   readonly [K in RuleId]?: Readonly<
     Partial<Record<keyof Extract<RuleSpec, { id: K }> & string, CoefFieldKind>>
   >;
-} = {};
+} = {
+  // 霜焰: the chill and the zone's slow scale; the burn cap bonus is a whole stack count.
+  frostflame: { frostPct: 'chance', zoneSlow: 'chance' },
+};
 
 /**
  * `spec` with the fields its `fields` entry lists scaled by `coef`: pct and mult × coef, chance

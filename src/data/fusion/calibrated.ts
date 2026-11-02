@@ -17,6 +17,16 @@ export const CALIBRATED: Readonly<Partial<Record<FusionKey, CalibrationEntry>>> 
     startWave: 1,
     digest: '7862c27e716ef8ed',
   },
+  'fire.ice': {
+    coef: 2.2,
+    status: 'spread',
+    median: 1.2155,
+    min: 0.9926,
+    max: 1.2779,
+    seeds: 8,
+    startWave: 1,
+    digest: '8d5a3a47af9c4550',
+  },
   'fire.poison': {
     coef: 1,
     status: 'insensitive',

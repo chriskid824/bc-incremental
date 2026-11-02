@@ -18,7 +18,7 @@ import type { LobParams } from '../build/compile';
 import type { BuildCompiler, RuleModule } from './module';
 
 /** The signature's lob parameters, or the error a form in a run of another signature is. */
-function lobParams(b: BuildCompiler, rule: RuleSpec['id']): LobParams {
+export function lobParams(b: BuildCompiler, rule: RuleSpec['id']): LobParams {
   const signature = b.signature();
   if (signature.lob === null) {
     throw new Error(

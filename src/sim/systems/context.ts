@@ -331,6 +331,8 @@ export interface RunContext {
   readonly burnDamage: number;
   readonly burnTicks: number;
   readonly burnCap: number;
+  /** Extra burn stacks on an enemy holding frost (BuildFlags.frostBurnCap, 霜焰); 0 without. */
+  readonly frostBurnCap: number;
   /** Burns live in DoT rings (BuildFlags.burnRings, eternalFlame) rather than records. */
   readonly burnRings: boolean;
   readonly poisonDamage: number;
@@ -1057,6 +1059,7 @@ export function createRunContext(
     burnDamage: values.burnDamage,
     burnTicks: Math.max(0, values.burnDuration * TICK_RATE),
     burnCap: Math.max(1, Math.floor(values.burnMaxStacks)),
+    frostBurnCap: Math.max(0, Math.floor(flags.frostBurnCap)),
     burnRings: flags.burnRings,
     poisonDamage: values.poisonDamage,
     poisonTicks: Math.max(0, values.poisonDuration * TICK_RATE),

@@ -398,5 +398,18 @@
   "web.node.outer.crit.main.shatter-crit.name": "碎裂暴擊",
   "web.node.outer.crit.main.steady-aim.name": "冷靜狙擊",
   "web.node.outer.crit.main.steady-aim.desc": "每第 3 次攻擊必定暴擊，暴擊倍率 ×1.5、暴擊傷害 +120%、攻擊頻率 +25%（都是 more）；不會隨機暴擊",
-  "web.node.outer.crit.main.threshold.name": "斬首線"
+  "web.node.outer.crit.main.threshold.name": "斬首線",
+  "web.fusion.fire.ice.title": "霜焰",
+  "web.node.outer.ice.main.entry.name": "寒氣",
+  "web.branch.outer.ice.cold-front": "寒流",
+  "web.node.outer.ice.cold-front.frostbite.name": "霜咬",
+  "web.node.outer.ice.cold-front.deep-freeze.name": "深凍",
+  "web.branch.outer.ice.shatter": "碎冰",
+  "web.node.outer.ice.shatter.cold-snap.name": "寒爆",
+  "web.node.outer.ice.shatter.chilblain.name": "凍瘡",
+  "web.node.outer.ice.main.frost-path.name": "霜徑",
+  "web.node.outer.ice.main.absolute-zero.name": "絕對零度",
+  "web.node.outer.ice.main.absolute-zero.desc": "場上所有敵人永遠帶 30% 減速；凍結沒有免疫時間，Boss 的凍結事件仍至少間隔 1 秒；你的攻擊頻率 −25%",
+  "web.node.outer.ice.main.threshold.name": "寒潮",
+  "web.node.fusion.fire.ice.core.desc": "爆炸附加 {frostPct} 冰冷；有冰冷的敵人燃燒層數上限 +3；火地變成霜火地（減速 {zoneSlow}）"
 }

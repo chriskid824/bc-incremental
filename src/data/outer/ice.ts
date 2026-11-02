@@ -63,8 +63,11 @@ export const ICE = defineOuter({
     }),
     'dasher',
   ),
-  // 絕對零度 (shared with 霜晶): its rule module is an engine item not on the branch yet.
-  keystone: keystone('absolute-zero', {}),
+  // 絕對零度 (gd §4.7, shared with 霜晶): every enemy always slowed 30%, no freeze immunity, a
+  // boss's freeze events at least 1 s apart; attack speed −25%.
+  keystone: keystone('absolute-zero', {
+    rules: [{ id: 'absoluteZero', globalSlow: 0.3, bossGapSec: 1, attackSpeedMore: -0.25 }],
+  }),
   // 寒潮: every 8 s a ring of cold from you adds 50% chill to the enemies it reaches.
   threshold: threshold({
     triggers: [

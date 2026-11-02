@@ -720,6 +720,22 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`sixCoils.damageMult must be > 0 (got ${rule.damageMult})`);
       }
       break;
+    case 'frostflame':
+      chance('frostflame.frostPct', rule.frostPct);
+      if (!(Number.isInteger(rule.burnCapBonus) && rule.burnCapBonus >= 0)) {
+        issues.push(
+          `frostflame.burnCapBonus must be a non-negative integer (got ${rule.burnCapBonus})`,
+        );
+      }
+      chance('frostflame.zoneSlow', rule.zoneSlow);
+      break;
+    case 'absoluteZero':
+      chance('absoluteZero.globalSlow', rule.globalSlow);
+      if (!(rule.bossGapSec >= 0)) {
+        issues.push(`absoluteZero.bossGapSec must be >= 0 (got ${rule.bossGapSec})`);
+      }
+      more('absoluteZero.attackSpeedMore', rule.attackSpeedMore);
+      break;
   }
   return issues;
 }
@@ -1394,6 +1410,8 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'icicle':
     case 'prism':
     case 'sixCoils':
+    case 'frostflame':
+    case 'absoluteZero':
       return [];
   }
 }

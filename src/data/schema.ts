@@ -488,6 +488,22 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         damageMult: finite,
       })
       .readonly(),
+    z
+      .strictObject({
+        id: z.literal('frostflame'),
+        frostPct: finite,
+        burnCapBonus: finite,
+        zoneSlow: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('absoluteZero'),
+        globalSlow: finite,
+        bossGapSec: finite,
+        attackSpeedMore: finite,
+      })
+      .readonly(),
   ]),
 );
 
