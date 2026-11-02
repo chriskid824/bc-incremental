@@ -39,15 +39,35 @@
  * targets are the elites and bosses near the player (focused), not near the turret: one up to
  * FOCUS_RANGE + the turret radius from the turret can be one.
  *
+ * A timed row (C5.7: a spirit, DRONE_KIND_SPIRIT) is one a spawnDrone effect appended at its
+ * event's point (spawnRows). It has no emitter, dock or seat: its numbers are its effect's
+ * (DronePool.specs), its payload its effect's, on the effects stream, and its hits, its ailment
+ * term and its droneExpire take the depth and origin of the effect that spawned it. Its m is
+ * attackSpeed / BASE_ATTACK_SPEED. It picks on its first stage and again only when it has lost
+ * its target, at most once every PICK_TICKS: the enemy nearest to it (pickNearest) or the drones'
+ * pick (pickOuter), by its aim. It dashes at once at what it found (from the next tick when the
+ * pick follows a lost target) and hovers where it is while it finds nothing. It steps, arrives and
+ * keeps its cooldown memory as a drone does, and its impact is a granted drone's at its own splash
+ * and damagePct, followed by its ailment term on each enemy the impact listed that is still alive.
+ * Every row first checks its time (DronePool.until, which a fixed row's never reaches): a timed row
+ * leaves when its time is up, mid-dash too, or at once when its impacts are spent, and raises
+ * droneExpire, with no target, at its position. The rows that left are dropped at the stage's end,
+ * the others keeping their order. A spawn past the summon cap, fixed and timed rows together, or
+ * past its effect's maxLive is refused and counted (summonCapped).
+ *
  * Kills inside the stage only mark their enemy dead, and enemy objects are never reused, so a
  * target a slot keeps from an earlier tick is alive or reads dead.
  */
 
+import { mul, ZERO } from '../../core/num';
+import { APPLIED_AILMENTS } from '../../data/triggers';
+import type { AppliedAilment } from '../../data/triggers';
 import { DRONE_COOLDOWN_MAX, DRONE_MEMORY, PICK_TICKS, SMALL_PROJECTILE_TICKS } from '../caps';
 import { beginAttack, chainFrom, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { emitCenterEvent } from '../effects/centerEvents';
-import { drainRepeatCharges } from '../effects/execute';
+import { fire } from '../effects/dispatch';
+import { applyStacks, drainRepeatCharges, durationOf } from '../effects/execute';
 import { PRIMARY } from '../effects/flags';
 import { EVENT } from '../effects/types';
 import { BASE_ATTACK_SPEED, nextShotSteady, SIGNATURE } from '../emitters/types';
@@ -60,28 +80,45 @@ import {
   DRONE_DASH,
   DRONE_DOCKED,
   DRONE_HOVER,
+  DRONE_KIND_SPIRIT,
   DRONE_KIND_TURRET,
   DRONE_RETURN,
 } from '../types';
 import { focused } from './context';
 import type { Enemy, RunContext } from './context';
 import { MOTION_HOMING, spawnShot } from './shots';
-import type { DronePool } from './systemState';
+import { AIM_OUTER, NEVER_LEAVES } from './systemState';
+import type { DronePool, SpawnSpecs } from './systemState';
 
 const DRONE_IMPACT = EVENT.droneImpact;
+const DRONE_EXPIRE = EVENT.droneExpire;
 
-/** Steps every slot of the drone pool once, in id order (step 6b). */
+/**
+ * Steps every slot of the drone pool once, in id order (step 6b), then drops the timed rows that
+ * left (dropLeft).
+ */
 export function stepDrones(ctx: RunContext): void {
   const ds = ctx.sys.drones;
   const emitters = ctx.emitters;
   const now = ctx.now;
   const asMult = ctx.build.values.attackSpeed / BASE_ATTACK_SPEED;
-  const { x, y, prevX, prevY, kind, mode, owner } = ds;
+  const { x, y, prevX, prevY, kind, mode, owner, until } = ds;
   for (let s = 0; s < ds.count; s++) {
+    // A timed row whose time is up leaves, mid-dash too, and at m ≤ 0; a fixed row never does.
+    if (now >= (until[s] as number)) {
+      leave(ctx, ds, s, 'time', now);
+      continue;
+    }
     prevX[s] = x[s] as number;
     prevY[s] = y[s] as number;
+    const k = kind[s];
+    // A spirit has no emitter: nothing reads emitters[owner] for one.
+    if (k === DRONE_KIND_SPIRIT) {
+      spiritStep(ctx, ds, s, asMult, now);
+      continue;
+    }
     const em = emitters[owner[s] as number] as EmitterRuntime;
-    if (kind[s] === DRONE_KIND_TURRET) {
+    if (k === DRONE_KIND_TURRET) {
       turretStep(ctx, ds, s, em);
       continue;
     }
@@ -103,6 +140,7 @@ export function stepDrones(ctx: RunContext): void {
         break;
     }
   }
+  if (ds.left !== 0) dropLeft(ds, now);
   ctx.state.droneCount = ds.count;
 }
 
@@ -229,6 +267,111 @@ function flyHome(ds: DronePool, s: number, em: EmitterRuntime, m: number): void 
   }
 }
 
+/**
+ * A spirit (K5): at m ≤ 0, or NaN, it does nothing; dashing, it steps (spiritDash); hovering, it
+ * picks once its clock allows and dashes at what it found on the same tick, as a docked drone
+ * launches, or stays where it is.
+ */
+function spiritStep(ctx: RunContext, ds: DronePool, s: number, m: number, now: number): void {
+  if (!(m > 0)) return;
+  if (ds.mode[s] === DRONE_DASH) spiritDash(ctx, ds, s, m, now);
+  else if (now >= (ds.nextPick[s] as number) && spiritPick(ctx, ds, s, now)) {
+    spiritDash(ctx, ds, s, m, now);
+  }
+}
+
+/** Spirit s picks by its aim, its clock then held PICK_TICKS: true when it now dashes. */
+function spiritPick(ctx: RunContext, ds: DronePool, s: number, now: number): boolean {
+  const specs = ds.specs as SpawnSpecs;
+  const aim = specs.aim[ds.spec[s] as number];
+  const t = aim === AIM_OUTER ? pickOuter(ctx, s) : pickNearest(ctx, s);
+  ds.nextPick[s] = now + PICK_TICKS;
+  if (t === null) return false;
+  engage(ds, s, t);
+  return true;
+}
+
+/**
+ * A dashing spirit, as a drone's dash with its effect's step, splash and cooldown: a target that
+ * died or was pushed out of the arena is lost (spiritLose); arriving, it snaps to the target's
+ * center and impacts (spiritImpact) unless the target is in its cooldown memory. Its last impact
+ * makes it leave at once ('spent'); a target its impact killed is lost.
+ */
+function spiritDash(ctx: RunContext, ds: DronePool, s: number, m: number, now: number): void {
+  const t = ds.target[s] as Enemy;
+  if (!t.alive || outOfArena(t)) {
+    spiritLose(ctx, ds, s, now);
+    return;
+  }
+  const specs = ds.specs as SpawnSpecs;
+  const f = ds.spec[s] as number;
+  const x = ds.x[s] as number;
+  const y = ds.y[s] as number;
+  const dx = t.x - x;
+  const dy = t.y - y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const step = (specs.stepBase[f] as number) * m;
+  if (dist - step <= t.radius) {
+    ds.x[s] = t.x;
+    ds.y[s] = t.y;
+    if (inMemory(ds, s, t.id, now)) return;
+    spiritImpact(ctx, ds, specs, s, t, f);
+    remember(ds, s, t.id, now + cooldownTicks(specs.coolTicks[f] as number, m));
+    const left = (ds.impactsLeft[s] as number) - 1;
+    ds.impactsLeft[s] = left;
+    if (left === 0) leave(ctx, ds, s, 'spent', now);
+    else if (!t.alive) spiritLose(ctx, ds, s, now);
+  } else {
+    const k = step / dist;
+    ds.x[s] = x + dx * k;
+    ds.y[s] = y + dy * k;
+  }
+}
+
+/**
+ * Spirit s drops its target and hovers where it is: it picks again at once when its clock
+ * allows, dashing from the next tick on at what it found, and never flies home.
+ */
+function spiritLose(ctx: RunContext, ds: DronePool, s: number, now: number): void {
+  ds.target[s] = null;
+  ds.targetId[s] = -1;
+  ds.mode[s] = DRONE_HOVER;
+  if (now >= (ds.nextPick[s] as number)) spiritPick(ctx, ds, s, now);
+}
+
+/**
+ * Spirit s of spawnDrone effect `f` impacts `target` (K7): impact as a granted drone's impact,
+ * on its effect's payload, splash and damagePct, at the row's depth and origin; then, with an
+ * ailment term, each enemy the impact listed that is still alive takes its stacks, in id order,
+ * each as a hit of the damage stat × ailmentDamagePct would apply it (applyStacks), at the same
+ * depth and origin. A build without the ailment's duration skips the term, as a zone's does.
+ */
+function spiritImpact(
+  ctx: RunContext,
+  ds: DronePool,
+  specs: SpawnSpecs,
+  s: number,
+  target: Enemy,
+  f: number,
+): void {
+  const p = ctx.effectPayloads[f] as Payload;
+  const depth = ds.depth[s] as number;
+  const origin = ds.origin[s] as number;
+  const r2 = specs.splashSq[f] as number;
+  const n = impact(ctx, s, target, p, null, r2, specs.scale[f] as number, depth, origin);
+  const a = specs.ailment[f] as number;
+  if (a < 0) return;
+  const ailment = APPLIED_AILMENTS[a] as AppliedAilment;
+  if (!(durationOf(ctx, ailment) > 0)) return;
+  const base = mul(p.baseDamage, specs.ailmentPct[f] as number);
+  const stacks = specs.stacks[f] as number;
+  const splash = ds.splash;
+  for (let i = 0; i < n; i++) {
+    const e = splash[i] as Enemy;
+    if (e.alive) applyStacks(ctx, ailment, e, p, base, stacks, depth, origin);
+  }
+}
+
 /** An impact's same-enemy cooldown at frequency m: coolTicks / m, rounded up, in [1, 90]. */
 function cooldownTicks(coolTicks: number, m: number): number {
   return Math.min(DRONE_COOLDOWN_MAX, Math.max(1, Math.ceil(coolTicks / m)));
@@ -329,6 +472,55 @@ export function pickOuter(ctx: RunContext, s: number): Enemy | null {
 }
 
 /**
+ * The enemy spirit s picks with aim 'nearest' (K6): the alive enemy nearest to the row (squared
+ * distance from its position) whose center is in the arena, not in the row's cooldown memory,
+ * and that no other row dashes at, the lowest id on ties; failing that, the nearest such one
+ * another row dashes at, the lowest id on ties; null for none. One forward scan of the enemies,
+ * in id order, which tests the arena, the memory and the chase only on an enemy that would rank
+ * first; then the other rows' targets. Draws nothing.
+ */
+export function pickNearest(ctx: RunContext, s: number): Enemy | null {
+  const ds = ctx.sys.drones;
+  const now = ctx.now;
+  const enemies = ctx.enemies;
+  const x = ds.x[s] as number;
+  const y = ds.y[s] as number;
+  let best = Infinity;
+  let bestE: Enemy | null = null;
+  // Forwards with <, so ties keep the lower id.
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i] as Enemy;
+    if (!e.alive) continue;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    const d = dx * dx + dy * dy;
+    if (!(d < best)) continue;
+    if (outOfArena(e) || inMemory(ds, s, e.id, now) || chased(ds, e, s)) continue;
+    best = d;
+    bestE = e;
+  }
+  if (bestE !== null) return bestE;
+  // Every candidate is chased: the other rows' targets.
+  const mode = ds.mode;
+  const target = ds.target;
+  let bestC: Enemy | null = null;
+  let bestD = Infinity;
+  for (let o = 0; o < ds.count; o++) {
+    if (o === s || mode[o] !== DRONE_DASH) continue;
+    const e = target[o] as Enemy;
+    if (!e.alive || outOfArena(e) || inMemory(ds, s, e.id, now)) continue;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    const d = dx * dx + dy * dy;
+    if (bestC === null || d < bestD || (d === bestD && e.id < bestC.id)) {
+      bestC = e;
+      bestD = d;
+    }
+  }
+  return bestC;
+}
+
+/**
  * Impact of drone slot `s` (−1 for a repeat's) on `target` with payload `p` of emitter `em`, an
  * attack of its own (D8). A `counted` impact, a signature drone's, is first counted as an attack
  * and a shot of `em` (countAttack, nextShotSteady), which makes its hits steady when that shot
@@ -351,25 +543,47 @@ export function impactAt(
   depth: number,
   origin: number,
 ): void {
+  const r2 = ctx.sys.drones.splashSq[em.index] as number;
+  impact(ctx, s, target, p, counted ? em : null, r2, 1, depth, origin);
+}
+
+/**
+ * impactAt's impact, its splash radius squared `r2` and its hits' `scale` given (none at 0); a
+ * `counted` impact names its emitter, and null counts nothing. A timed row's (spiritImpact) is
+ * a granted drone's at its effect's splash and damagePct. Returns how many enemies it listed
+ * (DronePool.splash).
+ */
+function impact(
+  ctx: RunContext,
+  s: number,
+  target: Enemy,
+  p: Payload,
+  counted: EmitterRuntime | null,
+  r2: number,
+  scale: number,
+  depth: number,
+  origin: number,
+): number {
   let steady = false;
-  if (counted) {
-    countAttack(ctx, em, target);
-    steady = nextShotSteady(ctx, em);
+  if (counted !== null) {
+    countAttack(ctx, counted, target);
+    steady = nextShotSteady(ctx, counted);
   }
   const ds = ctx.sys.drones;
-  const r2 = ds.splashSq[em.index] as number;
   beginAttack(ctx);
   const splash = ds.splash;
   const n = ctx.grid.within(target.x, target.y, r2, splash);
   const budget = ctx.chainBudget;
   const primary = (p.flags & SIGNATURE) !== 0 ? PRIMARY : 0;
-  for (let i = 0; i < n; i++) {
+  // A row of damagePct 0 lists its splash and hits none of it.
+  const hits = scale > 0 ? n : 0;
+  for (let i = 0; i < hits; i++) {
     const e = splash[i] as Enemy;
     if (!e.alive) continue;
     const isTarget = e === target;
     if (isTarget) budget.hits++;
     // Its hits add no shock, so a blocked one changes nothing after it (R1).
-    hitWithPayload(ctx, e, p, 0, 1, null, null, steady, depth, origin, isTarget ? primary : 0);
+    hitWithPayload(ctx, e, p, 0, scale, null, null, steady, depth, origin, isTarget ? primary : 0);
   }
   // Its victims carry the attack's serial, so the chain passes over them.
   if (p.chains) chainFrom(ctx, p, target, ctx.chainCount, steady, depth, origin);
@@ -386,7 +600,8 @@ export function impactAt(
   ctx.centerScratch.listCount = 0;
   emitCenterEvent(ctx, DRONE_IMPACT, depth, origin, target, target.x, target.y, p.flags);
   endAttack(ctx);
-  if (counted) drainRepeatCharges(ctx, em);
+  if (counted !== null) drainRepeatCharges(ctx, counted);
+  return n;
 }
 
 /**
@@ -485,4 +700,140 @@ export function swarmRepeat(
 ): void {
   const target = pickOuterFromCenter(ctx);
   if (target !== null) impactAt(ctx, -1, target, p, em, false, depth, origin);
+}
+
+/**
+ * Appends `count` timed rows (spirits) of spawnDrone effect `f` at (x, y) (K2, K4): each at slot
+ * `count` with the next id, in id order, hovering with no target and a pick due at once, its
+ * memory empty, its impacts its effect's, leaving `lifeTicks` ticks from now, and keeping `f`,
+ * `depth` and `origin`. A row is refused while the pool holds its summon cap of live rows, fixed
+ * and timed together, or `f` its maxLive, and each refused row adds 1 to summonCapped. Only a
+ * build with a spawnDrone effect runs it (DronePool.specs). The rows first step in the next
+ * tick's drone stage.
+ */
+export function spawnRows(
+  ctx: RunContext,
+  f: number,
+  count: number,
+  lifeTicks: number,
+  x: number,
+  y: number,
+  depth: number,
+  origin: number,
+): void {
+  const ds = ctx.sys.drones;
+  const specs = ds.specs as SpawnSpecs;
+  const live = specs.live;
+  const room = Math.min(ds.rows - ds.count, (specs.maxLive[f] as number) - (live[f] as number));
+  const placed = Math.max(0, Math.min(count, room));
+  ctx.counters.summonCapped += count - placed;
+  if (placed === 0) return;
+  const now = ctx.now;
+  const until = Math.min(NEVER_LEAVES, now + lifeTicks);
+  const impacts = specs.impacts[f] as number;
+  for (let k = 0; k < placed; k++) {
+    const s = ds.count++;
+    ds.id[s] = ds.nextId++;
+    ds.kind[s] = DRONE_KIND_SPIRIT;
+    ds.mode[s] = DRONE_HOVER;
+    ds.x[s] = x;
+    ds.y[s] = y;
+    ds.prevX[s] = x;
+    ds.prevY[s] = y;
+    ds.targetId[s] = -1;
+    ds.owner[s] = -1;
+    ds.seat[s] = -1;
+    ds.dockX[s] = x;
+    ds.dockY[s] = y;
+    ds.target[s] = null;
+    ds.nextPick[s] = now;
+    ds.impactsLeft[s] = impacts;
+    ds.dockLeft[s] = 0;
+    ds.acc[s] = 0;
+    const end = (s + 1) * DRONE_MEMORY;
+    for (let j = s * DRONE_MEMORY; j < end; j++) {
+      ds.memId[j] = -1;
+      ds.memUntil[j] = 0;
+    }
+    ds.until[s] = until;
+    ds.spec[s] = f;
+    ds.depth[s] = depth;
+    ds.origin[s] = origin;
+  }
+  live[f] = (live[f] as number) + placed;
+  ctx.state.droneCount = ds.count;
+}
+
+/**
+ * Timed row s leaves (K7), its time up ('time') or its impacts spent ('spent'): it is marked to
+ * be dropped at the stage's end (its until set to now), dashes at nothing from now on, so no
+ * picker counts it as chasing, and frees its place in its effect's maxLive. Its droneExpire
+ * SimEvent, then the droneExpire trigger event at its position, with no target, at its depth and
+ * origin, as the other events without a target are raised.
+ */
+function leave(
+  ctx: RunContext,
+  ds: DronePool,
+  s: number,
+  cause: 'time' | 'spent',
+  now: number,
+): void {
+  const x = ds.x[s] as number;
+  const y = ds.y[s] as number;
+  ds.until[s] = now;
+  ds.mode[s] = DRONE_HOVER;
+  ds.target[s] = null;
+  ds.targetId[s] = -1;
+  const live = (ds.specs as SpawnSpecs).live;
+  const f = ds.spec[s] as number;
+  live[f] = (live[f] as number) - 1;
+  ds.left++;
+  ctx.events.push({ type: 'droneExpire', droneId: ds.id[s] as number, x, y, cause });
+  fire(ctx, DRONE_EXPIRE, ds.depth[s] as number, ds.origin[s] as number, null, x, y, 0, ZERO);
+}
+
+/**
+ * Drops the rows that left in this stage (until ≤ now) by one stable compaction (K7): every
+ * other row moves down, in id order, with all of its per-slot state (moveRow).
+ */
+function dropLeft(ds: DronePool, now: number): void {
+  const until = ds.until;
+  const count = ds.count;
+  let kept = 0;
+  for (let s = 0; s < count; s++) {
+    if ((until[s] as number) <= now) continue;
+    if (kept !== s) moveRow(ds, s, kept);
+    kept++;
+  }
+  // The slots past the rows keep no enemy alive.
+  for (let s = kept; s < count; s++) ds.target[s] = null;
+  ds.count = kept;
+  ds.left = 0;
+}
+
+/** Moves the row in slot `from` to slot `to` (to < from): every per-slot array of the pool. */
+function moveRow(ds: DronePool, from: number, to: number): void {
+  ds.id[to] = ds.id[from] as number;
+  ds.kind[to] = ds.kind[from] as number;
+  ds.mode[to] = ds.mode[from] as number;
+  ds.x[to] = ds.x[from] as number;
+  ds.y[to] = ds.y[from] as number;
+  ds.prevX[to] = ds.prevX[from] as number;
+  ds.prevY[to] = ds.prevY[from] as number;
+  ds.targetId[to] = ds.targetId[from] as number;
+  ds.owner[to] = ds.owner[from] as number;
+  ds.seat[to] = ds.seat[from] as number;
+  ds.dockX[to] = ds.dockX[from] as number;
+  ds.dockY[to] = ds.dockY[from] as number;
+  ds.target[to] = ds.target[from] as Enemy | null;
+  ds.nextPick[to] = ds.nextPick[from] as number;
+  ds.impactsLeft[to] = ds.impactsLeft[from] as number;
+  ds.dockLeft[to] = ds.dockLeft[from] as number;
+  ds.acc[to] = ds.acc[from] as number;
+  ds.memId.copyWithin(to * DRONE_MEMORY, from * DRONE_MEMORY, (from + 1) * DRONE_MEMORY);
+  ds.memUntil.copyWithin(to * DRONE_MEMORY, from * DRONE_MEMORY, (from + 1) * DRONE_MEMORY);
+  ds.until[to] = ds.until[from] as number;
+  ds.spec[to] = ds.spec[from] as number;
+  ds.depth[to] = ds.depth[from] as number;
+  ds.origin[to] = ds.origin[from] as number;
 }

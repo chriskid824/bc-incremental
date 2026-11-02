@@ -158,11 +158,12 @@ export interface CompiledEffect {
   readonly radiusSq: number;
   /**
    * Tags of its hits (explode, nova: hit, trigger and area, plus its tags and element; shatter:
-   * hit, area and cold; groundZone: hit and zone, plus its tags and element; detonate: its
-   * ailment's kind and trigger, plus area with a radius; projectiles: hit, trigger and
-   * projectile, plus its tags and element; slashLine: hit and trigger, plus its tags; coinHit:
-   * hit and trigger; chainBolt: hit, trigger, chain and lightning) or of the hit an ailment it
-   * applies counts as (applyAilment: hit and trigger); 0 for the others.
+   * hit, area and cold; groundZone: hit and zone, plus its tags and element; spawnDrone: hit,
+   * minion and area, plus its tags and element; detonate: its ailment's kind and trigger, plus
+   * area with a radius; projectiles: hit, trigger and projectile, plus its tags and element;
+   * slashLine: hit and trigger, plus its tags; coinHit: hit and trigger; chainBolt: hit,
+   * trigger, chain and lightning) or of the hit an ailment it applies counts as (applyAilment:
+   * hit and trigger); 0 for the others.
    */
   readonly tags: TagMask;
   /**
@@ -170,7 +171,8 @@ export interface CompiledEffect {
    * × multiplier; a slashLine's payload scales it by its critScale, RunContext.effectPayloads);
    * 1 for shatter, whose hits scale it by the victim's max life, and for detonate, whose hits
    * deal the damage it takes from the ailment; the damage stat for groundZone, whose pulses
-   * scale it by damagePctPerSec × 0.25 and its ailment by ailmentDamagePct.
+   * scale it by damagePctPerSec × 0.25 and its ailment by ailmentDamagePct, and for spawnDrone,
+   * whose rows' impacts scale it by damagePct and their ailment by ailmentDamagePct.
    */
   readonly baseDamage: Num;
   /** spreadAilment's radius and effect (src/sim/ailments/apply.ts); null for the other kinds. */
@@ -424,6 +426,15 @@ export function compileEffect(
       tags =
         TAG.hit |
         TAG.zone |
+        tagMask(scaled.tags ?? []) |
+        (scaled.element === undefined ? 0 : TAG[scaled.element]);
+      baseDamage = num(damage);
+      break;
+    case 'spawnDrone':
+      tags =
+        TAG.hit |
+        TAG.minion |
+        TAG.area |
         tagMask(scaled.tags ?? []) |
         (scaled.element === undefined ? 0 : TAG[scaled.element]);
       baseDamage = num(damage);

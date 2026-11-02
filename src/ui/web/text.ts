@@ -120,6 +120,7 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   shield: 'web.effect.shield',
   gainShards: 'web.effect.gainShards',
   groundZone: 'web.effect.groundZone',
+  spawnDrone: 'web.effect.spawnDrone',
   repeatAttack: 'web.effect.repeatAttack',
   detonate: 'web.effect.detonate',
   projectiles: 'web.effect.projectiles',
@@ -413,6 +414,7 @@ export const COEF_FORMAT: {
   shield: {},
   gainShards: {},
   groundZone: { damagePctPerSec: 'pct', ailmentDamagePct: 'mult' },
+  spawnDrone: { damagePct: 'pct', ailmentDamagePct: 'mult' },
   repeatAttack: {},
   detonate: { damage: 'mult' },
   projectiles: { damagePct: 'pct' },
@@ -451,7 +453,7 @@ const sentence = (text: string): string =>
 const isAlways = (stat: StatId): boolean => (ALWAYS_STATS as readonly StatId[]).includes(stat);
 
 /** The words of a count: `web.word.<word>.one` for 1, `.other` otherwise. */
-type Word = 'stack' | 'time' | 'shot' | 'jump' | 'drone' | 'turret';
+type Word = 'stack' | 'time' | 'shot' | 'jump' | 'drone' | 'turret' | 'spirit';
 const word = (lookup: TextLookup, w: Word, n: number): string =>
   say(lookup, n === 1 ? `web.word.${w}.one` : `web.word.${w}.other`);
 
@@ -659,6 +661,32 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
       if (spec.slow !== undefined) extra('web.extra.slow', { pct: percent(spec.slow) });
       delivery(spec.tags, spec.element);
       return text({ duration: trim(spec.durationSec), radius: trim(spec.radius) });
+    }
+    case 'spawnDrone': {
+      if (spec.damagePct !== 0) extra('web.extra.spawnDamage', { damage: percent(spec.damagePct) });
+      if ((spec.impacts ?? 1) > 1) {
+        const n = spec.impacts ?? 1;
+        extra('web.extra.spawnImpacts', { n, times: word(lookup, 'time', n) });
+      }
+      if (spec.splash !== undefined) extra('web.extra.area', { radius: trim(spec.splash) });
+      if (spec.ailment !== undefined) {
+        const n = spec.ailmentStacks ?? 1;
+        extra('web.extra.spawnAilment', {
+          n,
+          ailment: say(lookup, `web.ailment.${spec.ailment}`),
+          stack: word(lookup, 'stack', n),
+        });
+        mult(spec.ailmentDamagePct);
+      }
+      delivery(spec.tags, spec.element);
+      if (spec.maxLive !== undefined) extra('web.extra.spawnMax', { max: spec.maxLive });
+      const n = spec.count ?? 1;
+      return text({
+        n,
+        spirits: word(lookup, 'spirit', n),
+        duration: trim(spec.lifeSec),
+        aim: say(lookup, `web.spawnAim.${spec.aim ?? 'nearest'}`),
+      });
     }
     case 'repeatAttack':
       if (spec.timing === 'nextAttack') extra('web.extra.nextAttack');

@@ -173,12 +173,18 @@ export interface SegmentViewState {
   readonly lines: readonly SegmentLinesState[];
 }
 
-/** DroneViewState.kind: a drone, or a turret (a slot that stays in its seat and fires). */
+/**
+ * DroneViewState.kind: a drone, a turret (a slot that stays in its seat and fires), or a spirit,
+ * a timed row a spawnDrone effect appended (C5.7): it dashes and impacts as a drone does, but
+ * has no emitter, dock or seat, and leaves when its time is up or its impacts are spent.
+ */
 export const DRONE_KIND_DRONE = 0;
 export const DRONE_KIND_TURRET = 1;
+export const DRONE_KIND_SPIRIT = 2;
 /**
  * DroneViewState.mode: a drone docked at its dock, dashing at its target, hovering where it lost
- * its target until it may pick again, or flying home to dock; a turret fixed in its seat.
+ * its target until it may pick again, or flying home to dock; a turret fixed in its seat. A
+ * spirit only dashes or hovers.
  */
 export const DRONE_DOCKED = 0;
 export const DRONE_DASH = 1;
@@ -188,11 +194,11 @@ export const DRONE_FIXED = 4;
 
 /**
  * The drone pool (src/sim/systems/drones.ts) as render and tools read it: the summons of every
- * drone emitter, placed once for the run, in typed arrays. Slots 0 .. SimState.droneCount − 1
- * hold them in id order.
+ * drone emitter, placed once for the run, then the timed rows as they come and go, in typed
+ * arrays. Slots 0 .. SimState.droneCount − 1 hold them in id order.
  */
 export interface DroneViewState {
-  /** Its entity id, 1 up in slot order: the order the stage steps them in. */
+  /** Its entity id, 1 up in slot order: the order the stage steps them in; never reused. */
   readonly id: Int32Array;
   /** DRONE_KIND_*. */
   readonly kind: Uint8Array;
@@ -208,9 +214,12 @@ export interface DroneViewState {
    * of a turret's last firing's first target; −1 none.
    */
   readonly targetId: Int32Array;
-  /** Its emitter's index in CompiledBuild.emitters. */
+  /** Its emitter's index in CompiledBuild.emitters; −1 for a spirit. */
   readonly owner: Int16Array;
-  /** A drone's dock index k of its emitter's drones, or a turret's index j of its turrets. */
+  /**
+   * A drone's dock index k of its emitter's drones, or a turret's index j of its turrets; −1 for
+   * a spirit.
+   */
   readonly seat: Int16Array;
 }
 
@@ -451,7 +460,7 @@ export type SimEvent =
   /**
    * Drone `droneId` (DroneViewState.id) impacted enemy `targetId` at (x, y), its center, after
    * its hits: `count` enemies were alive within `radius` of the point as it struck, the target
-   * among them, and each that was still alive took one hit.
+   * among them, and each that was still alive took one hit (none from a spirit of damagePct 0).
    */
   | {
       readonly type: 'impact';
@@ -474,6 +483,17 @@ export type SimEvent =
       readonly y: number;
       readonly targetId: number;
       readonly count: number;
+    }
+  /**
+   * Timed row `droneId` (DroneViewState.id) left the drone pool at (x, y): its time was up
+   * ('time') or its impacts were spent ('spent'). Its slot is dropped at the stage's end.
+   */
+  | {
+      readonly type: 'droneExpire';
+      readonly droneId: number;
+      readonly x: number;
+      readonly y: number;
+      readonly cause: 'time' | 'spent';
     }
   | {
       readonly type: 'enemyKilled';

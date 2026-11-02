@@ -199,7 +199,10 @@ export function createSimulation(
    *    run (emitters.ts, src/sim/emitters/).
    * 6b. drones: the drone pool's slots step in id order (src/sim/systems/drones.ts): drones
    *    move, pick and impact, with their hits, chains and kills resolved inline as in step 7,
-   *    and turrets fire homing shots, which move in step 7.
+   *    and turrets fire homing shots, which move in step 7. The timed rows (spirits) move, pick
+   *    and impact too; one whose time is up or whose impacts are spent leaves, raising
+   *    droneExpire, and the rows that left are dropped at the stage's end. The rows a spawnDrone
+   *    appends in step 11 first step here on the next tick.
    * 7. projectiles: the volley's projectiles move, retarget, and hit on arrival, and the shot
    *    pool's shots move and hit, all in id order (projectiles.ts, shots.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
@@ -220,7 +223,7 @@ export function createSimulation(
    *
    * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 4b in a run whose build
    * reads shardsHeld or enemiesInAura, 6's combo step in a run that keeps combo stacks or has a
-   * buff, its delayed repeats while one waits, 6b only while there is a drone, 8 in a run with
+   * buff, its delayed repeats while one waits, 6b only while the pool holds a row, 8 in a run with
    * segment emitters and 9 while there is a zone (a run of M1's content has none of them).
    * Delayed repeats still waiting when the run ends never fire.
    */

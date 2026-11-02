@@ -156,6 +156,13 @@ export interface BuildFlags {
    * without either, whose radii stay as written bit for bit (r × 1 is r).
    */
   areaFactor: number;
+  /**
+   * The build has a spawnDrone effect, a trigger's or one a module compiled: its run's drone pool
+   * holds the summon cap of rows, with the per-spec tables of the timed rows
+   * (src/sim/systems/systemState.ts createDronePool). compileBuild sets it once the modules have
+   * run; false keeps the pool at the rows its layout placed, as every run without one.
+   */
+  spawnsDrones: boolean;
 }
 
 /**
@@ -421,6 +428,7 @@ export function compileBuild(
     sizeFactor: 1,
     halveCounts: false,
     areaFactor: 1,
+    spawnsDrones: false,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -612,6 +620,9 @@ export function compileBuild(
   // So too the per-tick variables (lead ruling G2).
   flags.shardsHeld ||= scoped.some((mod) => mod.scaling?.per === 'shardsHeld');
   flags.enemiesInAura ||= scoped.some((mod) => mod.scaling?.per === 'enemiesInAura');
+  // Only a build that spawns timed rows sizes its drone pool past its fixed rows (C5.7, lead
+  // ruling K3).
+  flags.spawnsDrones = effects.some((fx) => fx.spec.kind === 'spawnDrone');
   // 「滿層」 (lead ruling E2): a module's own value stays; otherwise the cap, or gd's 20 when a
   // module lifted the cap, so ★無盡連擊 keeps 殘影 and ◆爆發.
   flags.comboFull ??= Number.isFinite(flags.comboCap) ? flags.comboCap : DEFAULT_COMBO_CAP;

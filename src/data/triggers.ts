@@ -124,6 +124,9 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  * - droneImpact: a drone of the signature attack (swarm) impacted, after its hits and its chain,
  *   at its target, which is the only enemy; it carries no list. Repeats and granted drones raise
  *   none.
+ * - droneExpire: a timed row (spawnDrone) left the drone pool, its time up or its impacts spent,
+ *   at its position; no target, at the depth and origin of the effect that spawned it. Fixed
+ *   drones and turrets never leave and raise none.
  */
 export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
   'explode',
@@ -142,6 +145,7 @@ export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>
   'ailmentTick',
   'freeze',
   'shatter',
+  'droneExpire',
 ]);
 
 /** Events without an enemy target: their effects start at the player. */
@@ -390,6 +394,40 @@ export interface GroundZoneSpec {
 }
 
 /**
+ * Timed rows of the drone pool (src/sim/systems/drones.ts; 火靈, 小無人機): `count` (default 1)
+ * of them appear at the event's point and live round(lifeSec × 60) ticks (one at least). Each
+ * dashes at an enemy picked by `aim` ('nearest', the default: the nearest to it; 'outer': the
+ * drones' pick), at `speed` (default DRONE_DEFAULTS.speed) × the attack speed over the base,
+ * and impacts it, hitting every enemy within `splash` (default DRONE_DEFAULTS.splash) of the
+ * target for damagePct of the damage stat (0: no hit), tagged hit, minion and area plus its tags
+ * and element; its hits crit and roll ailments as any hit does. Then each enemy in its splash
+ * that is still alive takes `ailmentStacks` (default 1) of `ailment`, each as an applyAilment of
+ * damagePct `ailmentDamagePct` (default 1) would apply it. After `impacts` (default 1) impacts,
+ * or when its time is up, the row leaves and raises droneExpire. Rows count in the run's summon
+ * cap with the fixed drones and turrets (SUMMON_CAP); a spawn past it, or past `maxLive` (default
+ * SUMMON_CAP) live rows of this effect, is refused and counted.
+ */
+export interface SpawnDroneSpec {
+  readonly kind: 'spawnDrone';
+  readonly lifeSec: number;
+  /** Required: 0 makes a row that only applies its ailment. */
+  readonly damagePct: number;
+  readonly count?: number;
+  readonly impacts?: number;
+  readonly maxLive?: number;
+  readonly aim?: 'nearest' | 'outer';
+  readonly speed?: number;
+  readonly splash?: number;
+  readonly ailment?: AppliedAilment;
+  readonly ailmentStacks?: number;
+  readonly ailmentDamagePct?: number;
+  /** More delivery tags of its hits: owner or geometry tags (src/data/tags.ts). */
+  readonly tags?: readonly DamageTag[];
+  /** The element its hits carry. */
+  readonly element?: 'cold' | 'lightning';
+}
+
+/**
  * Repeats of the signature attack (回聲, 多重施法): `count` of them, each the attack again at
  * a fresh target, dealing damagePct of the attack's damage on the effects stream. With timing
  * 'now' (the default) they fire when the effect runs; with 'nextAttack' they wait and fire right
@@ -584,6 +622,8 @@ export interface BuffSpec {
  * - gainShards: the dying enemy's shard drop again, × `fraction` (kill events only).
  * - groundZone: a zone of `radius` at the event's point for `durationSec`, pulsing four times a
  *   second (GroundZoneSpec).
+ * - spawnDrone: `count` timed rows of the drone pool at the event's point, each dashing at an
+ *   enemy and impacting it, then leaving (SpawnDroneSpec).
  * - repeatAttack: the signature attack again, `count` times, at damagePct of its damage
  *   (RepeatAttackSpec).
  * - detonate: the damage an ailment has left on the event's enemy, dealt at once (DetonateSpec).
@@ -637,6 +677,7 @@ export type EffectSpec =
   | { readonly kind: 'shield'; readonly lifePct: number; readonly capPct?: number }
   | { readonly kind: 'gainShards'; readonly fraction: number }
   | GroundZoneSpec
+  | SpawnDroneSpec
   | RepeatAttackSpec
   | DetonateSpec
   | ProjectilesSpec
@@ -670,6 +711,7 @@ export const COEF_FIELDS: {
   shield: [],
   gainShards: [],
   groundZone: ['damagePctPerSec', 'ailmentDamagePct'],
+  spawnDrone: ['damagePct', 'ailmentDamagePct'],
   // A share of the signature attack, whose damage the calibration does not scale.
   repeatAttack: [],
   detonate: ['damage'],

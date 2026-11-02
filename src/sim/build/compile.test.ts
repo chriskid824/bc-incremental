@@ -101,6 +101,7 @@ describe('compileBuild', () => {
       sizeFactor: 1,
       halveCounts: false,
       areaFactor: 1,
+      spawnsDrones: false,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

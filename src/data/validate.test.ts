@@ -964,8 +964,11 @@ describe('trigger validation', () => {
   });
 
   it('rejects an event the simulation does not raise yet', () => {
-    expect(triggerIssues({ on: 'droneExpire', do: [heal] })).toEqual([
-      `${at} event 'droneExpire' is not raised by the simulation yet`,
+    // C5.7 wired droneExpire, the last of TRIGGER_EVENTS: data checked without the schema can
+    // still name another.
+    const later = 'droneLaunch' as TriggerSpec['on'];
+    expect(triggerIssues({ on: later, do: [heal] })).toEqual([
+      `${at} event 'droneLaunch' is not raised by the simulation yet`,
     ]);
   });
 
