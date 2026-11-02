@@ -562,17 +562,18 @@ export const GRANT_SCHEMAS = {
   thorns: z
     .strictObject({ kind: z.literal('thorns'), damagePct: finite.exactOptional() })
     .readonly(),
-  // Only the endpoints the simulation has; drones and summons come in C5 (validate.ts names
-  // them for data checked without the schema).
+  // validate.ts holds links to 1 or 2, the range above 0 and pairPeriodSec to 0 or more, above
+  // 0 only between drones or summons.
   segment: z
     .strictObject({
       kind: z.literal('segment'),
-      endpoints: z.literal('shocked'),
+      endpoints: z.enum(['shocked', 'drones', 'summons']),
       links: finite.exactOptional(),
       range: finite.exactOptional(),
       damagePct: finite.exactOptional(),
       shockStacks: finite.exactOptional(),
       periodSec: finite.exactOptional(),
+      pairPeriodSec: finite.exactOptional(),
     })
     .readonly(),
   // Any selector; validate.ts rejects the 'player' pick, which has no enemy to strike, and holds

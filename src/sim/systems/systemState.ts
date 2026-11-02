@@ -25,7 +25,7 @@ import { IN_ZONE } from '../build/eval';
 import type { CompiledCondition } from '../build/eval';
 import { MAX_SOURCES } from '../build/sources';
 import type { CompiledEffect } from '../effects/types';
-import type { EmitterRuntime, Payload } from '../emitters/types';
+import type { EmitterRuntime, Payload, SegmentSpec } from '../emitters/types';
 import type { GridPoint, SpatialGrid } from '../grid';
 import { DRONE_DOCKED, DRONE_FIXED, DRONE_KIND_TURRET, DT, TICK_RATE } from '../types';
 import type {
@@ -399,23 +399,41 @@ export interface SegmentLines extends SegmentLinesState {
 }
 
 /**
+ * The pairs a segment between drone or summon endpoints keeps from its last pairing
+ * (SegmentSpec.pairTicks > 0): a[p] linked to b[p] for p < count, by the drone pool's row ids,
+ * which a compaction does not move; −1 until its first pairing. Its arrays hold the 2 links a
+ * row can make for each slot of the pool (DronePool.rows), and none for a segment that pairs at
+ * every judgement.
+ */
+export interface HeldPairs {
+  count: number;
+  readonly a: Int32Array;
+  readonly b: Int32Array;
+}
+
+/**
  * The segments of a run (RunContext.sys.segments, src/sim/systems/segments.ts), also
- * SimState.segments: the segment emitters, the links of each one's last judgement, and the
- * judgements' scratch. The scratch arrays grow with the endpoints, never shrink, and hold
- * leftovers past what the current judgement wrote.
+ * SimState.segments: the segment emitters, the links of each one's last judgement, the pairs
+ * each keeps between its pairings, and the judgements' scratch. The scratch arrays grow with the
+ * endpoints, never shrink, and hold leftovers past what the current judgement wrote.
  */
 export interface SegmentState extends SegmentViewState {
   /** The segment emitters, in emitter order; the segment stage judges for each in turn. */
   readonly emitters: readonly EmitterRuntime[];
   /** The links of each emitter's last judgement, emitters[i]'s at i. */
   readonly lines: readonly SegmentLines[];
+  /** The pairs each emitter keeps between its pairings, emitters[i]'s at i. */
+  readonly held: readonly HeldPairs[];
   /** The endpoint grid: the judgement's endpoints, `ends`, for their nearest others. */
   readonly grid: SpatialGrid<Enemy>;
   /** The last judgement's serial: the enemies it marks to hit carry it (Enemy.segMark). */
   serial: number;
   /** The judgement's endpoints, in id order; cut to their count before the grid takes them. */
   readonly ends: Enemy[];
-  /** Each endpoint's first and second link, as an index into `ends`; −1 for none. */
+  /**
+   * Each endpoint's first and second link, as an index into `ends`, or for drone and summon
+   * endpoints both as a slot of the drone pool; −1 for none.
+   */
   pick1: Int32Array;
   pick2: Int32Array;
   /** The judgement's pairs, a[s] with b[s] as indices into `ends`: at most 2 per endpoint. */
@@ -439,11 +457,24 @@ function createSegmentLines(): SegmentLines {
   };
 }
 
-/** No judgement yet, for the segment emitters `emitters`. */
-export function createSegmentState(emitters: readonly EmitterRuntime[]): SegmentState {
+/** No pairing yet, room for 2 links a slot of a pool of `rows` slots, or none at pairTicks 0. */
+function createHeldPairs(em: EmitterRuntime, rows: number): HeldPairs {
+  const n = (em.spec as SegmentSpec).pairTicks > 0 ? 2 * rows : 0;
+  return { count: -1, a: new Int32Array(n), b: new Int32Array(n) };
+}
+
+/**
+ * No judgement yet, for the segment emitters `emitters`, beside a drone pool of `rows` slots
+ * (DronePool.rows).
+ */
+export function createSegmentState(
+  emitters: readonly EmitterRuntime[],
+  rows: number,
+): SegmentState {
   return {
     emitters,
     lines: emitters.map(createSegmentLines),
+    held: emitters.map((em) => createHeldPairs(em, rows)),
     grid: createEnemyGrid(),
     serial: 0,
     ends: [],

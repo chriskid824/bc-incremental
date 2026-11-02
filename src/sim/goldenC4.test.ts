@@ -26,10 +26,10 @@ import { enemySlow, frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
 import { liveBleedStacks, livePoisonStacks } from './ailments/rings';
 import { SMALL_PROJECTILE_TICKS } from './caps';
-import { REPEAT } from './effects/flags';
+import { KILLED, REPEAT } from './effects/flags';
 import { enemiesInAura } from './emitters/aura';
 import { createPayload, ROWS } from './emitters/types';
-import type { EmitterRuntime, Payload } from './emitters/types';
+import type { EmitterRuntime, Payload, SegmentSpec } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
 import { BERSERK_MULT, MULTIPLY_COUNT, SWIFT_MULT, WARDED } from './systems/affixes';
@@ -57,8 +57,24 @@ import {
   TEST_WAVES,
   v3TestData,
 } from './testing';
-import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, NO_INPUT } from './types';
-import type { ContactTally, CounterId, EnemyState, RunConfig, SimEvent } from './types';
+import {
+  ARENA_HEIGHT,
+  ARENA_WIDTH,
+  COUNTER_IDS,
+  DRONE_KIND_DRONE,
+  DRONE_KIND_SPIRIT,
+  DRONE_KIND_TURRET,
+  DT,
+  NO_INPUT,
+} from './types';
+import type {
+  ContactTally,
+  CounterId,
+  EnemyState,
+  RunConfig,
+  SegmentLinesState,
+  SimEvent,
+} from './types';
 
 const GOLDEN_C4_TICKS = 1200;
 const GOLDEN_C4_SEEDS = [1, 2] as const;
@@ -1404,6 +1420,41 @@ const TEMPORARY_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
 });
 
 /**
+ * C5.8's segments between the drone pool's rows, at the default range of 200, share of 10% and
+ * one shock stack, every 0.25 s. `fence` (雷射柵欄's shape): C4.7's magma bombs (their stats,
+ * triggers and probes) with an outer.summon drone grant of 2 drones and 1 turret, `spirits`'
+ * spawnDrone trigger on every fourth bomb, and a 'summons' segment from outer.summon of links 1:
+ * each row, drones, turret and spirits alike, links to its nearest other within 200, and the
+ * enemies on the links take a minion lightning hit and a shock stack, some dying of it, while
+ * spirits come and leave between the judgements. `droneWeb` (雷網蜂's shape): the swarm entry's
+ * base with the swarm's turret, whose 3 drones fly sorties at the farthest enemies, and a
+ * 'drones' segment from outer.lightning of links 1 that pairs every 0.5 s: the judgement between
+ * two pairings keeps the drones' last pairs wherever they have flown, the turret never an
+ * endpoint.
+ */
+const FENCE_STATS = makeStats(MAGMA_STATS.values, [...maskProbeMods(), PROJECTILE_PROBE], {
+  triggers: [
+    ...MAGMA_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    { source: 'outer.fire', spec: SPIRIT_TRIGGER },
+  ],
+  conversions: [],
+  emitters: [
+    { source: 'outer.summon', grant: { kind: 'drone', drones: 2, turrets: 1 } },
+    { source: 'outer.summon', grant: { kind: 'segment', endpoints: 'summons', links: 1 } },
+  ],
+});
+const DRONE_WEB_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
+  triggers: [{ source: 'center', spec: SWARM_POISON }],
+  conversions: [],
+  emitters: [
+    {
+      source: 'outer.lightning',
+      grant: { kind: 'segment', endpoints: 'drones', links: 1, pairPeriodSec: 0.5 },
+    },
+  ],
+});
+
+/**
  * C4.21's aura and orbit grants beside M1's volley, over the drones entry's base (crits, ignites
  * and maskProbeMods()) with poison rolls: an aura on outer.aura within an auraRadius of 120,
  * every fourth pulse merged at × 4 (聚能脈衝) and a corona (日冕) on every alive enemy every 2 s at
@@ -2561,6 +2612,16 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     },
     data: () => v3TestData(),
     expected: ['7395fc0553e5b380', 'b26cf10df94b895a'],
+  },
+  {
+    name: 'fence',
+    config: { stats: FENCE_STATS, rules: [], signature: { id: 'magmaBomb' }, startWave: 12 },
+    expected: ['99c9400c39a6f9de', '4e95de42b237b636'],
+  },
+  {
+    name: 'droneWeb',
+    config: { stats: DRONE_WEB_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    expected: ['11d62aceed10bd1a', '773be1decb5c6398'],
   },
 ];
 
@@ -4171,6 +4232,190 @@ describe('golden C4 runs', () => {
         capped: 168,
         bossCapped: 168,
         walked: 3375,
+      },
+    });
+  });
+
+  it('links drones, the turret and spirits in fence, hitting, shocking and killing, and holds the drones’ pairs between pairings in droneWeb (C5.8)', () => {
+    /**
+     * Per seed, from each step's segment state against the rows the tick hook (stage 6) saw
+     * given out: the judgements (the segment state's serial) and those of fewer than 2
+     * endpoints, the endpoints and links (totals and the most at one judgement), the pairings
+     * and the reuses of held pairs, the reused links longer than the range, the links that end
+     * on a turret or a spirit, the judgements with a spirit among the endpoints, the hits (the
+     * pulses' and the onHit hooks' of the segment's tags, which must agree) and kills, and the
+     * rows that left.
+     */
+    const coverage = (name: string): Record<number, Record<string, number>> => {
+      const entry = ENTRIES.find((e) => e.name === name) as GoldenC4Entry;
+      const bySeed: Record<number, Record<string, number>> = {};
+      for (const seed of GOLDEN_C4_SEEDS) {
+        const seen = { ctx: null as RunContext | null, nextId: 0, hooked: 0, kills: 0 };
+        const watch: TestModule = (b) => {
+          b.hook('tick', (ctx) => {
+            seen.ctx = ctx;
+            seen.nextId = ctx.sys.drones.nextId;
+          });
+          b.hook('onHit', (ctx, hit) => {
+            const em = ctx.sys.segments.emitters[0] as EmitterRuntime;
+            if (hit.origin !== -1 || hit.chainIndex !== 0) return;
+            if ((hit.mask & ~TAG.crit) !== em.payload.tags) return;
+            seen.hooked++;
+            if ((hit.flags & KILLED) !== 0) seen.kills++;
+          });
+        };
+        const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+        const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [
+          ...(entry.modules?.() ?? []),
+          watch,
+        ]);
+        const c = {
+          judgements: 0,
+          below2: 0,
+          ends: 0,
+          maxEnds: 0,
+          links: 0,
+          maxLinks: 0,
+          pairings: 0,
+          reuses: 0,
+          stretched: 0,
+          turretLinks: 0,
+          spiritLinks: 0,
+          spiritJudgements: 0,
+          hits: 0,
+          hooked: 0,
+          kills: 0,
+          left: 0,
+        };
+        let serial = 0;
+        while (!sim.state.finished) {
+          const events = sim.step(NO_INPUT);
+          for (const event of events) {
+            if (event.type === 'droneExpire') c.left++;
+            else if (event.type === 'pulse' && event.kind === 'segment') c.hits += event.hits;
+          }
+          const ctx = seen.ctx;
+          if (ctx === null || ctx.sys.segments.serial === serial) continue;
+          serial = ctx.sys.segments.serial;
+          const em = ctx.sys.segments.emitters[0] as EmitterRuntime;
+          const spec = em.spec as SegmentSpec;
+          const ds = ctx.sys.drones;
+          const ln = ctx.state.segments.lines[0] as SegmentLinesState;
+          const ends: number[] = [];
+          for (let s = 0; s < ds.count; s++) {
+            if ((ds.id[s] as number) >= seen.nextId) continue;
+            if (spec.endpoints === 'summons' || ds.kind[s] === DRONE_KIND_DRONE) ends.push(s);
+          }
+          const rowAt = (x: number, y: number): number =>
+            ends.find((s) => ds.x[s] === x && ds.y[s] === y) ?? -1;
+          c.judgements++;
+          if (ends.length < 2) c.below2++;
+          c.ends += ends.length;
+          c.maxEnds = Math.max(c.maxEnds, ends.length);
+          c.links += ln.count;
+          c.maxLinks = Math.max(c.maxLinks, ln.count);
+          if (ends.some((s) => ds.kind[s] === DRONE_KIND_SPIRIT)) c.spiritJudgements++;
+          const reuse = spec.pairTicks > 0 && em.pairTimer !== 0;
+          if (reuse) c.reuses++;
+          else c.pairings++;
+          for (let l = 0; l < ln.count; l++) {
+            const [x1, y1, x2, y2] = [ln.x1[l], ln.y1[l], ln.x2[l], ln.y2[l]] as number[];
+            const kinds = [
+              ds.kind[rowAt(x1 as number, y1 as number)],
+              ds.kind[rowAt(x2 as number, y2 as number)],
+            ];
+            if (kinds.includes(DRONE_KIND_TURRET)) c.turretLinks++;
+            if (kinds.includes(DRONE_KIND_SPIRIT)) c.spiritLinks++;
+            const d2 =
+              ((x2 as number) - (x1 as number)) ** 2 + ((y2 as number) - (y1 as number)) ** 2;
+            if (reuse && d2 > spec.range * spec.range) c.stretched++;
+          }
+        }
+        c.hooked = seen.hooked;
+        c.kills = seen.kills;
+        bySeed[seed] = c;
+      }
+      return bySeed;
+    };
+    // fence: 2 to 5 rows every judgement, each its one link, many ending on the turret or a
+    // spirit; a few enemies on the links, one of them killed by its hit; rows leave between.
+    expect(coverage('fence')).toEqual({
+      1: {
+        judgements: 79,
+        below2: 0,
+        ends: 305,
+        maxEnds: 5,
+        links: 94,
+        maxLinks: 3,
+        pairings: 79,
+        reuses: 0,
+        stretched: 0,
+        turretLinks: 60,
+        spiritLinks: 45,
+        spiritJudgements: 54,
+        hits: 4,
+        hooked: 4,
+        kills: 1,
+        left: 10,
+      },
+      2: {
+        judgements: 79,
+        below2: 0,
+        ends: 307,
+        maxEnds: 5,
+        links: 99,
+        maxLinks: 3,
+        pairings: 79,
+        reuses: 0,
+        stretched: 0,
+        turretLinks: 72,
+        spiritLinks: 58,
+        spiritJudgements: 63,
+        hits: 3,
+        hooked: 3,
+        kills: 1,
+        left: 10,
+      },
+    });
+    // droneWeb: the 3 drones every judgement, never the turret; a pairing at the first
+    // judgement and every second one, the reuses between keeping links the drones have flown
+    // past the range.
+    expect(coverage('droneWeb')).toEqual({
+      1: {
+        judgements: 79,
+        below2: 0,
+        ends: 237,
+        maxEnds: 3,
+        links: 67,
+        maxLinks: 2,
+        pairings: 40,
+        reuses: 39,
+        stretched: 7,
+        turretLinks: 0,
+        spiritLinks: 0,
+        spiritJudgements: 0,
+        hits: 19,
+        hooked: 19,
+        kills: 0,
+        left: 0,
+      },
+      2: {
+        judgements: 79,
+        below2: 0,
+        ends: 237,
+        maxEnds: 3,
+        links: 45,
+        maxLinks: 2,
+        pairings: 40,
+        reuses: 39,
+        stretched: 6,
+        turretLinks: 0,
+        spiritLinks: 0,
+        spiritJudgements: 0,
+        hits: 18,
+        hooked: 18,
+        kills: 0,
+        left: 0,
       },
     });
   });

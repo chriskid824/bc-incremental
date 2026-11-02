@@ -17,7 +17,7 @@ import {
   STRIKE_DEFAULTS,
   THORNS_DAMAGE_PCT,
 } from '../../data/emitters';
-import type { EmitterGrant, GrantKind } from '../../data/emitters';
+import type { EmitterGrant, GrantKind, SegmentGrant } from '../../data/emitters';
 import { RULE_COEF_FIELDS, scaleRuleSpec } from '../../data/rules';
 import type { CoefFieldKind, RuleSpec } from '../../data/rules';
 import { SOURCE_CLASSES, sourceClass } from '../../data/sources';
@@ -271,6 +271,13 @@ export const GRANT_TEXT: Readonly<Record<GrantKind, MessageKey>> = {
   drone: 'web.grant.drone',
   aura: 'web.grant.aura',
   orbit: 'web.grant.orbit',
+};
+
+/** A segment grant's line by its endpoints (C5.8): 雷網's GRANT_TEXT one, and the pool's two. */
+export const SEGMENT_TEXT: Readonly<Record<SegmentGrant['endpoints'], MessageKey>> = {
+  shocked: 'web.grant.segment',
+  drones: 'web.grant.segmentDrones',
+  summons: 'web.grant.segmentSummons',
 };
 
 export const BONUS_TEXT: Readonly<Record<BonusSpec['form'], MessageKey>> = {
@@ -1049,11 +1056,14 @@ function grantText(lookup: TextLookup, grant: EmitterGrant): string {
     case 'thorns':
       return say(lookup, key, { damage: percent(grant.damagePct ?? THORNS_DAMAGE_PCT) });
     case 'segment': {
+      // By its endpoints; the pool's lines name their pairing period when it has one.
       const n = grant.shockStacks ?? SEGMENT_DEFAULTS.shockStacks;
-      return say(lookup, key, {
+      const pair = grant.pairPeriodSec ?? SEGMENT_DEFAULTS.pairPeriodSec;
+      return say(lookup, SEGMENT_TEXT[grant.endpoints], {
         period: trim(grant.periodSec ?? SEGMENT_DEFAULTS.periodSec),
         links: grant.links ?? SEGMENT_DEFAULTS.links,
         range: trim(grant.range ?? SEGMENT_DEFAULTS.range),
+        pair: pair > 0 ? say(lookup, 'web.extra.pairPeriod', { s: trim(pair) }) : '',
         damage: percent(grant.damagePct ?? SEGMENT_DEFAULTS.damagePct),
         n,
         stack: word(lookup, 'stack', n),

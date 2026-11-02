@@ -527,15 +527,18 @@ function grantIssues(grant: EmitterGrant): string[] {
       }
       break;
     case 'segment': {
-      // The schema takes only shocked endpoints; data checked without it can still name the
-      // drones' or the summons'.
+      // Data checked without the schema can name any endpoints.
       const endpoints: string = grant.endpoints;
-      if (endpoints === 'drones' || endpoints === 'summons') {
-        issues.push(
-          `segment endpoints '${endpoints}' come from drones and summons, which the simulation adds in C5`,
-        );
-      } else if (endpoints !== 'shocked') {
-        issues.push(`endpoints must be 'shocked' (got ${endpoints})`);
+      if (endpoints !== 'shocked' && endpoints !== 'drones' && endpoints !== 'summons') {
+        issues.push(`endpoints must be 'shocked', 'drones' or 'summons' (got ${endpoints})`);
+      }
+      // Shocked endpoints come and go with their shock, so their pairs are made at every
+      // judgement.
+      const pair = grant.pairPeriodSec;
+      if (pair !== undefined && !(Number.isFinite(pair) && pair >= 0)) {
+        issues.push(`pairPeriodSec must be finite and >= 0 (got ${pair})`);
+      } else if (pair !== undefined && pair > 0 && endpoints === 'shocked') {
+        issues.push('pairPeriodSec needs drone or summon endpoints (got shocked)');
       }
       if (grant.links !== undefined && grant.links !== 1 && grant.links !== 2) {
         issues.push(`links must be 1 or 2 (got ${grant.links})`);

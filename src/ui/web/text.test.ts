@@ -52,6 +52,7 @@ import {
   KIND_TEXT,
   messageLookup,
   SCALING_TEXT,
+  SEGMENT_TEXT,
   STAT_FORMAT,
 } from './text';
 import type { TextLookup } from './text';
@@ -110,6 +111,7 @@ describe('the registries (§4.7)', () => {
     CURVE_TEXT,
     EVENT_TEXT,
     GRANT_TEXT,
+    SEGMENT_TEXT,
     BONUS_TEXT,
     BUY_CHECK_TEXT,
   };
@@ -504,6 +506,9 @@ function kitchenSink(): NodeEffects {
   const emitters: EmitterGrant[] = [
     { kind: 'thorns' },
     { kind: 'segment', endpoints: 'shocked' },
+    // 雷網蜂- and 雷射柵欄-like links between the pool's rows (C5.8).
+    { kind: 'segment', endpoints: 'drones', links: 1, pairPeriodSec: 0.5 },
+    { kind: 'segment', endpoints: 'summons', links: 1 },
     {
       kind: 'strike',
       name: 'sink',
@@ -772,6 +777,45 @@ describe('every template, through one node (§4.7)', () => {
     });
     expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
   });
+
+  it.each([
+    [
+      'en',
+      [
+        'Lightning web: every 0.25 s, shocked enemies link to their 2 nearest within 200; each enemy on a link takes 10% damage and 1 shock stack',
+        'Arcs: every 0.25 s, each drone links to its 1 nearest within 200, relinking every 0.5 s; each enemy on a link takes 10% damage and 1 shock stack',
+        'Laser fence: every 0.5 s, each summon links to its 2 nearest within 150; each enemy on a link takes 20% damage and 2 shock stacks',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '雷網：每 0.25 秒，感電的敵人連向最近的 2 隻（200 內），線上的敵人受到 10% 傷害並感電 1 層',
+        '電弧：每 0.25 秒，每架無人機連向最近的 1 架（200 內），每 0.5 秒重新連線，線上的敵人受到 10% 傷害並感電 1 層',
+        '雷射：每 0.5 秒，每個召喚物連向最近的 2 個（150 內），線上的敵人受到 20% 傷害並感電 2 層',
+      ],
+    ],
+  ] as const)(
+    'writes a segment grant by its endpoints, the pairing period with it, in %s (C5.8)',
+    (locale, expected) => {
+      const web = withEffects(fire, NOTABLE, {
+        emitters: [
+          { kind: 'segment', endpoints: 'shocked' },
+          { kind: 'segment', endpoints: 'drones', links: 1, pairPeriodSec: 0.5 },
+          {
+            kind: 'segment',
+            endpoints: 'summons',
+            periodSec: 0.5,
+            range: 150,
+            damagePct: 0.2,
+            shockStacks: 2,
+            pairPeriodSec: 0,
+          },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
 
   it("writes a ranked node's triggers and conversions once a rank, and the bonus forms", () => {
     expect(linesOf(ranked, 'fire.center.alpha.r1', 'zh-TW', 2)).toEqual([

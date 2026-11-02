@@ -2434,7 +2434,7 @@ describe('emitter grant validation', () => {
     }
   });
 
-  it('rejects segment links but 1 or 2, a range not above 0, and the endpoints C5 adds', () => {
+  it('rejects segment links but 1 or 2, a range not above 0, and endpoints but shocked, drones or summons', () => {
     const segment = (fields: object): EmitterGrant =>
       ({ kind: 'segment', endpoints: 'shocked', ...fields }) as EmitterGrant;
     expect(
@@ -2444,8 +2444,8 @@ describe('emitter grant validation', () => {
           segment({ links: 3 }),
           segment({ links: 0, range: 0 }),
           segment({ links: 1.5, range: -10 }),
-          segment({ endpoints: 'drones' }),
-          segment({ endpoints: 'summons', links: 2 }),
+          segment({ endpoints: 'drones', links: 3 }),
+          segment({ endpoints: 'summons', range: 0 }),
           segment({ endpoints: 'enemies' }),
         ],
       }).filter((issue) => !issue.startsWith('talents: emitter segment')),
@@ -2455,11 +2455,9 @@ describe('emitter grant validation', () => {
       "talent 'outer.lightning.web': emitters[1] range must be > 0 (got 0)",
       "talent 'outer.lightning.web': emitters[2] links must be 1 or 2 (got 1.5)",
       "talent 'outer.lightning.web': emitters[2] range must be > 0 (got -10)",
-      "talent 'outer.lightning.web': emitters[3] segment endpoints 'drones' come from drones and " +
-        'summons, which the simulation adds in C5',
-      "talent 'outer.lightning.web': emitters[4] segment endpoints 'summons' come from drones and " +
-        'summons, which the simulation adds in C5',
-      "talent 'outer.lightning.web': emitters[5] endpoints must be 'shocked' (got enemies)",
+      "talent 'outer.lightning.web': emitters[3] links must be 1 or 2 (got 3)",
+      "talent 'outer.lightning.web': emitters[4] range must be > 0 (got 0)",
+      "talent 'outer.lightning.web': emitters[5] endpoints must be 'shocked', 'drones' or 'summons' (got enemies)",
     ]);
   });
 
@@ -2473,6 +2471,75 @@ describe('emitter grant validation', () => {
         'different fields; keep it on one node',
     ]);
     expect(grantIssues(web(150), { ...web(250), id: 'hub.web' })).toEqual([]);
+  });
+
+  it('accepts segment grants between drones or summons, with a pairing period of 0 or more (C5.8)', () => {
+    const grants: EmitterGrant[] = [
+      { kind: 'segment', endpoints: 'drones' },
+      { kind: 'segment', endpoints: 'summons', links: 1, range: 150, pairPeriodSec: 0 },
+      { kind: 'segment', endpoints: 'drones', links: 1, pairPeriodSec: 0.5 },
+      { kind: 'segment', endpoints: 'summons', pairPeriodSec: 1e6 },
+      { kind: 'segment', endpoints: 'shocked', pairPeriodSec: 0 },
+    ];
+    for (const grant of grants) {
+      expect(grantIssues({ id: 'outer.summon.fence', emitters: [grant] }), grant.kind).toEqual([]);
+    }
+  });
+
+  it('rejects a pairing period below 0 or not finite, and one above 0 between shocked enemies (C5.8)', () => {
+    const segment = (endpoints: string, pairPeriodSec: number): EmitterGrant =>
+      ({ kind: 'segment', endpoints, pairPeriodSec }) as EmitterGrant;
+    expect(
+      grantIssues({
+        id: 'outer.lightning.web',
+        emitters: [
+          segment('drones', -1),
+          segment('summons', NaN),
+          segment('shocked', Infinity),
+          segment('shocked', 0.5),
+          segment('shocked', 1e-9),
+          segment('drones', -Infinity),
+        ],
+      }).filter((issue) => !issue.startsWith('talents: emitter segment')),
+    ).toEqual([
+      "talent 'outer.lightning.web': emitters[0] pairPeriodSec must be finite and >= 0 (got -1)",
+      "talent 'outer.lightning.web': emitters[1] pairPeriodSec must be finite and >= 0 (got NaN)",
+      "talent 'outer.lightning.web': emitters[2] pairPeriodSec must be finite and >= 0 (got Infinity)",
+      "talent 'outer.lightning.web': emitters[3] pairPeriodSec needs drone or summon endpoints (got shocked)",
+      "talent 'outer.lightning.web': emitters[4] pairPeriodSec needs drone or summon endpoints (got shocked)",
+      "talent 'outer.lightning.web': emitters[5] pairPeriodSec must be finite and >= 0 (got -Infinity)",
+    ]);
+  });
+
+  it('keeps one segment emitter per source and kind of endpoints, so a source can have all three (C5.8)', () => {
+    const node = (id: string, ...emitters: EmitterGrant[]): Leaf => ({ id, emitters });
+    // A shocked, a drones and a summons segment of one source are three emitters.
+    expect(
+      grantIssues(
+        node('outer.summon.web', { kind: 'segment', endpoints: 'shocked' }),
+        node(
+          'outer.summon.fence',
+          { kind: 'segment', endpoints: 'drones', pairPeriodSec: 0.5 },
+          { kind: 'segment', endpoints: 'summons' },
+        ),
+      ),
+    ).toEqual([]);
+    // Two summons segments of one source that differ, even in their pairing period alone.
+    const conflict =
+      "talents: emitter segment 'summons' is granted twice by source 'outer.summon' with " +
+      'different fields; keep it on one node';
+    expect(
+      grantIssues(
+        node('outer.summon.web', { kind: 'segment', endpoints: 'summons' }),
+        node('outer.summon.fence', { kind: 'segment', endpoints: 'summons', pairPeriodSec: 0.5 }),
+      ),
+    ).toEqual([conflict]);
+    expect(
+      grantIssues(
+        node('outer.summon.web', { kind: 'segment', endpoints: 'summons', pairPeriodSec: 0.5 }),
+        node('hub.fence', { kind: 'segment', endpoints: 'summons', pairPeriodSec: 1 }),
+      ),
+    ).toEqual([]);
   });
 
   const strike = (fields: object): EmitterGrant =>

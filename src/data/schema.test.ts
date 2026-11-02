@@ -811,6 +811,15 @@ describe('EmitterGrantSchema', () => {
     expect(EmitterGrantSchema.parse({ kind: 'thorns' })).toEqual({ kind: 'thorns' });
     const bare = { kind: 'segment', endpoints: 'shocked' };
     expect(EmitterGrantSchema.parse(bare)).toEqual(bare);
+    // C5.8's endpoints and pairing period; validate.ts holds the period to 0 or more.
+    for (const between of [
+      { kind: 'segment', endpoints: 'drones' },
+      { kind: 'segment', endpoints: 'summons', pairPeriodSec: 0.5 },
+      { kind: 'segment', endpoints: 'drones', pairPeriodSec: -1 },
+    ]) {
+      expect(EmitterGrantSchema.parse(between)).toEqual(between);
+      expect(GRANT_SCHEMAS.segment.parse(between)).toEqual(between);
+    }
     const strike = {
       kind: 'strike',
       name: 'lightningStrike',
@@ -830,8 +839,15 @@ describe('EmitterGrantSchema', () => {
     ['a damage share that is not finite', { kind: 'thorns', damagePct: Infinity }],
     ['an unknown key', { kind: 'thorns', radius: 40 }],
     ['a segment without endpoints', { kind: 'segment', links: 2 }],
-    ['a segment between the drones, which C5 adds', { kind: 'segment', endpoints: 'drones' }],
-    ['a segment between the summons, which C5 adds', { kind: 'segment', endpoints: 'summons' }],
+    ['a segment between unknown endpoints', { kind: 'segment', endpoints: 'enemies' }],
+    [
+      'a segment pairing period that is not finite',
+      { kind: 'segment', endpoints: 'drones', pairPeriodSec: Infinity },
+    ],
+    [
+      'a segment pairing period that is not a number',
+      { kind: 'segment', endpoints: 'summons', pairPeriodSec: '0.5' },
+    ],
     ['a segment range that is not finite', { kind: 'segment', endpoints: 'shocked', range: NaN }],
     ['a segment with an unknown key', { kind: 'segment', endpoints: 'shocked', radius: 40 }],
     ['a strike without a name', { ...SAMPLE_GRANTS.strike, name: undefined }],
