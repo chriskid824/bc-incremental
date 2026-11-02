@@ -58,6 +58,7 @@ const LANDING_RADIUS = 60;
 
 /** Texture sizes in pixels (src/render/fxTextures.ts). */
 const GLOW_SIZE = 64;
+const BUBBLE_SIZE = 32;
 const STREAK_LENGTH = 64;
 const STREAK_HEIGHT = 16;
 
@@ -733,7 +734,7 @@ export class MagmaLayer {
       p.vx = this.rand(-18, 18);
       p.vy = -this.rand(40, 90);
       p.drag = 0.8;
-      const s = this.rand(7, 14) / GLOW_SIZE;
+      const s = this.rand(7, 14) / BUBBLE_SIZE;
       p.scale0 = s * 0.6;
       p.scale1 = s * 1.3;
       p.color0 = mixColor(this.looks.poison, 0xffffff, 0.35);

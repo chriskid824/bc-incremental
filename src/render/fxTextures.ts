@@ -17,16 +17,20 @@ export interface FxTextures {
   readonly shard: Texture;
   /** 40×60 flame tongue pointing up (-y), soft-edged. */
   readonly flame: Texture;
-  /** 64×64 hollow ring with a glint: 毒's bubble (the poison skin's shape 'bubble'). */
+  /** 32×32 hollow ring with a glint: 毒's bubble (the poison skin's shape 'bubble'). */
   readonly bubble: Texture;
 }
 
 const CELL = 64;
 const GAP = 2;
+/** The bubble's frame: BUBBLE px square at (BUBBLE_X, BUBBLE_Y) in the shard's cell. */
+const BUBBLE = 32;
+const BUBBLE_X = 28;
+const BUBBLE_Y = 30;
 
 export function createFxTextures(): FxTextures {
   const canvas = document.createElement('canvas');
-  canvas.width = (CELL + GAP) * 6;
+  canvas.width = (CELL + GAP) * 5;
   canvas.height = CELL;
   const ctx = canvas.getContext('2d');
   if (ctx === null) {
@@ -125,18 +129,22 @@ export function createFxTextures(): FxTextures {
   ctx.fill();
   ctx.restore();
 
-  // Bubble: a thin bright shell around a faint fill, with a glint up and to the left.
-  const bx = (CELL + GAP) * 5;
+  // Bubble: a thin bright shell around a faint fill, with a glint up and to the left. In the
+  // shard's cell, below and right of the shard, so the sheet keeps its size and every other
+  // frame its UVs (the M1 page draws as before).
+  const bx = dx + BUBBLE_X;
+  const by = BUBBLE_Y;
+  const br = BUBBLE / 2;
   ctx.fillStyle = 'rgba(255,255,255,0.18)';
   ctx.beginPath();
-  ctx.arc(bx + half, half, half - 6, 0, Math.PI * 2);
+  ctx.arc(bx + br, by + br, br - 3, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,1)';
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 2.5;
   ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,0.95)';
   ctx.beginPath();
-  ctx.arc(bx + half - 9, half - 9, 5, 0, Math.PI * 2);
+  ctx.arc(bx + br - 5, by + br - 5, 3, 0, Math.PI * 2);
   ctx.fill();
 
   const base = Texture.from(canvas);
@@ -148,6 +156,6 @@ export function createFxTextures(): FxTextures {
     streak: frame(tx, 0, CELL, 16),
     shard: frame(dx, 0, 16, 28),
     flame: frame(fx, 0, 40, 60),
-    bubble: frame(bx, 0, CELL, CELL),
+    bubble: frame(bx, by, BUBBLE, BUBBLE),
   };
 }
