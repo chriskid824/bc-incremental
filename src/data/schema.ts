@@ -529,6 +529,17 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       })
       .readonly(),
     z.strictObject({ id: z.literal('gigantism'), sizeMult: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('blastSpirit'),
+        every: finite,
+        lifeSec: finite,
+        damagePct: finite,
+        burnStacks: finite,
+        burnDamagePct: finite,
+        maxLive: finite,
+      })
+      .readonly(),
   ]),
 );
 

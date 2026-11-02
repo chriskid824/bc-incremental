@@ -4,9 +4,11 @@ import type { Content } from '../web/types';
 import { CRIT } from './crit';
 import { ICE } from './ice';
 import { POISON } from './poison';
+import { SUMMON } from './summon';
 
 export const OUTERS: Content['outers'] = {
   poison: POISON,
   crit: CRIT,
   ice: ICE,
+  summon: SUMMON,
 };

@@ -37,4 +37,14 @@ export const CALIBRATED: Readonly<Partial<Record<FusionKey, CalibrationEntry>>> 
     startWave: 1,
     digest: '4973bf215c2a4fd6',
   },
+  'fire.summon': {
+    coef: 0.313,
+    status: 'spread',
+    median: 1.2059,
+    min: 0.9466,
+    max: 1.6968,
+    seeds: 8,
+    startWave: 1,
+    digest: '44b34340d2657789',
+  },
 };

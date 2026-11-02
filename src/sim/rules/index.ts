@@ -6,6 +6,7 @@
 
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { absoluteZero } from './absoluteZero';
+import { blastSpirit } from './blastSpirit';
 import { eternalFlame } from './eternalFlame';
 import { icicle, prism } from './fanForms';
 import { frostflame } from './frostflame';
@@ -53,6 +54,7 @@ export const RULE_MODULES: {
   frostflame,
   absoluteZero,
   gigantism,
+  blastSpirit,
 };
 
 export const SIGNATURES: {

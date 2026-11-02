@@ -50,6 +50,15 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   frostflame: { id: 'frostflame', frostPct: 0.3, burnCapBonus: 3, zoneSlow: 0.3 },
   absoluteZero: { id: 'absoluteZero', globalSlow: 0.3, bossGapSec: 1, attackSpeedMore: -0.25 },
   gigantism: { id: 'gigantism', sizeMult: 2 },
+  blastSpirit: {
+    id: 'blastSpirit',
+    every: 4,
+    lifeSec: 4,
+    damagePct: 1,
+    burnStacks: 3,
+    burnDamagePct: 1,
+    maxLive: 6,
+  },
 };
 
 describe('ModifierSchema', () => {

@@ -115,8 +115,11 @@ describe('scaleRuleSpec', () => {
 describe('tables the rule modules fill', () => {
   // Empty in C6.2 (docs/v3 C6 design §3.7, §4.2): each hand module adds its RULE_COEF_FIELDS
   // entry, and each chain-policy module its POLICY_RULES id, when it lands, and updates this pin.
-  it('holds the landed hand modules: 霜焰 (B1)', () => {
-    expect(RULE_COEF_FIELDS).toEqual({ frostflame: { frostPct: 'chance', zoneSlow: 'chance' } });
+  it('holds the landed hand modules: 霜焰 and 爆靈 (B1)', () => {
+    expect(RULE_COEF_FIELDS).toEqual({
+      frostflame: { frostPct: 'chance', zoneSlow: 'chance' },
+      blastSpirit: { damagePct: 'pct', burnDamagePct: 'pct' },
+    });
     expect(POLICY_RULES).toEqual([]);
   });
 });

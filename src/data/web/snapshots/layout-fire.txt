@@ -53,6 +53,11 @@ fusion.fire.poison.mastery 688 -1312
 fusion.fire.poison.r1 538 -1052
 fusion.fire.poison.r2 588 -1139
 fusion.fire.poison.r3 638 -1225
+fusion.fire.summon.core -1080 60
+fusion.fire.summon.mastery -1480 60
+fusion.fire.summon.r1 -1180 60
+fusion.fire.summon.r2 -1280 60
+fusion.fire.summon.r3 -1380 60
 hub.defense.r1 480 -831
 hub.defense.r2 831 -480
 hub.defense.r3 960 0
@@ -131,6 +136,24 @@ outer.poison.virulence.r2 1058 -1583
 outer.poison.virulence.r3 1202 -1731
 outer.poison.virulence.r4 1252 -1818
 outer.poison.virulence.seep 1140 -1824
+outer.summon.emplacement.cannon -2000 -125
+outer.summon.emplacement.mastery -2300 -125
+outer.summon.emplacement.r1 -1800 -125
+outer.summon.emplacement.r2 -1900 -125
+outer.summon.emplacement.r3 -2100 -175
+outer.summon.emplacement.r4 -2200 -175
+outer.summon.emplacement.tesla-tower -2150 -75
+outer.summon.fleet.mastery -2300 125
+outer.summon.fleet.overclock -2150 75
+outer.summon.fleet.r1 -1800 125
+outer.summon.fleet.r2 -1900 125
+outer.summon.fleet.r3 -2100 175
+outer.summon.fleet.r4 -2200 175
+outer.summon.fleet.twin-drones -2000 125
+outer.summon.main.bug-sea -2380 60
+outer.summon.main.entry -1700 0
+outer.summon.main.lock-beacon -2250 0
+outer.summon.main.threshold -2380 -60
 board fire.center label 0 0
 board fusion.fire.aura label -588 1139
 board fusion.fire.barrage label -1139 -588
@@ -155,5 +178,5 @@ board outer.lightning label 1950 0 collapsed 1950 0 200
 board outer.poison label 975 -1689 collapsed 975 -1689 200
 board outer.summon label -1950 0 collapsed -1950 0 200
 board outer.thorns label -1689 975 collapsed -1689 975 200
-edges 153
-bounds -2150 -2091 2150 2380
+edges 179
+bounds -2380 -2091 2150 2380

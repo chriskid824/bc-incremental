@@ -118,7 +118,23 @@ export type RuleSpec =
    * rounded down, at least 1 (src/sim/rules/gigantism.ts, src/sim/build/size.ts). The first
    * instance's.
    */
-  | { readonly id: 'gigantism'; readonly sizeMult: number };
+  | { readonly id: 'gigantism'; readonly sizeMult: number }
+  /**
+   * 爆靈 (magmaBomb, 火靈's hand core; gd:525): every `every`-th bomb explosion spawns a timed
+   * spirit (spawnDrone) at the explosion that lives lifeSec, dashes at the nearest enemy and
+   * impacts it once for damagePct of the damage stat, igniting burnStacks burn stacks on the
+   * enemies in its splash, each as a hit of burnDamagePct of the damage stat would ignite it; at
+   * most maxLive of one instance's spirits at once. Each instance counts its own bombs.
+   */
+  | {
+      readonly id: 'blastSpirit';
+      readonly every: number;
+      readonly lifeSec: number;
+      readonly damagePct: number;
+      readonly burnStacks: number;
+      readonly burnDamagePct: number;
+      readonly maxLive: number;
+    };
 
 export type RuleId = RuleSpec['id'];
 
@@ -136,6 +152,7 @@ export const RULE_IDS: readonly RuleId[] = [
   'frostflame',
   'absoluteZero',
   'gigantism',
+  'blastSpirit',
 ];
 
 /**
@@ -217,6 +234,8 @@ export const RULE_COEF_FIELDS: {
 } = {
   // 霜焰: the chill and the zone's slow scale; the burn cap bonus is a whole stack count.
   frostflame: { frostPct: 'chance', zoneSlow: 'chance' },
+  // 爆靈: the spirit's hit and its burn scale; its rhythm, life, stacks and count stay.
+  blastSpirit: { damagePct: 'pct', burnDamagePct: 'pct' },
 };
 
 /**

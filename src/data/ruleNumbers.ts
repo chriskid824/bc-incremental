@@ -60,6 +60,14 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
     case 'gigantism':
       // gd:268's 「大小 ×2」; the halving is words.
       return [[`×${rule.sizeMult}`]];
+    case 'blastSpirit':
+      // gd:525's 「每第 4 發…1 隻 4 秒的火靈…點燃 3 層（最多 6 隻）」.
+      return [
+        [String(rule.every)],
+        [String(rule.lifeSec)],
+        [String(rule.burnStacks)],
+        [String(rule.maxLive)],
+      ];
   }
 }
 

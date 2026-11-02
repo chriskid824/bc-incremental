@@ -421,5 +421,17 @@
   "web.node.outer.ice.main.absolute-zero.name": "Absolute Zero",
   "web.node.outer.ice.main.absolute-zero.desc": "Every enemy is always slowed 30%; freezes leave no immunity, and a boss's freeze events stay at least 1 s apart; your attack speed −25%.",
   "web.node.outer.ice.main.threshold.name": "Cold Wave",
-  "web.node.fusion.fire.ice.core.desc": "Explosions add {frostPct} chill; an enemy holding chill can carry +3 burn stacks; your fire zones turn to frost-fire zones that slow by {zoneSlow}."
+  "web.node.fusion.fire.ice.core.desc": "Explosions add {frostPct} chill; an enemy holding chill can carry +3 burn stacks; your fire zones turn to frost-fire zones that slow by {zoneSlow}.",
+  "web.fusion.fire.summon.title": "Blast Spirit",
+  "web.node.fusion.fire.summon.core.desc": "Every 4th magma bomb spawns a fire spirit for 4 s that rushes the nearest enemy and explodes for {damagePct} of your damage, igniting 3 burn stacks (each {burnDamagePct}); at most 6 at once.",
+  "web.node.outer.summon.main.entry.name": "Wingman",
+  "web.branch.outer.summon.emplacement": "Emplacement",
+  "web.node.outer.summon.emplacement.cannon.name": "Cannon",
+  "web.node.outer.summon.emplacement.tesla-tower.name": "Tesla Tower",
+  "web.branch.outer.summon.fleet": "Fleet",
+  "web.node.outer.summon.fleet.twin-drones.name": "Twin Drones",
+  "web.node.outer.summon.fleet.overclock.name": "Overclock",
+  "web.node.outer.summon.main.lock-beacon.name": "Lock-on Beacon",
+  "web.node.outer.summon.main.bug-sea.name": "Swarm Tide",
+  "web.node.outer.summon.main.threshold.name": "Laser Fence"
 }

@@ -52,7 +52,7 @@ function run(
 
 describe('巨大化 (gigantism, gd:268)', () => {
   it('is a rule module registered as glassCannon is: its RuleSpec id, RULE_IDS and RULE_MODULES', () => {
-    expect(RULE_IDS.at(-1)).toBe('gigantism');
+    expect(RULE_IDS).toContain('gigantism');
     expect(RULE_MODULES.gigantism).toBe(gigantism);
     expect(gigantism.id).toBe('gigantism');
   });

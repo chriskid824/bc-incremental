@@ -421,5 +421,17 @@
   "web.node.outer.ice.main.absolute-zero.name": "絕對零度",
   "web.node.outer.ice.main.absolute-zero.desc": "場上所有敵人永遠帶 30% 減速；凍結沒有免疫時間，Boss 的凍結事件仍至少間隔 1 秒；你的攻擊頻率 −25%",
   "web.node.outer.ice.main.threshold.name": "寒潮",
-  "web.node.fusion.fire.ice.core.desc": "爆炸附加 {frostPct} 冰冷；有冰冷的敵人燃燒層數上限 +3；火地變成霜火地（減速 {zoneSlow}）"
+  "web.node.fusion.fire.ice.core.desc": "爆炸附加 {frostPct} 冰冷；有冰冷的敵人燃燒層數上限 +3；火地變成霜火地（減速 {zoneSlow}）",
+  "web.fusion.fire.summon.title": "爆靈",
+  "web.node.fusion.fire.summon.core.desc": "每第 4 發熔岩彈生出 1 隻 4 秒的火靈，衝向最近的敵人爆炸，造成你傷害的 {damagePct}，並點燃 3 層（每層 {burnDamagePct}）；最多 6 隻",
+  "web.node.outer.summon.main.entry.name": "僚機",
+  "web.branch.outer.summon.emplacement": "砲座",
+  "web.node.outer.summon.emplacement.cannon.name": "加農砲",
+  "web.node.outer.summon.emplacement.tesla-tower.name": "特斯拉塔",
+  "web.branch.outer.summon.fleet": "機隊",
+  "web.node.outer.summon.fleet.twin-drones.name": "雙機",
+  "web.node.outer.summon.fleet.overclock.name": "超頻",
+  "web.node.outer.summon.main.lock-beacon.name": "鎖定信標",
+  "web.node.outer.summon.main.bug-sea.name": "蟲海",
+  "web.node.outer.summon.main.threshold.name": "雷射柵欄"
 }

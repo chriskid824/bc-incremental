@@ -751,6 +751,29 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`gigantism.sizeMult must be >= 1 (got ${rule.sizeMult})`);
       }
       break;
+    case 'blastSpirit':
+      if (!isPositiveInt(rule.every)) {
+        issues.push(`blastSpirit.every must be a positive integer (got ${rule.every})`);
+      }
+      if (!(rule.lifeSec > 0)) {
+        issues.push(`blastSpirit.lifeSec must be > 0 (got ${rule.lifeSec})`);
+      }
+      if (!(rule.damagePct >= 0)) {
+        issues.push(`blastSpirit.damagePct must be >= 0 (got ${rule.damagePct})`);
+      }
+      if (!isPositiveInt(rule.burnStacks)) {
+        issues.push(`blastSpirit.burnStacks must be a positive integer (got ${rule.burnStacks})`);
+      }
+      if (!(rule.burnDamagePct > 0)) {
+        issues.push(`blastSpirit.burnDamagePct must be > 0 (got ${rule.burnDamagePct})`);
+      }
+      // A spirit is a summon: one instance's live ones fit in the run's cap.
+      if (!(isPositiveInt(rule.maxLive) && rule.maxLive <= SUMMON_SLOTS_MAX)) {
+        issues.push(
+          `blastSpirit.maxLive must be an integer in [1, ${SUMMON_SLOTS_MAX}] (got ${rule.maxLive})`,
+        );
+      }
+      break;
   }
   return issues;
 }
@@ -1492,6 +1515,7 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'frostflame':
     case 'absoluteZero':
     case 'gigantism':
+    case 'blastSpirit':
       return [];
   }
 }
