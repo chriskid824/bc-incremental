@@ -238,7 +238,7 @@ describe('EnemyBanner (§2.9 with the lead’s rulings L7 and P5)', () => {
     expect(bannerText(loadGameData().enemies.triangle)).toBeNull();
   });
 
-  it('is wired into ?enemies only: no other page makes a banner (the lead’s rulings P2 and P5)', () => {
+  it('is wired into ?enemies and the v3 game page only (the lead’s rulings P2, P5 and L7)', () => {
     const src = new URL('../', import.meta.url);
     const made = (readdirSync(src, { recursive: true, encoding: 'utf8' }) as string[])
       .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
@@ -246,6 +246,6 @@ describe('EnemyBanner (§2.9 with the lead’s rulings L7 and P5)', () => {
         /new (EnemyBanner|BannerLine)\(/.test(readFileSync(new URL(file, src), 'utf8')),
       )
       .map((file) => file.replaceAll('\\', '/'));
-    expect(made).toEqual(['app/enemies/route.ts']);
+    expect(made.sort()).toEqual(['app/enemies/route.ts', 'app/v3/game.ts']);
   });
 });
