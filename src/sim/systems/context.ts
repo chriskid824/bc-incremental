@@ -415,7 +415,8 @@ export interface RunContext {
   /**
    * The input of every stat read and condition check (src/sim/build/eval.ts): hits set its
    * target and chain jump; the contact step sets the player's life fraction once per tick, and
-   * the globals step the shards held and the enemies in the aura (src/sim/systems/globals.ts).
+   * the globals step the shards held, the enemies in the aura and the highest-hp enemy's id
+   * (src/sim/systems/globals.ts).
    */
   readonly evalInput: EvalInput;
   /** Per trigger index: nthAttack counts, cooldowns, periodic firings. */
@@ -1109,6 +1110,7 @@ export function createRunContext(
       comboStacks: 0,
       shardsHeld: 0,
       enemiesInAura: 0,
+      highestHpId: 0,
       ctx: null,
     },
     triggerState: {

@@ -95,7 +95,18 @@ export type RuleSpec =
    * rounded down, at least 1 (src/sim/rules/gigantism.ts, src/sim/build/size.ts). The first
    * instance's.
    */
-  | { readonly id: 'gigantism'; readonly sizeMult: number };
+  | { readonly id: 'gigantism'; readonly sizeMult: number }
+  /**
+   * 神經毒 (gd:389 「每 5 層毒減速 2%，最多 40%」): an enemy is slowed by slowPer for every
+   * stacksPer of its live poison stacks, at most max, as one more source of enemySlow
+   * (src/sim/ailments/frost.ts), whose largest slow wins. The first instance's.
+   */
+  | {
+      readonly id: 'poisonSlow';
+      readonly stacksPer: number;
+      readonly slowPer: number;
+      readonly max: number;
+    };
 
 export type RuleId = RuleSpec['id'];
 
@@ -111,6 +122,7 @@ export const RULE_IDS: readonly RuleId[] = [
   'prism',
   'sixCoils',
   'gigantism',
+  'poisonSlow',
 ];
 
 /**
@@ -219,3 +231,10 @@ export function scaleRuleSpec<S extends RuleSpec>(
  * BuildCompiler.chainPolicy. Each chain-policy module adds its id when it lands.
  */
 export const POLICY_RULES: readonly RuleId[] = [];
+
+/**
+ * The other rule ids web validation admits on a ◆ (kind notable or asc): a ◆ whose effect no data
+ * member can write, only its rule module, as 神經毒's poison-stack slow (gd:389). Each such module
+ * adds its id when it lands.
+ */
+export const NOTABLE_RULES: readonly RuleId[] = ['poisonSlow'];

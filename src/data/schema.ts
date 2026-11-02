@@ -25,6 +25,7 @@ import {
   SCALING_VARS,
   SELECTOR_ORIGINS,
   STACK_AILMENTS,
+  TARGET_IS_PICKS,
   TARGET_KINDS,
   TARGET_ORDERS,
   TARGET_PICKS,
@@ -152,6 +153,7 @@ export const TargetConditionSchema = exact<TargetCondition>()(
     z.strictObject({ inZone: SourceSelectorSchema }).readonly(),
     z.strictObject({ targetState: z.enum(TARGET_STATES) }).readonly(),
     z.strictObject({ targetFrostAtLeast: finite }).readonly(),
+    z.strictObject({ targetIs: z.enum(TARGET_IS_PICKS) }).readonly(),
   ]),
 );
 
@@ -513,6 +515,14 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       })
       .readonly(),
     z.strictObject({ id: z.literal('gigantism'), sizeMult: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('poisonSlow'),
+        stacksPer: finite,
+        slowPer: finite,
+        max: finite,
+      })
+      .readonly(),
   ]),
 );
 

@@ -52,6 +52,9 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
     case 'gigantism':
       // gd:268's 「大小 ×2」; the halving is words.
       return [[`×${rule.sizeMult}`]];
+    case 'poisonSlow':
+      // gd:389 words it as 每 5 層毒減速 2%，最多 40%.
+      return [[String(rule.stacksPer)], [percent(rule.slowPer)], [percent(rule.max)]];
   }
 }
 

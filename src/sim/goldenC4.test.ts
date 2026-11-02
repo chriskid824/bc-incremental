@@ -22,9 +22,9 @@ import { TAG } from '../data/tags';
 import type { TriggerSpec } from '../data/triggers';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyId, GameData } from '../data/types';
-import { frostMeter } from './ailments/frost';
+import { enemySlow, frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
-import { liveBleedStacks } from './ailments/rings';
+import { liveBleedStacks, livePoisonStacks } from './ailments/rings';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { REPEAT } from './effects/flags';
 import { enemiesInAura } from './emitters/aura';
@@ -2093,6 +2093,71 @@ const GIANT_SWARM_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
   emitters: [{ source: 'outer.summon', grant: { kind: 'drone', drones: 4, turrets: 2 } }],
 });
 
+/**
+ * E2's ◆鎖定 (C4 design §11's B1 row, F16; lead rulings H1, H2, H5): crit chance +25 % against
+ * the highest-life enemy and a shock on each hit of it, with no other crit, on a volley of four
+ * projectiles chaining twice at six attacks a second, damage 8, from wave 8 of the v3 fixture
+ * waves: the highest moves from enemy to enemy as they are worn down, the onion boss of wave 10
+ * among them.
+ */
+const HIGHEST_HP_STATS = makeStats(
+  {
+    damage: 8,
+    maxLife: 1e6,
+    critChance: 0,
+    igniteChance: 0,
+    attackSpeed: 6,
+    projectileCount: 4,
+    chainCount: 2,
+  },
+  [{ stat: 'critChance', kind: 'flat', value: 0.25, when: [{ targetIs: 'highestHp' }] }],
+  {
+    triggers: [
+      {
+        source: 'center',
+        spec: {
+          on: 'hit',
+          when: [{ targetIs: 'highestHp' }],
+          do: [{ kind: 'applyAilment', ailment: 'shock' }],
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
+/**
+ * E2's ◆神經毒 (gd:389; C4 design §11's B1 row, I7; lead rulings H3, H4, H5): poisonSlow at its
+ * 初始值 (2 % for every 5 live poison stacks, at most 40 %) on a build that poisons every hit and
+ * adds four stacks a hit on outer.poison, three projectiles chaining once at six attacks a
+ * second, damage 10, from wave 8 of the v3 fixture waves: its enemies hold from a few stacks to
+ * past 200, the onion boss of wave 10 among them, so the term's steps and its cap both show.
+ */
+const POISON_SLOW_STATS = makeStats(
+  {
+    damage: 10,
+    maxLife: 1e6,
+    critChance: 0,
+    igniteChance: 0,
+    poisonChance: 1,
+    attackSpeed: 6,
+    projectileCount: 3,
+    chainCount: 1,
+  },
+  [],
+  {
+    triggers: [
+      {
+        source: 'outer.poison',
+        spec: { on: 'hit', do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 4 }] },
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2480,6 +2545,22 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'temporaries',
     config: { stats: TEMPORARY_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
     expected: ['461c9839e9831c6f', '1f12ca2e24674c66'],
+  },
+  {
+    name: 'highestHp',
+    config: { stats: HIGHEST_HP_STATS, rules: [], startWave: 8 },
+    data: () => v3TestData(),
+    expected: ['7238818b14232ce7', '3bdb6f7dc21b3322'],
+  },
+  {
+    name: 'poisonSlow',
+    config: {
+      stats: POISON_SLOW_STATS,
+      rules: [{ id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 }],
+      startWave: 8,
+    },
+    data: () => v3TestData(),
+    expected: ['7395fc0553e5b380', 'b26cf10df94b895a'],
   },
 ];
 
@@ -3983,6 +4064,113 @@ describe('golden C4 runs', () => {
         spent: 117,
         ailmentTerm: 0,
         fixedKept: 1,
+      },
+    });
+  });
+
+  it('crits on the highest-life enemy alone in highestHp, and shocks it alone, the onion boss among them (E2)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'highestHp') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const bosses = new Set<number>();
+      const tops = new Set<number>();
+      let top = 0;
+      let crits = 0;
+      let bossCrits = 0;
+      let elsewhere = 0;
+      let shocks = 0;
+      let moves = 0;
+      let last = 0;
+      watchRun(entry, seed, (now, events, ctx) => {
+        // The id this tick's globals step wrote, which every hit of the tick reads.
+        const id = ctx.evalInput.highestHpId;
+        if (id !== last) moves++;
+        last = id;
+        if (id !== 0) tops.add(id);
+        for (const event of events) {
+          if (event.type === 'enemySpawned' && event.enemy === 'onion') bosses.add(event.enemyId);
+          else if (event.type === 'hit') {
+            if (event.targetId !== id) {
+              expect(event.crit, `tick ${now}`).toBe(false);
+              elsewhere++;
+              continue;
+            }
+            top++;
+            if (event.crit) crits++;
+            if (event.crit && bosses.has(id)) bossCrits++;
+          } else if (event.type === 'ailmentApplied' && event.ailment === 'shock') {
+            expect(event.targetId, `tick ${now}`).toBe(id);
+            shocks++;
+          }
+        }
+      });
+      bySeed[seed] = { top, crits, bossCrits, elsewhere, shocks, moves, tops: tops.size };
+    }
+    // No hit off the highest crits or shocks; of those on it, at a crit chance of 25 %, 32 % and
+    // 26 % crit, the onion's among them, and the highest moves from enemy to enemy.
+    expect(bySeed).toEqual({
+      1: { top: 143, crits: 46, bossCrits: 36, elsewhere: 635, shocks: 135, moves: 23, tops: 18 },
+      2: { top: 163, crits: 43, bossCrits: 32, elsewhere: 666, shocks: 157, moves: 24, tops: 20 },
+    });
+  });
+
+  it('slows the poisoned enemies of poisonSlow 2 % for every 5 live stacks, up to 40 % past 100, the onion boss in full, and they walk that much less (E2)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'poisonSlow') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const steps = new Set<number>();
+      // Each alive enemy's distance and slow at the end of the last tick: the slow the next
+      // tick's movement takes, before that tick's hits change its stacks.
+      const last = new Map<number, { dist: number; slow: number }>();
+      let most = 0;
+      let capped = 0;
+      let bossCapped = 0;
+      let walked = 0;
+      watchRun(entry, seed, (now, _events, ctx) => {
+        for (const e of ctx.enemies) {
+          if (!e.alive) continue;
+          // Nothing but movement moves an enemy in this build: a slowed one walked its step
+          // less its slow.
+          const before = last.get(e.id);
+          if (before !== undefined && before.slow > 0 && e.dist > 0) {
+            expect(before.dist - e.dist, `enemy ${e.id} at tick ${now}`).toBeCloseTo(
+              e.stepDist * (1 - before.slow),
+              9,
+            );
+            walked++;
+          }
+          const stacks = livePoisonStacks(e, now + 1);
+          const slow = enemySlow(ctx, e, now + 1);
+          // The build holds no other slow: the term is the whole of it.
+          expect(slow, `enemy ${e.id} at tick ${now + 1}`).toBe(
+            Math.min(0.4, 0.02 * Math.floor(stacks / 5)),
+          );
+          most = Math.max(most, stacks);
+          if (slow > 0) steps.add(Math.round(slow * 100));
+          if (slow === 0.4) capped++;
+          if (slow === 0.4 && e.boss) bossCapped++;
+          last.set(e.id, { dist: e.dist, slow });
+        }
+      });
+      bySeed[seed] = { most, steps: [...steps].sort((a, b) => a - b), capped, bossCapped, walked };
+    }
+    // The term from its first step (5 stacks) to its cap, which the onion boss holds past 100
+    // stacks, in full; thousands of slowed steps.
+    const STEPS = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20];
+    expect(bySeed).toEqual({
+      1: {
+        most: 250,
+        steps: [...STEPS, 26, 28, 34, 40],
+        capped: 149,
+        bossCapped: 149,
+        walked: 4196,
+      },
+      2: {
+        most: 215,
+        steps: [...STEPS, 22, 26, 28, 30, 34, 40],
+        capped: 168,
+        bossCapped: 168,
+        walked: 3375,
       },
     });
   });

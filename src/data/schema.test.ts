@@ -48,6 +48,7 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   prism: { id: 'prism', perPierce: 0.2, maxBonus: 2 },
   sixCoils: { id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55 },
   gigantism: { id: 'gigantism', sizeMult: 2 },
+  poisonSlow: { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 },
 };
 
 describe('ModifierSchema', () => {
