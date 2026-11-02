@@ -1,11 +1,13 @@
 /**
  * Static arena backdrop, drawn once: dark fill, faint grid, a soft light pool with range rings
- * around the player so the floor is not a black void, and a vignette.
+ * around the player so the floor is not a black void, and a vignette. A v3 character run draws
+ * its character's arena instead (createArenaBackdrop, docs/v3/game-design-v3.md §11.5), which
+ * drops M1's light pool and range rings.
  */
 
 import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../sim';
-import { COLORS } from './palette';
+import { ARENA_COLORS, COLORS } from './palette';
 
 const GRID_STEP = 80;
 /** Radius of the light pool around the player, and the spacing of its range rings. */
@@ -58,6 +60,97 @@ export function createBackdrop(): Container {
   root.addChild(vignette);
 
   return root;
+}
+
+/** 熔核's forge grate: rings this far apart, and this many spokes around the center. */
+export const GRATE_RING_STEP = 110;
+export const GRATE_SPOKES = 24;
+/** The spokes start this far out, clear of the construct (its plates reach 39 + 40). */
+const GRATE_HUB = 90;
+/** Ring arcs are drawn in pieces this many radians long, kept to those inside the arena. */
+const ARC_PIECE = Math.PI / 90;
+const HEAT_RADIUS = 520;
+
+/**
+ * The arena of a v3 character run (CharacterDef.arena): 熔核's ('fire') is charcoal with a forge
+ * grate, concentric rings and spokes around the player, and a faint heat at its center; the
+ * scorch marks are a layer of their own (src/render/magma.ts). Any other arena is M1's backdrop
+ * until its batch draws it.
+ */
+export function createArenaBackdrop(arena: string): Container {
+  if (arena !== 'fire') return createBackdrop();
+  const A = ARENA_COLORS.fire;
+  const root = new Container({ label: 'backdrop-fire' });
+  const cx = ARENA_WIDTH / 2;
+  const cy = ARENA_HEIGHT / 2;
+
+  const floor = new Graphics().rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT).fill(A.floor);
+  root.addChild(floor);
+
+  const heat = new Sprite(createGlowTexture());
+  heat.anchor.set(0.5);
+  heat.position.set(cx, cy);
+  heat.width = HEAT_RADIUS * 2;
+  heat.height = HEAT_RADIUS * 2;
+  heat.tint = A.heat;
+  heat.alpha = 0.55;
+  heat.blendMode = 'add';
+  root.addChild(heat);
+
+  const grate = new Graphics();
+  const hot = new Graphics();
+  const reach = Math.hypot(cx, cy);
+  for (let ring = 1; ring * GRATE_RING_STEP < reach; ring++) {
+    arcInside(ring % 3 === 0 ? hot : grate, cx, cy, ring * GRATE_RING_STEP);
+  }
+  for (let k = 0; k < GRATE_SPOKES; k++) {
+    const angle = (k / GRATE_SPOKES) * Math.PI * 2;
+    const c = Math.cos(angle);
+    const sn = Math.sin(angle);
+    const toEdge = Math.min(
+      Math.abs(c) < 1e-9 ? Infinity : (c > 0 ? ARENA_WIDTH - cx : cx) / Math.abs(c),
+      Math.abs(sn) < 1e-9 ? Infinity : (sn > 0 ? ARENA_HEIGHT - cy : cy) / Math.abs(sn),
+    );
+    grate.moveTo(cx + c * GRATE_HUB, cy + sn * GRATE_HUB).lineTo(cx + c * toEdge, cy + sn * toEdge);
+  }
+  grate.stroke({ width: 1.5, color: A.grate, alpha: 0.9 });
+  hot.stroke({ width: 2.5, color: A.grateHot, alpha: 0.8 });
+  grate.rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT).stroke({
+    width: 2,
+    color: A.edge,
+    alpha: 0.9,
+    alignment: 1,
+  });
+  root.addChild(grate, hot);
+
+  const vignette = new Sprite(createVignetteTexture());
+  vignette.width = ARENA_WIDTH;
+  vignette.height = ARENA_HEIGHT;
+  root.addChild(vignette);
+  return root;
+}
+
+/** The parts of the circle of `radius` around (cx, cy) inside the arena, as open paths on `g`. */
+function arcInside(g: Graphics, cx: number, cy: number, radius: number): void {
+  const inside = (a: number): boolean => {
+    const x = cx + Math.cos(a) * radius;
+    const y = cy + Math.sin(a) * radius;
+    return x >= 0 && x <= ARENA_WIDTH && y >= 0 && y <= ARENA_HEIGHT;
+  };
+  const pieces = Math.ceil((Math.PI * 2) / ARC_PIECE);
+  let drawing = false;
+  for (let i = 0; i <= pieces; i++) {
+    const a = i * ARC_PIECE;
+    if (!inside(a)) {
+      drawing = false;
+      continue;
+    }
+    const x = cx + Math.cos(a) * radius;
+    const y = cy + Math.sin(a) * radius;
+    if (drawing) g.lineTo(x, y);
+    else g.moveTo(x, y);
+    drawing = true;
+  }
 }
 
 /** White radial falloff for the light pool; tinted by the sprite. */

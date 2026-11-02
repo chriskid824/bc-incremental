@@ -41,6 +41,42 @@ export const COLORS = {
   playerShield: 0xcff6ff,
 } as const;
 
+/**
+ * 熔核's attack language and fusions (docs/v3/game-design-v3.md §11.4, §11.6, §5.2): the bomb and
+ * its explosion share the character orange (CONSTRUCT_COLORS.magmaCore.main); these are the rest.
+ */
+export const MAGMA_COLORS = {
+  /** The bomb's white-hot heart and its explosion's flash. */
+  bombHot: 0xfff1c9,
+  /** Its shadow on the floor and the scorch marks: near black, drawn with normal blending. */
+  shadow: 0x050201,
+  /** 火地: deep ember red under the orange, so a patch glows instead of flattening to a disc. */
+  zoneDeep: 0xc2340f,
+  /** 霜焰 (火冰): the white-blue frost ring outside the explosion and on a fire zone's edge. */
+  frostRim: 0xe4f7ff,
+  frost: 0x8fe3ff,
+  /** 斬擊線: 暴擊's low-chroma white light (gd §4.6, #FFF4D6), the crit skin's accent. */
+  slash: 0xfff4d6,
+} as const;
+
+/**
+ * The arenas (docs/v3/game-design-v3.md §11.5), by CharacterDef.arena. Only 熔核's is drawn so far;
+ * the others fall back to M1's backdrop until their batches.
+ */
+export const ARENA_COLORS = {
+  fire: {
+    /** Charcoal with a warm cast. */
+    floor: 0x110c0a,
+    /** The forge grate: concentric rings and spokes from the center. */
+    grate: 0x3b2417,
+    /** Every third ring, a little hotter. */
+    grateHot: 0x5c3018,
+    edge: 0x4a2a19,
+    /** A faint heat under the grate's center, far dimmer than M1's light pool. */
+    heat: 0x7a2e10,
+  },
+} as const;
+
 /** Linear blend of two 0xRRGGBB colors; t = 0 gives a, t = 1 gives b. */
 export function mixColor(a: number, b: number, t: number): number {
   const k = t <= 0 ? 0 : t >= 1 ? 1 : t;

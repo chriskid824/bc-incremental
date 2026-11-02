@@ -215,6 +215,11 @@ export class FrostCrystalView implements ConstructView {
     this.update(0);
   }
 
+  /** The idle clock back at zero, as a new view has it (Renderer.restart). */
+  rewind(): void {
+    this.timeMs = 0;
+  }
+
   update(dtMs: number): void {
     this.timeMs += dtMs;
     this.glintMs = Math.min(GLINT_MS, this.glintMs + dtMs);

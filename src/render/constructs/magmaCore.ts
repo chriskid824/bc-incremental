@@ -250,6 +250,11 @@ export class MagmaCoreView implements ConstructView {
     this.update(0);
   }
 
+  /** The idle clock back at zero, as a new view has it (Renderer.restart). */
+  rewind(): void {
+    this.timeMs = 0;
+  }
+
   update(dtMs: number): void {
     this.timeMs += dtMs;
     if (this.attackMs >= 0) {
