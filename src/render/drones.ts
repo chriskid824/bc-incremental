@@ -364,6 +364,36 @@ export class TurretTracks {
   }
 }
 
+/**
+ * A drone's colours (gd §11.7: a solid fill with a glowing edge): its fill and glow, edge, nose
+ * mark, trail and the chase bracket's. Fusion skins are parameters, not code (gd §5.3).
+ */
+export interface DroneSkin {
+  readonly fill: number;
+  readonly edge: number;
+  readonly mark: number;
+  readonly trail: number;
+}
+
+/** 蜂巢's drones: hive green throughout. */
+export const HIVE_DRONE_SKIN: DroneSkin = {
+  fill: C.main,
+  edge: C.droneEdge,
+  mark: C.droneMark,
+  trail: C.main,
+};
+
+/**
+ * 熔核's 爆靈 (火靈, gd §5.2): small orange kites with a yellow-green tail, the summon colour that
+ * marks them as the player's.
+ */
+export const BLAST_SPIRIT_SKIN: DroneSkin = {
+  fill: CONSTRUCT_COLORS.magmaCore.main,
+  edge: CONSTRUCT_COLORS.magmaCore.coreEdge,
+  mark: CONSTRUCT_COLORS.magmaCore.plate,
+  trail: C.main,
+};
+
 export class DroneLayer {
   readonly view = new Container({ label: 'drones' });
   /** Share of the run's drones docked at the last update (HiveCoreView's setDocked). */
@@ -388,10 +418,14 @@ export class DroneLayer {
   private readonly barrelSprites: Particle[] = [];
   private readonly turrets = new TurretTracks();
 
-  /** `streak` is the effect sheet's spark streak (src/render/fxTextures.ts). */
+  /**
+   * `streak` is the effect sheet's spark streak (src/render/fxTextures.ts); `skin` the drones'
+   * colours (the turrets keep the hive's).
+   */
   constructor(
     renderer: Renderer,
     private readonly streak: Texture,
+    private readonly skin: DroneSkin = HIVE_DRONE_SKIN,
   ) {
     this.trails = new ParticleContainer({
       label: 'drone-trails',
@@ -401,13 +435,13 @@ export class DroneLayer {
     this.trails.blendMode = 'add';
     const kite = new Graphics()
       .poly(KITE)
-      .stroke({ width: 3.6, color: C.main, alpha: 0.35, join: 'round' })
+      .stroke({ width: 3.6, color: skin.fill, alpha: 0.35, join: 'round' })
       .poly(KITE)
-      .fill({ color: C.main, alpha: 0.95 })
-      .stroke({ width: 1.3, color: C.droneEdge, alpha: 1, join: 'round' })
+      .fill({ color: skin.fill, alpha: 0.95 })
+      .stroke({ width: 1.3, color: skin.edge, alpha: 1, join: 'round' })
       .moveTo(-10, 0)
       .lineTo(6, 0)
-      .stroke({ width: 1.5, color: C.droneMark, alpha: 1, cap: 'round' });
+      .stroke({ width: 1.5, color: skin.mark, alpha: 1, cap: 'round' });
     const bounds = kite.getLocalBounds();
     this.kiteAnchorX = -bounds.minX / bounds.width;
     this.kiteAnchorY = -bounds.minY / bounds.height;
@@ -579,7 +613,7 @@ export class DroneLayer {
         streak.rotation = Math.atan2(dy, dx);
         streak.scaleX = (length * TRAIL_OVERLAP) / STREAK_LENGTH;
         streak.scaleY = TRAIL_WIDTH / STREAK_HEIGHT;
-        streak.color = packColor(C.main, TRAIL_ALPHA * (1 - age / TRAIL_TICKS));
+        streak.color = packColor(this.skin.trail, TRAIL_ALPHA * (1 - age / TRAIL_TICKS));
       }
       fromX = toX;
       fromY = toY;
@@ -611,7 +645,13 @@ export class DroneLayer {
       drawn++;
     }
     if (drawn > 0) {
-      g.stroke({ width: BRACKET_WIDTH, color: C.main, alpha: 0.9, cap: 'round', join: 'round' });
+      g.stroke({
+        width: BRACKET_WIDTH,
+        color: this.skin.trail,
+        alpha: 0.9,
+        cap: 'round',
+        join: 'round',
+      });
     }
   }
 

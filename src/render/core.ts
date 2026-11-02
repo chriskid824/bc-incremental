@@ -1,11 +1,15 @@
 /**
  * The view at the arena center (docs/v3 C5 design §13.2): the M1 hexagon (PlayerView,
- * src/render/player.ts, as it is) or a character construct that follows the run. The renderer
- * draws whichever RendererOptions.construct picks through this interface.
+ * src/render/player.ts, as it is) or a character construct that follows the run: 蜂巢's comb
+ * (HiveCoreView) or any other construct (ConstructCoreView, a v3 character run's,
+ * RendererOptions.character). The renderer draws whichever the options pick through this
+ * interface.
  */
 
 import { Container } from 'pixi.js';
 import type { PlayerState } from '../sim';
+import { createConstructView } from './constructs';
+import type { ConstructId, ConstructView } from './constructs';
 import { HiveView } from './constructs/hive';
 
 export interface CoreView {
@@ -69,5 +73,54 @@ export class HiveCoreView implements CoreView {
 
   rewind(): void {
     this.hive.rewind();
+  }
+}
+
+/**
+ * A character construct (src/render/constructs) at the player, for a v3 character run whose
+ * construct has no sim-driven parts (every one but the hive): it plays its attack pose toward
+ * each attack's target (attack), swells a little as kill shards come in and fades as the M1
+ * hexagon does once the player has no life left. Render-only: the sim keeps the player at the
+ * center with collision radius PLAYER_RADIUS, whatever the construct's parts do (gd §11.2).
+ */
+export class ConstructCoreView implements CoreView {
+  readonly view: Container;
+  private readonly construct: ConstructView;
+  private pulseMs = 0;
+
+  constructor(id: Exclude<ConstructId, 'hive'>) {
+    this.construct = createConstructView(id);
+    this.view = new Container({ label: `core-${id}` });
+    this.view.addChild(this.construct.view);
+  }
+
+  /** The attack pose toward `angle` (radians; 0 = +x, y down). */
+  attack(angle: number): void {
+    this.construct.attack(angle);
+  }
+
+  update(player: Readonly<PlayerState>, dtMs: number): void {
+    this.pulseMs = Math.max(0, this.pulseMs - dtMs);
+    this.view.position.set(player.x, player.y);
+    this.view.alpha = player.life > 0 ? 1 : DEAD_ALPHA;
+    this.construct.view.scale.set(1 + PULSE_SWELL * (this.pulseMs / PULSE_MS));
+    this.construct.update(dtMs);
+  }
+
+  hit(): void {
+    this.construct.hit();
+  }
+
+  pulse(): void {
+    this.pulseMs = PULSE_MS;
+  }
+
+  reset(): void {
+    this.pulseMs = 0;
+    this.construct.reset();
+  }
+
+  rewind(): void {
+    this.construct.rewind();
   }
 }

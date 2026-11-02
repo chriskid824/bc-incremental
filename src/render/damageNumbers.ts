@@ -279,6 +279,8 @@ export class DamageNumbers {
   private readonly spot: Point = { x: 0, y: 0 };
   private area: SafeArea = { width: ARENA_WIDTH, height: ARENA_HEIGHT, zones: [] };
   private typicalHit = 1;
+  /** The hit numbers' colour: a v3 character's (setHitColor), or null for LOOKS.hit's. */
+  private hitColor: number | null = null;
 
   constructor(private readonly random: RenderRandom = defaultRandom) {
     installFonts();
@@ -289,6 +291,14 @@ export class DamageNumbers {
   /** Reference amount for sizing; numbers at this amount get the base size. */
   setTypicalHit(amount: number): void {
     this.typicalHit = amount > 0 && Number.isFinite(amount) ? amount : 1;
+  }
+
+  /**
+   * Hit numbers in `color` (0xRRGGBB): a v3 character run's colour (gd §11.6, impl §7 item 3);
+   * null for M1's white. Crit, burn and chain numbers keep their own colours.
+   */
+  setHitColor(color: number | null): void {
+    this.hitColor = color;
   }
 
   /** Where numbers may float: the arena minus the HUD (numberLayout.hudSafeArea). */
@@ -340,7 +350,7 @@ export class DamageNumbers {
 
     const text = slot.text;
     text.text = label;
-    text.tint = tintOf(style, this.decades(amount));
+    text.tint = this.tint(style, this.decades(amount));
     text.alpha = 1;
     text.rotation = style === 'crit' ? (this.random() * 2 - 1) * 0.06 : 0;
     slot.style = style;
@@ -384,6 +394,10 @@ export class DamageNumbers {
     for (const slot of this.crits.live) place(slot);
   }
 
+  private tint(style: NumberStyle, decades: number): number {
+    return style === 'hit' && this.hitColor !== null ? this.hitColor : tintOf(style, decades);
+  }
+
   /** Adds `amount` to a young number of `kind` for `targetId`; false when there is none. */
   private merge(kind: DamageKind, amount: Num, targetId: number): boolean {
     const slot =
@@ -395,7 +409,7 @@ export class DamageNumbers {
     const decades = this.decades(slot.amount);
     const size = numberSize(slot.style, decades);
     slot.text.text = label;
-    slot.text.tint = tintOf(slot.style, decades);
+    slot.text.tint = this.tint(slot.style, decades);
     slot.scale = size / FONT_SIZE;
     slot.halfW = halfWidth(label.length, size);
     slot.halfH = halfHeight(size);

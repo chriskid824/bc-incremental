@@ -10,6 +10,7 @@ import type { SimEvent, SimState } from '../../sim';
 import { createRunHash } from '../../sim/testing';
 import { typicalHitOf } from '../typicalHit';
 import {
+  characterLookOf,
   frameMsOf,
   rendererView,
   renderSeedOf,
@@ -345,9 +346,28 @@ describe('resolveReplayBuild (docs/v3 C10 design §1.7; B5’s dev start options
     const preset = resolveReplayBuild({ kind: 'preset', id: 'renderStress' }, content, FULL_SCOPE);
     expect([preset.web, preset.progress]).toEqual([null, null]);
     expect(preset.run.testModules).toHaveLength(4);
+    // 熔核 has its center from B1; 霜晶 is still 製作中.
     expect(() => resolveSpec(previewSpec('ice'))).toThrow(/製作中/);
     expect(resolveSpec(fusionClipSpec('ice.fire', { content: 'fixture' })).web?.character).toBe(
       'ice',
     );
+  });
+});
+
+describe('characterLookOf (B1: the renderer draws the character)', () => {
+  it('reads the construct, arena and colour off the character and the owned fusion cores', () => {
+    const look = characterLookOf(resolveSpec(fusionClipSpec('fire.poison')));
+    expect(look).toMatchObject({ construct: 'magmaCore', arena: 'fire', color: 0xff7a2f });
+    expect(look?.fusions).toEqual([
+      { outer: 'poison', skin: { accent: 0x3fd08a, shape: 'bubble' } },
+    ]);
+  });
+
+  it('owns no fusion before its core is bought, and has no look for a preset', () => {
+    const look = characterLookOf(
+      resolveSpec(previewSpec('fire', { build: { kind: 'default', character: 'fire', count: 3 } })),
+    );
+    expect(look?.fusions).toEqual([]);
+    expect(characterLookOf(resolveSpec(renderStressSpec()))).toBeNull();
   });
 });

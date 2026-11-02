@@ -1,7 +1,8 @@
 import type { Container } from 'pixi.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DOCK_SLOTS, EMPTY_MS } from './constructs/hive';
-import { HiveCoreView } from './core';
+import { MagmaCoreView } from './constructs/magmaCore';
+import { ConstructCoreView, HiveCoreView } from './core';
 import type { CoreView } from './core';
 import { PlayerView } from './player';
 
@@ -57,6 +58,44 @@ describe('HiveCoreView', () => {
       view.update(player, 16);
       view.reset();
       expect(view.view.x).toBe(960);
+    }
+  });
+});
+
+describe('ConstructCoreView', () => {
+  it('draws the character’s construct at the player and fades it as the M1 hexagon does', () => {
+    const core = new ConstructCoreView('magmaCore');
+    core.update(player, 16);
+    expect([core.view.x, core.view.y]).toEqual([960, 540]);
+    expect(core.view.label).toBe('core-magmaCore');
+    expect(core.view.children[0]?.label).toBe('construct-magmaCore');
+    core.update({ ...player, life: 0 }, 16);
+    expect(core.view.alpha).toBeCloseTo(0.35, 9);
+  });
+
+  it('plays the construct’s attack pose and swells on a pulse, back to rest on reset', () => {
+    const attack = vi.spyOn(MagmaCoreView.prototype, 'attack');
+    const core = new ConstructCoreView('magmaCore');
+    core.attack(Math.PI / 2);
+    expect(attack).toHaveBeenCalledWith(Math.PI / 2);
+    const construct = core.view.children[0] as Container;
+    core.pulse();
+    core.update(player, 0);
+    expect(construct.scale.x).toBeCloseTo(1.08, 9);
+    core.reset();
+    core.update(player, 0);
+    expect(construct.scale.x).toBe(1);
+    attack.mockRestore();
+  });
+
+  it('builds every construct but the hive’s, which has a view of its own', () => {
+    for (const id of ['magmaCore', 'frostCrystal', 'teslaTower'] as const) {
+      const core: CoreView = new ConstructCoreView(id);
+      core.hit();
+      core.update(player, 16);
+      core.rewind();
+      core.reset();
+      expect(core.view.x).toBe(960);
     }
   });
 });

@@ -25,6 +25,7 @@ import {
   webRunConfig,
 } from '../../meta/web';
 import type { AccountProgress, CharacterProgress } from '../../meta/web';
+import type { CharacterLook, FusionLook } from '../../render/characterLook';
 import type { RenderRandom } from '../../render/random';
 import { createSimulation, NO_INPUT, TICK_RATE } from '../../sim';
 import type { SimEvent, SimState, Simulation } from '../../sim';
@@ -115,6 +116,24 @@ export function resolveReplayBuild(
   const web = assembleWeb(content, character, scope);
   const progress = progressOf(web, build);
   return { web, progress, run: webSetup(web, progress) };
+}
+
+/**
+ * The renderer's looks for a resolved build (RendererOptions.character): its character's
+ * construct, arena and colour, and the fusion cores its progress owns with their skins; null for
+ * a preset, which the renderer draws as M1's center.
+ */
+export function characterLookOf(resolved: ResolvedBuild): CharacterLook | null {
+  const { web, progress } = resolved;
+  if (web === null || progress === null) return null;
+  const fusions: FusionLook[] = [];
+  for (const [outer, fusion] of web.fusions) {
+    const core = fusion.board.nodes.find((node) => node.kind === 'core');
+    if (core !== undefined && (progress.ranks[core.id] ?? 0) > 0) {
+      fusions.push({ outer, skin: fusion.skin });
+    }
+  }
+  return { construct: web.def.construct, arena: web.def.arena, color: web.def.color, fusions };
 }
 
 /** A spec's build resolved: a preset loads no content; `fixture` is fixtureContent('B5'). */

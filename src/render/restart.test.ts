@@ -161,12 +161,13 @@ describe('Renderer.restart (docs/v3 C10 design §1.7, C10.5a)', () => {
     expect(shown(cleared)).not.toEqual(shown(fresh));
   });
 
-  it('is beginRun, then each rewind: the center’s, the enemies’ and the numbers’', () => {
+  it('is beginRun, then each rewind: the center’s, 熔核’s layer’s, the enemies’ and the numbers’', () => {
     const source = readFileSync(fileURLToPath(new URL('./renderer.ts', import.meta.url)), 'utf8');
     const body = /\n {2}restart\(typicalHit: number\): void \{\n([\s\S]*?)\n {2}\}\n/.exec(source);
     expect(body?.[1]?.split('\n').map((line) => line.trim())).toEqual([
       'this.beginRun(typicalHit);',
       'this.core.rewind();',
+      'this.magma?.rewind();',
       'this.enemies.rewind();',
       'this.numbers.rewind();',
     ]);

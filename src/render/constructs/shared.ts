@@ -28,6 +28,8 @@ export interface ConstructView {
   hit(): void;
   /** Back to the resting pose, as at the start of a run. */
   reset(): void;
+  /** The idle clock back at zero, as a new view has it (Renderer.restart). */
+  rewind(): void;
 }
 
 export interface Vec {
