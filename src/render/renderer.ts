@@ -295,7 +295,7 @@ export class Renderer {
       this.worldY + this.shake.offsetY * this.worldScale,
     );
     this.aimEmbers(state);
-    this.enemies.update(state.enemies, alpha, dt, this.bursts);
+    this.enemies.update(state.enemies, state.tick, alpha, dt, this.bursts);
     // After the enemies: the chase brackets and the barrels go by where they were just drawn.
     this.drones?.update(state, alpha, this.enemies, dt);
     this.projectiles.update(state.projectiles, alpha);

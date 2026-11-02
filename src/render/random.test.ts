@@ -7,6 +7,7 @@ import { num } from '../core/num';
 import { createRng } from '../core/rng';
 import type { GameData } from '../data/types';
 import type { EnemyState } from '../sim';
+import type { BurnStack, Enemy } from '../sim/systems/context';
 import { makeTestData } from '../sim/testing';
 import { ArcLayer } from './arcs';
 import { FxParticles } from './fx';
@@ -42,7 +43,13 @@ interface EnemiesModule {
     glow: Texture,
     random?: RenderRandom,
   ) => {
-    update(enemies: readonly EnemyState[], alpha: number, dtMs: number, bursts: BurstsLayer): void;
+    update(
+      enemies: readonly EnemyState[],
+      tick: number,
+      alpha: number,
+      dtMs: number,
+      bursts: BurstsLayer,
+    ): void;
   };
 }
 
@@ -71,7 +78,8 @@ function newBursts(random?: RenderRandom): {
   return { bursts: new Bursts(fx, under, TEXTURES, new RingLayer(), random), fx, under };
 }
 
-const burning = (id: number, x: number): EnemyState => ({
+/** Three burn records live through the scene's tick 1: EnemyLayer draws the live ones. */
+const burning = (id: number, x: number): EnemyState & Pick<Enemy, 'burns' | 'burnRingEnd'> => ({
   id,
   type: 'triangle',
   wave: 1,
@@ -85,6 +93,8 @@ const burning = (id: number, x: number): EnemyState => ({
   burnStacks: 3,
   alive: true,
   v3: null,
+  burns: [100, 100, 100].map((end) => ({ end }) as BurnStack),
+  burnRingEnd: 0,
 });
 
 /**
@@ -132,7 +142,7 @@ const SCENES: Readonly<Record<string, (random?: RenderRandom) => unknown>> = {
     const enemies = new EnemyLayer(DATA, tex, random);
     const { bursts, under } = newBursts(random);
     for (let frame = 0; frame < 30; frame++) {
-      enemies.update([burning(1, 0), burning(2, 60)], 1, 16, bursts);
+      enemies.update([burning(1, 0), burning(2, 60)], 1, 1, 16, bursts);
     }
     // Each burning enemy sheds flames from a random debt (flameDebt) at random spots.
     return under.view.particleChildren.map((p) => [p.x, p.y]);
