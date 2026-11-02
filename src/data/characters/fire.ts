@@ -1,16 +1,219 @@
 /**
  * 熔核 (fire): its select card from gd (colour and difficulty gd:30, reveal sets gd:304-305, enemy
- * row gd:735). Its center is B1's and its ascendancies are B2's; until then they are null, which
- * the select screen shows as 「製作中」 (docs/v3 C6 design D14). Under the 10/28 fallback B1 also
- * rewrites the two reveal sets (impl:282; D29).
+ * row gd:735) and its center board (gd §1.2), B1's. Its ascendancies are B2's; until then they are
+ * null. Every number is an initial value for the balance simulator (CLAUDE.md).
  */
 
-import { defineCharacter } from '../templates';
+import {
+  answers,
+  centerBranch,
+  defineCharacter,
+  flat,
+  inc,
+  keystone,
+  mastery,
+  more,
+  notable,
+  ranked,
+  signatureNode,
+  threshold,
+} from '../templates';
+
+/**
+ * 爆炸半徑 (擴散) ranks. The area stat of the C4 Q2 (A) engine item is not on the branch yet, so
+ * these ranks raise the signature's area hits until it lands and the ranks switch to it.
+ */
+const blast = (perRank: number, ranks: 3 | 4) =>
+  ranked('damage', perRank, ranks, 'increased', { scope: 'center', tags: ['area'] });
+
+/** `id` repeated `n` times: n ranks of it in a purchase order. */
+const ranks = (id: string, n: number): string[] => Array.from({ length: n }, () => id);
+const C = 'fire.center.';
+
+/**
+ * 預設 build (V25): a default player's purchase order, ranks by repetition. Bombs and burns
+ * first, 瘟疫 for the triangles, then the hub through 擴散's connector to the crit outer and
+ * 火暴, 無盡烈焰, the poison outer and 火毒, and the 火環 threshold.
+ */
+const DEFAULT_ORDER: readonly string[] = [
+  ...ranks(`${C}stoke.r1`, 2),
+  ...ranks(`${C}furnace.r1`, 2),
+  ...ranks(`${C}stoke.r1`, 2),
+  `${C}stoke.r2`,
+  `${C}stoke.kindle`,
+  ...ranks(`${C}furnace.r2`, 2),
+  ...ranks(`${C}furnace.r1`, 2),
+  `${C}furnace.heatwave`,
+  ...ranks(`${C}spread.r1`, 2),
+  `${C}spread.r2`,
+  `${C}spread.pandemic`,
+  `${C}spread.r3`,
+  `${C}main.c3`,
+  'hub.economy.r1',
+  'outer.crit.main.entry',
+  ...ranks('outer.crit.precision.r1', 2),
+  ...ranks('outer.crit.heavy.r1', 2),
+  'outer.crit.precision.r2',
+  'outer.crit.heavy.r2',
+  'outer.crit.heavy.execute',
+  'fusion.fire.crit.core',
+  `${C}stoke.r3`,
+  `${C}main.c1`,
+  `${C}main.eternal-flame`,
+  `${C}stoke.r4`,
+  `${C}stoke.smoulder`,
+  ...ranks(`${C}furnace.r2`, 2),
+  `${C}main.c3`,
+  'hub.defense.r1',
+  'hub.defense.r2',
+  'hub.defense.wave-shield',
+  'outer.poison.main.entry',
+  ...ranks('outer.poison.virulence.r1', 2),
+  ...ranks('outer.poison.virulence.r2', 2),
+  'outer.poison.virulence.double-dose',
+  'outer.poison.contagion.r1',
+  'outer.poison.contagion.r2',
+  'fusion.fire.poison.core',
+  `${C}main.threshold`,
+  'fusion.fire.crit.r1',
+  'fusion.fire.poison.r1',
+  ...ranks('hub.might.might', 3),
+];
 
 export const FIRE = defineCharacter({
   id: 'fire',
   color: 0xff7a2f,
-  center: null,
+  center: {
+    signature: signatureNode(),
+    branches: [
+      // 疊焰: burn damage and stack cap.
+      centerBranch('stoke', {
+        r1: ranked('burnDamage', 0.15, 4),
+        r2: ranked('burnMaxStacks', 1, 3, 'flat'),
+        // 引火: burning enemies take +15% hit damage.
+        a: notable('kindle', {
+          modifiers: [inc('damage', 0.15, { tags: ['hit'], when: [{ targetHas: 'burn' }] })],
+        }),
+        r3: ranked('burnDamage', 0.15, 3),
+        r4: ranked('burnDuration', 0.1, 3),
+        // 悶燒: burns last 2 s longer and stack 3 higher.
+        b: notable('smoulder', {
+          modifiers: [flat('burnDuration', 2), flat('burnMaxStacks', 3)],
+        }),
+        r5: ranked('burnDamage', 0.15, 3),
+        r6: ranked('burnDuration', 0.1, 3),
+        // 白熱: the bombs hit an enemy at 5 burn stacks ×2.
+        c: notable('white-heat', {
+          modifiers: [
+            more('damage', 1, {
+              scope: 'center',
+              tags: ['hit'],
+              when: [{ stacksAtLeast: { ailment: 'burn', stacks: 5 } }],
+            }),
+          ],
+        }),
+        mastery: mastery(),
+      }),
+      // 擴散: blast radius and spread.
+      centerBranch('spread', {
+        r1: blast(0.08, 4),
+        r2: ranked('burnDamage', 0.12, 4),
+        // 瘟疫: a burning enemy that dies spreads 40% of its burns within 250 (答案：三角).
+        a: answers(
+          notable('pandemic', {
+            triggers: [
+              {
+                on: 'diedWithAilment',
+                when: [{ victimHas: 'burn' }],
+                do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 250, effect: 0.4 }],
+              },
+            ],
+          }),
+          'triangle',
+        ),
+        r3: blast(0.08, 3),
+        r4: ranked('burnDamage', 0.12, 3),
+        // 餘燼彈: a burning enemy that dies throws a small fireball at the nearest enemy.
+        b: notable('ember-shot', {
+          triggers: [
+            {
+              on: 'kill',
+              when: [{ victimHas: 'burn' }],
+              target: { pick: 'nearest' },
+              do: [{ kind: 'projectiles', count: 1, aim: 'target', damagePct: 0.5 }],
+            },
+          ],
+        }),
+        r5: blast(0.08, 3),
+        r6: ranked('burnDamage', 0.12, 3),
+        // 連環爆: an enemy a bomb kills explodes again (radius 40, 50%), twice a bomb at most.
+        c: notable('chain-blast', {
+          rules: [{ id: 'chainBlast', radius: 40, damagePct: 0.5, perBomb: 2 }],
+        }),
+        mastery: mastery(),
+      }),
+      // 爐心: bomb rate and damage.
+      centerBranch('furnace', {
+        r1: ranked('attackSpeed', 0.06, 4),
+        r2: ranked('damage', 0.12, 4, 'increased', { scope: 'center' }),
+        // 熱浪: every 5 s the enemies within 200 are pushed back 80 (答案：衝刺者).
+        a: answers(
+          notable('heatwave', {
+            triggers: [
+              { on: 'periodic', every: 5, do: [{ kind: 'push', distance: 80, radius: 200 }] },
+            ],
+          }),
+          'dasher',
+        ),
+        r3: ranked('attackSpeed', 0.06, 3),
+        r4: ranked('damage', 0.12, 3, 'increased', { scope: 'center' }),
+        // 遠投: every 4th bomb is thrown at the farthest enemy (答案：召喚者).
+        b: answers(notable('far-throw', { rules: [{ id: 'farThrow', every: 4 }] }), 'summoner'),
+        r5: ranked('attackSpeed', 0.06, 3),
+        r6: ranked('damage', 0.12, 3, 'increased', { scope: 'center' }),
+        // 引爆: a burn that fills the stacks detonates the burn's remaining damage at once.
+        c: notable('detonate', {
+          triggers: [
+            {
+              on: 'ailmentApplied',
+              when: [{ ailment: 'burn' }, { stacksAtLeast: { ailment: 'burn', stacks: 'max' } }],
+              do: [{ kind: 'detonate', ailment: 'burn' }],
+            },
+          ],
+        }),
+        mastery: mastery(),
+      }),
+    ],
+    keystones: [
+      // 無盡烈焰 (M1): no burn stack cap; burn duration −50%.
+      keystone('eternal-flame', { rules: [{ id: 'eternalFlame', durationMore: -0.5 }] }),
+      // 火山: a giant bomb every 3 s, radius ×3 and damage ×5; no other attacks.
+      keystone('volcano', {
+        rules: [{ id: 'volcano', periodSec: 3, radiusMult: 3, damageMult: 5 }],
+      }),
+    ],
+    // 火環: every 6 s a nova of radius 300 from the player, 50% damage, igniting what it hits.
+    threshold: threshold({
+      triggers: [
+        {
+          on: 'periodic',
+          every: 6,
+          do: [
+            { kind: 'nova', radius: 300, damagePct: 0.5 },
+            { kind: 'applyAilment', ailment: 'burn', radius: 300, maxTargets: 64 },
+          ],
+        },
+      ],
+    }),
+    connectors: [
+      ranked('damage', 0.08, 3),
+      ranked('attackSpeed', 0.05, 3),
+      ranked('maxLife', 0.1, 3),
+      ranked('damage', 0.08, 3),
+      ranked('attackSpeed', 0.05, 3),
+      ranked('maxLife', 0.1, 3),
+    ],
+  },
   ascendancies: null,
   recommendedOuter: ['ice', 'crit', 'summon'],
   revealAt15: ['poison', 'lightning', 'thorns'],
@@ -28,5 +231,5 @@ export const FIRE = defineCharacter({
   },
   difficulty: 1,
   construct: 'magmaCore',
-  defaultOrder: [],
+  defaultOrder: DEFAULT_ORDER,
 });

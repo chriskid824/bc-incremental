@@ -4,12 +4,24 @@
  * the 12 hand pairs (a character with another archetype's outer) needs its rule here (V11), with
  * HAND_RANKS unless it gives its own; a template pair may replace its core's trigger, add
  * triggers (火毒's 瘟疫爆彈), replace or drop its bonus, add modifiers, replace its ranks and merge
- * its skin, and only the pairs of TEMPLATE_RULE_OVERRIDES may add rules. Empty until B1.
+ * its skin, and only the pairs of TEMPLATE_RULE_OVERRIDES may add rules.
  */
 
 import type { FusionKey, FusionOverride } from '../web/types';
 
-export const OVERRIDES: Readonly<Partial<Record<FusionKey, FusionOverride>>> = {};
+export const OVERRIDES: Readonly<Partial<Record<FusionKey, FusionOverride>>> = {
+  // 火毒「瘟爆」 (gd:597): v2's 瘟疫爆彈, a poisoned enemy burned to death passes its poison
+  // stacks to the enemies within 90.
+  'fire.poison': {
+    addTriggers: [
+      {
+        on: 'diedWithAilment',
+        when: [{ victimHas: 'poison' }, { killedBy: 'burn' }],
+        do: [{ kind: 'spreadAilment', ailment: 'poison', radius: 90, effect: 0.9 }],
+      },
+    ],
+  },
+};
 
 /** Fusions accepted outside the band, each with the reason the batch PR quotes (F21). */
 export const ACCEPTED_FAILS: Readonly<Partial<Record<FusionKey, string>>> = {};
