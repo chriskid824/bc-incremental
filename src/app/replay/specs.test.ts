@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CHARACTER_IDS } from '../../data/sources';
 import { TICK_RATE } from '../../sim';
 import { STRESS_START_WAVE } from '../../sim/testing';
 import { readDevFlags } from '../devFlags';
@@ -14,7 +15,6 @@ import {
   gifSpec,
   parseReplayParam,
   parseReplayRoute,
-  PREVIEW_PURCHASES,
   PREVIEW_SECONDS,
   PREVIEW_WAVE,
   previewSpec,
@@ -25,11 +25,9 @@ import type { ReplayRoute } from './specs';
 
 describe('the replay specs (docs/v3 C10 design §1.7, §1.8)', () => {
   it('holds the sources’ constants: the GIF’s, the wall’s 3 s clips, the select card’s 10 s', () => {
-    expect([GIF_WAVE, GIF_SECONDS, GIF_FPS, GIF_WIDTH]).toEqual([30, 15, 30, 640]);
+    expect([GIF_WAVE, GIF_SECONDS, GIF_FPS, GIF_WIDTH]).toEqual([28, 15, 30, 640]);
     expect([CLIP_TICKS, PREVIEW_SECONDS]).toEqual([180, 10]);
-    expect([CLIP_WAVE, CLIP_WARMUP_TICKS, PREVIEW_WAVE, PREVIEW_PURCHASES]).toEqual([
-      18, 300, 30, 68,
-    ]);
+    expect([CLIP_WAVE, CLIP_WARMUP_TICKS, PREVIEW_WAVE]).toEqual([18, 300, 28]);
   });
 
   it('builds the wall’s clip, the select card’s loop, the PR GIF and renderStress', () => {
@@ -42,16 +40,24 @@ describe('the replay specs (docs/v3 C10 design §1.7, §1.8)', () => {
       durationTicks: 180,
       loop: true,
     });
-    expect(previewSpec('summon')).toEqual({
-      build: { kind: 'default', character: 'summon', count: 68 },
+    expect(previewSpec('summon')).toStrictEqual({
+      build: { kind: 'default', character: 'summon' },
       content: 'registered',
       seed: 1,
-      startWave: 30,
+      startWave: 28,
       warmupTicks: 300,
       durationTicks: 600,
       loop: true,
     });
-    expect(gifSpec('ice')).toMatchObject({ startWave: 30, durationTicks: 900, loop: false });
+    expect(gifSpec('ice')).toStrictEqual({
+      build: { kind: 'default', character: 'ice' },
+      content: 'registered',
+      seed: 1,
+      startWave: 28,
+      warmupTicks: 300,
+      durationTicks: 900,
+      loop: false,
+    });
     expect(renderStressSpec()).toEqual({
       build: { kind: 'preset', id: 'renderStress' },
       content: 'registered',
@@ -65,6 +71,21 @@ describe('the replay specs (docs/v3 C10 design §1.7, §1.8)', () => {
       seed: 9,
       content: 'fixture',
     });
+  });
+
+  it('plays each character’s whole defaultOrder from wave 28 (the lead’s rulings G1, G2)', () => {
+    for (const c of CHARACTER_IDS) {
+      for (const spec of [previewSpec(c), gifSpec(c)]) {
+        // No count: ReplayBuild's 「all without it」, never a prefix.
+        expect(spec.build, c).toStrictEqual({ kind: 'default', character: c });
+        expect('count' in spec.build, c).toBe(false);
+        expect(spec.startWave, c).toBe(28);
+      }
+    }
+    // The page's own forms start there too, and `&wave=` still moves them.
+    expect(parseReplayParam('?replay=gif:fire')).toMatchObject({ startWave: 28 });
+    expect(parseReplayParam('?replay=preview:fire')).toMatchObject({ startWave: 28 });
+    expect(parseReplayParam('?replay=gif:fire&wave=30')).toMatchObject({ startWave: 30 });
   });
 });
 

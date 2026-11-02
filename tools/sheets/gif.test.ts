@@ -2,7 +2,8 @@
  * The PR GIF (tools/sheets/gif.ts, docs/v3 C10 design §2.6): the capture's plan (OWN test 2) and
  * the replay page's query, a fusion's 15 s clip in one take (the lead's ruling H8), the size ladder
  * (OWN test 3), ffmpeg's argument lists (OWN test 4), makeGif's captures and encodes on stub deps,
- * the flags, and the session: the server and the browser stop on every exit path.
+ * the flags with `--wave` (the lead's ruling G3), and the session: the server and the browser stop
+ * on every exit path.
  */
 
 import {
@@ -19,12 +20,19 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReplayRun, resolveSpec } from '../../src/app/replay/build';
 import type { ReplayView } from '../../src/app/replay/build';
-import { parseReplayRoute } from '../../src/app/replay/specs';
+import {
+  CLIP_WAVE,
+  fusionClipSpec,
+  GIF_WAVE,
+  gifSpec,
+  parseReplayRoute,
+} from '../../src/app/replay/specs';
 import { TICK_RATE } from '../../src/sim';
 import {
   capturePlan,
   captureReplay,
   climbLadder,
+  defaultWave,
   FIRST_FRAME,
   findOnPath,
   frameName,
@@ -80,24 +88,25 @@ describe('the capture’s plan (docs/v3 C10 design §2.6, OWN test 2)', () => {
     ]);
   });
 
-  it('opens gif:<c> or clip:<key> with the length, the rate, the width and step mode', () => {
-    const at = { seconds: 15, fps: 30, width: 640, fixture: false };
+  it('opens gif:<c> or clip:<key> with the wave, the length, the rate, the width and step mode', () => {
+    const at = { wave: 28, seconds: 15, fps: 30, width: 640, fixture: false };
     expect(replayQuery({ kind: 'character', character: 'fire' }, at)).toBe(
-      '/?replay=gif:fire&seconds=15&fps=30&width=640&step=1',
+      '/?replay=gif:fire&wave=28&seconds=15&fps=30&width=640&step=1',
     );
     expect(
-      replayQuery({ kind: 'fusion', key: 'fire.ice' }, { ...at, fps: 20, fixture: true }),
-    ).toBe('/?replay=clip:fire.ice&seconds=15&fps=20&width=640&step=1&fixture');
+      replayQuery({ kind: 'fusion', key: 'fire.ice' }, { ...at, wave: 18, fps: 20, fixture: true }),
+    ).toBe('/?replay=clip:fire.ice&wave=18&seconds=15&fps=20&width=640&step=1&fixture');
     // The page reads them as the capture plans them.
-    for (const [target, fps] of [
-      [{ kind: 'character', character: 'ice' }, 30],
-      [{ kind: 'fusion', key: 'ice.fire' }, 20],
+    for (const [target, wave, fps] of [
+      [{ kind: 'character', character: 'ice' }, 28, 30],
+      [{ kind: 'fusion', key: 'ice.fire' }, 7, 20],
     ] as const) {
-      const route = parseReplayRoute(replayQuery(target, { ...at, fps, fixture: true }).slice(1));
+      const query = replayQuery(target, { ...at, wave, fps, fixture: true });
+      const route = parseReplayRoute(query.slice(1));
       if ('error' in route) throw new Error(route.error);
       const plan = capturePlan(15, fps);
       expect(route).toMatchObject({ width: 640, step: true, frameTicks: plan.frameTicks });
-      expect(route.spec).toMatchObject({ content: 'fixture', durationTicks: 900 });
+      expect(route.spec).toMatchObject({ content: 'fixture', durationTicks: 900, startWave: wave });
     }
   });
 });
@@ -111,15 +120,16 @@ const NO_VIEW: ReplayView = {
 
 describe('a fusion’s 15 s clip (the lead’s ruling H8)', () => {
   it('captures 900 ticks in one take: the last frame shows the clip’s last tick, no restart inside', () => {
+    // From wave 1, where the fixture's run outlasts the clip (from CLIP_WAVE it ends early: H10).
     const query = replayQuery(
       { kind: 'fusion', key: 'fire.ice' },
-      { seconds: 15, fps: 30, width: 640, fixture: true },
+      { wave: 1, seconds: 15, fps: 30, width: 640, fixture: true },
     );
-    // From wave 1, where the fixture's run outlasts the clip (from CLIP_WAVE it ends early: H10).
-    const route = parseReplayRoute(`${query.slice(1)}&wave=1`);
+    const route = parseReplayRoute(query.slice(1));
     if ('error' in route) throw new Error(route.error);
     const plan = capturePlan(15, 30);
-    expect([route.spec.durationTicks, route.spec.loop]).toEqual([
+    expect([route.spec.startWave, route.spec.durationTicks, route.spec.loop]).toEqual([
+      1,
       plan.frames * plan.frameTicks,
       true,
     ]);
@@ -275,6 +285,7 @@ function stubDeps(gifBytes: readonly number[]) {
 
 const OPTIONS: GifOptions = {
   target: { kind: 'character', character: 'fire' },
+  wave: 28,
   seconds: 15,
   fps: 30,
   width: 640,
@@ -289,7 +300,7 @@ const OUT = {
   gif: join('out/gif', 'fire.gif'),
   mp4: join('out/gif', 'fire.mp4'),
 };
-const QUERY30 = '/?replay=gif:fire&seconds=15&fps=30&width=640&step=1&fixture';
+const QUERY30 = '/?replay=gif:fire&wave=28&seconds=15&fps=30&width=640&step=1&fixture';
 
 describe('makeGif (docs/v3 C10 design §2.6; the lead’s ruling H8)', () => {
   it('captures once and makes the MP4, then the GIF, which fits at the first rung and is attached', async () => {
@@ -330,7 +341,7 @@ describe('makeGif (docs/v3 C10 design §2.6; the lead’s ruling H8)', () => {
     expect(captures).toEqual([
       { query: QUERY30, plan: { frames: 450, frameTicks: 2 }, dir: OUT.frames30 },
       {
-        query: '/?replay=gif:fire&seconds=15&fps=20&width=640&step=1&fixture',
+        query: '/?replay=gif:fire&wave=28&seconds=15&fps=20&width=640&step=1&fixture',
         plan: { frames: 300, frameTicks: 3 },
         dir: OUT.frames20,
       },
@@ -351,19 +362,20 @@ describe('makeGif (docs/v3 C10 design §2.6; the lead’s ruling H8)', () => {
     expect(lines.at(-1)).toContain('the MP4 is the attachment');
   });
 
-  it('captures a fusion’s clip by its key, and a rung at the capture’s width unscaled', async () => {
+  it('captures a fusion’s clip by its key from its wave, and a rung at the capture’s width unscaled', async () => {
     const { deps, captures, ffmpeg } = stubDeps([9, 9]);
     const options: GifOptions = {
       ...OPTIONS,
       target: { kind: 'fusion', key: 'fire.ice' },
+      wave: 7,
       width: 480,
       fixture: false,
       maxBytes: 1,
     };
     const result = await makeGif(options, deps);
     expect(captures.map((capture) => capture.query)).toEqual([
-      '/?replay=clip:fire.ice&seconds=15&fps=30&width=480&step=1',
-      '/?replay=clip:fire.ice&seconds=15&fps=20&width=480&step=1',
+      '/?replay=clip:fire.ice&wave=7&seconds=15&fps=30&width=480&step=1',
+      '/?replay=clip:fire.ice&wave=7&seconds=15&fps=20&width=480&step=1',
     ]);
     const frames20 = join('out/gif', 'frames', 'fire.ice-20fps');
     const palette = join('out/gif', 'frames', 'fire.ice-palette.png');
@@ -378,9 +390,10 @@ describe('makeGif (docs/v3 C10 design §2.6; the lead’s ruling H8)', () => {
 });
 
 describe('gif.ts’ flags', () => {
-  it('defaults to 15 s at 30 fps, 640 px, out/gif and the 9.5 MB cap', () => {
+  it('defaults to GIF_WAVE, 15 s at 30 fps, 640 px, out/gif and the 9.5 MB cap', () => {
     expect(parseGifArgs(['--character', 'fire'])).toEqual({
       target: { kind: 'character', character: 'fire' },
+      wave: 28,
       seconds: 15,
       fps: 30,
       width: 640,
@@ -392,6 +405,8 @@ describe('gif.ts’ flags', () => {
       parseGifArgs([
         '--fusion',
         'ice.fire',
+        '--wave',
+        '12',
         '--seconds',
         '3',
         '--fps',
@@ -406,6 +421,7 @@ describe('gif.ts’ flags', () => {
       ]),
     ).toEqual({
       target: { kind: 'fusion', key: 'ice.fire' },
+      wave: 12,
       seconds: 3,
       fps: 20,
       width: 480,
@@ -440,6 +456,57 @@ describe('gif.ts’ flags', () => {
     expect(error('--character', 'fire', '--width', '642')).toContain('642 × 361 px');
     expect(error('--character', 'fire', '--max-bytes', '0')).toBe('--max-bytes 0: at least 1');
     expect(error('--character', 'fire', '--bogus')).toContain("Unknown option '--bogus'");
+  });
+
+  it('takes --wave <n> into the query as &wave=; without it, each form’s own wave (the lead’s ruling G3)', () => {
+    const parsed = (...argv: string[]): GifOptions => {
+      const options = parseGifArgs(argv);
+      if ('error' in options) throw new Error(options.error);
+      return options;
+    };
+    // Without it: gif:'s GIF_WAVE, and a fusion clip's CLIP_WAVE, as the page's own forms start.
+    expect([GIF_WAVE, CLIP_WAVE]).toEqual([28, 18]);
+    expect(parsed('--character', 'fire').wave).toBe(GIF_WAVE);
+    expect(parsed('--fusion', 'fire.ice').wave).toBe(CLIP_WAVE);
+    expect(defaultWave({ kind: 'character', character: 'ice' })).toBe(gifSpec('ice').startWave);
+    expect(defaultWave({ kind: 'fusion', key: 'ice.fire' })).toBe(
+      fusionClipSpec('ice.fire').startWave,
+    );
+    // With it, for either target: the page starts the clip there.
+    for (const [argv, form] of [
+      [['--character', 'fire', '--wave', '40'], 'gif:fire'],
+      [['--fusion', 'fire.ice', '--wave', '40'], 'clip:fire.ice'],
+      [['--character', 'fire', '--wave', '1'], 'gif:fire'],
+    ] as const) {
+      const options = parsed(...argv);
+      const query = replayQuery(options.target, options);
+      expect(query, form).toBe(
+        `/?replay=${form}&wave=${options.wave}&seconds=15&fps=30&width=640&step=1`,
+      );
+      const route = parseReplayRoute(query.slice(1));
+      if ('error' in route) throw new Error(route.error);
+      expect(route.spec.startWave, form).toBe(Number(argv[3]));
+    }
+  });
+
+  it('refuses a wave that is not a whole number, or that the page refuses, naming --wave', () => {
+    const error = (...argv: string[]): string => {
+      const parsed = parseGifArgs(argv);
+      return 'error' in parsed ? parsed.error : 'parsed';
+    };
+    expect(error('--character', 'fire', '--wave', 'thirty')).toBe('--wave thirty: a whole number');
+    expect(error('--character', 'fire', '--wave', '28.5')).toBe('--wave 28.5: a whole number');
+    expect(error('--fusion', 'fire.ice', '--wave', '')).toBe('--wave : a whole number');
+    // The page's &wave= is a whole number from 1.
+    const zero = error('--character', 'fire', '--wave', '0');
+    expect(zero).toMatch(/^--wave 0: the replay page refuses /);
+    expect(zero).toContain('&wave=0: a whole number from 1 to 9007199254740991');
+    expect(error('--fusion', 'fire.ice', '--wave', '0')).toMatch(/^--wave 0: /);
+    expect(error('--character', 'fire', '--wave', '9007199254740992')).toMatch(
+      /^--wave 9007199254740992: .*a whole number from 1 to 9007199254740991$/,
+    );
+    // Another flag's refusal does not name --wave.
+    expect(error('--character', 'fire', '--wave', '28', '--seconds', '61')).not.toContain('--wave');
   });
 });
 
@@ -624,6 +691,16 @@ describe('gif.ts’ run', () => {
     const { deps, log } = stubSession(stubPage());
     expect(await run(['--character', 'fire', '--fps', '7'], {}, deps)).toBe(2);
     expect(log).toEqual([]);
+  });
+
+  it('prints a bad --wave’s error and a usage line that names --wave', async () => {
+    const { deps, log } = stubSession(stubPage());
+    expect(await run(['--character', 'fire', '--wave', 'x'], {}, deps)).toBe(2);
+    expect(log).toEqual([]);
+    const printed = String(vi.mocked(console.error).mock.calls.at(-1)?.[0]);
+    expect(printed).toContain('gif: --wave x: a whole number');
+    expect(printed).toContain('usage: npx tsx tools/sheets/gif.ts');
+    expect(printed).toContain('--fusion <c>.<o> [--wave <n>] [--seconds 15]');
   });
 
   it('stops the server and the browser when the page does not load; a window holds a wide canvas', async () => {
