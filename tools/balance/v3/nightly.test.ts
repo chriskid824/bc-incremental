@@ -287,11 +287,14 @@ describe('the nightly plan', () => {
         content: 'registered',
         commit: SHA,
         fuzzSeed: 11_260_404,
-        // One character: no triples until a second center (B2).
+        // The weekly adds 熔核's triples (three outers from B1's ice).
         shards: [
           { id: 'fire-sessions', kind: 'sessions', character: 'fire' },
           { id: 'fire-probes', kind: 'probes', character: 'fire' },
           { id: 'fire-doubles', kind: 'doubles', character: 'fire' },
+          ...(set === 'weekly'
+            ? [{ id: 'fire-triples', kind: 'triples', character: 'fire', part: [0, 1] }]
+            : []),
           { id: 'global-m1', kind: 'm1' },
           { id: 'global-fuzz', kind: 'fuzz' },
         ],

@@ -207,14 +207,20 @@ describe('npm run checks', () => {
   it('appends report.md to --summary, cut at SUMMARY_MAX_BYTES with its note past it', async () => {
     const summary = join(root, 'summary.md');
     writeFileSync(summary, '## an earlier step\n');
-    expect(await main(['--out', root, '--summary', summary], capture(), fixed())).toBeLessThan(2);
+    expect(
+      await main(['--out', root, '--summary', summary], capture(), fixed({ run: deathsAt(30) })),
+    ).toBeLessThan(2);
     expect(readFileSync(summary, 'utf8')).toBe(`## an earlier step\n${read('report.md')}`);
 
     // A ref of 50,000 lines makes report.md longer than the summary may be.
     const ref = Array.from({ length: 50_000 }, (_, i) => `claude/v3-engine-${i}`).join('\n');
     writeFileSync(summary, '');
     expect(
-      await main(['--out', root, '--summary', summary], capture(), fixed({ ref: () => ref })),
+      await main(
+        ['--out', root, '--summary', summary],
+        capture(),
+        fixed({ ref: () => ref, run: deathsAt(30) }),
+      ),
     ).toBeLessThan(2);
     const report = read('report.md');
     expect(Buffer.byteLength(report)).toBeGreaterThan(SUMMARY_MAX_BYTES);
@@ -233,7 +239,10 @@ describe('npm run checks', () => {
     expect(readCommit()).toBe('unknown');
     vi.stubEnv('GITHUB_HEAD_REF', '');
     vi.stubEnv('GITHUB_REF_NAME', '');
-    const deps: ChecksDeps = { now: () => new Date(Date.UTC(2026, 9, 28, 3, 17)) };
+    const deps: ChecksDeps = {
+      now: () => new Date(Date.UTC(2026, 9, 28, 3, 17)),
+      run: deathsAt(30),
+    };
     expect(await main(['--out', root], capture(), deps)).toBeLessThan(2);
     expect(JSON.parse(read('checks.json')).header).toMatchObject({
       commit: 'unknown',
