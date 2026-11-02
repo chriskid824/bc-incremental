@@ -259,8 +259,8 @@ export function createLobState(): LobState {
 
 /**
  * The repeats of the signature attack (RunContext.sys.repeat, the repeatAttack executor in
- * src/sim/effects/execute.ts): each repeatAttack effect's payload, and the repeats waiting for
- * the attack's next own firing.
+ * src/sim/effects/execute.ts): each repeatAttack effect's payload, the repeats waiting for the
+ * attack's next own firing, 殘影's echo, and the repeats waiting for a tick.
  */
 export interface RepeatState {
   /**
@@ -280,9 +280,60 @@ export interface RepeatState {
     head: number;
     count: number;
   };
+  /**
+   * 殘影 (BuildFlags.comboEcho, src/sim/systems/combo.ts): the payload of its echoes, the
+   * signature's at its damagePct as a repeatAttack's (repeatPayload in context.ts), and their
+   * delay in whole ticks; null without comboEcho.
+   */
+  readonly echo: { readonly payload: Payload; readonly ticks: number } | null;
+  /** The repeats waiting for their tick (DelayedRepeats). */
+  readonly delayed: DelayedRepeats;
 }
 
-export function createRepeatState(payloads: readonly (Payload | null)[]): RepeatState {
+/**
+ * The repeats waiting for their tick (scheduleRepeat in src/sim/effects/queue.ts, fired by
+ * drainDelayedRepeats in src/sim/effects/execute.ts): a ring of entries ordered by their due tick
+ * and then by their seq, the run's count of schedulings when each was scheduled, so of two due
+ * on one tick the one scheduled first fires first. Each entry carries what a repeat charge
+ * carries, its payload and its hits' trigger depth and origin, and its due tick; the earliest at
+ * head, count of them. Its arrays hold no slot until the first scheduling, and double when full,
+ * so scheduling allocates nothing once they have grown; nothing caps them.
+ */
+export interface DelayedRepeats {
+  /** Slot of the earliest entry. */
+  head: number;
+  count: number;
+  /** Capacity − 1; the capacity is 0 or a power of two. */
+  capMask: number;
+  /** Schedulings so far in the run: the seq of the next entry. */
+  scheduled: number;
+  /** Per slot: the entry's due tick and seq, payload, and its hits' trigger depth and origin. */
+  due: Float64Array;
+  seq: Float64Array;
+  payload: (Payload | null)[];
+  depth: Int32Array;
+  origin: Int32Array;
+}
+
+/** Delayed repeats of `capacity` slots (0, or a power of two), none waiting. */
+export function createDelayedRepeats(capacity = 0): DelayedRepeats {
+  return {
+    head: 0,
+    count: 0,
+    capMask: capacity - 1,
+    scheduled: 0,
+    due: new Float64Array(capacity),
+    seq: new Float64Array(capacity),
+    payload: new Array<Payload | null>(capacity).fill(null),
+    depth: new Int32Array(capacity),
+    origin: new Int32Array(capacity),
+  };
+}
+
+export function createRepeatState(
+  payloads: readonly (Payload | null)[],
+  echo: RepeatState['echo'],
+): RepeatState {
   return {
     payloads,
     charges: {
@@ -292,6 +343,8 @@ export function createRepeatState(payloads: readonly (Payload | null)[]): Repeat
       head: 0,
       count: 0,
     },
+    echo,
+    delayed: createDelayedRepeats(),
   };
 }
 

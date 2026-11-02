@@ -25,6 +25,7 @@ import type { EnemyId, GameData } from '../data/types';
 import { frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
 import { SMALL_PROJECTILE_TICKS } from './caps';
+import { REPEAT } from './effects/flags';
 import { createPayload, ROWS } from './emitters/types';
 import type { EmitterRuntime, Payload } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
@@ -42,6 +43,7 @@ import {
 } from './systems/enemyRecord';
 import { MOTION_HOMING, MOTION_LOB, MOTION_STRAIGHT, spawnShot } from './systems/shots';
 import {
+  afterimageModule,
   GOLDEN_BUILDS,
   makeConfig,
   makeStats,
@@ -2153,6 +2155,15 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [armouredSquares()],
     expected: ['02eeaeab6f5845d4', '9b4b4349d77245df'],
   },
+  // C6b.4's 殘影 (lead ruling E3) on combo's build and waves, through the test module: at full
+  // stacks each attack's echo, half its damage, 18 ticks later.
+  {
+    name: 'afterimage',
+    config: { stats: COMBO_STATS, rules: [], startWave: 12 },
+    data: comboData,
+    modules: () => [afterimageModule()],
+    expected: ['a67d786a39587fd2', 'b73235919ad0dcfd'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -2978,6 +2989,123 @@ describe('golden C4 runs', () => {
         aura: [0, 2],
         kills: { coin: 19, dot: 8, hit: 4 },
         seen,
+      },
+    });
+  });
+
+  it('echoes each attack at full stacks in afterimage 18 ticks later at half damage, through a halving and past the run’s end (C6b.4)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'afterimage') as GoldenC4Entry;
+    const bySeed: Record<number, Record<string, unknown>> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const full: string[] = [];
+      const halved: string[] = [];
+      const cleared: string[] = [];
+      const late: string[] = [];
+      const afterHalving: string[] = [];
+      const shares = { echo: new Set<number>(), attack: new Set<number>() };
+      const waiting: number[] = [];
+      let first = '';
+      let last = '';
+      let fullFrom = -1;
+      let halvedAt = -1;
+      let prev = 0;
+      let scheduled = 0;
+      let fired = 0;
+      let count = 0;
+      // At each tick's end of the emitter stage, after its hits on the player, its drain and its
+      // attacks: the echoes the tick scheduled and fired (in scheduling order, as they share one
+      // delay), the stretches of full stacks and the halvings.
+      const watch: TestModule = (b) => {
+        b.hook('tick', (ctx) => {
+          const list = ctx.sys.repeat.delayed;
+          const stacks = ctx.sys.combo.stacks;
+          if (ctx.events.some((e) => e.type === 'playerHit')) {
+            halved.push(`${ctx.now}: ${prev} → ${stacks}`);
+            halvedAt = ctx.now;
+          }
+          const idle = ctx.sys.combo.idle;
+          if (idle > 0 && idle % 60 === 0 && prev > 0)
+            cleared.push(`${ctx.now}: ${prev} → ${stacks}`);
+          const fresh = list.scheduled - scheduled;
+          const out = count + fresh - list.count;
+          for (let n = 0; n < out; n++) {
+            const at = waiting.shift() as number;
+            if (ctx.now - at !== 18) late.push(`${at} → ${ctx.now}`);
+            if (at < halvedAt) afterHalving.push(`${at} → ${ctx.now}`);
+            last = `${at} → ${ctx.now}`;
+          }
+          for (let n = 0; n < fresh; n++) waiting.push(ctx.now);
+          if (first === '' && fresh > 0) first = `${ctx.now} (wave ${ctx.current?.wave ?? 0})`;
+          scheduled = list.scheduled;
+          fired += out;
+          count = list.count;
+          if (stacks >= 20 && fullFrom < 0) fullFrom = ctx.now;
+          if (stacks < 20 && fullFrom >= 0) {
+            full.push(`${fullFrom}–${ctx.now - 1}`);
+            fullFrom = -1;
+          }
+          prev = stacks;
+        });
+        // A primary emitter hit's share of 10 × (1 + 0.02 per stack), the attack's damage at the
+        // stacks it lands at: × 1.5 on a crit.
+        b.hook('onHit', (ctx, hit) => {
+          if (hit.origin !== -1 || hit.chainIndex !== 0) return;
+          const share = toNumber(hit.amount) / (10 * (1 + 0.02 * ctx.sys.combo.stacks));
+          shares[(hit.flags & REPEAT) !== 0 ? 'echo' : 'attack'].add(Math.round(share * 1e9) / 1e9);
+        });
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const modules = [...(entry.modules?.() ?? []), watch];
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), modules);
+      while (!sim.state.finished) sim.step(NO_INPUT);
+      if (fullFrom >= 0) full.push(`${fullFrom}–`);
+      bySeed[seed] = {
+        first,
+        last,
+        full,
+        halved,
+        cleared,
+        scheduled,
+        fired,
+        pending: count,
+        late,
+        afterHalving,
+        echoShares: [...shares.echo].sort(),
+        attackShares: [...shares.attack].sort(),
+      };
+    }
+    // Both seeds fill the stacks in wave 12, as combo does, and echo each attack from then on,
+    // 18 ticks after it, until a square walks in and halves them; the two echoes still waiting
+    // fire after the halving all the same. Seed 1 fills them again at 712 and schedules its last
+    // echo at 944, the gap between releases clearing the stacks at 1013; seed 2 fills them at
+    // 722 and is still echoing when the run ends, two echoes left unfired. Each echo fires 18
+    // ticks after its attack, and its primary hit deals half the attack's damage at the stacks
+    // it lands at, × 1.5 on a crit.
+    const echoes = { echoShares: [0.5, 0.75], attackShares: [1, 1.5], late: [] };
+    expect(bySeed).toEqual({
+      1: {
+        ...echoes,
+        first: '228 (wave 12)',
+        last: '944 → 962',
+        full: ['228–375', '712–1012'],
+        halved: ['376: 20 → 10'],
+        cleared: ['505: 19 → 0', '633: 6 → 0', '1013: 20 → 0', '1158: 6 → 0'],
+        scheduled: 44,
+        fired: 44,
+        pending: 0,
+        afterHalving: ['359 → 377', '368 → 386'],
+      },
+      2: {
+        ...echoes,
+        first: '263 (wave 12)',
+        last: '1180 → 1198',
+        full: ['263–405', '722–'],
+        halved: ['406: 20 → 10'],
+        cleared: ['519: 16 → 0', '632: 5 → 0'],
+        scheduled: 68,
+        fired: 66,
+        pending: 2,
+        afterHalving: ['394 → 412', '404 → 422'],
       },
     });
   });

@@ -3,11 +3,20 @@
  * for the tick's effect phase (execute.ts) and run first in, first out. A ring of typed arrays
  * that doubles when full, up to EFFECT_QUEUE_HARD_CAP entries, and never shrinks: enqueueing
  * allocates nothing once it has grown.
+ *
+ * Beside it, the delayed repeats (RunContext.sys.repeat.delayed, docs/v3 C6 design §7.4 C6b.4):
+ * repeats of the signature attack that wait for a tick, not for an attack (殘影's echoes,
+ * src/sim/systems/combo.ts), ordered by (due tick, seq), where seq counts the run's schedulings,
+ * and fired by drainDelayedRepeats (execute.ts) once a tick. A ring of typed arrays too, from no
+ * slot, doubling when full; nothing caps it.
  */
 
 import type { Num } from '../../core/num';
 import { toNumber } from '../../core/num';
+import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
+import { createDelayedRepeats } from '../systems/systemState';
+import type { DelayedRepeats } from '../systems/systemState';
 import { EFFECT_QUEUE_HARD_CAP } from './types';
 
 /** Entries a new queue has room for. */
@@ -162,6 +171,70 @@ export function dequeue(q: EffectQueue, entry: EffectEntry): void {
   q.target[at] = null;
   q.head = (at + 1) & q.capMask;
   q.size--;
+}
+
+/** Delayed repeats a list holds at its first growth. */
+const DELAYED_INITIAL_CAPACITY = 16;
+
+/** Doubles the list's capacity (from none to DELAYED_INITIAL_CAPACITY), keeping its order. */
+function growDelayed(list: DelayedRepeats): void {
+  const next = createDelayedRepeats(Math.max(DELAYED_INITIAL_CAPACITY, (list.capMask + 1) * 2));
+  for (let n = 0; n < list.count; n++) {
+    const from = (list.head + n) & list.capMask;
+    next.due[n] = list.due[from] as number;
+    next.seq[n] = list.seq[from] as number;
+    next.payload[n] = list.payload[from] as Payload | null;
+    next.depth[n] = list.depth[from] as number;
+    next.origin[n] = list.origin[from] as number;
+  }
+  list.head = 0;
+  list.capMask = next.capMask;
+  list.due = next.due;
+  list.seq = next.seq;
+  list.payload = next.payload;
+  list.depth = next.depth;
+  list.origin = next.origin;
+}
+
+/**
+ * Schedules a repeat of the signature attack with payload `p` for tick `due`, its hits at
+ * `depth` from trigger `origin` (RunContext.sys.repeat.delayed): it takes the run's next seq and
+ * goes in by the list's order, after every entry due on an earlier tick or on its own, so it
+ * fires after them and before every entry due later, whenever those were scheduled.
+ */
+export function scheduleRepeat(
+  ctx: RunContext,
+  due: number,
+  p: Payload,
+  depth: number,
+  origin: number,
+): void {
+  const list = ctx.sys.repeat.delayed;
+  if (list.count === list.capMask + 1) growDelayed(list);
+  const seq = list.scheduled++;
+  const mask = list.capMask;
+  const { head, due: dues, seq: seqs, payload, depth: depths, origin: origins } = list;
+  // From the tail back, each entry ordered after (due, seq) moves one slot on.
+  let n = list.count;
+  while (n > 0) {
+    const from = (head + n - 1) & mask;
+    const d = dues[from] as number;
+    if (d < due || (d === due && (seqs[from] as number) < seq)) break;
+    const to = (head + n) & mask;
+    dues[to] = d;
+    seqs[to] = seqs[from] as number;
+    payload[to] = payload[from] as Payload | null;
+    depths[to] = depths[from] as number;
+    origins[to] = origins[from] as number;
+    n--;
+  }
+  const at = (head + n) & mask;
+  dues[at] = due;
+  seqs[at] = seq;
+  payload[at] = p;
+  depths[at] = depth;
+  origins[at] = origin;
+  list.count++;
 }
 
 /** Per trigger index (TriggerState in RunContext). */

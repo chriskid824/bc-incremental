@@ -31,7 +31,7 @@ import type { SourcedRule } from '../data/stats';
 import { COEF_MAX, COEF_MIN } from '../data/triggers';
 import type { GameData } from '../data/types';
 import { dispatchPendingKills } from './effects/dispatch';
-import { runEffectQueue } from './effects/execute';
+import { drainDelayedRepeats, runEffectQueue } from './effects/execute';
 import { updateAilments } from './systems/ailments';
 import { stepCombo } from './systems/combo';
 import { resolveContacts } from './systems/contact';
@@ -147,10 +147,12 @@ export function createSimulation(
   // The segment emitters are fixed with the run context, as is whether it is a v3 run, whose
   // enemies the enemy AI step moves, and whether the combo step has work (ComboState.ticks). A
   // stage with nothing to do is not called, since a call made every tick, even one that returns
-  // at once, takes from V8's inlining budget for step and leaves other stages out of it.
+  // at once, takes from V8's inlining budget for step and leaves other stages out of it. The
+  // delayed repeats' list is one object for the run, so its count is the one test a tick.
   const segments = ctx.sys.segments.emitters.length !== 0;
   const enemyAi = ctx.sys.enemyAi.enabled;
   const combo = ctx.sys.combo.ticks;
+  const delayed = ctx.sys.repeat.delayed;
   // So is whether the globals step has work (src/sim/systems/globals.ts): a build that reads the
   // shards held, or the enemies in the aura while it has an aura emitter. The wallet is the run
   // config's, 0 without one.
@@ -183,9 +185,12 @@ export function createSimulation(
    *    and contact; then the player regenerates (contact.ts).
    * 6. emitters: in a run that keeps combo stacks or has a buff, the combo step first: the
    *    idle ticks without a target for the signature emitter and their decay, and the buff
-   *    windows that are over (combo.ts); then each emitter's due attacks are counted, with the
-   *    signature's combo stack, the onAttack hooks and the nthAttack triggers, and fire
-   *    projectiles; then the rule modules' tick hooks run (emitters.ts, src/sim/emitters/).
+   *    windows that are over (combo.ts); then, while any waits, the delayed repeats whose tick
+   *    has come fire, in (due, seq) order (殘影's echoes; drainDelayedRepeats in
+   *    src/sim/effects/execute.ts); then each emitter's due attacks are counted, with the
+   *    signature's combo stack and, at full stacks under 殘影, its echo scheduled, the onAttack
+   *    hooks and the nthAttack triggers, and fire projectiles; then the rule modules' tick hooks
+   *    run (emitters.ts, src/sim/emitters/).
    * 6b. drones: the drone pool's slots step in id order (src/sim/systems/drones.ts): drones
    *    move, pick and impact, with their hits, chains and kills resolved inline as in step 7,
    *    and turrets fire homing shots, which move in step 7.
@@ -209,8 +214,9 @@ export function createSimulation(
    *
    * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 4b in a run whose build
    * reads shardsHeld or enemiesInAura, 6's combo step in a run that keeps combo stacks or has a
-   * buff, 6b only while there is a drone, 8 in a run with segment emitters and 9 while there is
-   * a zone (a run of M1's content has none of them).
+   * buff, its delayed repeats while one waits, 6b only while there is a drone, 8 in a run with
+   * segment emitters and 9 while there is a zone (a run of M1's content has none of them).
+   * Delayed repeats still waiting when the run ends never fire.
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -226,6 +232,7 @@ export function createSimulation(
     resolveContacts(ctx);
     if (ctx.player.life > 0) {
       if (combo) stepCombo(ctx);
+      if (delayed.count !== 0) drainDelayedRepeats(ctx);
       runEmitters(ctx);
       runTickHooks(ctx);
       if (ctx.sys.drones.count !== 0) stepDrones(ctx);

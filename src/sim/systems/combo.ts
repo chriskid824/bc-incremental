@@ -21,6 +21,14 @@
  * so a hit reads them as they are at that hit, and recomputes the combo factor of each emitter
  * whose hit row has an attackSpeed entry scaled on them.
  *
+ * 殘影 (BuildFlags.comboEcho, gd §4.5's threshold): a counted attack of the signature emitter
+ * that leaves the stacks full, at or above BuildFlags.comboFull once its own stack is in,
+ * schedules one echo of itself (scheduleRepeat, src/sim/effects/queue.ts): a repeat of the
+ * signature attack on the echo payload (RunContext.sys.repeat.echo, at comboEcho.damagePct of
+ * its damage), due round(delaySec × TICK_RATE) ticks later, at least 1, which fires then
+ * whatever the stacks have become. An echo is a repeat, no attack: it gains no stack and leaves
+ * no echo of its own.
+ *
  * A buff effect (src/data/triggers.ts BuffSpec) is active from its firing, in the effect phase,
  * until its window of round(durationSec × TICK_RATE) ticks is over: it multiplies the cadence of
  * the emitters it takes by 1 + more from the next emitter stage, for that many emitter stages.
@@ -35,6 +43,7 @@
 
 import { SCOPED_STATS } from '../../data/stats';
 import { statAt } from '../build/eval';
+import { scheduleRepeat } from '../effects/queue';
 import { isFar } from '../emitters/lob';
 import { SLOT_HIT, slotRow } from '../emitters/types';
 import type { EmitterRuntime } from '../emitters/types';
@@ -48,11 +57,19 @@ const ATTACK_SPEED = SCOPED_STATS.indexOf('attackSpeed');
 
 /**
  * A counted attack of `em` (countAttack): +1 stack when it is the signature emitter's, up to the
- * cap. Called only when BuildFlags.combo is set.
+ * cap; then, under 殘影, its echo when the stacks are full. Called only when BuildFlags.combo is
+ * set.
  */
 export function gainComboOnAttack(ctx: RunContext, em: EmitterRuntime): void {
   if (em.index !== 0) return;
-  setStacks(ctx, Math.min(ctx.build.flags.comboCap, ctx.sys.combo.stacks + 1));
+  const flags = ctx.build.flags;
+  const cs = ctx.sys.combo;
+  setStacks(ctx, Math.min(flags.comboCap, cs.stacks + 1));
+  const echo = ctx.sys.repeat.echo;
+  // The attack's own depth and origin: 0 and −1. compileBuild has set comboFull.
+  if (echo !== null && cs.stacks >= (flags.comboFull as number)) {
+    scheduleRepeat(ctx, ctx.now + echo.ticks, echo.payload, 0, -1);
+  }
 }
 
 /** A comboStack effect: `stacks` more, up to the cap. */

@@ -22,7 +22,9 @@
  * its effect's repeat payload (RunContext.sys.repeat: the signature's, flagged SIGNATURE and
  * REPEAT, on the effects stream): at once, or, with timing 'nextAttack', right after the
  * attack's next own firing (drainRepeatCharges), at most REPEAT_CHARGE_CAP waiting. An entry
- * whose event came from a repeat's hit (REPEAT) repeats nothing (rule 7).
+ * whose event came from a repeat's hit (REPEAT) repeats nothing (rule 7). The repeats that wait
+ * for a tick instead (殘影's echoes, RunContext.sys.repeat.delayed) fire through the same steps
+ * once their tick has come (drainDelayedRepeats).
  *
  * A detonate takes its share of the damage an ailment has left on its live target
  * (src/sim/ailments/remaining.ts) and deals it at once, as it is (PRESCALED); on a kill trigger,
@@ -429,6 +431,32 @@ export function drainRepeatCharges(ctx: RunContext, em: EmitterRuntime): void {
     charges.payload[at] = null;
     charges.head = (at + 1) % REPEAT_CHARGE_CAP;
     charges.count--;
+    step(ctx, em, p, depth, origin);
+  }
+}
+
+/**
+ * Fires every delayed repeat whose tick has come (RunContext.sys.repeat.delayed, scheduleRepeat
+ * in queue.ts), in (due, seq) order, each a repeat of the signature attack on emitter 0 with its
+ * own payload, depth and origin, as repeatAttack's are. step() calls it once a tick, in the
+ * emitter stage after the combo step and before the emitters attack, and only while an entry
+ * waits; whatever the stacks are, so an echo fires after a hit has halved them.
+ */
+export function drainDelayedRepeats(ctx: RunContext): void {
+  const list = ctx.sys.repeat.delayed;
+  const now = ctx.now;
+  if ((list.due[list.head] as number) > now) return;
+  const em = ctx.emitters[0] as EmitterRuntime;
+  const step = REPEAT_STEPS[ctx.build.signature.id];
+  while (list.count > 0) {
+    const at = list.head;
+    if ((list.due[at] as number) > now) return;
+    const p = list.payload[at] as Payload;
+    const depth = list.depth[at] as number;
+    const origin = list.origin[at] as number;
+    list.payload[at] = null;
+    list.head = (at + 1) & list.capMask;
+    list.count--;
     step(ctx, em, p, depth, origin);
   }
 }

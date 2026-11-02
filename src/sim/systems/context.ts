@@ -703,18 +703,24 @@ function effectPayload(
 }
 
 /**
- * The payload of a repeatAttack effect's repeats (RunContext.sys.repeat): the signature
- * payload's at the effect's damagePct of its damage, on the effects stream, flagged SIGNATURE
- * and REPEAT. Its tags, sources and chain policy are the signature's, so it shares its rows. A
- * lob's carries its own fire zone's payload, the signature's 火地 at the same share on the
- * effects stream, which rolls ailments and always ignites as 火地 does, flagged REPEAT too: its
- * pulse hits and their kills fire no repeat (rule 7, Hoshi's Q5/F1). Null for every other
- * effect.
+ * The payload of a repeatAttack effect's repeats (RunContext.sys.repeat): repeatPayload at the
+ * effect's damagePct. Null for every other effect.
  */
-function repeatPayload(fx: CompiledEffect, signature: Payload, rng: Rng): Payload | null {
+function effectRepeatPayload(fx: CompiledEffect, signature: Payload, rng: Rng): Payload | null {
   const spec = fx.spec;
-  if (spec.kind !== 'repeatAttack') return null;
-  const share = spec.damagePct;
+  return spec.kind === 'repeatAttack' ? repeatPayload(signature, spec.damagePct, rng) : null;
+}
+
+/**
+ * The payload of a repeat of the signature attack at `share` of its damage (a repeatAttack
+ * effect's, and 殘影's echoes, RunContext.sys.repeat): the signature payload's at that share, on
+ * the effects stream, flagged SIGNATURE and REPEAT. Its tags, sources and chain policy are the
+ * signature's, so it shares its rows. A lob's carries its own fire zone's payload, the
+ * signature's 火地 at the same share on the effects stream, which rolls ailments and always
+ * ignites as 火地 does, flagged REPEAT too: its pulse hits and their kills fire no repeat (rule
+ * 7, Hoshi's Q5/F1).
+ */
+function repeatPayload(signature: Payload, share: number, rng: Rng): Payload {
   const zone = signature.zoneVariant;
   return createPayload({
     baseDamage: mul(signature.baseDamage, share),
@@ -962,7 +968,16 @@ export function createRunContext(
   const effectPayloads = effects.map((fx) =>
     effectPayload(fx, effectsRng, critChance, attribution),
   );
-  const repeatPayloads = effects.map((fx) => repeatPayload(fx, signaturePayload, effectsRng));
+  const repeatPayloads = effects.map((fx) => effectRepeatPayload(fx, signaturePayload, effectsRng));
+  // 殘影's echoes: a payload and a delay only for a build that sets comboEcho (lead ruling E3).
+  const comboEcho = flags.comboEcho;
+  const echo =
+    comboEcho === null
+      ? null
+      : {
+          payload: repeatPayload(signaturePayload, comboEcho.damagePct, effectsRng),
+          ticks: Math.max(1, Math.round(comboEcho.delaySec * TICK_RATE)),
+        };
   // Who burn damage can be credited to: the applier of every payload whose hits ignite, an
   // emitter's zone payload among them (Payload.zoneVariant), and of every applyAilment and
   // groundZone burn. A repeat's payloads have the signature's sources.
@@ -1121,7 +1136,7 @@ export function createRunContext(
       pulse: createPulseAcc(),
       zones,
       lob: createLobState(),
-      repeat: createRepeatState(repeatPayloads),
+      repeat: createRepeatState(repeatPayloads, echo),
       split: createSplitState(build),
       segments,
       chain: createChainState(chainRetention),

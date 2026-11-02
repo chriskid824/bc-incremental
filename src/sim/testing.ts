@@ -18,6 +18,7 @@ import type { TriggerSpec } from '../data/triggers';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyDef, EnemyId, GameData, V3WaveRules, WaveTable } from '../data/types';
 import { centerDamage, compileBuild } from './build/compile';
+import type { BuildFlags } from './build/compile';
 import { CHAIN_HIT_CAP, PROJECTILE_CAP, SUMMON_CAP } from './caps';
 import type { GridItem } from './grid';
 import type { TestModule } from './rules';
@@ -407,6 +408,20 @@ export function maskProbeMods(): Modifier[] {
     { stat: 'damage', kind: 'increased', value: 0.28, tags: ['burn'] },
     { stat: 'damage', kind: 'increased', value: 0.56, tags: ['chain'] },
   ];
+}
+
+/** 殘影's numbers (gd:425): 0.3 s later, at 50 % of the attack's damage. */
+export const AFTERIMAGE: NonNullable<BuildFlags['comboEcho']> = { delaySec: 0.3, damagePct: 0.5 };
+
+/**
+ * 殘影 as a rule module sets it (docs/v3 C6 design §7.4 C6b.4; B4 writes the real one): at full
+ * stacks each counted attack of the signature is echoed by `echo` (AFTERIMAGE's numbers unless
+ * given). It leaves BuildFlags.combo to compileBuild, which sets it for any echo.
+ */
+export function afterimageModule(echo: BuildFlags['comboEcho'] = AFTERIMAGE): TestModule {
+  return (b) => {
+    b.flags.comboEcho = echo;
+  };
 }
 
 type EventOf<T extends SimEvent['type']> = Extract<SimEvent, { type: T }>;

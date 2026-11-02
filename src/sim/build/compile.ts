@@ -116,7 +116,28 @@ export interface BuildFlags {
    */
   shardsHeld: boolean;
   enemiesInAura: boolean;
+  /**
+   * The stacks at which the combo is full (「滿層」: 殘影, ◆爆發): full means stacks ≥ comboFull.
+   * A module may set it; left null, compileBuild sets it once the modules have run, to comboCap
+   * while that is finite and to DEFAULT_COMBO_CAP when a module lifts the cap (★無盡連擊), so
+   * ★ turns neither off. A compiled build's is never null.
+   */
+  comboFull: number | null;
+  /**
+   * 殘影 (gd §4.5's threshold, 「滿層時每次攻擊留下殘影，0.3 秒後重複那一擊（50% 傷害）」): each
+   * counted attack of the signature emitter at full stacks schedules one repeat of it delaySec
+   * later (src/sim/systems/combo.ts), at damagePct of its damage; null (no echo) unless a module
+   * sets it, and then compileBuild sets BuildFlags.combo, since the echo reads the stacks.
+   * delaySec must be positive and finite, damagePct in (0, 1].
+   */
+  comboEcho: { readonly delaySec: number; readonly damagePct: number } | null;
 }
+
+/**
+ * The combo's cap (gd:419's 「上限 20」): BuildFlags.comboCap's default, and comboFull's when a
+ * module lifts the cap.
+ */
+export const DEFAULT_COMBO_CAP = 20;
 
 /** Parameters of the signature attack. */
 export interface SignatureParams {
@@ -362,12 +383,14 @@ export function compileBuild(
     globalSlow: 0,
     shatterMult: 1,
     combo: false,
-    comboCap: 20,
+    comboCap: DEFAULT_COMBO_CAP,
     comboIdleTicks: 60,
     comboIdleKeep: 0,
     comboHitKeep: 0.5,
     shardsHeld: false,
     enemiesInAura: false,
+    comboFull: null,
+    comboEcho: null,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -540,13 +563,33 @@ export function compileBuild(
     effects.push(shatterEffect(Math.max(0, values.shatterRadius)));
   }
   // The run counts the combo stacks only for a build that reads or adds them (lead ruling K1),
-  // so every other build's run stays the same bit for bit.
+  // 殘影 included, which reads them for 「滿層」, so every other build's run stays the same bit
+  // for bit.
   flags.combo ||=
     scoped.some((mod) => mod.scaling?.per === 'comboStacks') ||
-    effects.some((fx) => fx.spec.kind === 'comboStack');
+    effects.some((fx) => fx.spec.kind === 'comboStack') ||
+    flags.comboEcho !== null;
   // So too the per-tick variables (lead ruling G2).
   flags.shardsHeld ||= scoped.some((mod) => mod.scaling?.per === 'shardsHeld');
   flags.enemiesInAura ||= scoped.some((mod) => mod.scaling?.per === 'enemiesInAura');
+  // 「滿層」 (lead ruling E2): a module's own value stays; otherwise the cap, or gd's 20 when a
+  // module lifted the cap, so ★無盡連擊 keeps 殘影 and ◆爆發.
+  flags.comboFull ??= Number.isFinite(flags.comboCap) ? flags.comboCap : DEFAULT_COMBO_CAP;
+  const echo = flags.comboEcho;
+  if (
+    echo !== null &&
+    !(
+      echo.delaySec > 0 &&
+      Number.isFinite(echo.delaySec) &&
+      echo.damagePct > 0 &&
+      echo.damagePct <= 1
+    )
+  ) {
+    throw new Error(
+      `comboEcho: delaySec ${echo.delaySec} must be positive and finite, ` +
+        `damagePct ${echo.damagePct} in (0, 1]`,
+    );
+  }
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
   );
