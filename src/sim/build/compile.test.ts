@@ -103,6 +103,10 @@ describe('compileBuild', () => {
       halveCounts: false,
       areaFactor: 1,
       spawnsDrones: false,
+      highestHp: false,
+      poisonSlowStacks: 0,
+      poisonSlowPer: 0,
+      poisonSlowMax: 0,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

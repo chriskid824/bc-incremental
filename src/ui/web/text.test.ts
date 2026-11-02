@@ -457,6 +457,7 @@ function kitchenSink(): NodeEffects {
       do: [heal],
     })),
     { on: 'hit', when: [{ targetFrostAtLeast: 0.3 }], do: [heal] },
+    { on: 'hit', when: [{ targetIs: 'highestHp' }], do: [heal] },
     ...TARGET_PICKS.map((pick): TriggerSpec => ({ on: 'hit', target: { pick }, do: [heal] })),
     ...(['outward', 'nearest', 'eventTarget', 'along'] as const).map((toward): TriggerSpec => ({
       on: 'hit',
@@ -536,7 +537,11 @@ function kitchenSink(): NodeEffects {
       { tags: ['hit'], to: 'cold', fraction: 0.5 },
       { to: 'burn', fraction: 0.25 },
     ],
-    rules: [{ id: 'glassCannon', damageMore: 1 }],
+    rules: [
+      { id: 'glassCannon', damageMore: 1 },
+      { id: 'gigantism', sizeMult: 2 },
+      { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 },
+    ],
   });
 }
 
@@ -595,7 +600,7 @@ describe('every template, through one node (§4.7)', () => {
     }
     expect([...kinds].sort()).toEqual(Object.keys(KIND_TEXT).sort());
     const families =
-      /^web\.(?:kind|effect|word|ailment|applied|held|state|killedBy|toward|aim|spawnAim|extra|event|fanout|cond|hit|targetKind|enemies|how|trigger|conds|pick|scaling|curve|mod|qual|scope|tag|rank|conversion|ruleFallback|centerDamage|bonus|grant|ring|masteryName|coreName|answers|join)\b/;
+      /^web\.(?:kind|effect|word|ailment|applied|held|state|killedBy|toward|aim|spawnAim|extra|event|fanout|cond|hit|targetKind|enemies|how|trigger|conds|pick|scaling|curve|mod|qual|scope|tag|rank|conversion|ruleFallback|rule|targetIs|centerDamage|bonus|grant|ring|masteryName|coreName|answers|join)\b/;
     const unasked = Object.keys(MESSAGES.en).filter((key) => families.test(key) && !asked.has(key));
     // An ailment condition sits on ailmentApplied and ailmentTick only (CONDITION_CONTEXTS), whose
     // templates name the ailment themselves: its registry entry is never a line of its own.

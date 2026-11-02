@@ -13,8 +13,10 @@
  * freeze, so a thawed enemy is not slowed by a stale meter.
  */
 
+import type { BuildFlags } from '../build/compile';
 import type { Enemy, RunContext } from '../systems/context';
 import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
+import { livePoisonStacks } from './rings';
 
 /** How much less a boss is slowed at a full meter than a normal enemy (frostSlowCap − 0.15). */
 export const BOSS_SLOW_CAP_OFFSET = 0.15;
@@ -36,14 +38,27 @@ export function holdsFrozen(enemy: Enemy, now: number): boolean {
 
 /**
  * The fraction of its step the enemy loses at tick `now`: all of it while frozen, else the
- * largest of the build's slow on every enemy (BuildFlags.globalSlow), its chill and the live
- * slow of the zones it stands in (src/sim/systems/zones.ts), which bosses take in full.
+ * largest of the build's slow on every enemy (BuildFlags.globalSlow), its chill, the live slow
+ * of the zones it stands in (src/sim/systems/zones.ts) and, under 神經毒 (poisonSlow), its poison
+ * slow (poisonSlowOf); bosses take the zones' and the poison's in full.
  */
 export function enemySlow(ctx: RunContext, enemy: Enemy, now: number): number {
   if (enemy.frozenUntil > now) return 1;
   const cap = enemy.boss ? ctx.bossFrostSlowCap : ctx.frostSlowCap;
-  const slow = Math.max(ctx.globalSlow, cap * enemy.frost);
-  return enemy.zoneSlowUntil > now ? Math.max(slow, enemy.zoneSlow) : slow;
+  let slow = Math.max(ctx.globalSlow, cap * enemy.frost);
+  if (enemy.zoneSlowUntil > now) slow = Math.max(slow, enemy.zoneSlow);
+  const flags = ctx.build.flags;
+  return flags.poisonSlowPer > 0 ? Math.max(slow, poisonSlowOf(flags, enemy, now)) : slow;
+}
+
+/**
+ * 神經毒's slow on the enemy at tick `now` (lead rulings H3, H4): poisonSlowPer for every
+ * poisonSlowStacks of its live poison stacks (livePoisonStacks: none once every stack has
+ * ended), at most poisonSlowMax. Read only in a run with the rule (poisonSlowPer > 0).
+ */
+export function poisonSlowOf(flags: Readonly<BuildFlags>, enemy: Enemy, now: number): number {
+  const steps = Math.floor(livePoisonStacks(enemy, now) / flags.poisonSlowStacks);
+  return Math.min(flags.poisonSlowMax, flags.poisonSlowPer * steps);
 }
 
 /**

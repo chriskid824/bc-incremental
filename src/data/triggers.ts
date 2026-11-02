@@ -202,6 +202,14 @@ export const TARGET_STATES = ['dashing', 'stopped'] as const;
 export type TargetState = (typeof TARGET_STATES)[number];
 
 /**
+ * Which enemy of the run a target condition asks for (targetIs): highestHp, the alive enemy with
+ * the most hp left at this tick's globals step (src/sim/systems/globals.ts), the first of equals
+ * in ctx.enemies, bosses included. A list, so later picks append.
+ */
+export const TARGET_IS_PICKS = ['highestHp'] as const;
+export type TargetIsPick = (typeof TARGET_IS_PICKS)[number];
+
+/**
  * A condition on the enemy an event or a damage instance targets; never met without a target.
  * targetHas: the enemy holds the ailment (burn: one of its burn stacks has not ended yet;
  * poison: it has poison damage left to take; bleed: its bleed has not ended; shock: its shock
@@ -213,7 +221,8 @@ export type TargetState = (typeof TARGET_STATES)[number];
  * one source id and never a class (a zone pulse marks the enemies within it for 16 ticks,
  * groundZone). targetState: it is in that state (TARGET_STATES), never in an M1 run, whose
  * enemies have no behaviours. targetFrostAtLeast: its chill meter is at least this fraction, in
- * (0, 1] (a frozen enemy's meter reads full, frostMeter).
+ * (0, 1] (a frozen enemy's meter reads full, frostMeter). targetIs: it is the run's enemy of that
+ * pick (TARGET_IS_PICKS) as this tick's globals step found it, never outside a run.
  */
 export type TargetCondition =
   | { readonly targetHas: HeldAilment }
@@ -224,7 +233,8 @@ export type TargetCondition =
     }
   | { readonly inZone: SourceSelector }
   | { readonly targetState: TargetState }
-  | { readonly targetFrostAtLeast: number };
+  | { readonly targetFrostAtLeast: number }
+  | { readonly targetIs: TargetIsPick };
 
 /**
  * A condition of a trigger. chance: the trigger fires with this probability, rolled when the
@@ -280,6 +290,7 @@ export const CONDITION_CONTEXTS: Readonly<
   inZone: ['modifier', ...TARGETED],
   targetState: ['modifier', ...TARGETED],
   targetFrostAtLeast: ['modifier', ...TARGETED],
+  targetIs: ['modifier', ...TARGETED],
   chance: TRIGGER_EVENTS,
   cooldownSec: TRIGGER_EVENTS,
   hitIs: ['hit', 'crit', ...KILLS],

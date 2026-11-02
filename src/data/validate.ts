@@ -774,6 +774,18 @@ function ruleIssues(rule: RuleSpec): string[] {
         );
       }
       break;
+    case 'poisonSlow':
+      // Its term, min(max, slowPer × floor(stacks / stacksPer)), is a slow in (0, 1].
+      if (!isPositiveInt(rule.stacksPer)) {
+        issues.push(`poisonSlow.stacksPer must be a positive integer (got ${rule.stacksPer})`);
+      }
+      if (!(rule.slowPer > 0 && rule.slowPer <= 1)) {
+        issues.push(`poisonSlow.slowPer must be in (0, 1] (got ${rule.slowPer})`);
+      }
+      if (!(rule.max > 0 && rule.max <= 1)) {
+        issues.push(`poisonSlow.max must be in (0, 1] (got ${rule.max})`);
+      }
+      break;
   }
   return issues;
 }
@@ -1516,6 +1528,7 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'absoluteZero':
     case 'gigantism':
     case 'blastSpirit':
+    case 'poisonSlow':
       return [];
   }
 }

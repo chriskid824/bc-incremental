@@ -8,7 +8,7 @@
 
 import { lt, mul } from '../../core/num';
 import { SCOPED_STATS } from '../../data/stats';
-import { HELD_AILMENTS, STACK_AILMENTS, TARGET_KINDS } from '../../data/triggers';
+import { HELD_AILMENTS, STACK_AILMENTS, TARGET_IS_PICKS, TARGET_KINDS } from '../../data/triggers';
 import type {
   Condition,
   HeldAilment,
@@ -63,9 +63,9 @@ const CURVE_CODE: Readonly<Record<ScalingCurve, CompiledScaling['curve']>> = {
  * What a read of a dynamic entry or a condition looks at; one reused object per run
  * (RunContext.evalInput). `now`, `target` and `chainJump` are set before each damage instance
  * reads its stats; `playerLifeFrac`, life / max life, once per tick after the contact step;
- * `comboStacks` wherever the stacks change (src/sim/systems/combo.ts); `shardsHeld` and
- * `enemiesInAura` once per tick before the contact step, in a run whose build reads them
- * (src/sim/systems/globals.ts).
+ * `comboStacks` wherever the stacks change (src/sim/systems/combo.ts); `shardsHeld`,
+ * `enemiesInAura` and `highestHpId` once per tick before the contact step, in a run whose build
+ * reads them (src/sim/systems/globals.ts).
  */
 export interface EvalInput {
   now: number;
@@ -88,6 +88,12 @@ export interface EvalInput {
    */
   enemiesInAura: number;
   /**
+   * The id of the alive enemy with the most hp at this tick's globals step, which targetIs
+   * 'highestHp' compares its target with; 0 for none (enemy ids start at 1), outside a run and in
+   * a run whose build names no targetIs (BuildFlags.highestHp).
+   */
+  highestHpId: number;
+  /**
    * The run, whose stack caps stacksAtLeast 'max' reads; null outside a run, where no such
    * condition is met.
    */
@@ -96,7 +102,8 @@ export interface EvalInput {
 
 /**
  * An input for estimates outside a run: no target (target conditions are not met, target
- * variables read 0), full life, no combo stacks, no shards held, no enemy in an aura and no run.
+ * variables read 0), full life, no combo stacks, no shards held, no enemy in an aura, no
+ * highest-hp enemy and no run.
  */
 export const staticInput = (chainJump = 0): EvalInput => ({
   now: 0,
@@ -106,6 +113,7 @@ export const staticInput = (chainJump = 0): EvalInput => ({
   comboStacks: 0,
   shardsHeld: 0,
   enemiesInAura: 0,
+  highestHpId: 0,
   ctx: null,
 });
 
@@ -251,6 +259,11 @@ export const IN_ZONE = 5;
 const TARGET_STATE = 7;
 /** The target's chill meter (frostMeter) is at least `a`. */
 const TARGET_FROST_AT_LEAST = 8;
+/**
+ * The target is the run's enemy of TARGET_IS_PICKS ordinal `a` at this tick's globals step:
+ * highestHp, EvalInput.highestHpId. Never met outside a run.
+ */
+const TARGET_IS = 9;
 
 /** The EnemyV3.state bit of each targetState (src/sim/systems/enemyRecord.ts). */
 const STATE_BITS: Readonly<Record<TargetState, number>> = { dashing: DASHING, stopped: STOPPED };
@@ -258,11 +271,11 @@ const STATE_BITS: Readonly<Record<TargetState, number>> = { dashing: DASHING, st
 /**
  * A condition compiled for checking: a code and two operands. Target conditions read the
  * target (held ailment ordinal; TARGET_KINDS ordinal; hp fraction; stack ailment ordinal and
- * stacks, or for 'max' that ordinal alone; zone source index; state bit; chill fraction);
- * hitIs, victimHas and killedBy read the event's flags.
+ * stacks, or for 'max' that ordinal alone; zone source index; state bit; chill fraction;
+ * TARGET_IS_PICKS ordinal); hitIs, victimHas and killedBy read the event's flags.
  */
 export interface CompiledCondition {
-  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   readonly a: number;
   readonly b: number;
 }
@@ -312,6 +325,9 @@ export function compileCondition(
   if ('targetFrostAtLeast' in condition) {
     return { code: TARGET_FROST_AT_LEAST, a: condition.targetFrostAtLeast, b: 0 };
   }
+  if ('targetIs' in condition) {
+    return { code: TARGET_IS, a: TARGET_IS_PICKS.indexOf(condition.targetIs), b: 0 };
+  }
   if ('ailment' in condition) {
     if (on === 'ailmentApplied') {
       const flag = appliedFlag(condition.ailment);
@@ -347,9 +363,16 @@ const NORMAL = TARGET_KINDS.indexOf('normal');
 const kindOf = (enemy: Enemy): number => (enemy.boss ? BOSS : enemy.tough ? ELITE : NORMAL);
 
 /**
+ * Some condition of `conditions` is a targetIs (TARGET_IS): a run of a build with one computes
+ * its pick once a tick (BuildFlags.highestHp, src/sim/systems/globals.ts).
+ */
+export const readsTargetIs = (conditions: readonly CompiledCondition[] | null): boolean =>
+  conditions !== null && conditions.some((c) => c.code === TARGET_IS);
+
+/**
  * Every condition holds for an event or instance on `target` (null: none, and then no target
  * condition holds) at tick `now`, carrying `flags`, in run `ctx` (null: none, and then no
- * stacksAtLeast 'max' holds).
+ * stacksAtLeast 'max' or targetIs holds).
  */
 export function conditionsMet(
   conditions: readonly CompiledCondition[],
@@ -395,6 +418,10 @@ export function conditionsMet(
         if (liveStacks(target, c.a, now) < Math.max(1, cap)) return false;
         break;
       }
+      case TARGET_IS:
+        // highestHp, TARGET_IS_PICKS' only pick: the globals step's id, never 0 for an enemy.
+        if (ctx === null || target.id !== ctx.evalInput.highestHpId) return false;
+        break;
     }
   }
   return true;

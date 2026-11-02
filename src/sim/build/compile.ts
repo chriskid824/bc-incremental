@@ -49,7 +49,7 @@ import type { BuildCompiler, HookName, Hooks, TestModule } from '../rules';
 import { NO_POLICY_SPEC } from '../systems/systemState';
 import type { ChainPolicySpec } from '../systems/systemState';
 import type { CharacterRun } from '../types';
-import { statAt, staticInput } from './eval';
+import { readsTargetIs, statAt, staticInput } from './eval';
 import { compileConversions, compileMods, ModTable, rowValues } from './modTable';
 import type { CompiledConversion, CompiledMod } from './modTable';
 import { sizeOf } from './size';
@@ -168,6 +168,22 @@ export interface BuildFlags {
    * run; false keeps the pool at the rows its layout placed, as every run without one.
    */
   spawnsDrones: boolean;
+  /**
+   * The run finds the alive enemy with the most hp once a tick into EvalInput.highestHpId
+   * (src/sim/systems/globals.ts), which targetIs 'highestHp' reads: compileBuild sets it once
+   * the modules have run when any compiled condition is a targetIs, a modifier's `when` (the
+   * build's or a module's, compileMods) or a trigger's (the build's or a module's,
+   * compileTrigger). False: the id stays 0 and nothing computes it.
+   */
+  highestHp: boolean;
+  /**
+   * 神經毒 (poisonSlow, src/sim/rules/poisonSlow.ts): enemySlow (src/sim/ailments/frost.ts) takes
+   * min(poisonSlowMax, poisonSlowPer × floor(live poison stacks / poisonSlowStacks)) as one more
+   * source. 0 = off: every other run's enemySlow and movement stay as they were.
+   */
+  poisonSlowStacks: number;
+  poisonSlowPer: number;
+  poisonSlowMax: number;
 }
 
 /**
@@ -435,6 +451,10 @@ export function compileBuild(
     halveCounts: false,
     areaFactor: 1,
     spawnsDrones: false,
+    highestHp: false,
+    poisonSlowStacks: 0,
+    poisonSlowPer: 0,
+    poisonSlowMax: 0,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -652,6 +672,11 @@ export function compileBuild(
   );
 
   const mods = compileMods(scoped, sources);
+  // So too the highest-hp enemy (lead ruling H2): every condition compiles in compileMods (a
+  // modifier's `when`, the build's and the modules') or in compileTrigger (a trigger's, through
+  // addTrigger), so a targetIs anywhere in the build is in one of these.
+  flags.highestHp ||=
+    mods.some((mod) => readsTargetIs(mod.cond)) || triggers.some((t) => readsTargetIs(t.conds));
   const conversions = compileConversions(stats.conversions);
   const table = new ModTable(
     mods,

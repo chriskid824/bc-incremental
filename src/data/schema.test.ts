@@ -59,6 +59,7 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
     burnDamagePct: 1,
     maxLive: 6,
   },
+  poisonSlow: { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 },
 };
 
 describe('ModifierSchema', () => {

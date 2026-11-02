@@ -149,6 +149,7 @@ export const CONDITION_TEXT: Readonly<Record<ConditionKey, MessageKey>> = {
   inZone: 'web.cond.inZone',
   targetState: 'web.cond.targetState',
   targetFrostAtLeast: 'web.cond.targetFrostAtLeast',
+  targetIs: 'web.cond.targetIs',
   chance: 'web.cond.chance',
   cooldownSec: 'web.cond.cooldownSec',
   hitIs: 'web.cond.hitIs',
@@ -485,6 +486,7 @@ const ENEMY_CONDITIONS: ReadonlySet<ConditionKey> = new Set<ConditionKey>([
   'inZone',
   'targetState',
   'targetFrostAtLeast',
+  'targetIs',
 ]);
 
 /** One condition's text; a chance × `coef`, at most 100% (D10). */
@@ -510,6 +512,8 @@ function conditionText(lookup: TextLookup, condition: Condition, coef: number): 
     return say(lookup, key, { state: say(lookup, `web.state.${condition.targetState}`) });
   if ('targetFrostAtLeast' in condition)
     return say(lookup, key, { pct: percent(condition.targetFrostAtLeast) });
+  if ('targetIs' in condition)
+    return say(lookup, key, { pick: say(lookup, `web.targetIs.${condition.targetIs}`) });
   if ('chance' in condition)
     return say(lookup, key, { pct: percent(Math.min(1, condition.chance * coef)) });
   if ('cooldownSec' in condition) return say(lookup, key, { s: trim(condition.cooldownSec) });
@@ -1227,13 +1231,19 @@ function chanceLine(lookup: TextLookup, node: WebNode, fusion: FusionDef | undef
 
 /**
  * A rule's generated line: `web.rule.<id>` for a rule with a text of its own (巨大化's, gd:268,
- * its sizeMult as ×2), else `web.ruleFallback` naming it, until its node's hand description
- * (V17) does.
+ * its sizeMult as ×2; 神經毒's poisonSlow, gd:389), else `web.ruleFallback` naming it, until its
+ * node's hand description (V17) does.
  */
 function ruleText(lookup: TextLookup, rule: RuleSpec): string {
   switch (rule.id) {
     case 'gigantism':
       return say(lookup, 'web.rule.gigantism', { mult: `×${trim(rule.sizeMult)}` });
+    case 'poisonSlow':
+      return say(lookup, 'web.rule.poisonSlow', {
+        n: rule.stacksPer,
+        pct: percent(rule.slowPer),
+        max: percent(rule.max),
+      });
     default:
       return say(lookup, 'web.ruleFallback', { rule: rule.id });
   }

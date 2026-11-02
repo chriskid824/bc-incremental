@@ -18,6 +18,7 @@ import { m1Volley } from './m1Volley';
 import { magmaBomb } from './magmaBomb';
 import type { RuleModule, SignatureModule } from './module';
 import { overload } from './overload';
+import { poisonSlow } from './poisonSlow';
 import { sixCoils } from './sixCoils';
 import { steadyAim } from './steadyAim';
 import { swarm } from './swarm';
@@ -55,6 +56,7 @@ export const RULE_MODULES: {
   absoluteZero,
   gigantism,
   blastSpirit,
+  poisonSlow,
 };
 
 export const SIGNATURES: {

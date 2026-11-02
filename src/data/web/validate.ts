@@ -14,6 +14,7 @@ import { TEMPLATE_RULE_OVERRIDES } from '../fusion/overrides';
 import { coefRange, scalesDamage } from '../fusion/sensitivity';
 import {
   CHARACTER_SIGNATURE,
+  NOTABLE_RULES,
   POLICY_RULES,
   RULE_COEF_FIELDS,
   SIGNATURE_EVENT,
@@ -1106,13 +1107,17 @@ function formProblem(form: string, node: WebNode, board: Board): string | null {
   return null;
 }
 
-/** Rules a node of this kind may hold besides forms (D8, F50): ★, cores, finals; a ◆ a chain policy. */
+/**
+ * Rules a node of this kind may hold besides forms (D8, F50): ★, cores, finals; a ◆ a chain policy
+ * or a NOTABLE_RULES rule.
+ */
 const holdsRule = (node: WebNode, rule: string): boolean =>
   node.kind === 'keystone' ||
   node.kind === 'core' ||
   node.kind === 'ascFinal' ||
   ((node.kind === 'notable' || node.kind === 'asc') &&
-    (POLICY_RULES as readonly string[]).includes(rule));
+    ((POLICY_RULES as readonly string[]).includes(rule) ||
+      (NOTABLE_RULES as readonly string[]).includes(rule)));
 
 /** Each transfer in `node`'s triggers with its effect (1 when left out). */
 function transfers(node: WebNode): { readonly kind: string; readonly effect: number }[] {
@@ -1140,7 +1145,7 @@ function nodeRuleIssues(board: Board): ContentIssue[] {
       } else if (!holdsRule(node, rule.id)) {
         push(
           `rule '${rule.id}' sits on ${article(node.kind)} node; a rule takes a ★, a fusion core or an ` +
-            'ascendancy final, or a ◆ when POLICY_RULES lists it',
+            'ascendancy final, or a ◆ when POLICY_RULES or NOTABLE_RULES lists it',
         );
       }
     }

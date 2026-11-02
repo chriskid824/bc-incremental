@@ -183,6 +183,7 @@ const on = (ctx: RunContext, target: Enemy): EvalInput => ({
   comboStacks: 0,
   shardsHeld: 0,
   enemiesInAura: 0,
+  highestHpId: 0,
   ctx,
 });
 
@@ -839,6 +840,19 @@ describe('the treasure (docs/v3 C7 design §2.5)', () => {
     expect(record(one).state).toBe(ORBITING);
     tick(ctx);
     expect(record(one).state).toBe(FLEEING);
+  });
+
+  it('turns by its slowed step under 神經毒 too: 100 live poison stacks turn it 40 % less (E2)', () => {
+    // Planted bug: orbitTurn handed a slow without poisonSlow's term (lead ruling H4).
+    const ctx = placed([at('treasure', 480), at('treasure', 480)], {
+      rules: [{ id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 }],
+    });
+    const [plain, poisoned] = [enemy(ctx, 1), enemy(ctx, 2)];
+    poisoned.poisonStacks = 100;
+    poisoned.poisonRingEnd = ctx.now + 60;
+    tick(ctx);
+    expect(bearing(plain)).toBeCloseTo(TREASURE_STEP / 480, 12);
+    expect(bearing(poisoned)).toBeCloseTo((TREASURE_STEP * 0.6) / 480, 12);
   });
 
   it('turns by its slowed step: a chill of 0.5 turns it 15 % less', () => {

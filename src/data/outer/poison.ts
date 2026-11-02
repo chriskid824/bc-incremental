@@ -103,12 +103,9 @@ export const POISON = defineOuter({
       mastery: mastery(),
     }),
   ],
-  // 神經毒: its slow per poison stack is an engine item not on the branch yet; until it lands the
-  // node makes poisoned dashers take more poison damage (答案：衝刺者).
+  // 神經毒: every 5 poison stacks slow the enemy 2%, at most 40% (答案：衝刺者).
   answer: answers(
-    notable('neurotoxin', {
-      modifiers: [inc('damage', 0.3, { tags: ['poison'], when: [{ targetState: 'dashing' }] })],
-    }),
+    notable('neurotoxin', { rules: [{ id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 }] }),
     'dasher',
   ),
   // 致死毒素: poison damage +10% more per 10 stacks on the target (at most +300%); hits −50%.

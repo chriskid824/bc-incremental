@@ -546,9 +546,9 @@ describe('one golden message per load-time check (D23)', () => {
       push(find(path?.board, 'fire.asc.path-one.n1').effects.rules, flame);
     };
     const refused = [
-      "node 'fire.center.alpha.r1' (src/data/characters/fire.ts): rule 'eternalFlame' sits on a ranked node; a rule takes a ★, a fusion core or an ascendancy final, or a ◆ when POLICY_RULES lists it",
-      "node 'fire.center.alpha.alpha-one' (src/data/characters/fire.ts): rule 'eternalFlame' sits on a notable node; a rule takes a ★, a fusion core or an ascendancy final, or a ◆ when POLICY_RULES lists it",
-      "node 'fire.asc.path-one.n1' (src/data/characters/fire.ts): rule 'eternalFlame' sits on an asc node; a rule takes a ★, a fusion core or an ascendancy final, or a ◆ when POLICY_RULES lists it",
+      "node 'fire.center.alpha.r1' (src/data/characters/fire.ts): rule 'eternalFlame' sits on a ranked node; a rule takes a ★, a fusion core or an ascendancy final, or a ◆ when POLICY_RULES or NOTABLE_RULES lists it",
+      "node 'fire.center.alpha.alpha-one' (src/data/characters/fire.ts): rule 'eternalFlame' sits on a notable node; a rule takes a ★, a fusion core or an ascendancy final, or a ◆ when POLICY_RULES or NOTABLE_RULES lists it",
+      "node 'fire.asc.path-one.n1' (src/data/characters/fire.ts): rule 'eternalFlame' sits on an asc node; a rule takes a ★, a fusion core or an ascendancy final, or a ◆ when POLICY_RULES or NOTABLE_RULES lists it",
     ];
     const ownRules = (issues: string[]) => issues.filter((message) => !message.startsWith('rule '));
     expect(ownRules(plant(edit, 'B2'))).toEqual(refused);
@@ -558,6 +558,51 @@ describe('one golden message per load-time check (D23)', () => {
     } finally {
       rules.policy.length = 0;
     }
+  });
+
+  it("V6: a ◆ holds a NOTABLE_RULES rule, 神經毒's poisonSlow (gd:389), and a ranked node does not", () => {
+    const slow = { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 };
+    expect(
+      plant((content) => {
+        push(
+          find(content.outers.poison?.board, 'outer.poison.alpha.alpha-one').effects.rules,
+          slow,
+        );
+      }, 'B2'),
+    ).toEqual([]);
+    expect(
+      plant((content) => {
+        push(find(content.outers.poison?.board, 'outer.poison.alpha.r2').effects.rules, slow);
+      }, 'B2').filter((message) => !message.startsWith('rule ')),
+    ).toEqual([
+      "node 'outer.poison.alpha.r2' (src/data/outer/poison.ts): rule 'poisonSlow' sits on a ranked node; a rule takes a ★, a fusion core or an ascendancy final, or a ◆ when POLICY_RULES or NOTABLE_RULES lists it",
+    ]);
+  });
+
+  it('V6: an asc ◆ holds a NOTABLE_RULES rule too, which keeps to one board per web', () => {
+    // Planted bugs: NOTABLE_RULES admitted on a notable alone; its rules left out of the
+    // one-board check.
+    const slow = { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 };
+    expect(
+      plant((content) => {
+        const [path] = content.characters.fire.ascendancies ?? [];
+        push(find(path?.board, 'fire.asc.path-one.n1').effects.rules, slow);
+      }, 'B2'),
+    ).toEqual([]);
+    expect(
+      plant((content) => {
+        push(
+          find(content.outers.poison?.board, 'outer.poison.alpha.alpha-one').effects.rules,
+          slow,
+        );
+        push(
+          find(content.characters.fire.center, 'fire.center.alpha.alpha-one').effects.rules,
+          slow,
+        );
+      }, 'B2'),
+    ).toContain(
+      "rule 'poisonSlow' (web 'fire'): on boards 'fire.center' and 'outer.poison'; a rule id may sit on one board per web",
+    );
   });
 
   it('V6: a rule on a ★ or an ascendancy final, which POLICY_RULES need not list', () => {

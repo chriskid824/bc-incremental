@@ -28,14 +28,9 @@ export const CRIT = defineOuter({
     outerBranch('precision', {
       r1: ranked('critChance', 0.02, 4, 'flat'),
       r2: ranked('critChance', 0.05, 4, 'flat', { when: [{ targetKind: 'boss' }] }),
-      // 鎖定: crit chance +25% against the enemy with the most life. Its highestHp condition is
-      // an engine item not on the branch yet; until it lands the node reads bosses and elites
-      // only (the enemies with the most life).
+      // 鎖定: crit chance +25% against the alive enemy with the most life left.
       a: notable('lock-on', {
-        modifiers: [
-          flat('critChance', 0.25, { when: [{ targetKind: 'boss' }] }),
-          flat('critChance', 0.25, { when: [{ targetKind: 'elite' }] }),
-        ],
+        modifiers: [flat('critChance', 0.25, { when: [{ targetIs: 'highestHp' }] })],
       }),
       r3: ranked('critChance', 0.02, 3, 'flat'),
       r4: ranked('critChance', 0.05, 3, 'flat', { when: [{ targetKind: 'elite' }] }),

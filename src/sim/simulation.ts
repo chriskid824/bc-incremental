@@ -154,12 +154,13 @@ export function createSimulation(
   const combo = ctx.sys.combo.ticks;
   const delayed = ctx.sys.repeat.delayed;
   // So is whether the globals step has work (src/sim/systems/globals.ts): a build that reads the
-  // shards held, or the enemies in the aura while it has an aura emitter. The wallet is the run
-  // config's, 0 without one.
+  // shards held, or the enemies in the aura while it has an aura emitter, or that names targetIs
+  // (the highest-hp enemy). The wallet is the run config's, 0 without one.
   const flags = ctx.build.flags;
   const held = flags.shardsHeld;
   const inAura = flags.enemiesInAura && ctx.emitters.some((em) => em.spec.kind === 'aura');
-  const globals = held || inAura;
+  const top = flags.highestHp;
+  const globals = held || inAura || top;
   const wallet = config.walletShards ?? ZERO;
 
   /**
@@ -183,8 +184,9 @@ export function createSimulation(
    * 3. movement: every enemy walks towards the player, or out for a fleeing treasure, by the
    *    step the enemy AI left it (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
-   * 4b. globals: in a run whose build reads them, the shards held and the alive enemies an aura
-   *    pulse would reach, into the run's EvalInput for every later hit of the tick (globals.ts).
+   * 4b. globals: in a run whose build reads them, the shards held, the alive enemies an aura
+   *    pulse would reach and the alive enemy with the most hp (targetIs), into the run's
+   *    EvalInput for every later hit of the tick (globals.ts).
    * 5. contact: enemies that reached the player hit it, through its defences (damage taken,
    *    shield, extra lives), and leak, halving the combo stacks (combo.ts) and raising heroHit
    *    and contact; under 拒馬 a dashing one is pushed back out instead, and under 荊棘纏繞 a boss
@@ -222,10 +224,10 @@ export function createSimulation(
    * 14. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
    * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 4b in a run whose build
-   * reads shardsHeld or enemiesInAura, 6's combo step in a run that keeps combo stacks or has a
-   * buff, its delayed repeats while one waits, 6b only while the pool holds a row, 8 in a run with
-   * segment emitters and 9 while there is a zone (a run of M1's content has none of them).
-   * Delayed repeats still waiting when the run ends never fire.
+   * reads shardsHeld or enemiesInAura or names targetIs, 6's combo step in a run that keeps
+   * combo stacks or has a buff, its delayed repeats while one waits, 6b only while the pool holds
+   * a row, 8 in a run with segment emitters and 9 while there is a zone (a run of M1's content
+   * has none of them). Delayed repeats still waiting when the run ends never fire.
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -237,7 +239,7 @@ export function createSimulation(
     if (enemyAi) stepEnemyAi(ctx);
     moveEnemies(ctx);
     rebuildGrid(ctx);
-    if (globals) stepGlobals(ctx, wallet, held, inAura);
+    if (globals) stepGlobals(ctx, wallet, held, inAura, top);
     resolveContacts(ctx);
     if (ctx.player.life > 0) {
       if (combo) stepCombo(ctx);

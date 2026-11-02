@@ -2,13 +2,14 @@
  * Movement system (docs/v3/implementation-plan-v3.md §2.15): enemies walk straight towards
  * the player, who stays at the center. Contact is resolved after every enemy has moved
  * (src/sim/systems/contact.ts). A slowed enemy walks only the part of its step its slow leaves
- * (enemySlow in src/sim/ailments/frost.ts: nothing while frozen; frost, a global slow or a
- * zone's). Once a bleed has been applied in the run (RunContext.bleedApplied), a bleeding enemy
- * that moves counts the tick for its bleed (src/sim/ailments/bleed.ts), or under 大出血's
- * bleedRings for its bleed rings' step (countBleedRingMove, src/sim/ailments/rings.ts), so a
- * frozen one bleeds as if standing still. The enemy AI step (src/sim/systems/enemyAi.ts) sets a
- * v3 behaviour's step before this stage: 0 for an enemy that stands, a dash's, or below 0 for a
- * fleeing treasure, which walks out and counts its bleed too.
+ * (enemySlow in src/sim/ailments/frost.ts: nothing while frozen; frost, a global slow, a
+ * zone's or 神經毒's poison slow). Once a bleed has been applied in the run
+ * (RunContext.bleedApplied), a bleeding enemy that moves counts the tick for its bleed
+ * (src/sim/ailments/bleed.ts), or under 大出血's bleedRings for its bleed rings' step
+ * (countBleedRingMove, src/sim/ailments/rings.ts), so a frozen one bleeds as if standing still.
+ * The enemy AI step (src/sim/systems/enemyAi.ts) sets a v3 behaviour's step before this stage: 0
+ * for an enemy that stands, a dash's, or below 0 for a fleeing treasure, which walks out and
+ * counts its bleed too.
  */
 
 import { countBleedMove } from '../ailments/bleed';
@@ -17,7 +18,13 @@ import { countBleedRingMove } from '../ailments/rings';
 import type { Enemy, RunContext } from './context';
 
 export function moveEnemies(ctx: RunContext): void {
-  if (ctx.bleedApplied || ctx.frostApplied || ctx.globalSlow !== 0 || ctx.sys.zones.slowApplied) {
+  if (
+    ctx.bleedApplied ||
+    ctx.frostApplied ||
+    ctx.globalSlow !== 0 ||
+    ctx.sys.zones.slowApplied ||
+    ctx.build.flags.poisonSlowPer !== 0
+  ) {
     moveSlowedOrBleeding(ctx);
     return;
   }
@@ -38,7 +45,7 @@ export function moveEnemies(ctx: RunContext): void {
 /**
  * moveEnemies once some enemy may be slowed or bleed: the same moves, each slowed enemy's step
  * shortened, counted for bleeding enemies. An enemy with no slow walks its whole step, as
- * moveEnemies does.
+ * moveEnemies does; under 神經毒 (BuildFlags.poisonSlowPer) one holding poison is asked too.
  */
 function moveSlowedOrBleeding(ctx: RunContext): void {
   const enemies = ctx.enemies;
@@ -46,6 +53,7 @@ function moveSlowedOrBleeding(ctx: RunContext): void {
   const py = ctx.player.y;
   const now = ctx.now;
   const slowsAll = ctx.globalSlow !== 0;
+  const poisonSlows = ctx.build.flags.poisonSlowPer !== 0;
   const bleedRings = ctx.build.flags.bleedRings;
   for (let i = 0; i < enemies.length; i++) {
     const enemy = enemies[i] as Enemy;
@@ -53,7 +61,13 @@ function moveSlowedOrBleeding(ctx: RunContext): void {
     enemy.prevY = enemy.y;
     const before = enemy.dist;
     let step = enemy.stepDist;
-    if (slowsAll || enemy.frost !== 0 || enemy.frozenUntil > now || enemy.zoneSlowUntil > now) {
+    if (
+      slowsAll ||
+      enemy.frost !== 0 ||
+      enemy.frozenUntil > now ||
+      enemy.zoneSlowUntil > now ||
+      (poisonSlows && enemy.poisonRingEnd > now)
+    ) {
       step *= 1 - enemySlow(ctx, enemy, now);
     }
     const dist = before - step;

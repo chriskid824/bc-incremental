@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RuleSpec } from './rules';
 import {
   CHARACTER_SIGNATURE,
+  NOTABLE_RULES,
   POLICY_RULES,
   RULE_COEF_FIELDS,
   scaleRuleSpec,
@@ -121,5 +122,10 @@ describe('tables the rule modules fill', () => {
       blastSpirit: { damagePct: 'pct', burnDamagePct: 'pct' },
     });
     expect(POLICY_RULES).toEqual([]);
+  });
+
+  // A ◆ rule module adds its NOTABLE_RULES id when it lands (E2: 神經毒's poisonSlow, gd:389).
+  it('admits poisonSlow on a ◆', () => {
+    expect(NOTABLE_RULES).toEqual(['poisonSlow']);
   });
 });

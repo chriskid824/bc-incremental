@@ -63,7 +63,7 @@ describe('content module import order (L8)', () => {
       await import('../fusion/overrides');
     const { CALIBRATED } = await import('../fusion/calibrated');
     const { EMPTY_RANKS, HAND_PAIRS, HAND_RANKS } = await import('../fusion/generate');
-    const { CHARACTER_SIGNATURE, POLICY_RULES, RULE_COEF_FIELDS, SIGNATURE_EVENT } =
+    const { CHARACTER_SIGNATURE, NOTABLE_RULES, POLICY_RULES, RULE_COEF_FIELDS, SIGNATURE_EVENT } =
       await import('../rules');
     expect(content.characters).toBe(CHARACTERS);
     expect(content.outers).toBe(OUTERS);
@@ -87,6 +87,7 @@ describe('content module import order (L8)', () => {
       SIGNATURE_EVENT,
       RULE_COEF_FIELDS,
       POLICY_RULES,
+      NOTABLE_RULES,
       HAND_PAIRS,
       HAND_RANKS,
       EMPTY_RANKS,

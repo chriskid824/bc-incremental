@@ -358,6 +358,7 @@ const on = (ctx: RunContext, target: Enemy | null): EvalInput => ({
   comboStacks: 0,
   shardsHeld: 0,
   enemiesInAura: 0,
+  highestHpId: 0,
   ctx: null,
 });
 
