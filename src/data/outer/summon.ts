@@ -5,7 +5,7 @@
  * (src/data/emitters.ts DroneGrant), which is how its ranks tell them apart. Every number is an
  * initial value for the balance simulator.
  *
- * Engine items not on the branch yet (C5.8 laser fence, C5.9 turret fields, eliteFirst aim,
+ * Engine items not on the branch yet (C5.9 turret fields, eliteFirst aim,
  * swarm.size and the drone speed stat): until they land, the nodes that need them read as the
  * comment above each says, with gd's numbers where data can carry them.
  */
@@ -103,9 +103,9 @@ export const SUMMON = defineOuter({
     modifiers: [more('damage', -0.45, DRONE)],
     emitters: [{ kind: 'drone', drones: 2, damagePct: 0.8, name: 'swarm' }],
   }),
-  // 雷射柵欄: lasers between each summon and its nearest other, 10% hit damage and shock every
-  // 0.25 s. It is C5.8; until it lands the threshold gives summons +20% damage.
-  threshold: threshold({ modifiers: [inc('damage', 0.2, SUMMONS)] }),
+  // 雷射柵欄: a laser from each summon to its nearest other; every 0.25 s each enemy on a line
+  // takes 10% hit damage and a shock stack (the segment's defaults, range 200).
+  threshold: threshold({ emitters: [{ kind: 'segment', endpoints: 'summons', links: 1 }] }),
   payload: null,
   skin: { accent: 0x9bf25c, shape: 'drone' },
   covers: {
