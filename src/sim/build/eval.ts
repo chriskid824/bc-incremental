@@ -62,7 +62,8 @@ const CURVE_CODE: Readonly<Record<ScalingCurve, CompiledScaling['curve']>> = {
 /**
  * What a read of a dynamic entry or a condition looks at; one reused object per run
  * (RunContext.evalInput). `now`, `target` and `chainJump` are set before each damage instance
- * reads its stats; `playerLifeFrac`, life / max life, once per tick after the contact step.
+ * reads its stats; `playerLifeFrac`, life / max life, once per tick after the contact step;
+ * `comboStacks` wherever the stacks change (src/sim/systems/combo.ts).
  */
 export interface EvalInput {
   now: number;
@@ -71,6 +72,8 @@ export interface EvalInput {
   /** The instance's chain jump index, 0 for a primary hit and for ailments. */
   chainJump: number;
   playerLifeFrac: number;
+  /** The run's combo stacks as they are now; 0 at a run's start and outside a run. */
+  comboStacks: number;
   /**
    * The run, whose stack caps stacksAtLeast 'max' reads; null outside a run, where no such
    * condition is met.
@@ -80,13 +83,14 @@ export interface EvalInput {
 
 /**
  * An input for estimates outside a run: no target (target conditions are not met, target
- * variables read 0), full life and no run.
+ * variables read 0), full life, no combo stacks and no run.
  */
 export const staticInput = (chainJump = 0): EvalInput => ({
   now: 0,
   target: null,
   chainJump,
   playerLifeFrac: 1,
+  comboStacks: 0,
   ctx: null,
 });
 
@@ -154,6 +158,7 @@ const SCALING_READERS: { readonly [K in ScalingVar]: (ev: Readonly<EvalInput>) =
   targetPoisonStacks: (ev) => (ev.target === null ? 0 : livePoisonStacks(ev.target, ev.now)),
   targetShockStacks: (ev) => (ev.target === null ? 0 : activeShockStacks(ev.target, ev.now)),
   targetFrost: (ev) => (ev.target === null ? 0 : frostMeter(ev.target, ev.now)),
+  comboStacks: (ev) => ev.comboStacks,
 };
 
 /** A ScalingSpec compiled for per-instance evaluation. */

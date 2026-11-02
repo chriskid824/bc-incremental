@@ -32,6 +32,7 @@ import type { GameData } from '../data/types';
 import { dispatchPendingKills } from './effects/dispatch';
 import { runEffectQueue } from './effects/execute';
 import { updateAilments } from './systems/ailments';
+import { stepCombo } from './systems/combo';
 import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
 import type { TestModule } from './rules';
@@ -138,11 +139,12 @@ export function createSimulation(
   const ctx = createRunContext(config, data, testModules);
   const { state, events } = ctx;
   // The segment emitters are fixed with the run context, as is whether it is a v3 run, whose
-  // enemies the enemy AI step moves. A stage with nothing to do is not called, since a call made
-  // every tick, even one that returns at once, takes from V8's inlining budget for step and
-  // leaves other stages out of it.
+  // enemies the enemy AI step moves, and whether the combo step has work (ComboState.ticks). A
+  // stage with nothing to do is not called, since a call made every tick, even one that returns
+  // at once, takes from V8's inlining budget for step and leaves other stages out of it.
   const segments = ctx.sys.segments.emitters.length !== 0;
   const enemyAi = ctx.sys.enemyAi.enabled;
+  const combo = ctx.sys.combo.ticks;
 
   /**
    * Advances one tick. The systems run in the tick order of
@@ -156,16 +158,18 @@ export function createSimulation(
    *    charge and dash, treasures circle and flee, and an escaped treasure leaves the field,
    *    shooters fire and summoners summon at their posts; frozen ones pause their timers and only
    *    regenerate (enemyAi.ts). Then the bullets in flight move, and hit the player, through its
-   *    defences, before any contact (bullets.ts).
+   *    defences, before any contact, halving the combo stacks and raising heroHit (bullets.ts).
    * 3. movement: every enemy walks towards the player, or out for a fleeing treasure, by the
    *    step the enemy AI left it (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
    * 5. contact: enemies that reached the player hit it, through its defences (damage taken,
-   *    shield, extra lives), and leak, raising heroHit and contact; then the player regenerates
-   *    (contact.ts).
-   * 6. emitters: each emitter's due attacks are counted, with the onAttack hooks and the
-   *    nthAttack triggers, and fire projectiles; then the rule modules' tick hooks run
-   *    (emitters.ts, src/sim/emitters/).
+   *    shield, extra lives), and leak, halving the combo stacks (combo.ts) and raising heroHit
+   *    and contact; then the player regenerates (contact.ts).
+   * 6. emitters: in a run that keeps combo stacks or has a buff, the combo step first: the
+   *    idle ticks without a target for the signature emitter and their decay, and the buff
+   *    windows that are over (combo.ts); then each emitter's due attacks are counted, with the
+   *    signature's combo stack, the onAttack hooks and the nthAttack triggers, and fire
+   *    projectiles; then the rule modules' tick hooks run (emitters.ts, src/sim/emitters/).
    * 6b. drones: the drone pool's slots step in id order (src/sim/systems/drones.ts): drones
    *    move, pick and impact, with their hits, chains and kills resolved inline as in step 7,
    *    and turrets fire homing shots, which move in step 7.
@@ -187,9 +191,9 @@ export function createSimulation(
    * 13. waveControl: record cleared waves (waves.ts).
    * 14. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
-   * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 6b only while there is
-   * a drone, 8 in a run with segment emitters and 9 while there is a zone (a run of M1's content
-   * has none of them).
+   * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 6's combo step in a run
+   * that keeps combo stacks or has a buff, 6b only while there is a drone, 8 in a run with
+   * segment emitters and 9 while there is a zone (a run of M1's content has none of them).
    */
   function step(_input: InputFrame): readonly SimEvent[] {
     events.length = 0;
@@ -203,6 +207,7 @@ export function createSimulation(
     rebuildGrid(ctx);
     resolveContacts(ctx);
     if (ctx.player.life > 0) {
+      if (combo) stepCombo(ctx);
       runEmitters(ctx);
       runTickHooks(ctx);
       if (ctx.sys.drones.count !== 0) stepDrones(ctx);

@@ -87,6 +87,11 @@ describe('compileBuild', () => {
       bossMinGapTicks: 0,
       globalSlow: 0,
       shatterMult: 1,
+      combo: false,
+      comboCap: 20,
+      comboIdleTicks: 60,
+      comboIdleKeep: 0,
+      comboHitKeep: 0.5,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

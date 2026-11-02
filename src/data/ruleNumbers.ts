@@ -150,6 +150,10 @@ export function effectNumbers(effect: EffectSpec): string[][] {
         [percent(effect.damagePct)],
         ...(effect.shockStacks === undefined ? [] : [[String(effect.shockStacks)]]),
       ];
+    case 'comboStack':
+      return [[String(effect.stacks)]];
+    case 'buff':
+      return [[`×${1 + effect.more}`, signedPercent(effect.more)], [String(effect.durationSec)]];
   }
 }
 

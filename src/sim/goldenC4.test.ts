@@ -25,7 +25,7 @@ import { frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { createPayload, ROWS } from './emitters/types';
-import type { Payload } from './emitters/types';
+import type { EmitterRuntime, Payload } from './emitters/types';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
 import { BERSERK_MULT, MULTIPLY_COUNT, SWIFT_MULT, WARDED } from './systems/affixes';
@@ -1746,6 +1746,57 @@ const onionData = (): GameData =>
     },
   });
 
+/**
+ * C6b.2's combo stacks and timed buff (docs/v3 C6 design §7.4, gd §4.5) on M1's volley: attack
+ * speed × (1 + 0.03 per stack) and damage +2 % increased per stack, a stack per kill beside each
+ * attack's, and every 10 s an untagged buff of attack speed × 3 for 2 s. A v3 run from wave 12 of
+ * three triangles and one square a wave (the square at 15 × its life), released over 8 s
+ * (TEST_V3_WAVES.v3 spread, as v3TestData's merge is shallow, with no affix or treasure): the
+ * stacks reach the cap, a square that walks in halves them, and the gaps between a wave's
+ * releases clear them.
+ */
+const COMBO_STATS = makeStats(
+  { damage: 10, maxLife: 1e6 },
+  [
+    { stat: 'attackSpeed', kind: 'more', value: 0.03, scaling: { per: 'comboStacks' } },
+    { stat: 'damage', kind: 'increased', value: 0.02, scaling: { per: 'comboStacks' } },
+  ],
+  {
+    triggers: [
+      { source: 'center', spec: { on: 'kill', do: [{ kind: 'comboStack', stacks: 1 }] } },
+      {
+        source: 'center',
+        spec: {
+          on: 'periodic',
+          every: 10,
+          do: [{ kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2 }],
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+const comboData = (): GameData =>
+  v3TestData({
+    enemies: { square: { hpMult: 15 } },
+    waves: {
+      rules: [
+        { enemy: 'triangle', fromWave: 1, base: 3, perWave: 0, maxCount: 3 },
+        { enemy: 'square', fromWave: 1, base: 1, perWave: 0, maxCount: 1 },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      spawnDurationSec: 8,
+      waveTimerSec: 12,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2047,6 +2098,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: ONION_STATS, rules: [], startWave: 10 },
     data: onionData,
     expected: ['1d73c42d306cbd2d', 'da114191660d2463'],
+  },
+  {
+    name: 'combo',
+    config: { stats: COMBO_STATS, rules: [], startWave: 12 },
+    data: comboData,
+    expected: ['dbcf015be087c6c0', '95856d903901563c'],
   },
 ];
 
@@ -2719,6 +2776,73 @@ describe('golden C4 runs', () => {
         'onion 60, wave 11: hit (2 left, 12 sprayed); hit (1 left, 12 sprayed); poison (0 left, 12 sprayed); killed: 32 × a burst triangle’s shards, 3 cores',
         'onion 105, wave 12: burn (2 left, 12 sprayed)',
       ],
+    });
+  });
+
+  it('fills the stacks to the cap in combo, halves them at a leak, clears them after 60 idle ticks between releases, and runs a 2 s buff window (C6b.2)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'combo') as GoldenC4Entry;
+    const bySeed: Record<number, Record<string, string[]>> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const seen: Record<string, string[]> = { cap: [], halved: [], cleared: [], buffed: [] };
+      let prev = 0;
+      let buffFrom = -1;
+      // At each tick's end of the emitter stage: the stacks after the tick's hits on the player,
+      // its combo step and its attacks.
+      const watch: TestModule = (b) =>
+        void b.hook('tick', (ctx) => {
+          const cs = ctx.sys.combo;
+          const em = ctx.emitters[0] as EmitterRuntime;
+          const wave = ctx.current?.wave ?? 0;
+          if (cs.stacks === 20 && prev < 20) seen.cap?.push(`${ctx.now} (wave ${wave})`);
+          if (ctx.events.some((e) => e.type === 'playerHit')) {
+            seen.halved?.push(`${ctx.now}: ${prev} → ${cs.stacks}`);
+          }
+          if (cs.idle > 0 && cs.idle % 60 === 0 && prev > 0) {
+            const rec = ctx.current;
+            const left = rec === null ? 0 : rec.queue.length - rec.released;
+            seen.cleared?.push(
+              `${ctx.now} (wave ${wave}, ${left} to release): ${prev} → ${cs.stacks}`,
+            );
+          }
+          // The buff's factor × the combo factor, 冰霜 never there.
+          const factor = cs.comboFactor[0] as number;
+          if (cs.active > 0 && buffFrom < 0) buffFrom = ctx.now;
+          if (cs.active > 0 && em.cadence !== factor * 3) seen.buffed?.push(`${ctx.now}: off`);
+          if (cs.active === 0 && buffFrom >= 0) {
+            seen.buffed?.push(`${buffFrom}–${ctx.now - 1}`);
+            buffFrom = -1;
+          }
+          if (cs.active === 0 && em.cadence !== factor) seen.buffed?.push(`${ctx.now}: off`);
+          prev = cs.stacks;
+        });
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [watch]);
+      while (!sim.state.finished) sim.step(NO_INPUT);
+      bySeed[seed] = seen;
+    }
+    // Both seeds fill the stacks in wave 12, each square that walks in halves them, and each
+    // wave's first releases die more than a second before the next one appears: the gaps clear
+    // them. A wave starts the tick after the field is clear and releases its first enemy at
+    // once, so no gap ever falls between two waves. The buff fires at tick 602 (its period from
+    // tick 1, staggered by its trigger index, 1) and holds the cadence at its combo factor × 3
+    // for 120 emitter stages, and at the combo factor alone outside its window.
+    expect(bySeed).toEqual({
+      1: {
+        cap: ['228 (wave 12)', '457 (wave 13)', '722 (wave 13)'],
+        halved: ['376: 20 → 10', '964: 20 → 10'],
+        cleared: [
+          '515 (wave 13, 3 to release): 20 → 0',
+          '643 (wave 13, 2 to release): 6 → 0',
+          '1065 (wave 14, 3 to release): 15 → 0',
+        ],
+        buffed: ['603–722'],
+      },
+      2: {
+        cap: ['263 (wave 12)', '730 (wave 13)'],
+        halved: ['406: 20 → 10'],
+        cleared: ['528 (wave 13, 3 to release): 18 → 0', '635 (wave 13, 2 to release): 5 → 0'],
+        buffed: ['603–722'],
+      },
     });
   });
 

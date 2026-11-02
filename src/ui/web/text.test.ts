@@ -384,6 +384,12 @@ function kitchenSink(): NodeEffects {
       target: { pick: 'nearest' },
       do: [{ kind: 'chainBolt', jumps: 2, damagePct: 0.4, shockStacks: 1, from: 'nearestToPoint' }],
     },
+    { on: 'hit', do: [{ kind: 'comboStack', stacks: 2 }] },
+    {
+      on: 'periodic',
+      every: 10,
+      do: [{ kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2, tags: ['minion'] }],
+    },
     // Each center event's fan-outs (status, self, placement) and a selector's.
     ...CENTER_EVENTS.flatMap((on): TriggerSpec[] => [
       { on, do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
@@ -767,6 +773,49 @@ describe('describeNode (§4.7)', () => {
     ]);
     expect(linesOf(web, NOTABLE, 'zh-TW')).toEqual([
       '敵人死亡時：分別朝最近的敵人射出 2 發小彈，每發 25% 傷害，彈幕外盤每多 1 發小彈，這裡也多 1 發；呈扇形朝目標射出 2 發小彈，每發 25% 傷害，扇形 40°，彈幕外盤每多 1 發小彈，這裡也多 1 發',
+    ]);
+  });
+
+  it('writes the combo stacks, the buffs and comboStacks in both locales (C6b.2)', () => {
+    // Plants a template or a locale left without them: the lines would hold their keys.
+    const lines = (part: Partial<NodeEffects>, locale: Locale): readonly string[] =>
+      describeNode(withEffects(fire, NOTABLE, part), NOTABLE, 1, lookups[locale]).lines;
+    const triggers: TriggerSpec[] = [
+      { on: 'hit', do: [{ kind: 'comboStack', stacks: 1 }] },
+      { on: 'kill', do: [{ kind: 'comboStack', stacks: 3 }] },
+      {
+        on: 'periodic',
+        every: 10,
+        do: [{ kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2, tags: ['minion'] }],
+      },
+      { on: 'waveStart', do: [{ kind: 'buff', stat: 'attackSpeed', more: 0.5, durationSec: 1.5 }] },
+    ];
+    const modifiers: Modifier[] = [
+      { stat: 'attackSpeed', kind: 'more', value: 0.03, scaling: { per: 'comboStacks' } },
+      { stat: 'damage', kind: 'increased', value: 0.04, scaling: { per: 'comboStacks', every: 5 } },
+    ];
+    expect(LOCALES.map((locale) => lines({ triggers, modifiers }, locale))).toEqual([
+      [
+        '3% more Attack speed (per combo stack)',
+        '4% increased Damage (per 5 combo stacks)',
+        'On hitting enemies: +1 combo stack',
+        'When enemies are killed: +3 combo stacks',
+        'Every 10 s: Attack speed ×3 for 2 s, minion attacks only',
+        'At the start of each wave: Attack speed ×1.5 for 1.5 s',
+      ],
+      [
+        '攻擊速度總增 3%（每層連擊）',
+        '傷害提高 4%（每 5 層連擊）',
+        '擊中敵人時：+1 層連擊',
+        '敵人死亡時：+3 層連擊',
+        '每 10 秒：攻擊速度 ×3，持續 2 秒，只限召喚物的攻擊',
+        '每波開始時：攻擊速度 ×1.5，持續 1.5 秒',
+      ],
+    ]);
+    // The fixture's combo payload (lead ruling K8, gd:565): a stack per explosion, a bonus on them.
+    expect(LOCALES.map((locale) => linesOf(fire, 'fusion.fire.combo.core', locale))).toEqual([
+      ['Each explosion: +1 combo stack', '+4% center damage per 5 combo stacks'],
+      ['每次爆炸：+1 層連擊', '每 5 層連擊，中心傷害 +4%'],
     ]);
   });
 

@@ -780,6 +780,19 @@ describe('one golden message per load-time check (D23)', () => {
     ]);
   });
 
+  it('V12: the combo payload’s comboStack leaves the coef to its bonus, which a scaled effect beside it takes back (lead ruling K8)', () => {
+    // Plants a COEF field on comboStack: the fixture's combo payload would fail V12.
+    expect(plant(() => {}, 'B5')).toEqual([]);
+    expect(
+      plant((content) => {
+        const payload = content.outers.combo?.payload as { readonly effects: readonly unknown[] };
+        set(payload, 'effects', [...payload.effects, { kind: 'nova', radius: 90, damagePct: 1 }]);
+      }, 'B5'),
+    ).toEqual([
+      "outer 'combo' (src/data/outer/combo.ts): coefScalesBonus with a nova the coef already scales; drop coefScalesBonus",
+    ]);
+  });
+
   it('V12: coefScalesBonus never with a powFactor bonus', () => {
     expect(
       plant((content) => {

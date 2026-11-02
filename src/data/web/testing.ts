@@ -272,12 +272,18 @@ const OUTER_CARDS: Readonly<Record<OuterId, OuterCard>> = {
       shooter: 'answer',
       boss: 'helps',
     },
-    // A stand-in until C6b's comboStack (D11): 殘影's repeat at 50 % (gd:425), which no COEF field
-    // scales, so coef reaches the bonus and r3 instead (Q2 (A)); no bonus until comboStacks (F42).
+    // gd:565: +1 combo stack for the player, and the center's damage +4 % per 5 combo stacks
+    // (D11, D13). comboStack has no COEF field, so coef reaches the bonus and r3 instead (Q2 (A),
+    // V12).
     payload: {
       type: 'self',
-      effects: [{ kind: 'repeatAttack', count: 1, damagePct: 0.5 }],
-      bonus: null,
+      effects: [{ kind: 'comboStack', stacks: 1 }],
+      bonus: {
+        form: 'scaling',
+        kind: 'increased',
+        value: 0.04,
+        scaling: { per: 'comboStacks', every: 5 },
+      },
       ranks: RANKS,
       coefScalesBonus: true,
     },

@@ -114,6 +114,10 @@ describe('ModifierSchema', () => {
       when: [{ stacksAtLeast: { ailment: 'burn', stacks: 3 } }],
       scaling: { per: 'chainJump' },
     },
+    { stat: 'damage', kind: 'increased', value: 0.02, scaling: { per: 'comboStacks' } },
+    { stat: 'attackSpeed', kind: 'increased', value: 0.1 },
+    { stat: 'attackSpeed', kind: 'more', value: 0.03, scaling: { per: 'comboStacks' } },
+    { stat: 'attackSpeed', kind: 'more', value: 0.5, tags: ['minion'], scope: 'outer.summon' },
   ])('accepts %o', (modifier) => {
     expect(ModifierSchema.parse(modifier)).toEqual(modifier);
   });
@@ -121,7 +125,7 @@ describe('ModifierSchema', () => {
   it.each<[string, unknown]>([
     [
       'a tag on a stat that is not scoped',
-      { stat: 'attackSpeed', kind: 'increased', value: 1, tags: ['crit'] },
+      { stat: 'projectileCount', kind: 'increased', value: 1, tags: ['crit'] },
     ],
     ['a tag on a flat modifier', { stat: 'damage', kind: 'flat', value: 5, tags: ['burn'] }],
     ['empty tags', { stat: 'damage', kind: 'increased', value: 0.1, tags: [] }],
@@ -184,7 +188,7 @@ describe('ModifierSchema', () => {
     ],
     [
       'conditions on a stat that is not scoped',
-      { stat: 'attackSpeed', kind: 'more', value: 0.1, when: [{ targetHas: 'burn' }] },
+      { stat: 'projectileCount', kind: 'more', value: 0.1, when: [{ targetHas: 'burn' }] },
     ],
     [
       'conditions on flat damage',
@@ -473,6 +477,9 @@ describe('EffectSpecSchema', () => {
     { kind: 'chainBolt', jumps: 2, damagePct: 0.5 },
     { kind: 'chainBolt', jumps: 0, damagePct: 1, shockStacks: 1, from: 'eventTarget' },
     { kind: 'chainBolt', jumps: 31, damagePct: 0.2, shockStacks: 3, from: 'nearestToPoint' },
+    { kind: 'comboStack', stacks: 1 },
+    { kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2 },
+    { kind: 'buff', stat: 'attackSpeed', more: -0.3, durationSec: 0.5, tags: ['minion', 'hit'] },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -642,6 +649,20 @@ describe('EffectSpecSchema', () => {
     [
       'chainBolt with a chain policy field',
       { kind: 'chainBolt', jumps: 2, damagePct: 0.5, bounces: 1 },
+    ],
+    ['comboStack without stacks', { kind: 'comboStack' }],
+    ['comboStack with a cap (C6b.2)', { kind: 'comboStack', stacks: 1, cap: 20 }],
+    ['buff without a stat', { kind: 'buff', more: 2, durationSec: 2 }],
+    ['buff of damage', { kind: 'buff', stat: 'damage', more: 2, durationSec: 2 }],
+    ['buff without more', { kind: 'buff', stat: 'attackSpeed', durationSec: 2 }],
+    ['buff without durationSec', { kind: 'buff', stat: 'attackSpeed', more: 2 }],
+    [
+      'buff with an unknown tag',
+      { kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2, tags: ['summon'] },
+    ],
+    [
+      'buff with an unknown key',
+      { kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2, stacks: 1 },
     ],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
@@ -1079,7 +1100,7 @@ describe('parseGameData schema errors', () => {
     const data = content();
     const [i, node] = talentAt(data, 'keenEye');
     const m = node.modifiers.length;
-    node.modifiers.push({ stat: 'attackSpeed', kind: 'more', value: 0.1, tags: ['crit'] });
+    node.modifiers.push({ stat: 'projectileCount', kind: 'more', value: 0.1, tags: ['crit'] });
     expect(() => parseGameData(data)).toThrow(
       `talents.${i}.modifiers.${m}.tags: tags are only allowed on scoped stats, and not on flat damage`,
     );

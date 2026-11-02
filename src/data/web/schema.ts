@@ -230,6 +230,8 @@ const [
   slashLine,
   coinHit,
   chainBolt,
+  comboStack,
+  buff,
 ] = EffectSpecSchema.options;
 
 /**
@@ -255,6 +257,8 @@ export const PayloadEffectSchema = exact<PayloadEffect>()(
     slashLine.unwrap().omit({ from: true, toward: true }).readonly(),
     coinHit,
     chainBolt,
+    comboStack,
+    buff,
   ]),
 );
 

@@ -118,6 +118,7 @@ describe('webBuild (§5.1)', () => {
       target: enemy,
       chainJump: 0,
       playerLifeFrac: 1,
+      comboStacks: 0,
       ctx: null,
     };
     const tables = [modTableFor(merged), modTableFor(unmerged)] as const;

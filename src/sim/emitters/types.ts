@@ -662,6 +662,30 @@ export function shotsInFlight(spec: EmitterSpec): boolean {
 }
 
 /**
+ * Whether an emitter of `spec` counts its attacks by its cadence (EmitterRuntime.cadence): the
+ * volley, lob, fan and arc, and the drone emitter's drones and turrets. A thorns emitter hits
+ * with the contacts, and a segment's judgements, a strike's timer, an aura's phase and an
+ * orbit's cooldown keep fixed periods (lead ruling L5 of C7), so 冰霜, the combo and the buffs
+ * leave them alone (src/sim/systems/combo.ts).
+ */
+export function readsCadence(spec: EmitterSpec): boolean {
+  switch (spec.kind) {
+    case 'volley':
+    case 'lob':
+    case 'fan':
+    case 'arc':
+    case 'drone':
+      return true;
+    case 'thorns':
+    case 'segment':
+    case 'strike':
+    case 'aura':
+    case 'orbit':
+      return false;
+  }
+}
+
+/**
  * The ticks a periodic emitter's phase rule counts in: an emitter of index i takes the phase
  * (3 + 4 × i) % PHASE_TICKS, so emitters of one period act on different ticks.
  */
@@ -728,10 +752,12 @@ export interface EmitterRuntime {
   /** Every shot of the current attack is steady (steadyAim counting attacks). */
   steadyAttack: boolean;
   /**
-   * Ticks the accumulator gains per tick: exactly 1, or AffixState.frostFactor while a 冰霜 elite
-   * is near the player (refreshCadence, src/sim/systems/affixes.ts). Every emitter that counts
-   * attacks by it is slowed by it; an aura's phase, a strike's timer and an orbit's cooldown are
-   * fixed periods that do not read it (lead ruling L5).
+   * Ticks the accumulator gains per tick: AffixState.frostFactor (1, or FROST_CADENCE while a
+   * 冰霜 elite is near the player) × its combo factor × its buffs' factor (ComboState), exactly 1
+   * with none of them (refreshCadence, src/sim/systems/affixes.ts). Every emitter that counts
+   * attacks by it (readsCadence) runs at it; an aura's phase, a strike's timer and an orbit's
+   * cooldown are fixed periods that do not read it (lead ruling L5), and take no combo or buff
+   * factor.
    */
   cadence: number;
   /**

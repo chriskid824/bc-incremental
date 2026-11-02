@@ -436,7 +436,7 @@ describe('ModTable', () => {
 
   it('rejects a modifier of a stat that is not scoped', () => {
     expect(() =>
-      compileMods([{ stat: 'attackSpeed', kind: 'flat', value: 0.1 }], createSourceTable()),
+      compileMods([{ stat: 'projectileCount', kind: 'flat', value: 0.1 }], createSourceTable()),
     ).toThrow(/scoped/);
   });
 
@@ -455,6 +455,12 @@ describe('ModTable', () => {
         const row = table.row(mask);
         for (const stat of scopedStats) {
           if (stat === 'damage') continue;
+          // attackSpeed's column is its emitters' cadence factor, which only its per-instance
+          // modifiers reach (rowValues): 1 here, its value being their attack interval.
+          if (stat === 'attackSpeed') {
+            expect(statAt(table, row, SCOPED_INDEX[stat], staticInput(0)), `${n} ${stat}`).toBe(1);
+            continue;
+          }
           // The table adds its rules' offset (+0 here) last, which turns the −0 of a zero base
           // under a negative 1 + Σincreased into +0 where StatBlock keeps −0: the same number.
           expect(statAt(table, row, SCOPED_INDEX[stat], staticInput(0)), `${n} ${stat}`).toBe(

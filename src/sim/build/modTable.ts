@@ -17,7 +17,10 @@
  * StatBlock.values.damage, so damage of an instance = values.damage × its damage row, which is
  * M1's damageMult[mask] bit for bit. Any other scoped stat folds to its final value, then takes
  * the rules' post-operations, × postScale + postOffset (scaleStat and offsetStat, src/sim/rules/);
- * with no tagged, scoped or scaling modifier that is CompiledBuild.values[stat] bit for bit.
+ * with no tagged, scoped or scaling modifier that is CompiledBuild.values[stat] bit for bit. But
+ * attackSpeed: its row value is the factor its per-instance modifiers put on the cadence of the
+ * emitters whose hits take the row (src/sim/systems/combo.ts), so it folds from 1 and takes no
+ * post-operation (rowValues), its base and the rules' being in its attack interval already.
  *
  * Modifiers with a scaling or conditions (Modifier.when) are dynamic entries: a row lists the
  * matching ones per stat in data order, and statAt (src/sim/build/eval.ts) adds those whose
@@ -56,6 +59,23 @@ export const SCOPED_INDEX = Object.fromEntries(
 
 /** Position of damage in a row. */
 const DAMAGE = SCOPED_INDEX.damage;
+
+/** Position of attackSpeed in a row. */
+const ATTACK_SPEED = SCOPED_INDEX.attackSpeed;
+
+/**
+ * `perStat`'s value of each scoped stat, in row order, for a ModTable's base, postScale or
+ * postOffset, with `attackSpeed` for attackSpeed: 1 for its base and postScale and 0 for its
+ * postOffset, so that its column folds its per-instance modifiers alone (StatBlock.scoped).
+ */
+export function rowValues(
+  perStat: Readonly<Record<ScopedStat, number>>,
+  attackSpeed: number,
+): Float64Array {
+  const values = Float64Array.from(SCOPED_STATS, (stat) => perStat[stat]);
+  values[ATTACK_SPEED] = attackSpeed;
+  return values;
+}
 
 const FLAT = 0;
 const INCREASED = 1;
@@ -303,6 +323,11 @@ export class ModTable {
     return statAt(this, row, DAMAGE, ESTIMATE);
   }
 
+  /** Whether scoped stat `stat` of row `row` has dynamic entries, which statAt evaluates. */
+  dynamic(row: number, stat: number): boolean {
+    return this.dynCount[row * S + stat] !== 0;
+  }
+
   /** Row of conversion part `j` (convStart, convCount), filled on its first use. */
   partRow(j: number): number {
     const cached = this.convRow[j] as number;
@@ -463,7 +488,7 @@ export function modTableFor(
   stats: StatBlock,
   sources: SourceTable = createSourceTable(),
 ): ModTable {
-  const base = Float64Array.from(SCOPED_STATS, (stat) => stats.base[stat]);
+  const base = rowValues(stats.base, 1);
   const scale = new Float64Array(S).fill(1);
   const offset = new Float64Array(S);
   const conversions = compileConversions(stats.conversions);

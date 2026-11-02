@@ -2,8 +2,9 @@
  * Contact system (docs/v3/implementation-plan-v3.md §2.15): an enemy that reaches the player
  * first takes a hit from each of the build's thorns emitters (src/data/emitters.ts), in emitter
  * order, until one kills it. A survivor deals its contact damage and leaks, i.e. leaves the field
- * without a kill or drops; the touch then raises heroHit (no target, at the player) and contact
- * (on the touching enemy), and the leaked enemy gives its DoT rings back
+ * without a kill or drops; the touch then halves the combo stacks when the build keeps them
+ * (src/sim/systems/combo.ts), raises heroHit (no target, at the player) and contact (on the
+ * touching enemy), and the leaked enemy gives its DoT rings back
  * (src/sim/ailments/apply.ts). An enemy the thorns kill dies as any hit's victim does, with its
  * drops and split, and never reaches the player: no life loss, leak or heroHit, only its contact
  * triggers, which find its ailments already released. Runs after movement; every enemy is still
@@ -29,6 +30,7 @@ import { hitWithPayload } from '../combat/hit';
 import { fire } from '../effects/dispatch';
 import { EVENT } from '../effects/types';
 import type { EmitterRuntime } from '../emitters/types';
+import { loseComboOnHit } from './combo';
 import type { Enemy, RunContext } from './context';
 import { removeEnemy } from './death';
 
@@ -147,6 +149,7 @@ export function resolveContacts(ctx: RunContext): void {
       );
       enemy.rec.leaked = true;
       removeEnemy(ctx, enemy);
+      if (ctx.build.flags.combo) loseComboOnHit(ctx);
       fire(ctx, EVENT.heroHit, 0, -1, null, player.x, player.y, 0, ZERO);
       fire(ctx, EVENT.contact, 0, -1, enemy, enemy.x, enemy.y, 0, ZERO);
       // After its contact triggers, whose conditions see what it held as it touched.

@@ -9,8 +9,9 @@
  * Each tick a bullet first tests the player, then flies: within PLAYER_RADIUS + BULLET_RADIUS of
  * the player it hits, through damagePlayer as a BULLET (src/sim/systems/contact.ts), which takes
  * the player's shield, life and extra lives as for a contact but outside contactDamageTaken,
- * tallies the hit by its shooter's type and pushes bulletHit; then heroHit is raised at the player
- * (never contact) and the bullet is gone. One that reaches a dead player is gone without a hit,
+ * tallies the hit by its shooter's type and pushes bulletHit; then the combo stacks halve when the
+ * build keeps them (src/sim/systems/combo.ts), heroHit is raised at the player (never contact)
+ * and the bullet is gone. One that reaches a dead player is gone without a hit,
  * and a revived player takes the bullets after the revive. Otherwise it keeps its position as
  * prevX/prevY and flies its velocity, bulletSpeed × DT straight towards where the player was when
  * it was fired, the player at the arena's centre. So a bullet fired at distance d hits
@@ -28,6 +29,7 @@ import { ENEMY_IDS } from '../../data/types';
 import { fire } from '../effects/dispatch';
 import { EVENT } from '../effects/types';
 import { DT, PLAYER_RADIUS } from '../types';
+import { loseComboOnHit } from './combo';
 import { BULLET, damagePlayer } from './contact';
 import type { Enemy, RunContext } from './context';
 import { rebuildGrid } from './grid';
@@ -112,6 +114,7 @@ export function stepBullets(ctx: RunContext): void {
           rebuildGrid(ctx);
           gridReady = true;
         }
+        if (ctx.build.flags.combo) loseComboOnHit(ctx);
         fire(ctx, EVENT.heroHit, 0, -1, null, px, py, 0, ZERO);
       }
       continue;

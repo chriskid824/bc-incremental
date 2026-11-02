@@ -355,6 +355,7 @@ const on = (ctx: RunContext, target: Enemy | null): EvalInput => ({
   target,
   chainJump: 0,
   playerLifeFrac: 1,
+  comboStacks: 0,
   ctx: null,
 });
 

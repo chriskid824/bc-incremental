@@ -201,7 +201,10 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
  * depends on the damage instance, so the simulation reads them from ModTable rows keyed by the
  * instance's tags and source (src/sim/build/modTable.ts). A row holds them in this order.
  * enemyRegen's modifiers carry conditions and scalings only: it is read on the untagged center
- * row (src/data/validate.ts).
+ * row (src/data/validate.ts). attackSpeed's per-instance modifiers (attackSpeedIssues) multiply
+ * the cadence of the emitters whose payload rows they match (src/sim/systems/combo.ts); its
+ * other modifiers stay in StatBlock.values, its attack interval, and its column in a row starts
+ * from 1 rather than its base (src/sim/build/modTable.ts).
  */
 export const SCOPED_STATS = [
   'damage',
@@ -221,6 +224,7 @@ export const SCOPED_STATS = [
   'ignoreArmour',
   'ailmentOnBlock',
   'enemyRegen',
+  'attackSpeed',
 ] as const satisfies readonly StatId[];
 export type ScopedStat = (typeof SCOPED_STATS)[number];
 
@@ -243,7 +247,8 @@ export type ModifierKind = 'flat' | 'increased' | 'more';
  * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more).
  * `value` is a fraction for increased/more (0.2 = 20%).
  * Only modifiers of SCOPED_STATS may carry tags, notTags, a scope, conditions or a scaling, and
- * flat damage never does: it stays in StatBlock.values.damage. An empty list counts as no list.
+ * flat damage never does: it stays in StatBlock.values.damage; attackSpeed's only as
+ * attackSpeedIssues allows. An empty list counts as no list.
  */
 export interface Modifier {
   readonly stat: StatId;
@@ -259,6 +264,40 @@ export interface Modifier {
   readonly when?: readonly TargetCondition[];
   /** The value counts per damage instance, scaled by one of its variables (src/data/triggers.ts). */
   readonly scaling?: ScalingSpec;
+}
+
+/** Tags, notTags, a scope, conditions or a scaling: the value depends on the damage instance. */
+export const isPerInstance = (mod: Modifier): boolean =>
+  (mod.tags?.length ?? 0) > 0 ||
+  (mod.notTags?.length ?? 0) > 0 ||
+  mod.scope !== undefined ||
+  (mod.when?.length ?? 0) > 0 ||
+  mod.scaling !== undefined;
+
+/**
+ * Why an attackSpeed modifier is not legal, if it is not. A per-instance one (isPerInstance)
+ * multiplies the cadence of its emitters (src/sim/systems/combo.ts), which has no target and is
+ * recomputed only when the combo stacks change: a `more`, without conditions, scaled on
+ * comboStacks if it scales. The others stay in StatBlock.values, as any kind.
+ */
+export function attackSpeedIssues(mod: Modifier): string[] {
+  if (mod.stat !== 'attackSpeed' || !isPerInstance(mod)) return [];
+  const issues: string[] = [];
+  if (mod.kind !== 'more') {
+    issues.push(
+      `attackSpeed with tags, notTags, a scope or a scaling must be kind 'more' (got '${mod.kind}'): it multiplies its emitters' cadence`,
+    );
+  }
+  if ((mod.when?.length ?? 0) > 0) {
+    issues.push("attackSpeed takes no conditions: an emitter's cadence has no target");
+  }
+  const per = mod.scaling?.per;
+  if (per !== undefined && per !== 'comboStacks') {
+    issues.push(
+      `attackSpeed scales only on 'comboStacks' (got '${per}'): its emitters' cadence is recomputed only when the stacks change`,
+    );
+  }
+  return issues;
 }
 
 /**
@@ -332,9 +371,11 @@ export interface StatBlock {
    */
   readonly values: Readonly<Record<StatId, number>>;
   /**
-   * Every modifier of a scoped stat, untagged ones included, in data order. The simulation folds
-   * them per tag mask and source into ModTable rows: damage of an instance = values.damage × its
-   * damage row; another scoped stat of an instance is its row's value.
+   * Every modifier of a scoped stat, untagged ones included, in data order, but attackSpeed's
+   * per-instance ones only (isPerInstance), since its others are its attack interval. The
+   * simulation folds them per tag mask and source into ModTable rows: damage of an instance =
+   * values.damage × its damage row; another scoped stat of an instance is its row's value, and
+   * attackSpeed's is a factor on its emitter's cadence.
    */
   readonly scoped: readonly Modifier[];
   readonly triggers: StatExtras['triggers'];

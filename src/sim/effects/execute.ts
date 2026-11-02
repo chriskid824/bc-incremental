@@ -51,6 +51,9 @@
  * counts 1 in its chain budget, then exactly `jumps` jumps on the general chain path
  * (chainGeneral, src/sim/combat/policy.ts) without a policy. Its payload shocks each enemy a
  * jump lands on and leaves alive (Payload.shockOnHit), and the executor its first one alike.
+ *
+ * A comboStack adds its stacks to the run's combo, up to its cap, and a buff starts or extends
+ * its window on the cadence of the emitters it takes (src/sim/systems/combo.ts).
  */
 
 import type { Num } from '../../core/num';
@@ -80,6 +83,7 @@ import { fireLobRepeat } from '../emitters/lob';
 import { createPayload, PCT_MAX_HP, SLOT_BLEED, SLOT_BURN, SLOT_POISON } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { fireVolleyRepeat } from '../emitters/volley';
+import { addComboStacks, fireBuff } from '../systems/combo';
 import type { Enemy, RunContext } from '../systems/context';
 import { swarmRepeat } from '../systems/drones';
 import { rebuildGrid } from '../systems/grid';
@@ -771,6 +775,12 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     roots[0] = first;
     chainGeneral(ctx, p, roots, 1, spec.jumps, false, depth, origin);
     endAttack(ctx);
+  },
+  comboStack(ctx, spec) {
+    addComboStacks(ctx, spec.stacks);
+  },
+  buff(ctx, _spec, _fx, entry) {
+    fireBuff(ctx, entry.effect);
   },
 };
 

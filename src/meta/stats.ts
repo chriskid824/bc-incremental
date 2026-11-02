@@ -78,10 +78,13 @@ interface Accumulator {
  * final = (base + Σflat) × (1 + Σincreased) × Π(1 + more) over the untagged, unscoped modifiers
  * without conditions or a scaling of every stat except damage, whose `values` entry keeps only
  * base + Σflat. Every modifier of a scoped stat (SCOPED_STATS) also goes to `scoped`, in data
- * order; tagged, scoped, conditional and scaling ones go only there, and the simulation folds
- * them per damage instance (src/sim/build/modTable.ts). An empty list counts as none. Throws on
- * tags, notTags, a scope, conditions or a scaling outside scoped stats or on flat damage, which
- * data validation should prevent. The extras (triggers, conversions, emitters) pass through.
+ * order, but attackSpeed's untagged, unscoped ones without conditions or a scaling, its attack
+ * interval, go only to `values`; the tagged, scoped, conditional and scaling ones of every scoped
+ * stat go only to `scoped`, and the simulation folds them per damage instance
+ * (src/sim/build/modTable.ts). An empty list
+ * counts as none. Throws on tags, notTags, a scope, conditions or a scaling outside scoped stats
+ * or on flat damage, which data validation should prevent. The extras (triggers, conversions,
+ * emitters) pass through.
  */
 export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExtras): StatBlock {
   const acc = {} as Record<StatId, Accumulator>;
@@ -103,7 +106,9 @@ export function computeStatBlock(modifiers: readonly Modifier[], extras: StatExt
           `damage: ${JSON.stringify(mod)}`,
       );
     }
-    if (isScoped) scoped.push(mod);
+    // attackSpeed's static modifiers are the attack interval alone; its per-instance ones
+    // multiply cadence (attackSpeedIssues), never both.
+    if (isScoped && (perInstance || mod.stat !== 'attackSpeed')) scoped.push(mod);
     // Damage increased/more apply per damage instance too.
     if (perInstance || (mod.stat === 'damage' && mod.kind !== 'flat')) continue;
     const a = acc[mod.stat];

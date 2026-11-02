@@ -221,7 +221,7 @@ describe('generate on the fixture', () => {
     }
   });
 
-  it("writes each bonus form's modifier: status, inZone, and none for inPayload and null", () => {
+  it("writes each bonus form's modifier: status, inZone, scaling, and none for inPayload and null", () => {
     const at = (key: FusionKey): readonly Modifier[] => coreOf(fusion(key)).effects.modifiers;
     const bonus = (when: NonNullable<Modifier['when']>): Modifier[] => [
       { stat: 'damage', kind: 'increased', value: 0.2, scope: 'center', when },
@@ -230,7 +230,16 @@ describe('generate on the fixture', () => {
     expect(at('summon.bleed')).toEqual(bonus([{ targetHas: 'bleed' }]));
     expect(at('fire.aura')).toEqual(bonus([{ inZone: 'fusion.fire.aura' }]));
     expect(at('summon.aura')).toEqual(bonus([{ inZone: 'fusion.summon.aura' }]));
-    for (const o of ['crit', 'thorns', 'barrage', 'combo', 'greed'] as const) {
+    expect(at('lightning.combo')).toEqual([
+      {
+        stat: 'damage',
+        kind: 'increased',
+        value: 0.04,
+        scope: 'center',
+        scaling: { per: 'comboStacks', every: 5 },
+      },
+    ]);
+    for (const o of ['crit', 'thorns', 'barrage', 'greed'] as const) {
       expect(at(`lightning.${o}`)).toEqual([]);
     }
   });

@@ -180,6 +180,7 @@ const on = (ctx: RunContext, target: Enemy): EvalInput => ({
   target,
   chainJump: 0,
   playerLifeFrac: 1,
+  comboStacks: 0,
   ctx,
 });
 

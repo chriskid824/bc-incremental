@@ -25,7 +25,7 @@ import { grantKey } from '../../data/emitters';
 import type { SourcedEmitter } from '../../data/emitters';
 import { M1_SIGNATURE, RULE_COEF_FIELDS, scaleRuleSpec } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
-import { isScopedStat, SCOPED_STATS, STAT_IDS } from '../../data/stats';
+import { attackSpeedIssues, isScopedStat, STAT_IDS } from '../../data/stats';
 import type { Modifier, SourcedRule, StatBlock, StatId } from '../../data/stats';
 import { jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
@@ -48,7 +48,7 @@ import { NO_POLICY_SPEC } from '../systems/systemState';
 import type { ChainPolicySpec } from '../systems/systemState';
 import type { CharacterRun } from '../types';
 import { statAt, staticInput } from './eval';
-import { compileConversions, compileMods, ModTable } from './modTable';
+import { compileConversions, compileMods, ModTable, rowValues } from './modTable';
 import type { CompiledConversion, CompiledMod } from './modTable';
 import {
   CENTER,
@@ -90,6 +90,24 @@ export interface BuildFlags {
    * its more.
    */
   shatterMult: number;
+  /**
+   * The run keeps the combo stacks (RunContext.sys.combo, src/sim/systems/combo.ts;
+   * docs/v3/game-design-v3.md §4.5): compileBuild sets it once the modules have run when a
+   * modifier scales on comboStacks or an effect is a comboStack, and a module that reads the
+   * stacks otherwise sets it itself. False: the stacks stay 0 and nothing counts them.
+   */
+  combo: boolean;
+  /**
+   * The stacks' cap (Infinity: 「層數沒有上限」, ★無盡連擊); the idle ticks, without a target
+   * for the signature emitter, after which the stacks keep floor(stacks × comboIdleKeep)
+   * (0: all go; ◆慣性's 0.75, which keeps at least 1: 「不會歸零」), again at each further
+   * multiple; and what a hit on the player keeps of them, floor(stacks × comboHitKeep)
+   * (★無盡連擊's 0: 「被擊中時歸零」).
+   */
+  comboCap: number;
+  comboIdleTicks: number;
+  comboIdleKeep: number;
+  comboHitKeep: number;
 }
 
 /** Parameters of the signature attack. */
@@ -252,9 +270,11 @@ function addedModifierIssue(mod: Modifier): string | null {
   if (mod.stat === 'damage') return mod.kind === 'flat' ? 'is flat damage' : null;
   const untagged =
     (mod.tags?.length ?? 0) === 0 && (mod.notTags?.length ?? 0) === 0 && mod.scope === undefined;
-  return untagged && mod.scaling === undefined
-    ? 'applies to every instance; use scaleStat or offsetStat'
-    : null;
+  if (untagged && mod.scaling === undefined) {
+    return 'applies to every instance; use scaleStat or offsetStat';
+  }
+  // A module's cadence factor obeys the data's rules (src/data/stats.ts).
+  return attackSpeedIssues(mod)[0] ?? null;
 }
 
 function signatureEmitter<K extends SignatureId>(
@@ -330,6 +350,11 @@ export function compileBuild(
     bossMinGapTicks: 0,
     globalSlow: 0,
     shatterMult: 1,
+    combo: false,
+    comboCap: 20,
+    comboIdleTicks: 60,
+    comboIdleKeep: 0,
+    comboHitKeep: 0.5,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -501,19 +526,22 @@ export function compileBuild(
     triggers[SHATTER_TRIGGER] = shatterTrigger(true, effects.length);
     effects.push(shatterEffect(Math.max(0, values.shatterRadius)));
   }
+  // The run counts the combo stacks only for a build that reads or adds them (lead ruling K1),
+  // so every other build's run stays the same bit for bit.
+  flags.combo ||=
+    scoped.some((mod) => mod.scaling?.per === 'comboStacks') ||
+    effects.some((fx) => fx.spec.kind === 'comboStack');
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
   );
 
   const mods = compileMods(scoped, sources);
   const conversions = compileConversions(stats.conversions);
-  const scopedOf = (perStat: Readonly<Record<StatId, number>>): Float64Array =>
-    Float64Array.from(SCOPED_STATS, (stat) => perStat[stat]);
   const table = new ModTable(
     mods,
-    scopedOf(stats.base),
-    scopedOf(postScale),
-    scopedOf(postOffset),
+    rowValues(stats.base, 1),
+    rowValues(postScale, 1),
+    rowValues(postOffset, 0),
     conversions,
   );
   return {

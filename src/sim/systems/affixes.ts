@@ -11,7 +11,8 @@
  *   (src/sim/systems/death.ts);
  * - `stepAffixes` and `refreshCadence`: 冰霜's factor on every emitter's cadence, taken once at
  *   the start of the enemy AI step (src/sim/systems/enemyAi.ts), where the two lists are also
- *   compacted. 狂暴 runs in that step's own loop, with the constants below.
+ *   compacted; refreshCadence composes it with the combo's factors (src/sim/systems/combo.ts).
+ *   狂暴 runs in that step's own loop, with the constants below.
  *
  * §1.8 gives this module as the home of C7.6's constants. The ones the record, the spawn path
  * and the ailment entries need are declared in enemyRecord.ts and re-exported here (deviation
@@ -21,6 +22,7 @@
  */
 
 import { AFFIX_MULTIPLY } from '../../data/affixes';
+import type { EmitterRuntime } from '../emitters/types';
 import type { Enemy, RunContext } from './context';
 import type { EnemyV3, SpawnOrigin } from './enemyRecord';
 import { spawnOrSkip } from './spawn';
@@ -109,17 +111,26 @@ export function multiply(ctx: RunContext, parent: Enemy): void {
 }
 
 /**
- * Writes 冰霜's factor (AffixState.frostFactor) on every emitter of the run, which every emitter
- * that counts attacks by its cadence then runs at: the signature attacks (volley, lob, fan, arc)
- * and the drones and turrets, whose dash and return speeds, dock time and impact cooldown all
- * scale with it (src/sim/systems/drones.ts). An aura's pulse phase, a strike's timer and an
- * orbit's cooldown are fixed periods that never read cadence, so they keep their own rate (lead
- * ruling L5). Every emitter of a run exists from createRunContext, and nothing else writes
- * cadence, so one pass covers the run.
+ * Writes every emitter's cadence: 冰霜's factor (AffixState.frostFactor) × the emitter's combo
+ * factor × its buffs' factor (ComboState, src/sim/systems/combo.ts), in that order, which every
+ * emitter that counts attacks by its cadence then runs at: the signature attacks (volley, lob,
+ * fan, arc) and the drones and turrets, whose dash and return speeds, dock time and impact
+ * cooldown all scale with it (src/sim/systems/drones.ts). An aura's pulse phase, a strike's timer
+ * and an orbit's cooldown are fixed periods that never read cadence, so they keep their own rate
+ * (lead ruling L5), and their combo and buff factors stay 1. Every emitter of a run exists from
+ * createRunContext, which sets each cadence to its combo factor at 0 stacks (1 but for a fixed
+ * per-instance attackSpeed factor); after that only this function writes cadence, so one pass
+ * covers the run; it runs when one of the three factors changes. With both other factors 1, the cadence is the frost factor
+ * exactly.
  */
 export function refreshCadence(ctx: RunContext): void {
-  const cadence = ctx.sys.affixes.frostFactor;
-  for (const em of ctx.emitters) em.cadence = cadence;
+  const frost = ctx.sys.affixes.frostFactor;
+  const { comboFactor, buffFactor } = ctx.sys.combo;
+  const emitters = ctx.emitters;
+  for (let i = 0; i < emitters.length; i++) {
+    (emitters[i] as EmitterRuntime).cadence =
+      frost * (comboFactor[i] as number) * (buffFactor[i] as number);
+  }
 }
 
 /**

@@ -10,6 +10,7 @@ import { mul, toNumber, ZERO } from '../../core/num';
 import type { Rng } from '../../core/rng';
 import { createStreams } from '../../core/rng';
 import { reachableEnemies } from '../../data/compose';
+import { tagMask } from '../../data/tags';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
 import { doomed } from '../ailments/apply';
@@ -55,6 +56,7 @@ import {
   PRESCALED,
   ROWS,
   SIGNATURE,
+  readsCadence,
   SLOT_HIT,
   SLOT_HIT_CRIT,
   shotsInFlight,
@@ -70,7 +72,15 @@ import type {
   TestModule,
 } from '../rules';
 import { FOCUS_RANGE, isCovered } from '../targeting';
-import { ARENA_HEIGHT, ARENA_WIDTH, COUNTER_IDS, DT, MAX_RUN_SECONDS, TICK_RATE } from '../types';
+import {
+  ARENA_HEIGHT,
+  ARENA_WIDTH,
+  COUNTER_IDS,
+  DRONE_KIND_TURRET,
+  DT,
+  MAX_RUN_SECONDS,
+  TICK_RATE,
+} from '../types';
 import type {
   CounterId,
   EnemyState,
@@ -90,6 +100,7 @@ import {
   createAffixState,
   createBulletPool,
   createChainState,
+  createComboState,
   createDronePool,
   createEnemyAiState,
   createLobState,
@@ -100,10 +111,11 @@ import {
   createSplitState,
   createZonePool,
 } from './systemState';
-import type { SystemState } from './systemState';
+import type { ComboLayout, DroneLayout, SystemState } from './systemState';
 
 const DAMAGE = SCOPED_INDEX.damage;
 const CRIT_MULTIPLIER = SCOPED_INDEX.critMultiplier;
+const ATTACK_SPEED = SCOPED_INDEX.attackSpeed;
 const FUSION = SOURCE_CLASS_ORDINAL.fusion;
 
 const HALF_WIDTH = ARENA_WIDTH / 2;
@@ -736,6 +748,72 @@ function repeatPayload(fx: CompiledEffect, signature: Payload, rng: Rng): Payloa
 }
 
 /**
+ * The combo state's layout (ComboLayout) for a run of `build` with `emitters` and the drone
+ * rows of `drones`. Each emitter that reads cadence (readsCadence) takes its combo factor at 0
+ * stacks from its payload's hit row (SLOT_HIT, filled here), as a hit of it reads that row, only
+ * when the build has an attackSpeed modifier per instance (StatBlock.scoped), so no other build
+ * fills a row earlier than it did; the emitters whose row holds a scaled one join `scaled`. Each
+ * buff effect, in effect order, takes a slot: its factor 1 + more, its window in whole ticks, and
+ * the emitters it takes, those that read cadence and whose payload carries all of its tags.
+ */
+function comboLayout(
+  build: CompiledBuild,
+  emitters: readonly EmitterRuntime[],
+  drones: DroneLayout,
+): ComboLayout {
+  const count = emitters.length;
+  const comboFactor = new Float64Array(count).fill(1);
+  const scaled: number[] = [];
+  if (build.mods.some((mod) => mod.stat === ATTACK_SPEED)) {
+    const table = build.table;
+    const atStart = staticInput();
+    for (const em of emitters) {
+      if (!readsCadence(em.spec)) continue;
+      // Row first: filling it may grow, and so replace, the table's arrays.
+      const row = slotRow(build, em.payload, SLOT_HIT);
+      comboFactor[em.index] = statAt(table, row, ATTACK_SPEED, atStart);
+      if (table.dynamic(row, ATTACK_SPEED)) scaled.push(em.index);
+    }
+  }
+  const effects = build.effects;
+  const buffSlot = new Int32Array(effects.length).fill(-1);
+  const mult: number[] = [];
+  const ticks: number[] = [];
+  const masks: number[] = [];
+  effects.forEach((fx, i) => {
+    const spec = fx.spec;
+    if (spec.kind !== 'buff') return;
+    buffSlot[i] = mult.length;
+    mult.push(1 + spec.more);
+    ticks.push(Math.round(spec.durationSec * TICK_RATE));
+    masks.push(tagMask(spec.tags ?? []));
+  });
+  const buffMatch = new Uint8Array(mult.length * count);
+  masks.forEach((all, b) => {
+    for (const em of emitters) {
+      if (readsCadence(em.spec) && (em.payload.tags & all) === all) {
+        buffMatch[b * count + em.index] = 1;
+      }
+    }
+  });
+  // A swarm's drones pick only enemies inside the arena, its turrets any alive one.
+  let turret = false;
+  for (let r = 0; r < drones.rows; r++) {
+    if (drones.kind[r] === DRONE_KIND_TURRET && drones.owner[r] === 0) turret = true;
+  }
+  return {
+    ticks: build.flags.combo || mult.length !== 0,
+    inArenaOnly: (emitters[0] as EmitterRuntime).spec.kind === 'drone' && !turret,
+    comboFactor,
+    scaled: Int32Array.from(scaled),
+    buffSlot,
+    buffMult: Float64Array.from(mult),
+    buffTicks: Float64Array.from(ticks),
+    buffMatch,
+  };
+}
+
+/**
  * Builds the context of one run; the config must already be validated. testModules are for
  * tests only (src/sim/rules/module.ts).
  */
@@ -800,6 +878,9 @@ export function createRunContext(
   const thornsEmitters = emitters.filter((em) => em.spec.kind === 'thorns');
   const signatureEmitter = emitters[0] as EmitterRuntime;
   const signaturePayload = signatureEmitter.payload;
+  const combo = comboLayout(build, emitters, layout);
+  // 冰霜's and the buffs' factors start at 1, so each cadence starts at its combo factor.
+  for (const em of emitters) em.cadence = combo.comboFactor[em.index] as number;
 
   // Derived stats, clamped as documented in src/data/stats.ts. The estimates read the signature
   // payload's primary hit rows (rows first: filling one may grow the table's arrays).
@@ -992,7 +1073,7 @@ export function createRunContext(
     thornsEmitters,
 
     // Its run is this context, set once the literal is built.
-    evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1, ctx: null },
+    evalInput: { now: 0, target: null, chainJump: 0, playerLifeFrac: 1, comboStacks: 0, ctx: null },
     triggerState: {
       count: new Int32Array(triggers.length),
       readyAt: new Float64Array(triggers.length),
@@ -1050,6 +1131,7 @@ export function createRunContext(
       ),
       bullets,
       affixes: createAffixState(affixesRng, guardBlockOf(data)),
+      combo: createComboState(combo, emitters.length),
     },
 
     enemies,

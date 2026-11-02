@@ -67,6 +67,8 @@ export interface SystemState {
   readonly bullets: BulletPool;
   /** The elite affixes' stream, lists and cadence factor (src/sim/systems/affixes.ts). */
   readonly affixes: AffixState;
+  /** The combo stacks and the timed buffs, with their cadence factors (src/sim/systems/combo.ts). */
+  readonly combo: ComboState;
 }
 
 /**
@@ -825,4 +827,75 @@ export interface AffixState {
  */
 export function createAffixState(rng: Rng, guardBlockPct: number): AffixState {
   return { rng, guardians: [], frostElites: [], frostFactor: 1, guardBlockPct };
+}
+
+/**
+ * What createRunContext works out for the combo state from the compiled build (comboLayout in
+ * src/sim/systems/context.ts), per emitter of the run and per buff effect of the build.
+ */
+export interface ComboLayout {
+  /** The run steps the state every tick (stepCombo): BuildFlags.combo, or a buff effect. */
+  readonly ticks: boolean;
+  /**
+   * The signature emitter picks only enemies inside the arena: a swarm without a turret, whose
+   * drones' picks are the only ones it makes (pickOuter, src/sim/systems/drones.ts).
+   */
+  readonly inArenaOnly: boolean;
+  /**
+   * Per emitter, its combo factor at 0 stacks: the product of the per-instance attackSpeed
+   * modifiers its payload's hit row matches, 1 for an emitter that does not read cadence.
+   */
+  readonly comboFactor: Float64Array;
+  /** The emitters whose factor moves with the stacks: their row holds a scaling entry. */
+  readonly scaled: Int32Array;
+  /** Per effect index, its buff's slot (0 … buffs − 1, in effect order), −1 for another effect. */
+  readonly buffSlot: Int32Array;
+  /** Per buff slot: 1 + its more, and its window, round(durationSec × TICK_RATE) ticks. */
+  readonly buffMult: Float64Array;
+  readonly buffTicks: Float64Array;
+  /**
+   * Per buff slot × emitter (slot × emitters + index): 1 when the emitter reads cadence and its
+   * payload carries every tag of the buff, which takes it.
+   */
+  readonly buffMatch: Uint8Array;
+}
+
+/**
+ * The combo stacks and the timed buffs (RunContext.sys.combo, docs/v3/game-design-v3.md §4.5,
+ * docs/v3 C6 design §7.4 C6b.2): one member for both, since both are factors on the emitters'
+ * cadence, which refreshCadence composes with 冰霜's (src/sim/systems/affixes.ts), and the one
+ * per-tick combo step runs both (stepCombo, src/sim/systems/combo.ts). A run whose build neither
+ * reads the stacks (BuildFlags.combo false) nor has a buff never steps it or changes it: its
+ * stacks stay 0 and every factor exactly 1.
+ */
+export interface ComboState extends ComboLayout {
+  /** The run's combo stacks, an integer from 0 to BuildFlags.comboCap. */
+  stacks: number;
+  /** Ticks in a row on which the signature emitter had no target to pick. */
+  idle: number;
+  /** Per emitter, the product of the active buffs it takes, 1 without one. */
+  readonly buffFactor: Float64Array;
+  /** Per buff slot, the last tick of its window, −1 while it is not active. */
+  readonly buffEnd: Float64Array;
+  /** The buffs active now. */
+  active: number;
+}
+
+/** The combo state of `layout` for a run of `emitters` emitters: no stacks and no buff active. */
+export function createComboState(layout: ComboLayout, emitters: number): ComboState {
+  return {
+    ticks: layout.ticks,
+    inArenaOnly: layout.inArenaOnly,
+    comboFactor: layout.comboFactor,
+    scaled: layout.scaled,
+    buffSlot: layout.buffSlot,
+    buffMult: layout.buffMult,
+    buffTicks: layout.buffTicks,
+    buffMatch: layout.buffMatch,
+    stacks: 0,
+    idle: 0,
+    buffFactor: new Float64Array(emitters).fill(1),
+    buffEnd: new Float64Array(layout.buffMult.length).fill(-1),
+    active: 0,
+  };
 }

@@ -15,6 +15,7 @@ import type { Modifier, ModifierKind, StatId } from './stats';
 import { DAMAGE_TAGS } from './tags';
 import {
   APPLIED_AILMENTS,
+  BUFF_STATS,
   CONVERSION_TARGETS,
   DETONATE_AILMENTS,
   HELD_AILMENTS,
@@ -389,6 +390,16 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         damagePct: finite,
         shockStacks: finite.exactOptional(),
         from: z.enum(['eventTarget', 'nearestToPoint']).exactOptional(),
+      })
+      .readonly(),
+    z.strictObject({ kind: z.literal('comboStack'), stacks: finite }).readonly(),
+    z
+      .strictObject({
+        kind: z.literal('buff'),
+        stat: z.enum(BUFF_STATS),
+        more: finite,
+        durationSec: finite,
+        tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
       })
       .readonly(),
   ]),

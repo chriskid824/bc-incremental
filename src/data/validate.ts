@@ -8,10 +8,11 @@ import { grantKey } from './emitters';
 import type { EmitterGrant } from './emitters';
 import type { RuleSpec } from './rules';
 import { ARCHETYPE_TAGS, SOURCE_CLASSES, sourceOfNode } from './sources';
-import { isBehaviourModifier } from './stats';
+import { attackSpeedIssues, isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
 import { DELIVERY_MASK, DOT_MASK, TAG } from './tags';
 import {
+  BUFF_STATS,
   CONDITION_CONTEXTS,
   conditionKey,
   DOT_AILMENTS,
@@ -738,6 +739,7 @@ function modifierIssues(mod: Modifier): string[] {
       'enemyRegen takes no tags, notTags or scope: it is read on the untagged center row',
     );
   }
+  issues.push(...attackSpeedIssues(mod));
   (mod.when ?? []).forEach((condition, i) => {
     for (const problem of conditionIssues(condition)) issues.push(`when[${i}] ${problem}`);
   });
@@ -1277,9 +1279,41 @@ function effectIssues(
       }
       break;
     }
+    case 'comboStack': {
+      const { stacks } = effect;
+      if (!(Number.isInteger(stacks) && stacks >= 1 && stacks <= COMBO_STACKS_MAX)) {
+        issues.push(`stacks must be an integer in [1, ${COMBO_STACKS_MAX}] (got ${stacks})`);
+      }
+      break;
+    }
+    case 'buff': {
+      // The schema takes only the stats the simulation buffs; data checked without it can still
+      // carry another.
+      const stat: string = effect.stat;
+      if (!(BUFF_STATS as readonly string[]).includes(stat)) {
+        issues.push(`stat must be ${BUFF_STATS.map((s) => `'${s}'`).join(' or ')} (got ${stat})`);
+      }
+      if (!(Number.isFinite(effect.more) && effect.more > -1)) {
+        issues.push(`more must be finite and > -1 (got ${effect.more})`);
+      }
+      if (!(Number.isFinite(effect.durationSec) && effect.durationSec > 0)) {
+        issues.push(`durationSec must be finite and > 0 (got ${effect.durationSec})`);
+      }
+      const tags = effect.tags;
+      if (tags !== undefined && (tags.length === 0 || new Set(tags).size !== tags.length)) {
+        issues.push('tags must be unique and not empty; omit the field instead');
+      }
+      break;
+    }
   }
   return issues;
 }
+
+/**
+ * The most combo stacks one comboStack adds: BuildFlags.comboCap's default (docs/v3/
+ * game-design-v3.md §4.5).
+ */
+const COMBO_STACKS_MAX = 20;
 
 /** The most repeats one repeatAttack makes. */
 const REPEAT_COUNT_MAX = 4;

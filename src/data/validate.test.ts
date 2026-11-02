@@ -1513,6 +1513,105 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('accepts comboStack and buff effects on any event, the player their target (C6b.2)', () => {
+    expect(
+      triggerIssues(
+        { on: 'hit', do: [{ kind: 'comboStack', stacks: 1 }] },
+        { on: 'kill', do: [{ kind: 'comboStack', stacks: 20 }] },
+        { on: 'heroHit', do: [{ kind: 'comboStack', stacks: 3 }] },
+        {
+          on: 'periodic',
+          every: 10,
+          do: [{ kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2, tags: ['minion'] }],
+        },
+        {
+          on: 'waveStart',
+          do: [{ kind: 'buff', stat: 'attackSpeed', more: -0.5, durationSec: 0.1 }],
+        },
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects comboStack and buff parameters out of range (C6b.2)', () => {
+    // Plants the bounds of either: [1, 20] whole stacks, more > −1, durationSec > 0, both finite.
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { kind: 'comboStack', stacks: 0 },
+          { kind: 'comboStack', stacks: 21 },
+          { kind: 'comboStack', stacks: 1.5 },
+          { kind: 'comboStack', stacks: Number.NaN },
+          { kind: 'buff', stat: 'attackSpeed', more: -1, durationSec: 0 },
+          {
+            kind: 'buff',
+            stat: 'attackSpeed',
+            more: Number.POSITIVE_INFINITY,
+            durationSec: Number.POSITIVE_INFINITY,
+          },
+          { kind: 'buff', stat: 'attackSpeed', more: Number.NaN, durationSec: -2 },
+          { kind: 'buff', stat: 'damage' as 'attackSpeed', more: 1, durationSec: 1, tags: [] },
+          { kind: 'buff', stat: 'attackSpeed', more: 1, durationSec: 1, tags: ['hit', 'hit'] },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] stacks must be an integer in [1, 20] (got 0)`,
+      `${at} do[1] stacks must be an integer in [1, 20] (got 21)`,
+      `${at} do[2] stacks must be an integer in [1, 20] (got 1.5)`,
+      `${at} do[3] stacks must be an integer in [1, 20] (got NaN)`,
+      `${at} do[4] more must be finite and > -1 (got -1)`,
+      `${at} do[4] durationSec must be finite and > 0 (got 0)`,
+      `${at} do[5] more must be finite and > -1 (got Infinity)`,
+      `${at} do[5] durationSec must be finite and > 0 (got Infinity)`,
+      `${at} do[6] more must be finite and > -1 (got NaN)`,
+      `${at} do[6] durationSec must be finite and > 0 (got -2)`,
+      `${at} do[7] stat must be 'attackSpeed' (got damage)`,
+      `${at} do[7] tags must be unique and not empty; omit the field instead`,
+      `${at} do[8] tags must be unique and not empty; omit the field instead`,
+    ]);
+  });
+
+  it('takes a per-instance attackSpeed only as a more without conditions, scaled on comboStacks if at all (lead ruling K5)', () => {
+    // Plants each refusal dropped: an increased, a condition, a scaling on another variable.
+    const fast: Modifier = { stat: 'attackSpeed', kind: 'more', value: 0.5, tags: ['minion'] };
+    let index = -1;
+    /** Issues of the real content with `mods` on 'vitality', with a descKey if it needs one. */
+    const modifierIssues = (...mods: Modifier[]): string[] =>
+      issuesAfter((d) => {
+        const node = talent(d, 'vitality');
+        index = node.modifiers.length;
+        node.modifiers.push(...(mods as Mutable<Modifier>[]));
+        if (needsDescKey(node)) node.descKey = 'talent.vitality.desc';
+      });
+    expect(
+      modifierIssues(
+        fast,
+        { ...fast, tags: [], scope: 'outer.summon' },
+        { stat: 'attackSpeed', kind: 'more', value: 0.03, scaling: { per: 'comboStacks' } },
+        { stat: 'attackSpeed', kind: 'increased', value: 0.2 },
+        { stat: 'attackSpeed', kind: 'flat', value: 0.1 },
+        { stat: 'attackSpeed', kind: 'more', value: -0.3 },
+      ),
+    ).toEqual([]);
+    const m = (k: number): string => `talent 'vitality': modifiers[${index + k}]`;
+    expect(
+      modifierIssues(
+        { ...fast, kind: 'increased' },
+        { stat: 'attackSpeed', kind: 'flat', value: 0.1, notTags: ['crit'] },
+        { ...fast, when: [{ targetHas: 'frost' }] },
+        { ...fast, tags: [], scaling: { per: 'chainJump' } },
+        { ...fast, kind: 'increased', scaling: { per: 'targetDistance', every: 10 } },
+      ),
+    ).toEqual([
+      `${m(0)} attackSpeed with tags, notTags, a scope or a scaling must be kind 'more' (got 'increased'): it multiplies its emitters' cadence`,
+      `${m(1)} attackSpeed with tags, notTags, a scope or a scaling must be kind 'more' (got 'flat'): it multiplies its emitters' cadence`,
+      `${m(2)} attackSpeed takes no conditions: an emitter's cadence has no target`,
+      `${m(3)} attackSpeed scales only on 'comboStacks' (got 'chainJump'): its emitters' cadence is recomputed only when the stacks change`,
+      `${m(4)} attackSpeed with tags, notTags, a scope or a scaling must be kind 'more' (got 'increased'): it multiplies its emitters' cadence`,
+      `${m(4)} attackSpeed scales only on 'comboStacks' (got 'targetDistance'): its emitters' cadence is recomputed only when the stacks change`,
+    ]);
+  });
+
   it('accepts a shield with and without its cap, and rejects a gain or cap that is not > 0', () => {
     expect(
       triggerIssues(

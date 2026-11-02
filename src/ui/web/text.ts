@@ -126,6 +126,8 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   slashLine: 'web.effect.slashLine',
   coinHit: 'web.effect.coinHit',
   chainBolt: 'web.effect.chainBolt',
+  comboStack: 'web.effect.comboStack',
+  buff: 'web.effect.buff',
 };
 
 /**
@@ -210,6 +212,12 @@ export const SCALING_TEXT: Readonly<
     one: 'web.scaling.targetFrost.one',
     other: 'web.scaling.targetFrost.other',
     every: 'percent',
+  },
+  comboStacks: {
+    name: 'web.scaling.comboStacks.name',
+    one: 'web.scaling.comboStacks.one',
+    other: 'web.scaling.comboStacks.other',
+    every: 'number',
   },
 };
 
@@ -390,6 +398,8 @@ export const COEF_FORMAT: {
   slashLine: { damagePct: 'pct' },
   coinHit: { multiplier: 'mult' },
   chainBolt: { damagePct: 'pct' },
+  comboStack: {},
+  buff: {},
 };
 
 // Numbers, as M1 writes them (src/ui/describe.ts).
@@ -682,6 +692,16 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
       }
       if (spec.from === 'nearestToPoint') extra('web.extra.nearestToPoint');
       return text({ jumps: spec.jumps, damage: percent(spec.damagePct) });
+    case 'comboStack':
+      return text({ n: spec.stacks, stack: word(lookup, 'stack', spec.stacks) });
+    case 'buff':
+      if (spec.tags !== undefined && spec.tags.length > 0)
+        extra('web.extra.buffTags', { tags: tagList(lookup, spec.tags) });
+      return text({
+        stat: say(lookup, `stat.${spec.stat}`),
+        mult: trim(1 + spec.more),
+        duration: trim(spec.durationSec),
+      });
   }
 }
 
@@ -713,7 +733,11 @@ const fansOut = (effect: EffectSpec): boolean =>
   (effect.kind === 'applyAilment' || effect.kind === 'addFrost' || effect.kind === 'detonate') &&
   effect.radius === undefined;
 const onPlayer = (effect: EffectSpec): boolean =>
-  effect.kind === 'repeatAttack' || effect.kind === 'heal' || effect.kind === 'shield';
+  effect.kind === 'repeatAttack' ||
+  effect.kind === 'heal' ||
+  effect.kind === 'shield' ||
+  effect.kind === 'comboStack' ||
+  effect.kind === 'buff';
 
 /**
  * How a center event's trigger without a selector places its effects, for FANOUT_TEXT: every

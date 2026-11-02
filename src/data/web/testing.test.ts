@@ -236,7 +236,7 @@ const OUTER_CARDS = {
   poison: [0x3fd08a, 'status'],
   bleed: [0xd7263d, 'status'],
   lightning: [0xb48cff, null],
-  combo: [0xff4fb8, 'none'],
+  combo: [0xff4fb8, 'scaling'],
   crit: [0xfff4d6, 'inPayload'],
   ice: [0x8fe3ff, null],
   aura: [0xffd6ec, 'inZone'],

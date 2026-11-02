@@ -152,7 +152,7 @@ describe('computeStatBlock', () => {
 
   it('throws on tags, notTags, a scope, conditions or a scaling outside scoped stats and on flat damage', () => {
     const rejected: Modifier[] = [
-      { stat: 'attackSpeed', kind: 'increased', value: 1, tags: ['crit'] },
+      { stat: 'projectileCount', kind: 'increased', value: 1, tags: ['crit'] },
       { stat: 'damage', kind: 'flat', value: 5, tags: ['burn'] },
       { stat: 'chainCount', kind: 'flat', value: 0.1, notTags: ['chain'] },
       { stat: 'damage', kind: 'flat', value: 5, notTags: ['burn'] },
@@ -160,7 +160,7 @@ describe('computeStatBlock', () => {
       { stat: 'damage', kind: 'flat', value: 5, scope: 'center' },
       { stat: 'chainCount', kind: 'flat', value: 0.1, scaling: { per: 'chainJump' } },
       { stat: 'damage', kind: 'flat', value: 5, scaling: { per: 'chainJump' } },
-      { stat: 'attackSpeed', kind: 'increased', value: 1, when: [{ targetHas: 'burn' }] },
+      { stat: 'projectileCount', kind: 'increased', value: 1, when: [{ targetHas: 'burn' }] },
       { stat: 'damage', kind: 'flat', value: 5, when: [{ targetKind: 'boss' }] },
     ];
     for (const mod of rejected) expect(() => block([mod]), JSON.stringify(mod)).toThrow(/Tags/);
@@ -171,7 +171,7 @@ describe('computeStatBlock', () => {
     expect(STAT_IDS.slice(-2)).toEqual(['treasureRate', 'barrageCount']);
     expect(BASE_STATS.barrageCount).toBe(0);
     expect(isScopedStat('barrageCount')).toBe(false);
-    expect(SCOPED_STATS).toHaveLength(17);
+    expect(SCOPED_STATS).toHaveLength(18);
     const stats = block([
       { stat: 'barrageCount', kind: 'flat', value: 2 },
       { stat: 'barrageCount', kind: 'flat', value: 1.5 },

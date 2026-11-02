@@ -12,6 +12,7 @@ import { fire as fireTriggers } from '../effects/dispatch';
 import { drainRepeatCharges } from '../effects/execute';
 import { EVENT } from '../effects/types';
 import { pickTargetInGrid } from '../targeting';
+import { gainComboOnAttack } from '../systems/combo';
 import { focused, rollCount } from '../systems/context';
 import type { Enemy, Projectile, RunContext } from '../systems/context';
 import { liveProjectiles } from '../systems/shots';
@@ -42,13 +43,15 @@ export function runVolley(ctx: RunContext, em: EmitterRuntime): void {
 }
 
 /**
- * Counts an attack of `em` at `target`, its first target: its attack and volley serials,
- * steadyAim's every-Nth-attack rhythm, the onAttack hooks, which may make the whole attack
- * steady (ctx.shotScratch), then the nthAttack triggers at the target.
+ * Counts an attack of `em` at `target`, its first target: its attack and volley serials, the
+ * signature emitter's combo stack when the build keeps them (src/sim/systems/combo.ts), so its
+ * own hits read it, steadyAim's every-Nth-attack rhythm, the onAttack hooks, which may make the
+ * whole attack steady (ctx.shotScratch), then the nthAttack triggers at the target.
  */
 export function countAttack(ctx: RunContext, em: EmitterRuntime, target: Enemy): void {
   em.attacks++;
   em.volley++;
+  if (ctx.build.flags.combo) gainComboOnAttack(ctx, em);
   const { forceCritEvery, counts } = ctx.build.signature;
   em.steadyAttack = counts === 'attack' && forceCritEvery > 0 && em.attacks % forceCritEvery === 0;
   const shot = ctx.shotScratch;

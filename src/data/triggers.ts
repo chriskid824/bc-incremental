@@ -21,9 +21,11 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
  * `targetShockStacks`: the stacks of that ailment on the instance's target. `targetFrost`: the
  * target's chill meter, 0 to 1 (a frozen enemy reads 1). `targetDistance`: how far the target is
  * from the player, in arena units.
- * `lifeLostPct`: the fraction of the player's max life missing, 0 to 1. A target variable reads
- * 0 without a target (estimates outside a run). The simulation reads each variable through a
- * registry typed over this list (src/sim/build/eval.ts), so a new variable lands with its reader.
+ * `lifeLostPct`: the fraction of the player's max life missing, 0 to 1. `comboStacks`: the run's
+ * combo stacks as they are at the instance (src/sim/systems/combo.ts), a run variable that needs
+ * no target. A target variable reads 0 without a target, and comboStacks 0 outside a run
+ * (estimates). The simulation reads each variable through a registry typed over this list
+ * (src/sim/build/eval.ts), so a new variable lands with its reader.
  */
 export const SCALING_VARS = [
   'chainJump',
@@ -33,6 +35,7 @@ export const SCALING_VARS = [
   'targetPoisonStacks',
   'targetShockStacks',
   'targetFrost',
+  'comboStacks',
 ] as const;
 export type ScalingVar = (typeof SCALING_VARS)[number];
 
@@ -518,6 +521,35 @@ export interface ChainBoltSpec {
 }
 
 /**
+ * Combo stacks (連擊, docs/v3/game-design-v3.md §4.5): `stacks` of them, 1 to 20, beside the one
+ * each counted attack of the signature gives, up to the run's cap (BuildFlags.comboCap,
+ * src/sim/systems/combo.ts). It acts on the player and needs no enemy.
+ */
+export interface ComboStackSpec {
+  readonly kind: 'comboStack';
+  readonly stacks: number;
+}
+
+/** The stats a buff raises; a stat joins with the content that first buffs it (L9). */
+export const BUFF_STATS = ['attackSpeed'] as const;
+export type BuffStat = (typeof BUFF_STATS)[number];
+
+/**
+ * A timed buff (超頻, gd:478): for round(durationSec × 60) ticks after it fires, the cadence of
+ * each emitter that reads one and whose payload carries all of `tags` (every such emitter without
+ * them) is × (1 + `more`), more > −1 (src/sim/systems/combo.ts). Firing it again while it lasts
+ * restarts its time and multiplies nothing more; distinct buff effects multiply. It acts on the
+ * player and needs no enemy.
+ */
+export interface BuffSpec {
+  readonly kind: 'buff';
+  readonly stat: BuffStat;
+  readonly more: number;
+  readonly durationSec: number;
+  readonly tags?: readonly DamageTag[];
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -556,6 +588,8 @@ export interface ChainBoltSpec {
  * - coinHit: one hit of `multiplier` × the damage stat on the event's enemy (CoinHitSpec).
  * - chainBolt: a hit on the event's enemy, or the one nearest the event's point, and `jumps`
  *   chain jumps from it, each shocking its enemy (ChainBoltSpec).
+ * - comboStack: `stacks` combo stacks, up to the run's cap (ComboStackSpec).
+ * - buff: × (1 + more) on the cadence of the emitters that carry its tags, for a time (BuffSpec).
  */
 export type EffectSpec =
   | {
@@ -602,7 +636,9 @@ export type EffectSpec =
   | ProjectilesSpec
   | SlashLineSpec
   | CoinHitSpec
-  | ChainBoltSpec;
+  | ChainBoltSpec
+  | ComboStackSpec
+  | BuffSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -635,6 +671,10 @@ export const COEF_FIELDS: {
   slashLine: ['damagePct'],
   coinHit: ['multiplier'],
   chainBolt: ['damagePct'],
+  // A stack count, which the coefficient never scales: insensitive (docs/v3 C6 design §4.2).
+  comboStack: [],
+  // No payload carries one; a fusion that does names its field here.
+  buff: [],
 };
 
 /**
