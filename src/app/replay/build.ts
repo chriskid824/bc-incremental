@@ -123,7 +123,9 @@ export function resolveReplayBuild(
  * construct, arena and colour, and the fusion cores its progress owns with their skins; null for
  * a preset, which the renderer draws as M1's center.
  */
-export function characterLookOf(resolved: ResolvedBuild): CharacterLook | null {
+export function characterLookOf(
+  resolved: Pick<ResolvedBuild, 'web' | 'progress'>,
+): CharacterLook | null {
   const { web, progress } = resolved;
   if (web === null || progress === null) return null;
   const fusions: FusionLook[] = [];

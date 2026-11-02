@@ -1,13 +1,18 @@
 /**
- * The one place the v3 page tells the renderer which character it draws. Today's RendererOptions
- * knows only `construct: 'hive'` (蜂巢's comb, drones and turrets); every other character gets
- * M1's center until the renderer draws v3 constructs and arenas, when this maps CharacterDef's
- * construct (and arena) to that option instead.
+ * The one place the v3 page tells the renderer which character it draws: the character's looks
+ * (RendererOptions.character, src/render/characterLook.ts) from its web and the run's progress,
+ * the owned fusion cores' skins included, read as the replay reads them (characterLookOf).
  */
 
-import type { CharacterDef } from '../../data/web';
+import type { AssembledWeb } from '../../data/web';
+import type { CharacterProgress } from '../../meta/web';
 import type { RendererOptions } from '../../render';
+import { characterLookOf } from '../replay/build';
 
-export function characterRendererOptions(def: CharacterDef): Pick<RendererOptions, 'construct'> {
-  return def.construct === 'hive' ? { construct: 'hive' } : {};
+export function characterRendererOptions(
+  web: AssembledWeb,
+  progress: CharacterProgress,
+): Pick<RendererOptions, 'character'> {
+  const look = characterLookOf({ web, progress });
+  return look === null ? {} : { character: look };
 }

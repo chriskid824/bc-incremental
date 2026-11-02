@@ -287,8 +287,8 @@ export class GamePage {
 
   // Runs.
 
-  private rendererFor(def: CharacterDef): Renderer {
-    const options = characterRendererOptions(def);
+  private rendererFor(web: AssembledWeb, progress: CharacterProgress): Renderer {
+    const options = characterRendererOptions(web, progress);
     const key = JSON.stringify(options);
     if (this.renderer === null || this.rendererKey !== key) {
       this.renderer?.destroy();
@@ -311,7 +311,7 @@ export class GamePage {
     this.screen = 'run';
     const run = new CharacterRunState(web, progress, startWave, this.data);
     this.run = run;
-    this.rendererFor(web.def).beginRun(run.typicalHit);
+    this.rendererFor(web, progress).beginRun(run.typicalHit);
     this.banner = new EnemyBanner(
       this.data.enemies,
       this.profile.account.seenEnemies as readonly EnemyId[],
