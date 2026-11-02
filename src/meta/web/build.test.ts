@@ -277,6 +277,7 @@ describe('webRunConfig', () => {
     // A new caller shows here, to be read.
     expect(callers.sort()).toEqual([
       'src/app/replay/build.ts webRunConfig',
+      'src/app/v3/run.ts webRunConfig',
       'src/meta/web/calibrate.ts webRunConfig',
       'src/meta/web/fuzz.ts webRunConfig',
       'tools/balance/v3/checks/c7.ts cappedRunConfig',

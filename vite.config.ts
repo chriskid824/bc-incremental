@@ -38,6 +38,13 @@ export default defineConfig(({ mode }) => {
       sourcemap: true,
       // `vite build --mode steam` makes the Steam build's page (src/platform/index.ts).
       outDir: mode === 'steam' ? 'dist-steam' : 'dist',
+      // The M1 page and the v3 game page; the dev pages (viewer, sheet, clips) stay out.
+      rollupOptions: {
+        input: {
+          main: join(ROOT, 'index.html'),
+          game: join(ROOT, 'game.html'),
+        },
+      },
     },
     test: {
       include: [
