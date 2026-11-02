@@ -91,7 +91,7 @@ const FROST_TICKS = 10;
 const EMBERS = 8;
 const EMBER_MAX = 18;
 /** Bubbles a poisoned explosion raises. */
-const BUBBLES = 7;
+const BUBBLES = 10;
 /** Explosions of a tick held for the poison check, and poisoned spots. */
 const MAX_PENDING = 16;
 
@@ -734,7 +734,7 @@ export class MagmaLayer {
       p.vx = this.rand(-18, 18);
       p.vy = -this.rand(40, 90);
       p.drag = 0.8;
-      const s = this.rand(7, 14) / BUBBLE_SIZE;
+      const s = this.rand(16, 26) / BUBBLE_SIZE;
       p.scale0 = s * 0.6;
       p.scale1 = s * 1.3;
       p.color0 = mixColor(this.looks.poison, 0xffffff, 0.35);
