@@ -343,10 +343,11 @@ export class WebPanel {
     rows.push(el(this.doc, 'div', 'v3p-tip-kind', kind));
     for (const line of tip.lines) rows.push(el(this.doc, 'div', 'v3p-tip-line', line));
     if (tip.price !== null) rows.push(el(this.doc, 'div', 'v3p-tip-price', tip.price));
-    if (tip.action !== null) {
-      const action = el(this.doc, 'div', 'v3p-tip-action', tip.action);
-      const plan = planClick(this.web, this.progress, this.options.account, id);
-      action.dataset.refused = String(plan.kind === 'refused');
+    const pending = this.pending?.id === id;
+    const actionText = pending ? this.t('panel.tip.pathPending') : tip.action;
+    if (actionText !== null) {
+      const action = el(this.doc, 'div', 'v3p-tip-action', actionText);
+      action.dataset.refused = String(!pending && tip.refused);
       rows.push(action);
     }
     if (tip.refund !== null) rows.push(el(this.doc, 'div', 'v3p-tip-refund', tip.refund));

@@ -338,7 +338,10 @@ export function priceText(price: Price, lookup: TextLookup): string {
       say(lookup, 'panel.price.shards', { shards: formatNum(price.shards, { format: 'short' }) }),
     );
   }
-  if (price.cores > 0) parts.push(say(lookup, 'panel.price.cores', { cores: price.cores }));
+  if (price.cores > 0) {
+    const key = price.cores === 1 ? 'panel.price.core' : 'panel.price.cores';
+    parts.push(say(lookup, key, { cores: price.cores }));
+  }
   if (price.resonance > 0) {
     parts.push(say(lookup, 'panel.price.resonance', { resonance: price.resonance }));
   }
@@ -434,6 +437,8 @@ export interface NodeTip {
   readonly price: string | null;
   /** The action or the reason it cannot be bought, translated. */
   readonly action: string | null;
+  /** The action is a refusal. */
+  readonly refused: boolean;
   /** 「右鍵退點，返還 …」 for an owned node but the signature. */
   readonly refund: string | null;
 }
@@ -484,6 +489,7 @@ export function nodeTip(
     lines: text.lines,
     price,
     action,
+    refused: plan.kind === 'refused',
     refund,
   };
 }

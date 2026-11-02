@@ -319,5 +319,7 @@
   "panel.card.answer": "答案：{enemies}",
   "panel.card.helps": "能幫忙：{enemies}",
   "panel.card.collapse": "收合",
-  "panel.card.close": "關閉"
+  "panel.card.close": "關閉",
+  "panel.price.core": "{cores} 核心",
+  "panel.tip.pathPending": "再點一次買下這條路徑"
 }

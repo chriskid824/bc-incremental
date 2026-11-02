@@ -177,7 +177,7 @@ describe('planClick and the path preview (gd §8 item 5)', () => {
 describe('priceText', () => {
   it('writes shards and cores, or 免費', () => {
     expect(priceText({ shards: num(1500), cores: 1, resonance: 0 }, en)).toBe(
-      '1.50K shards + 1 cores',
+      '1.50K shards + 1 core',
     );
     expect(priceText({ shards: num(180), cores: 0, resonance: 0 }, zh)).toBe('180 碎片');
     expect(priceText({ shards: num(0), cores: 0, resonance: 0 }, zh)).toBe('免費');

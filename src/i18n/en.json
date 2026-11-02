@@ -319,5 +319,7 @@
   "panel.card.answer": "Answers: {enemies}",
   "panel.card.helps": "Helps against: {enemies}",
   "panel.card.collapse": "Collapse",
-  "panel.card.close": "Close"
+  "panel.card.close": "Close",
+  "panel.price.core": "{cores} core",
+  "panel.tip.pathPending": "Click again to buy the path"
 }
