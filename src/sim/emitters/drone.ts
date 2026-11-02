@@ -10,15 +10,18 @@
  * picks, so its row's first pick, by the same rule from j, is never read. An emitter's turrets
  * fire its turret payload (turretPayload, src/sim/emitters/types.ts). An emitter's drones are
  * counted (countOf, halved under 巨大化) and its splash sized (sizeOf) here, once for the run;
- * its turrets are not halved. Draws nothing.
+ * its turrets are not halved. A build with a spawnDrone effect also gets the tables of its timed
+ * rows (C5.7, spawnSpecs), which the effects append at run time. Draws nothing.
  */
 
 import type { Rng } from '../../core/rng';
 import { DRONE_DEFAULTS } from '../../data/emitters';
+import { APPLIED_AILMENTS } from '../../data/triggers';
 import type { CompiledBuild } from '../build/compile';
 import { countOf, sizeOf } from '../build/size';
-import { PICK_TICKS } from '../caps';
-import type { ChainPolicy, DroneLayout } from '../systems/systemState';
+import { PICK_TICKS, SUMMON_CAP } from '../caps';
+import { AIM_NEAREST, AIM_OUTER } from '../systems/systemState';
+import type { ChainPolicy, DroneLayout, SpawnSpecs } from '../systems/systemState';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
@@ -120,5 +123,45 @@ export function droneLayout(
     impacts,
     splashSq,
     turretPayload: turretPayloads,
+    spawnSpecs: build.flags.spawnsDrones ? spawnSpecs(build) : null,
   };
+}
+
+/**
+ * The tables of `build`'s timed rows, one entry per compiled effect (SpawnSpecs): a spawnDrone's
+ * fields with their defaults (maxLive SUMMON_CAP, speed and splash DRONE_DEFAULTS', impacts 1,
+ * aim nearest), its splash through sizeOf as a drone's is, its cooldown DRONE_DEFAULTS'; its
+ * COEF fields are the compiled spec's, × the coefficient.
+ */
+function spawnSpecs(build: CompiledBuild): SpawnSpecs {
+  const n = build.effects.length;
+  const specs: SpawnSpecs = {
+    live: new Int32Array(n),
+    maxLive: new Int32Array(n),
+    stepBase: new Float64Array(n),
+    coolTicks: new Float64Array(n),
+    splashSq: new Float64Array(n),
+    impacts: new Int16Array(n),
+    aim: new Uint8Array(n),
+    scale: new Float64Array(n),
+    ailment: new Int8Array(n).fill(-1),
+    stacks: new Int32Array(n),
+    ailmentPct: new Float64Array(n),
+  };
+  build.effects.forEach((fx, f) => {
+    const spec = fx.spec;
+    if (spec.kind !== 'spawnDrone') return;
+    specs.maxLive[f] = spec.maxLive ?? SUMMON_CAP;
+    specs.stepBase[f] = (spec.speed ?? DRONE_DEFAULTS.speed) / TICK_RATE;
+    specs.coolTicks[f] = DRONE_DEFAULTS.cooldownSec * TICK_RATE;
+    const splash = sizeOf(build, spec.splash ?? DRONE_DEFAULTS.splash);
+    specs.splashSq[f] = splash * splash;
+    specs.impacts[f] = spec.impacts ?? 1;
+    specs.aim[f] = spec.aim === 'outer' ? AIM_OUTER : AIM_NEAREST;
+    specs.scale[f] = spec.damagePct;
+    if (spec.ailment !== undefined) specs.ailment[f] = APPLIED_AILMENTS.indexOf(spec.ailment);
+    specs.stacks[f] = spec.ailmentStacks ?? 1;
+    specs.ailmentPct[f] = spec.ailmentDamagePct ?? 1;
+  });
+  return specs;
 }

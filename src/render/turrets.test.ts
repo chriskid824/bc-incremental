@@ -166,13 +166,14 @@ describe('turrets in the drone layer', () => {
     const [kites, bases, barrels] = ['drone-kites', 'turret-bases', 'turret-barrels'].map((label) =>
       part(layer, label),
     ) as [ParticleContainer, ParticleContainer, ParticleContainer];
-    // The kites keep their place under the turrets.
+    // The kites keep their place under the turrets; the spirits' kites (C5.7) go over them.
     expect(layer.view.children.map((child) => child.label)).toEqual([
       'drone-trails',
       'drone-brackets',
       'drone-kites',
       'turret-bases',
       'turret-barrels',
+      'spirit-kites',
     ]);
     // A docked drone (id 1) and the turret above the core (id 2); enemy 7 level with the seat.
     const seat = { kind: DRONE_KIND_TURRET, mode: DRONE_FIXED, x: CENTER.x, y: CENTER.y - 90 };

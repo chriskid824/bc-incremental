@@ -332,6 +332,30 @@ export const EffectSpecSchema = exact<EffectSpec>()(
       .readonly(),
     z
       .strictObject({
+        kind: z.literal('spawnDrone'),
+        lifeSec: finite,
+        // Required, as a zone's damagePctPerSec is.
+        damagePct: z.number({
+          error: (issue) =>
+            issue.input === undefined
+              ? 'damagePct is required; use 0 for a row that only applies its ailment'
+              : undefined,
+        }),
+        count: finite.exactOptional(),
+        impacts: finite.exactOptional(),
+        maxLive: finite.exactOptional(),
+        aim: z.enum(['nearest', 'outer']).exactOptional(),
+        speed: finite.exactOptional(),
+        splash: finite.exactOptional(),
+        ailment: z.enum(APPLIED_AILMENTS).exactOptional(),
+        ailmentStacks: finite.exactOptional(),
+        ailmentDamagePct: finite.exactOptional(),
+        tags: damagePart.tags,
+        element: damagePart.element,
+      })
+      .readonly(),
+    z
+      .strictObject({
         kind: z.literal('repeatAttack'),
         count: finite,
         damagePct: finite,

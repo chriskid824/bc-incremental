@@ -453,7 +453,7 @@ describe('web content schemas', () => {
       OuterDefSchema,
       {
         ...OUTER,
-        payload: { ...OUTER.payload, effects: [{ kind: 'spawnDrone', durationSec: 4 }] },
+        payload: { ...OUTER.payload, effects: [{ kind: 'spawnTurret', durationSec: 4 }] },
       },
       'payload.effects.0.kind',
     ],

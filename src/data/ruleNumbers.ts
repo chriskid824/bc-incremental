@@ -136,6 +136,16 @@ export function effectNumbers(effect: EffectSpec): string[][] {
         ...(effect.addFrostPerSec === undefined ? [] : [[percent(effect.addFrostPerSec)]]),
         ...(effect.slow === undefined ? [] : [[percent(effect.slow)]]),
       ];
+    case 'spawnDrone':
+      return [
+        ...(effect.count === undefined ? [] : [[String(effect.count)]]),
+        [String(effect.lifeSec)],
+        ...(effect.damagePct === 0 ? [] : [[percent(effect.damagePct)]]),
+        ...(effect.impacts === undefined ? [] : [[String(effect.impacts)]]),
+        ...(effect.maxLive === undefined ? [] : [[String(effect.maxLive)]]),
+        ...(effect.ailmentStacks === undefined ? [] : [[String(effect.ailmentStacks)]]),
+        ...(effect.ailmentDamagePct === undefined ? [] : [[percent(effect.ailmentDamagePct)]]),
+      ];
     case 'repeatAttack':
       return [[String(effect.count)], [percent(effect.damagePct)]];
     case 'detonate':

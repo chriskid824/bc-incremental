@@ -566,9 +566,41 @@ export function createChainState(chainRetention: number): ChainState {
 }
 
 /**
+ * The numbers of the timed rows (C5.7) of each spawnDrone effect, by compiled effect index
+ * (CompiledBuild.effects), one entry for every effect of a build with a spawnDrone
+ * (BuildFlags.spawnsDrones), 0 for an effect of another kind: droneLayout fills them once, and
+ * the pool keeps them, `live` aside, which it counts.
+ */
+export interface SpawnSpecs {
+  /** Live rows of each effect, which a spawn checks against its maxLive. */
+  readonly live: Int32Array;
+  /** Its maxLive: the per-kind cap. */
+  readonly maxLive: Int32Array;
+  /** A row's step a tick (its speed over TICK_RATE) and same-enemy cooldown in ticks, at m = 1. */
+  readonly stepBase: Float64Array;
+  readonly coolTicks: Float64Array;
+  /** Its splash radius squared (sizeOf), its impacts a row, and its aim (0 nearest, 1 outer). */
+  readonly splashSq: Float64Array;
+  readonly impacts: Int16Array;
+  readonly aim: Uint8Array;
+  /**
+   * Its impacts' hit scale (damagePct) and ailment term: the ailment's APPLIED_AILMENTS index
+   * (−1 for none), its stacks and its share of the damage stat (ailmentDamagePct).
+   */
+  readonly scale: Float64Array;
+  readonly ailment: Int8Array;
+  readonly stacks: Int32Array;
+  readonly ailmentPct: Float64Array;
+}
+
+/** SpawnSpecs.aim: the nearest enemy to the row (pickNearest), or the drones' pick (pickOuter). */
+export const AIM_NEAREST = 0;
+export const AIM_OUTER = 1;
+
+/**
  * The drone pool of a run as droneLayout (src/sim/emitters/drone.ts) places it, once: plain
- * arrays, which createDronePool copies. Rows come in emitter order, each emitter's drones before
- * its turrets (C5.4), and stop at summonCap.
+ * arrays, which createDronePool copies, and the timed rows' tables, which it keeps. Rows come in
+ * emitter order, each emitter's drones before its turrets (C5.4), and stop at summonCap.
  */
 export interface DroneLayout {
   /** Rows placed: at most summonCap. */
@@ -598,18 +630,25 @@ export interface DroneLayout {
   readonly impacts: readonly number[];
   readonly splashSq: readonly number[];
   readonly turretPayload: readonly (Payload | null)[];
+  /** The timed rows' tables in a build with a spawnDrone effect, its `live` all 0; else null. */
+  readonly spawnSpecs: SpawnSpecs | null;
 }
 
 /**
  * The drone pool (RunContext.sys.drones), also SimState.drones: DroneLayout's rows in typed
- * arrays, the slots 0 .. count − 1 in id order, and its per-emitter numbers. Slot s's cooldown
- * memory is the DRONE_MEMORY entries from s × DRONE_MEMORY of memId and memUntil: an entry is
- * live while its memUntil is above the current tick, and expired from then on.
+ * arrays, then the timed rows the spawnDrone effects append (C5.7), the slots 0 .. count − 1 in
+ * id order, and its per-emitter numbers. Slot s's cooldown memory is the DRONE_MEMORY entries
+ * from s × DRONE_MEMORY of memId and memUntil: an entry is live while its memUntil is above the
+ * current tick, and expired from then on.
  */
 export interface DronePool extends DroneViewState {
   /** Live slots, 0 .. count − 1, in id order. */
   count: number;
-  /** The slots its arrays hold: DroneLayout.rows (0 in a run without drones). */
+  /**
+   * The slots its arrays hold: DroneLayout.summonCap in a build with a spawnDrone effect, which
+   * no spawn passes (fixed and timed rows together); else DroneLayout.rows (0 in a run without
+   * drones).
+   */
   readonly rows: number;
   /** The id the next slot would take. */
   nextId: number;
@@ -632,6 +671,24 @@ export interface DronePool extends DroneViewState {
   /** The cooldown memory: the enemy ids (−1 at first) and the ticks their entries end (0). */
   readonly memId: Int32Array;
   readonly memUntil: Int32Array;
+  /**
+   * The tick each slot leaves at, the first on which it is gone: a timed row's spawn tick +
+   * max(1, round(lifeSec × 60)), or the tick its impacts were spent; 2147483647 for a fixed row,
+   * which never leaves.
+   */
+  readonly until: Int32Array;
+  /**
+   * A timed row's spawnDrone effect (CompiledBuild.effects index, −1 for a fixed row), and the
+   * trigger depth and origin of the effect that spawned it, which its hits, its ailment term and
+   * its droneExpire take (0 and −1 for a fixed row).
+   */
+  readonly spec: Int32Array;
+  readonly depth: Uint8Array;
+  readonly origin: Int32Array;
+  /** Slots marked as leaving in the current stage, dropped at its end (0 outside the stage). */
+  left: number;
+  /** DroneLayout.spawnSpecs, with its own `live` counts; null in a build without spawnDrone. */
+  readonly specs: SpawnSpecs | null;
   /** Per emitter index: DroneLayout's numbers. */
   readonly stepBase: Float64Array;
   readonly dockTicks: Float64Array;
@@ -648,9 +705,14 @@ export interface DronePool extends DroneViewState {
   readonly turretAccept: (enemy: Enemy) => boolean;
 }
 
+/** DronePool.until of a fixed row: no tick reaches it. */
+export const NEVER_LEAVES = 2147483647;
+
 /**
  * The pool of `layout`: every row placed, ids 1 .. rows in row order, each at its dock; drones
- * docked with no dock time left and a full sortie, turrets fixed. `shootable` stands for
+ * docked with no dock time left and a full sortie, turrets fixed; none leaves. Its arrays hold
+ * the summon cap of slots in a build with a spawnDrone effect, the slots past the placed rows
+ * empty until a spawn appends one, and exactly the placed rows otherwise. `shootable` stands for
  * RunContext.shootable, which the context is still being built for: the pool keeps it for its
  * turrets and does not call it here.
  */
@@ -659,31 +721,53 @@ export function createDronePool(
   shootable: (enemy: Enemy) => boolean,
 ): DronePool {
   const n = layout.rows;
+  const spawnSpecs = layout.spawnSpecs;
+  const cap = spawnSpecs === null ? n : Math.max(n, layout.summonCap);
+  /** A typed array of `cap` slots, its first n from `rows`. */
+  const slots = <T extends Int32Array | Int16Array | Uint8Array | Float64Array>(
+    make: new (length: number) => T,
+    rows: ArrayLike<number>,
+  ): T => {
+    const out = new make(cap);
+    for (let s = 0; s < n; s++) out[s] = rows[s] as number;
+    return out;
+  };
+  const ids = Array.from({ length: n }, (_, s) => s + 1);
   const pool: DronePool = {
-    id: Int32Array.from({ length: n }, (_, s) => s + 1),
-    kind: Uint8Array.from(layout.kind),
-    mode: Uint8Array.from(layout.kind, (k) =>
-      k === DRONE_KIND_TURRET ? DRONE_FIXED : DRONE_DOCKED,
+    id: slots(Int32Array, ids),
+    kind: slots(Uint8Array, layout.kind),
+    mode: slots(
+      Uint8Array,
+      layout.kind.map((k) => (k === DRONE_KIND_TURRET ? DRONE_FIXED : DRONE_DOCKED)),
     ),
-    x: Float64Array.from(layout.x),
-    y: Float64Array.from(layout.y),
-    prevX: Float64Array.from(layout.x),
-    prevY: Float64Array.from(layout.y),
-    targetId: new Int32Array(n).fill(-1),
-    owner: Int16Array.from(layout.owner),
-    seat: Int16Array.from(layout.seat),
+    x: slots(Float64Array, layout.x),
+    y: slots(Float64Array, layout.y),
+    prevX: slots(Float64Array, layout.x),
+    prevY: slots(Float64Array, layout.y),
+    targetId: new Int32Array(cap).fill(-1),
+    owner: slots(Int16Array, layout.owner),
+    seat: slots(Int16Array, layout.seat),
     count: n,
-    rows: n,
+    rows: cap,
     nextId: n + 1,
-    dockX: Float64Array.from(layout.x),
-    dockY: Float64Array.from(layout.y),
-    target: new Array<Enemy | null>(n).fill(null),
-    nextPick: Int32Array.from(layout.firstPick),
-    impactsLeft: Int16Array.from(layout.owner, (i) => layout.impacts[i] as number),
-    dockLeft: new Float64Array(n),
-    acc: new Float64Array(n),
-    memId: new Int32Array(n * DRONE_MEMORY).fill(-1),
-    memUntil: new Int32Array(n * DRONE_MEMORY),
+    dockX: slots(Float64Array, layout.x),
+    dockY: slots(Float64Array, layout.y),
+    target: new Array<Enemy | null>(cap).fill(null),
+    nextPick: slots(Int32Array, layout.firstPick),
+    impactsLeft: slots(
+      Int16Array,
+      layout.owner.map((i) => layout.impacts[i] as number),
+    ),
+    dockLeft: new Float64Array(cap),
+    acc: new Float64Array(cap),
+    memId: new Int32Array(cap * DRONE_MEMORY).fill(-1),
+    memUntil: new Int32Array(cap * DRONE_MEMORY),
+    until: new Int32Array(cap).fill(NEVER_LEAVES),
+    spec: new Int32Array(cap).fill(-1),
+    depth: new Uint8Array(cap),
+    origin: new Int32Array(cap).fill(-1),
+    left: 0,
+    specs: spawnSpecs === null ? null : { ...spawnSpecs, live: new Int32Array(spawnSpecs.live) },
     stepBase: Float64Array.from(layout.stepBase),
     dockTicks: Float64Array.from(layout.dockTicks),
     coolTicks: Float64Array.from(layout.coolTicks),

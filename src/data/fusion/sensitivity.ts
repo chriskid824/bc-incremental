@@ -30,14 +30,16 @@ function chanceOf(trigger: TriggerSpec): number {
 }
 
 /**
- * True when the effect has a COEF field whose value, 1 when left out, is above 0. A zone's
- * ailmentDamagePct counts only with its ailment: without one it scales nothing (a 0-damage zone
- * is insensitive, §4.2).
+ * True when the effect has a COEF field whose value, 1 when left out, is above 0. A zone's or a
+ * timed row's ailmentDamagePct counts only with its ailment: without one it scales nothing (a
+ * 0-damage zone is insensitive, §4.2).
  */
 export function scalesDamage(effect: EffectSpec): boolean {
   const values = effect as unknown as Readonly<Record<string, number | undefined>>;
   const idle = (field: string): boolean =>
-    effect.kind === 'groundZone' && field === 'ailmentDamagePct' && effect.ailment === undefined;
+    (effect.kind === 'groundZone' || effect.kind === 'spawnDrone') &&
+    field === 'ailmentDamagePct' &&
+    effect.ailment === undefined;
   return (COEF_FIELDS[effect.kind] as readonly string[]).some(
     (field) => !idle(field) && (values[field] ?? 1) > 0,
   );

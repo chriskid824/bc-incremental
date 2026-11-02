@@ -315,6 +315,40 @@ function kitchenSink(): NodeEffects {
         },
       ],
     },
+    // 爆靈-like timed rows (C5.7), and rows with every other field.
+    {
+      on: 'nthAttack',
+      every: 4,
+      do: [
+        {
+          kind: 'spawnDrone',
+          lifeSec: 4,
+          damagePct: 1,
+          maxLive: 6,
+          ailment: 'burn',
+          ailmentStacks: 3,
+        },
+      ],
+    },
+    {
+      on: 'kill',
+      do: [
+        {
+          kind: 'spawnDrone',
+          lifeSec: 4,
+          damagePct: 0.5,
+          count: 2,
+          impacts: 3,
+          aim: 'outer',
+          speed: 500,
+          splash: 30,
+          ailment: 'shock',
+          ailmentDamagePct: 1.5,
+          tags: ['projectile'],
+          element: 'cold',
+        },
+      ],
+    },
     {
       on: 'heroHit',
       do: [{ kind: 'repeatAttack', count: 2, damagePct: 0.5, timing: 'nextAttack' }],
@@ -561,7 +595,7 @@ describe('every template, through one node (§4.7)', () => {
     }
     expect([...kinds].sort()).toEqual(Object.keys(KIND_TEXT).sort());
     const families =
-      /^web\.(?:kind|effect|word|ailment|applied|held|state|killedBy|toward|aim|extra|event|fanout|cond|hit|targetKind|enemies|how|trigger|conds|pick|scaling|curve|mod|qual|scope|tag|rank|conversion|ruleFallback|centerDamage|bonus|grant|ring|masteryName|coreName|answers|join)\b/;
+      /^web\.(?:kind|effect|word|ailment|applied|held|state|killedBy|toward|aim|spawnAim|extra|event|fanout|cond|hit|targetKind|enemies|how|trigger|conds|pick|scaling|curve|mod|qual|scope|tag|rank|conversion|ruleFallback|centerDamage|bonus|grant|ring|masteryName|coreName|answers|join)\b/;
     const unasked = Object.keys(MESSAGES.en).filter((key) => families.test(key) && !asked.has(key));
     // An ailment condition sits on ailmentApplied and ailmentTick only (CONDITION_CONTEXTS), whose
     // templates name the ailment themselves: its registry entry is never a line of its own.
@@ -667,6 +701,72 @@ describe('every template, through one node (§4.7)', () => {
       expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
     },
   );
+
+  it.each([
+    [
+      'en',
+      [
+        'Every 4 attacks: 1 spirit of 4 s, each dashing at the nearest enemy, impacting for 100% damage, 3 burn stacks on each enemy its impact reaches, at most 6 at once',
+        'On hitting enemies: 3 spirits of 2.5 s, each dashing at the outermost enemy, impacting for 40% damage, up to 3 times each, radius 25, tagged projectile',
+        'When enemies are killed: 1 spirit of 1 s, each dashing at the nearest enemy, 1 poison stack on each enemy its impact reaches, damage ×2',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '每 4 次攻擊：生出 1 隻 4 秒的靈，衝向最近的敵人，撞擊造成 100% 傷害，衝擊範圍內的敵人燃燒 3 層（最多 6 隻）',
+        '擊中敵人時：生出 3 隻 2.5 秒的靈，衝向最外圈的敵人，撞擊造成 40% 傷害，每隻最多撞擊 3 次，範圍半徑 25，帶投射物標籤',
+        '敵人死亡時：生出 1 隻 1 秒的靈，衝向最近的敵人，衝擊範圍內的敵人毒 1 層，傷害 ×2',
+      ],
+    ],
+  ] as const)('writes spawnDrone, its rows and their terms, in %s (C5.7)', (locale, expected) => {
+    const web = withEffects(fire, NOTABLE, {
+      triggers: [
+        {
+          on: 'nthAttack',
+          every: 4,
+          do: [
+            {
+              kind: 'spawnDrone',
+              lifeSec: 4,
+              damagePct: 1,
+              maxLive: 6,
+              ailment: 'burn',
+              ailmentStacks: 3,
+            },
+          ],
+        },
+        {
+          on: 'hit',
+          do: [
+            {
+              kind: 'spawnDrone',
+              lifeSec: 2.5,
+              damagePct: 0.4,
+              count: 3,
+              impacts: 3,
+              aim: 'outer',
+              splash: 25,
+              tags: ['projectile'],
+            },
+          ],
+        },
+        {
+          on: 'kill',
+          do: [
+            {
+              kind: 'spawnDrone',
+              lifeSec: 1,
+              damagePct: 0,
+              ailment: 'poison',
+              ailmentDamagePct: 2,
+            },
+          ],
+        },
+      ],
+    });
+    expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+  });
 
   it("writes a ranked node's triggers and conversions once a rank, and the bonus forms", () => {
     expect(linesOf(ranked, 'fire.center.alpha.r1', 'zh-TW', 2)).toEqual([

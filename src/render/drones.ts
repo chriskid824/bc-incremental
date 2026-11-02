@@ -6,13 +6,22 @@
  * ParticleContainer; a small hive-green corner bracket on every enemy a drone dashes at; and each
  * turret as a square base in its seat with a barrel that turns toward the enemy its last firing
  * aimed at (the turretFire event, through EnemyLayer.positionOf) and recoils when it fires. Its
- * shots are drawn by the shot pool's layer (src/render/poolShots.ts). Reads the simulation state
- * and never writes it.
+ * shots are drawn by the shot pool's layer (src/render/poolShots.ts). A spirit, a timed row of a
+ * spawnDrone effect (C5.7), is a drone's kite and trail at SPIRIT_SCALE of their size, in its own
+ * layer above the turrets, its track dropped once it has left the pool; it brackets nothing, and
+ * its leaving (the droneExpire event) draws nothing yet. Reads the simulation state and never
+ * writes it.
  */
 
 import { Container, Graphics, Particle, ParticleContainer } from 'pixi.js';
 import type { Renderer, Texture } from 'pixi.js';
-import { DRONE_DASH, DRONE_DOCKED, DRONE_KIND_DRONE, DRONE_KIND_TURRET } from '../sim';
+import {
+  DRONE_DASH,
+  DRONE_DOCKED,
+  DRONE_KIND_DRONE,
+  DRONE_KIND_SPIRIT,
+  DRONE_KIND_TURRET,
+} from '../sim';
 import type { DroneViewState, SimState } from '../sim';
 import { KITE } from './constructs/hive';
 import { packColor } from './fx';
@@ -32,6 +41,8 @@ const TRAIL_WIDTH = 7;
 /** Each streak reaches a little past the older point, so the trail reads as one stroke. */
 const TRAIL_OVERLAP = 1.3;
 const TRAIL_ALPHA = 0.55;
+/** A spirit's kite and trail width, as a share of a drone's. */
+export const SPIRIT_SCALE = 0.6;
 /** Shorter trail pieces (a drone at rest) are not drawn. */
 const MIN_STREAK_PX = 0.5;
 /** The kite texture's pixels per arena unit, enough for a crisp kite on a large screen. */
@@ -211,7 +222,8 @@ export interface DroneTrack {
 }
 
 /**
- * The drones' render state by id: each one's heading and trail. No Pixi, so the tests reach it.
+ * The drones' and spirits' render state by id: each one's heading and trail. No Pixi, so the
+ * tests reach it.
  */
 export class DroneTracks {
   private readonly byId = new Map<number, DroneTrack>();
@@ -232,9 +244,10 @@ export class DroneTracks {
   }
 
   /**
-   * Brings the track of every drone (kind DRONE) in `state` up to date: its heading from its
-   * last tick's move, held below HEADING_HOLD_PX, or outward while docked; its trail sampled at
-   * the sim tick, so a frame that shows the same tick again adds nothing.
+   * Brings the track of every drone and spirit (kind DRONE, SPIRIT) in `state` up to date: its
+   * heading from its last tick's move, held below HEADING_HOLD_PX, or outward while docked (a new
+   * spirit's starts outward too); its trail sampled at the sim tick, so a frame that shows the
+   * same tick again adds nothing. The track of one no longer in the state is dropped.
    */
   follow(state: Readonly<DroneFrame>): void {
     const calls = ++this.calls;
@@ -243,7 +256,8 @@ export class DroneTracks {
     const cy = state.player.y;
     let seen = 0;
     for (let s = 0; s < state.droneCount; s++) {
-      if (ds.kind[s] !== DRONE_KIND_DRONE) continue;
+      const kind = ds.kind[s];
+      if (kind !== DRONE_KIND_DRONE && kind !== DRONE_KIND_SPIRIT) continue;
       const id = ds.id[s] as number;
       const x = ds.x[s] as number;
       const y = ds.y[s] as number;
@@ -406,6 +420,8 @@ export class DroneLayer {
   private readonly kiteAnchorY: number;
   private readonly streakSprites: Particle[] = [];
   private readonly kiteSprites: Particle[] = [];
+  private readonly spirits: ParticleContainer;
+  private readonly spiritSprites: Particle[] = [];
   private readonly tracks = new DroneTracks();
   private chased = new Int32Array(8);
   private readonly bases: ParticleContainer;
@@ -498,7 +514,20 @@ export class DroneLayer {
       texture: this.barrelTexture,
       dynamicProperties: { position: true, rotation: true, color: false, vertex: false },
     });
-    this.view.addChild(this.trails, this.brackets, this.kites, this.bases, this.barrels);
+    // Its sprites keep SPIRIT_SCALE, so the kites' static vertices hold for it too.
+    this.spirits = new ParticleContainer({
+      label: 'spirit-kites',
+      texture: this.kiteTexture,
+      dynamicProperties: { position: true, rotation: true, color: false, vertex: false },
+    });
+    this.view.addChild(
+      this.trails,
+      this.brackets,
+      this.kites,
+      this.bases,
+      this.barrels,
+      this.spirits,
+    );
   }
 
   /** Forgets every drone and turret, as at the start of a run. */
@@ -514,6 +543,8 @@ export class DroneLayer {
     this.bases.update();
     this.barrels.particleChildren.length = 0;
     this.barrels.update();
+    this.spirits.particleChildren.length = 0;
+    this.spirits.update();
     this.brackets.clear();
   }
 
@@ -536,25 +567,31 @@ export class DroneLayer {
     this.dockedShare = dockedFraction(ds, count);
     const streaks = this.trails.particleChildren;
     const kites = this.kites.particleChildren;
+    const spirits = this.spirits.particleChildren;
     const previousStreaks = streaks.length;
     const previousKites = kites.length;
+    const previousSpirits = spirits.length;
     const previousTurrets = this.bases.particleChildren.length;
     let streakCount = 0;
     let kiteCount = 0;
+    let spiritCount = 0;
     let turretCount = 0;
     for (let s = 0; s < count; s++) {
-      if (ds.kind[s] === DRONE_KIND_TURRET) {
+      const kind = ds.kind[s];
+      if (kind === DRONE_KIND_TURRET) {
         this.drawTurret(state, s, turretCount++);
         continue;
       }
-      if (ds.kind[s] !== DRONE_KIND_DRONE) continue;
+      const spirit = kind === DRONE_KIND_SPIRIT;
+      if (kind !== DRONE_KIND_DRONE && !spirit) continue;
       const track = this.tracks.get(ds.id[s] as number) as DroneTrack;
       const px = ds.prevX[s] as number;
       const py = ds.prevY[s] as number;
       const hx = px + ((ds.x[s] as number) - px) * alpha;
       const hy = py + ((ds.y[s] as number) - py) * alpha;
-      streakCount = this.drawTrail(track.trail, hx, hy, streakCount);
-      const kite = this.kite(kiteCount++);
+      const width = spirit ? TRAIL_WIDTH * SPIRIT_SCALE : TRAIL_WIDTH;
+      streakCount = this.drawTrail(track.trail, hx, hy, streakCount, width);
+      const kite = spirit ? this.spirit(spiritCount++) : this.kite(kiteCount++);
       kite.x = hx;
       kite.y = hy;
       kite.rotation = track.heading;
@@ -563,6 +600,8 @@ export class DroneLayer {
     if (streakCount !== previousStreaks) this.trails.update();
     kites.length = kiteCount;
     if (kiteCount !== previousKites) this.kites.update();
+    spirits.length = spiritCount;
+    if (spiritCount !== previousSpirits) this.spirits.update();
     this.bases.particleChildren.length = turretCount;
     this.barrels.particleChildren.length = turretCount;
     if (turretCount !== previousTurrets) {
@@ -596,8 +635,8 @@ export class DroneLayer {
     barrel.rotation = track.angle;
   }
 
-  /** Streaks from the drawn position back through the trail, fading with age. */
-  private drawTrail(trail: TrailRing, hx: number, hy: number, n: number): number {
+  /** Streaks `width` wide from the drawn position back through the trail, fading with age. */
+  private drawTrail(trail: TrailRing, hx: number, hy: number, n: number, width: number): number {
     let fromX = hx;
     let fromY = hy;
     for (let age = 0; age < trail.size; age++) {
@@ -612,7 +651,7 @@ export class DroneLayer {
         streak.y = fromY;
         streak.rotation = Math.atan2(dy, dx);
         streak.scaleX = (length * TRAIL_OVERLAP) / STREAK_LENGTH;
-        streak.scaleY = TRAIL_WIDTH / STREAK_HEIGHT;
+        streak.scaleY = width / STREAK_HEIGHT;
         streak.color = packColor(this.skin.trail, TRAIL_ALPHA * (1 - age / TRAIL_TICKS));
       }
       fromX = toX;
@@ -694,6 +733,23 @@ export class DroneLayer {
       this.kiteSprites.push(sprite);
     }
     this.kites.particleChildren[n] = sprite;
+    return sprite;
+  }
+
+  /** The nth spirit kite: the drone's kite at SPIRIT_SCALE. */
+  private spirit(n: number): Particle {
+    let sprite = this.spiritSprites[n];
+    if (sprite === undefined) {
+      sprite = new Particle({
+        texture: this.kiteTexture,
+        anchorX: this.kiteAnchorX,
+        anchorY: this.kiteAnchorY,
+        scaleX: SPIRIT_SCALE,
+        scaleY: SPIRIT_SCALE,
+      });
+      this.spiritSprites.push(sprite);
+    }
+    this.spirits.particleChildren[n] = sprite;
     return sprite;
   }
 }

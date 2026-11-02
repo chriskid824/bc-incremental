@@ -199,6 +199,10 @@ const PER_SLOT = [
   'acc',
   'memId',
   'memUntil',
+  'until',
+  'spec',
+  'depth',
+  'origin',
 ] as const;
 /** The pool's per-emitter arrays, by name. */
 const PER_EMITTER = [

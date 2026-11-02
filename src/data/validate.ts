@@ -51,6 +51,15 @@ const isPositiveInt = (n: number): boolean => Number.isInteger(n) && n > 0;
 const isNonNegativeInt = (n: number): boolean => Number.isInteger(n) && n >= 0;
 
 /**
+ * Events whose effects never have the event's enemy: the targetless events, and droneExpire,
+ * raised at a leaving row's position (its effects start there, not at the player).
+ */
+const ENEMYLESS_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
+  ...TARGETLESS_EVENTS,
+  'droneExpire',
+]);
+
+/**
  * A node whose descKey text the talent screen shows: it has rules, triggers, conversions,
  * emitters or behaviour modifiers, which the screen cannot describe from numbers alone.
  */
@@ -1012,7 +1021,7 @@ function selectorIssues(on: TriggerEventId, atKill: boolean, target: TargetSelec
   if (target.range !== undefined && !(target.range > 0)) {
     issues.push(`target.range must be > 0 (got ${target.range})`);
   }
-  if (target.excludeEventTarget === true && TARGETLESS_EVENTS.has(on)) {
+  if (target.excludeEventTarget === true && ENEMYLESS_EVENTS.has(on)) {
     issues.push(`target.excludeEventTarget needs the event's enemy, which '${on}' events have not`);
   }
   return issues;
@@ -1073,13 +1082,13 @@ function effectIssues(
       }
     }
   };
-  // The event's enemy: none on targetless events, gone once a kill or shatter trigger's
-  // effects run (a kill's transfers run at the kill, before it is gone; a shatter's never do),
-  // and gone by the time a contact trigger's effects run, since a touching enemy leaks or dies
-  // at its touch. A selector's enemy takes its place, alive when it is picked; a 'player' pick
-  // gives none. A detonate needs the enemy whose ailment it deals, with or without a radius,
-  // but on the events whose enemy is dead, where the victim's damage left stands in (its radius
-  // is checked below).
+  // The event's enemy: none on targetless events and droneExpire (ENEMYLESS_EVENTS), gone once
+  // a kill or shatter trigger's effects run (a kill's transfers run at the kill, before it is
+  // gone; a shatter's never do), and gone by the time a contact trigger's effects run, since a
+  // touching enemy leaks or dies at its touch. A selector's enemy takes its place, alive when it
+  // is picked; a 'player' pick gives none. A detonate needs the enemy whose ailment it deals,
+  // with or without a radius, but on the events whose enemy is dead, where the victim's damage
+  // left stands in (its radius is checked below).
   const detonate = effect.kind === 'detonate';
   const dead = DEAD_EVENTS.includes(on);
   const needsTarget =
@@ -1091,9 +1100,9 @@ function effectIssues(
     if (target.pick === 'player') {
       issues.push(`${effect.kind} needs an enemy, which target.pick 'player' does not give`);
     }
-  } else if (needsTarget && detonate && TARGETLESS_EVENTS.has(on)) {
+  } else if (needsTarget && detonate && ENEMYLESS_EVENTS.has(on)) {
     issues.push(`detonate needs a target on '${on}' events; add target {pick}`);
-  } else if (needsTarget && TARGETLESS_EVENTS.has(on)) {
+  } else if (needsTarget && ENEMYLESS_EVENTS.has(on)) {
     issues.push(`${effect.kind} needs the event's enemy, which '${on}' events have not`);
   } else if (needsTarget && on === 'contact') {
     issues.push(`${effect.kind} needs the event's enemy, which has left by the time it runs`);
@@ -1180,6 +1189,10 @@ function effectIssues(
       issues.push(...groundZoneIssues(effect, zonesRead));
       delivery(effect.tags);
       break;
+    case 'spawnDrone':
+      issues.push(...spawnDroneIssues(effect));
+      delivery(effect.tags);
+      break;
     case 'detonate':
       if (effect.fraction !== undefined && !(effect.fraction > 0 && effect.fraction <= 1)) {
         issues.push(`fraction must be in (0, 1] (got ${effect.fraction})`);
@@ -1228,7 +1241,7 @@ function effectIssues(
       if (
         (aim === 'target' || aim === 'distinct') &&
         target === undefined &&
-        TARGETLESS_EVENTS.has(on)
+        ENEMYLESS_EVENTS.has(on)
       ) {
         issues.push(
           `projectiles aim '${aim}' needs a target on '${on}' events; add target {pick} or use aim 'radial'`,
@@ -1256,7 +1269,7 @@ function effectIssues(
         issues.push(
           `toward must be 'outward', 'nearest', 'eventTarget' or 'along' (got ${toward})`,
         );
-      } else if (toward === 'eventTarget' && target === undefined && TARGETLESS_EVENTS.has(on)) {
+      } else if (toward === 'eventTarget' && target === undefined && ENEMYLESS_EVENTS.has(on)) {
         issues.push(`toward 'eventTarget' needs the event's enemy, which '${on}' events have not`);
       } else if (toward === 'along' && on !== 'chainJump') {
         // Its direction is the jump's angle, the chainJump event's value.
@@ -1267,7 +1280,7 @@ function effectIssues(
     }
     case 'coinHit':
       positive('multiplier', effect.multiplier);
-      if (target === undefined && TARGETLESS_EVENTS.has(on)) {
+      if (target === undefined && ENEMYLESS_EVENTS.has(on)) {
         issues.push(`coinHit needs a target on '${on}' events; add target {pick}`);
       }
       break;
@@ -1285,7 +1298,7 @@ function effectIssues(
           if (target.pick === 'player') {
             issues.push("chainBolt needs an enemy, which target.pick 'player' does not give");
           }
-        } else if (TARGETLESS_EVENTS.has(on) || dead || on === 'contact') {
+        } else if (ENEMYLESS_EVENTS.has(on) || dead || on === 'contact') {
           issues.push(
             `chainBolt from 'eventTarget' needs a live enemy; on '${on}' events use from 'nearestToPoint'`,
           );
@@ -1395,6 +1408,66 @@ function groundZoneIssues(
     issues.push(
       'groundZone does nothing: give it damagePctPerSec > 0, ailment, addFrostPerSec or slow',
     );
+  }
+  return issues;
+}
+
+/** The most impacts one timed row makes: its count is kept in an Int16Array (DronePool). */
+const SPAWN_IMPACTS_MAX = 32767;
+
+/**
+ * Ranges of a spawnDrone: a life above 0, a hit of 0 or more, whole counts (impacts up to 32767,
+ * maxLive up to the summon cap), an aim the simulation runs, a speed above 0 and a splash of 0 or
+ * more, all finite; ailment terms only with an ailment, as a groundZone's; and something to do:
+ * a hit or an ailment.
+ */
+function spawnDroneIssues(effect: Extract<EffectSpec, { kind: 'spawnDrone' }>): string[] {
+  const issues: string[] = [];
+  const { lifeSec, damagePct, count, impacts, maxLive, speed, splash } = effect;
+  if (!(Number.isFinite(lifeSec) && lifeSec > 0)) {
+    issues.push(`lifeSec must be finite and > 0 (got ${lifeSec})`);
+  }
+  // The schema requires it too; data checked without the schema can still omit it.
+  if ((damagePct as number | undefined) === undefined) {
+    issues.push('damagePct is required; use 0 for a row that only applies its ailment');
+  } else if (!(Number.isFinite(damagePct) && damagePct >= 0)) {
+    issues.push(`damagePct must be finite and >= 0 (got ${damagePct})`);
+  }
+  if (count !== undefined && !isPositiveInt(count)) {
+    issues.push(`count must be a positive integer (got ${count})`);
+  }
+  if (impacts !== undefined && !(isPositiveInt(impacts) && impacts <= SPAWN_IMPACTS_MAX)) {
+    issues.push(`impacts must be an integer in [1, ${SPAWN_IMPACTS_MAX}] (got ${impacts})`);
+  }
+  if (maxLive !== undefined && !(isPositiveInt(maxLive) && maxLive <= SUMMON_SLOTS_MAX)) {
+    issues.push(`maxLive must be an integer in [1, ${SUMMON_SLOTS_MAX}] (got ${maxLive})`);
+  }
+  // The schema takes only the aims the simulation runs; data checked without it can still carry
+  // another.
+  const aim: string | undefined = effect.aim;
+  if (aim !== undefined && aim !== 'nearest' && aim !== 'outer') {
+    issues.push(`aim must be 'nearest' or 'outer' (got ${aim})`);
+  }
+  if (speed !== undefined && !(Number.isFinite(speed) && speed > 0)) {
+    issues.push(`speed must be finite and > 0 (got ${speed})`);
+  }
+  if (splash !== undefined && !(Number.isFinite(splash) && splash >= 0)) {
+    issues.push(`splash must be finite and >= 0 (got ${splash})`);
+  }
+  if (effect.ailmentStacks !== undefined && !isPositiveInt(effect.ailmentStacks)) {
+    issues.push(`ailmentStacks must be a positive integer (got ${effect.ailmentStacks})`);
+  }
+  if (effect.ailmentDamagePct !== undefined && !(effect.ailmentDamagePct > 0)) {
+    issues.push(`ailmentDamagePct must be > 0 (got ${effect.ailmentDamagePct})`);
+  }
+  if (
+    effect.ailment === undefined &&
+    (effect.ailmentStacks !== undefined || effect.ailmentDamagePct !== undefined)
+  ) {
+    issues.push('ailmentStacks and ailmentDamagePct need ailment');
+  }
+  if (damagePct === 0 && effect.ailment === undefined) {
+    issues.push('spawnDrone does nothing: give it damagePct > 0 or ailment');
   }
   return issues;
 }

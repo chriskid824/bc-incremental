@@ -1355,6 +1355,55 @@ const TURRET_GRANT_STATS = makeStats(
 );
 
 /**
+ * C5.7's timed rows, on the effects stream. `spirits`: M1's volley at attack speed 12 and two
+ * projectiles over the magma bombs' base (crits, ignites, a chain jump, frost and
+ * maskProbeMods()), whose every fourth attack spawns one 火靈-like row at the player (a 'player'
+ * pick): it lives 4 s, dashes at the enemy nearest to it at speed 200 × m 3 (the drones' 600),
+ * impacts once, hitting every enemy within 40 of its target for the damage stat, and burns each
+ * enemy it hit that is still alive with 3 stacks; at most 6 live at once, which the wave holds
+ * out long enough to reach, so later spawns are refused and counted, and a few rows leave on
+ * time. `temporaries`: the swarm entry's base with the swarm's turret (3 drones and 1 turret,
+ * fixed rows 1–4) and a hit trigger spawning a row of 4 s, 3 impacts at the drones' outer aim
+ * and 30% of the damage stat at the hit's point; only the fixed rows' hits spawn them (rule 3
+ * keeps the trigger off its own rows' hits: every row is at depth 1 with the trigger as its
+ * origin), enough to fill the pool to its summon cap of 24, fixed and timed rows together, which
+ * refuses the rest; rows leave spent and on time.
+ */
+const SPIRIT_TRIGGER: TriggerSpec = {
+  on: 'nthAttack',
+  every: 4,
+  target: { pick: 'player' },
+  do: [
+    {
+      kind: 'spawnDrone',
+      lifeSec: 4,
+      damagePct: 1,
+      impacts: 1,
+      aim: 'nearest',
+      maxLive: 6,
+      speed: 200,
+      splash: 40,
+      ailment: 'burn',
+      ailmentStacks: 3,
+    },
+  ],
+};
+const SPIRIT_STATS = makeStats(
+  { ...MAGMA_STATS.values, attackSpeed: 12, projectileCount: 2 },
+  maskProbeMods(),
+  { triggers: [{ source: 'outer.fire', spec: SPIRIT_TRIGGER }], conversions: [], emitters: [] },
+);
+const TEMPORARY_TRIGGER: TriggerSpec = {
+  on: 'hit',
+  do: [{ kind: 'spawnDrone', lifeSec: 4, damagePct: 0.3, impacts: 3, aim: 'outer' }],
+};
+const TEMPORARY_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
+  triggers: [{ source: 'outer.summon', spec: TEMPORARY_TRIGGER }],
+  conversions: [],
+  emitters: [],
+});
+
+/**
  * C4.21's aura and orbit grants beside M1's volley, over the drones entry's base (crits, ignites
  * and maskProbeMods()) with poison rolls: an aura on outer.aura within an auraRadius of 120,
  * every fourth pulse merged at × 4 (聚能脈衝) and a corona (日冕) on every alive enemy every 2 s at
@@ -2421,6 +2470,16 @@ const ENTRIES: readonly GoldenC4Entry[] = [
       },
     },
     expected: ['ad16c2f0388397f6', '6a2634374d2084b6'],
+  },
+  {
+    name: 'spirits',
+    config: { stats: SPIRIT_STATS, rules: [], startWave: 12 },
+    expected: ['b115812b24d90592', '4889c1a8c3d06c9b'],
+  },
+  {
+    name: 'temporaries',
+    config: { stats: TEMPORARY_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    expected: ['461c9839e9831c6f', '1f12ca2e24674c66'],
   },
 ];
 
@@ -3814,6 +3873,117 @@ describe('golden C4 runs', () => {
     expect(bySeed).toEqual({
       1: { projectileCount: 2, perFiring: { 1: 8, 2: 36 }, maxChain: 1, radii, ...drones },
       2: { projectileCount: 2, perFiring: { 1: 11, 2: 33 }, maxChain: 1, radii, ...drones },
+    });
+  });
+
+  it('spawns, caps, impacts and leaves timed rows in spirits and temporaries, the one at its maxLive of 6 and burning, the other at the summon cap of 24 with its fixed rows kept (C5.7)', () => {
+    /** Per seed: the rows' coverage, from the pool at each tick's start and the run's events. */
+    const coverage = (name: string): Record<number, Record<string, number>> => {
+      const entry = ENTRIES.find((e) => e.name === name) as GoldenC4Entry;
+      const bySeed: Record<number, Record<string, number>> = {};
+      for (const seed of GOLDEN_C4_SEEDS) {
+        const seen = { fixed: -1, maxRows: 0, maxLive: 0, fixedKept: 1 };
+        const watched: { ctx: RunContext | null } = { ctx: null };
+        const watch: TestModule = (b) =>
+          void b.hook('tick', (ctx) => {
+            watched.ctx = ctx;
+            const ds = ctx.sys.drones;
+            if (seen.fixed < 0) seen.fixed = ds.nextId - 1;
+            seen.maxRows = Math.max(seen.maxRows, ds.count);
+            for (const live of ds.specs?.live ?? []) seen.maxLive = Math.max(seen.maxLive, live);
+            for (let s = 0; s < seen.fixed; s++) if (ds.id[s] !== s + 1) seen.fixedKept = 0;
+          });
+        const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+        const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [
+          ...(entry.modules?.() ?? []),
+          watch,
+        ]);
+        let impacts = 0;
+        let time = 0;
+        let spent = 0;
+        let ailmentTerm = 0;
+        while (!sim.state.finished) {
+          // A row's ailment term: the ignites right after its impact event.
+          let term = false;
+          for (const event of sim.step(NO_INPUT)) {
+            if (event.type === 'impact') {
+              term = event.droneId > seen.fixed;
+              if (term) impacts++;
+            } else if (term && event.type === 'ignite') ailmentTerm++;
+            else {
+              term = false;
+              if (event.type === 'droneExpire') {
+                if (event.cause === 'time') time++;
+                else spent++;
+              }
+            }
+          }
+        }
+        const ds = (watched.ctx as RunContext).sys.drones;
+        bySeed[seed] = {
+          spawns: ds.nextId - 1 - seen.fixed,
+          refused: sim.result().counters.summonCapped,
+          maxRows: seen.maxRows,
+          maxLive: seen.maxLive,
+          impacts,
+          time,
+          spent,
+          ailmentTerm,
+          fixedKept: seen.fixedKept,
+        };
+      }
+      return bySeed;
+    };
+    // spirits: the sixth live row reached and later ones refused; 3 burn stacks a hit enemy
+    // still alive, after each impact; a few rows leave on time, before they reach their enemy.
+    expect(coverage('spirits')).toEqual({
+      1: {
+        spawns: 52,
+        refused: 8,
+        maxRows: 6,
+        maxLive: 6,
+        impacts: 46,
+        time: 2,
+        spent: 46,
+        ailmentTerm: 141,
+        fixedKept: 1,
+      },
+      2: {
+        spawns: 47,
+        refused: 13,
+        maxRows: 6,
+        maxLive: 6,
+        impacts: 39,
+        time: 3,
+        spent: 39,
+        ailmentTerm: 120,
+        fixedKept: 1,
+      },
+    });
+    // temporaries: 20 timed rows beside the 4 fixed ones, which never leave, and the rest refused.
+    expect(coverage('temporaries')).toEqual({
+      1: {
+        spawns: 142,
+        refused: 24,
+        maxRows: 24,
+        maxLive: 20,
+        impacts: 389,
+        time: 4,
+        spent: 124,
+        ailmentTerm: 0,
+        fixedKept: 1,
+      },
+      2: {
+        spawns: 135,
+        refused: 39,
+        maxRows: 24,
+        maxLive: 20,
+        impacts: 379,
+        time: 6,
+        spent: 117,
+        ailmentTerm: 0,
+        fixedKept: 1,
+      },
     });
   });
 

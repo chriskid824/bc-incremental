@@ -661,12 +661,14 @@ function guardBlockOf(data: GameData): number {
 
 /**
  * The payload of an effect that hits (explode, nova, detonate, projectiles, slashLine, coinHit,
- * chainBolt), applies an ailment (applyAilment) or makes a zone (groundZone), on the effects
- * stream: its tags and source, no flags, no chain policy, never chaining from an attack (a
- * chainBolt's executor runs its chain, chainGeneral). An applied ailment's damage is that of a
- * hit of the payload, so only its burn row is read. A zone's pulses aggregate their hits, which
- * crit and roll ailments as any hit does, before the zone applies its own terms
- * (src/sim/systems/zones.ts); a zone without damage hits nothing, so its payload rolls none. A
+ * chainBolt), applies an ailment (applyAilment), makes a zone (groundZone) or spawns timed rows
+ * (spawnDrone), on the effects stream: its tags and source, no flags, no chain policy, never
+ * chaining from an attack (a chainBolt's executor runs its chain, chainGeneral). An applied
+ * ailment's damage is that of a hit of the payload, so only its burn row is read. A zone's
+ * pulses aggregate their hits, which crit and roll ailments as any hit does, before the zone
+ * applies its own terms (src/sim/systems/zones.ts); a zone without damage hits nothing, so its
+ * payload rolls none. A timed row's impacts hit as a drone's do, without aggregating
+ * (src/sim/systems/drones.ts), and a row without damage (damagePct 0) rolls none either. A
  * detonate's hits deal the damage it hands them as it is (PRESCALED, base 1): no crit, no
  * ailment, no damage row, so its payload draws nothing. A slashLine's base damage is × (1 +
  * critScale × `critChance`), the build's crit chance read once here (A21); a coinHit's payload
@@ -685,6 +687,7 @@ function effectPayload(
   // A shatter's payload depends on its credit (RunContext.shatterPayloads).
   if (fx.tags === 0 || spec.kind === 'shatter') return null;
   const zone = spec.kind === 'groundZone';
+  const rows = spec.kind === 'spawnDrone';
   const detonate = spec.kind === 'detonate';
   const hits = spec.kind !== 'applyAilment' && !detonate;
   const critScale = spec.kind === 'slashLine' ? (spec.critScale ?? 0) : 0;
@@ -697,7 +700,7 @@ function effectPayload(
     flags: 0,
     rng,
     chains: false,
-    rollsAilments: hits && (!zone || spec.damagePctPerSec > 0),
+    rollsAilments: hits && (!zone || spec.damagePctPerSec > 0) && (!rows || spec.damagePct > 0),
     canCrit: hits,
     damageMode: detonate ? PRESCALED : ROWS,
     aggregate: zone,
@@ -989,8 +992,8 @@ export function createRunContext(
           ticks: Math.max(1, Math.round(comboEcho.delaySec * TICK_RATE)),
         };
   // Who burn damage can be credited to: the applier of every payload whose hits ignite, an
-  // emitter's zone payload among them (Payload.zoneVariant), and of every applyAilment and
-  // groundZone burn. A repeat's payloads have the signature's sources.
+  // emitter's zone payload among them (Payload.zoneVariant), and of every applyAilment,
+  // groundZone and spawnDrone burn. A repeat's payloads have the signature's sources.
   const burnCredits = new Set<number>();
   for (const emitter of emitters) {
     const p = emitter.payload;
@@ -1004,7 +1007,8 @@ export function createRunContext(
     const p = effectPayloads[i];
     const spec = fx.spec;
     const burns =
-      (spec.kind === 'applyAilment' || spec.kind === 'groundZone') && spec.ailment === 'burn';
+      (spec.kind === 'applyAilment' || spec.kind === 'groundZone' || spec.kind === 'spawnDrone') &&
+      spec.ailment === 'burn';
     if (p !== undefined && p !== null && (p.rollsAilments || burns)) {
       burnCredits.add(ailmentCredit(sources, attribution, 'burn', p.source));
     }
