@@ -441,6 +441,8 @@ describe('EffectSpecSchema', () => {
     { kind: 'projectiles', count: 3, damagePct: 0.5, aim: 'target' },
     { kind: 'projectiles', count: 4, damagePct: 0.2, aim: 'distinct', from: 'player' },
     { kind: 'projectiles', count: 12, damagePct: 0.1, aim: 'radial', pierce: -1, bounce: 2 },
+    // C6b.1: the barrage payload's count link.
+    { kind: 'projectiles', count: 4, damagePct: 0.25, aim: 'radial', countStat: 'barrageCount' },
     {
       kind: 'projectiles',
       count: 5,
@@ -556,6 +558,39 @@ describe('EffectSpecSchema', () => {
     [
       'projectiles with an unknown key',
       { kind: 'projectiles', count: 3, damagePct: 0.5, aim: 'radial', radius: 100 },
+    ],
+    ...(['projectileCount', 'barrage', 'chainCount'] as const).map(
+      (countStat): [string, unknown] => [
+        `projectiles linked to '${countStat}' (C6b.1)`,
+        { kind: 'projectiles', count: 4, damagePct: 0.25, aim: 'radial', countStat },
+      ],
+    ),
+    [
+      'projectiles linked to no stat (C6b.1)',
+      { kind: 'projectiles', count: 4, damagePct: 0.25, aim: 'radial', countStat: null },
+    ],
+    [
+      'countStat on repeatAttack (C6b.1)',
+      { kind: 'repeatAttack', count: 1, damagePct: 0.5, countStat: 'barrageCount' },
+    ],
+    [
+      'countStat on a nova (C6b.1)',
+      { kind: 'nova', radius: 90, damagePct: 1, countStat: 'barrageCount' },
+    ],
+    [
+      'countStat on a slashLine (C6b.1)',
+      {
+        kind: 'slashLine',
+        length: 300,
+        width: 24,
+        damagePct: 0.5,
+        toward: 'outward',
+        countStat: 'barrageCount',
+      },
+    ],
+    [
+      'countStat on a chainBolt (C6b.1)',
+      { kind: 'chainBolt', jumps: 2, damagePct: 0.5, countStat: 'barrageCount' },
     ],
     ...(['flight', 'player'] as const).map((toward): [string, unknown] => [
       `slashLine toward '${toward}'`,

@@ -361,10 +361,13 @@ export function compileBuild(
   // SHATTER_TRIGGER's index; its entry is decided once every module has compiled.
   const triggers: CompiledTrigger[] = [shatterTrigger(false, 0)];
   const effects: CompiledEffect[] = [];
+  // The StatBlock's barrage count, read once a compile: a projectiles effect with countStat links
+  // its count to it (compileEffect; docs/v3 C6 design §7.4 C6b.1), whoever adds the effect.
+  const barrageCount = stats.values.barrageCount;
   const addTrigger = (source: number, spec: TriggerSpec, coef: number): void => {
     triggers.push(compileTrigger(triggers.length, spec, source, coef, effects.length, sources));
     for (const effect of spec.do) {
-      effects.push(compileEffect(effect, source, coef, values.damage, spec.target));
+      effects.push(compileEffect(effect, source, coef, values.damage, spec.target, barrageCount));
     }
   };
   // The module instance being compiled, its source and its trigger index (−1 until its first
@@ -418,7 +421,8 @@ export function compileBuild(
       addTrigger(sources.index(source), spec, coef);
     },
     addEffect(source: string, spec: EffectSpec, coef = 1) {
-      effects.push(compileEffect(spec, sources.index(source), coef, values.damage));
+      const ix = sources.index(source);
+      effects.push(compileEffect(spec, ix, coef, values.damage, undefined, barrageCount));
       return effects.length - 1;
     },
     addEmitter(source, grant) {

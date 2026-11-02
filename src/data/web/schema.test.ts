@@ -583,6 +583,10 @@ describe('PayloadEffectSchema', () => {
   it.each([
     ['a slash, placed by the event', CRIT_SLASH],
     ['radial projectiles', { kind: 'projectiles', count: 4, aim: 'radial', damagePct: 0.5 }],
+    [
+      'the barrage payload, its count linked (C6b.1)',
+      { kind: 'projectiles', count: 4, aim: 'radial', damagePct: 0.25, countStat: 'barrageCount' },
+    ],
     ['a thorns nova', { kind: 'nova', radius: 120, damagePct: 1, tags: ['thorns'] }],
     ['poison', { kind: 'applyAilment', ailment: 'poison', stacks: 2 }],
     ['frost', { kind: 'addFrost', amount: 0.25 }],

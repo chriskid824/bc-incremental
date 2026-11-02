@@ -15,6 +15,7 @@ import {
   CONDITION_CONTEXTS,
   conditionKey,
   DOT_AILMENTS,
+  PROJECTILES_COUNT_MAX,
   TARGETLESS_EVENTS,
   TRANSFER_EFFECTS,
   WIRED_EVENTS,
@@ -1282,9 +1283,6 @@ function effectIssues(
 
 /** The most repeats one repeatAttack makes. */
 const REPEAT_COUNT_MAX = 4;
-
-/** The most projectiles one projectiles effect fires. */
-const PROJECTILES_COUNT_MAX = 64;
 
 /**
  * The most jumps one chainBolt makes: with its first hit, the CHAIN_HIT_CAP (32) hits one

@@ -357,6 +357,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         pierce: finite.exactOptional(),
         bounce: finite.exactOptional(),
         spreadDeg: finite.exactOptional(),
+        countStat: z.literal('barrageCount').exactOptional(),
         ...damagePart,
       })
       .readonly(),

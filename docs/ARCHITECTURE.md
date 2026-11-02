@@ -564,7 +564,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 `src/sim/effects/execute.ts`（每個欄位的意思在 `src/data/triggers.ts`）。效果的擊中都走 `hitWithPayload`，用效果自己的酬載（`effects` stream），帶佇列項目的深度與 origin。
 
 - `groundZone`：在事件位置（或選擇器選到的敵人）加一個效果區域（§4.7.6）。
-- `projectiles`：在投射物池產生小投射物（`spawnShot`，受 `PROJECTILE_CAP` 限制），從事件位置或角色出發；`target`、`distinct` 追蹤，`radial`、`fan` 直線（§4.7.3）。
+- `projectiles`：在投射物池產生小投射物（`spawnShot`，受 `PROJECTILE_CAP` 限制），從事件位置或角色出發；`target`、`distinct` 追蹤，`radial`、`fan` 直線（§4.7.3）。帶 `countStat: 'barrageCount'`（C6b.1，彈幕的 `inPayload` 加成）時，數量在編譯時連到小彈數量：`compileEffect` 讀 `compileBuild` 從 StatBlock 的 `values.barrageCount` 取一次的值（資料的觸發、規則模組的 `addTrigger` 與 `addEffect` 都用它；規則模組的 `scaleStat`、`offsetStat` 不影響連結），`count` 換成 `min(64, count + max(0, floor(barrageCount) − 2))`（2 是彈幕外盤入口給的發數，`BARRAGE_ENTRY_SHOTS`），記在 `CompiledEffect.spec.count`，不乘係數；執行器照舊讀 `spec.count`。`barrageCount` 是不分範圍的屬性，基礎 0、格式 number。
 - `slashLine`：一條線，依 ID 各打一次線寬一半加上自身半徑內的敵人（`grid.inSegmentBox` 加大型敵人的補查）；`'along'` 只用在 chainJump，沿著那一跳的角度。`slash` 事件在擊中之前。
 - `coinHit`：對目標一擊，`coin` 事件在前；酬載帶 `bypass` 位元，給 C7 的護盾與堅甲，由 `bypassOf` 讀。
 - `chainBolt`：自己的一次攻擊，第一下算預算 1，然後正好 `jumps` 跳（一般路徑、沒有策略，整數跳數不擲骰），每一下沒被全部擋下也沒殺死就加 `shockStacks` 層感電（§4.3 的 R1）；不發 chainJump。

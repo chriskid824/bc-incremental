@@ -1287,16 +1287,18 @@ function payloadIssues(outer: OuterDef): ContentIssue[] {
     if (!effects.some((effect) => effect.kind === 'groundZone'))
       push("bonus 'inZone' needs a groundZone in the payload");
   } else if (bonus?.form === 'inPayload') {
+    // An inPayload bonus adds no modifier (D13): the payload carries it, crit's critScale,
+    // thorns' tag or barrage's count link (countStat, C6b.1).
     const fits = effects.some(
       (effect) =>
         ('critScale' in effect && effect.critScale !== undefined) ||
         ('tags' in effect &&
           (effect.tags as readonly string[] | undefined)?.includes('thorns') === true) ||
-        effect.kind === 'projectiles',
+        (effect.kind === 'projectiles' && effect.countStat !== undefined),
     );
     if (!fits)
       push(
-        "bonus 'inPayload' needs a critScale, a thorns tag or a projectile count in the payload",
+        "bonus 'inPayload' needs a critScale, a thorns tag or a projectiles effect with countStat in the payload",
       );
   }
   payload.effects.forEach((effect, i) => {

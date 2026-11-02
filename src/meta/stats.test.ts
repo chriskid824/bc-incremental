@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { loadGameData } from '../data';
 import type { EmitterGrant } from '../data/emitters';
-import { BASE_STATS, NO_EXTRAS, STAT_IDS } from '../data/stats';
+import { BASE_STATS, isScopedStat, NO_EXTRAS, SCOPED_STATS, STAT_IDS } from '../data/stats';
 import type { Modifier, StatBlock } from '../data/stats';
 import { tagMask } from '../data/tags';
 import type { ConversionSpec, TriggerSpec } from '../data/triggers';
@@ -164,6 +164,22 @@ describe('computeStatBlock', () => {
       { stat: 'damage', kind: 'flat', value: 5, when: [{ targetKind: 'boss' }] },
     ];
     for (const mod of rejected) expect(() => block([mod]), JSON.stringify(mod)).toThrow(/Tags/);
+  });
+
+  it("appends C6b.1's barrageCount: last of 50, base 0, unscoped, its flat values summed", () => {
+    expect(STAT_IDS).toHaveLength(50);
+    expect(STAT_IDS.slice(-2)).toEqual(['treasureRate', 'barrageCount']);
+    expect(BASE_STATS.barrageCount).toBe(0);
+    expect(isScopedStat('barrageCount')).toBe(false);
+    expect(SCOPED_STATS).toHaveLength(17);
+    const stats = block([
+      { stat: 'barrageCount', kind: 'flat', value: 2 },
+      { stat: 'barrageCount', kind: 'flat', value: 1.5 },
+    ]);
+    expect(stats.values.barrageCount).toBe(3.5);
+    expect(stats.scoped).toEqual([]);
+    const tagged = { stat: 'barrageCount', kind: 'flat', value: 1, tags: ['projectile'] } as const;
+    expect(() => block([tagged])).toThrow(/Tags/);
   });
 
   it('passes the triggers and conversions through', () => {

@@ -86,6 +86,7 @@
   "web.extra.pierceAll": "，穿透全部敵人",
   "web.extra.bounce": "，反彈 {n} {times}",
   "web.extra.spread": "，扇形 {deg}°",
+  "web.extra.barrageCount": "，彈幕外盤每多 1 發小彈，這裡也多 1 發",
   "web.extra.alwaysCrit": "，必定暴擊",
   "web.extra.critScale": "，每 10% 暴擊率傷害 +{pct}",
   "web.extra.ignoreShield": "，無視護盾",

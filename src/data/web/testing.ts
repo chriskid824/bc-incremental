@@ -370,9 +370,18 @@ const OUTER_CARDS: Readonly<Record<OuterId, OuterCard>> = {
       dasher: 'helps',
       boss: 'answer',
     },
+    // 4 bullets at 25 % with C6b.1's count link (F24), which is its inPayload bonus.
     payload: {
       type: 'placement',
-      effects: [{ kind: 'projectiles', count: 4, damagePct: 0.25, aim: 'radial' }],
+      effects: [
+        {
+          kind: 'projectiles',
+          count: 4,
+          damagePct: 0.25,
+          aim: 'radial',
+          countStat: 'barrageCount',
+        },
+      ],
       bonus: { form: 'inPayload' },
       ranks: RANKS,
     },

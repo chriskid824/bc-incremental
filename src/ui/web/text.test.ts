@@ -41,6 +41,7 @@ import {
   COEF_FORMAT,
   CONDITION_TEXT,
   coreBonus,
+  COUNT_STAT_TEXT,
   CURVE_TEXT,
   describeNode,
   EFFECT_TEXT,
@@ -103,6 +104,7 @@ describe('the registries (§4.7)', () => {
   const REGISTRIES = {
     KIND_TEXT,
     EFFECT_TEXT,
+    COUNT_STAT_TEXT,
     CONDITION_TEXT,
     CURVE_TEXT,
     EVENT_TEXT,
@@ -722,6 +724,49 @@ describe('describeNode (§4.7)', () => {
     expect(linesOf(fire, 'fusion.fire.crit.core', 'zh-TW')).toEqual([
       '每次爆炸，在落點：朝最近的敵人畫一條長 300、寬 24 的斬擊線，100% 傷害，必定暴擊，每 10% 暴擊率傷害 +10%',
       '這條融合吃暴擊外盤的加成',
+    ]);
+  });
+
+  it('writes the barrage core’s count link after its count, and no link on projectiles without one (C6b.1, gd:564)', () => {
+    expect(linesOf(fire, 'fusion.fire.barrage.core', 'en')).toEqual([
+      'Each explosion, where it lands: 4 small projectiles all around, 25% damage each, +1 for each of your small projectiles above 2',
+      "This fusion takes the Barrage board's bonuses",
+    ]);
+    expect(linesOf(fire, 'fusion.fire.barrage.core', 'zh-TW')).toEqual([
+      '每次爆炸，在落點：朝四周射出 4 發小彈，每發 25% 傷害，彈幕外盤每多 1 發小彈，這裡也多 1 發',
+      '這條融合吃彈幕外盤的加成',
+    ]);
+    const radial = { kind: 'projectiles', count: 4, aim: 'radial', damagePct: 0.25 } as const;
+    const web = withEffects(fire, NOTABLE, {
+      modifiers: [flat('barrageCount', 2)],
+      triggers: [{ on: 'kill', do: [radial] }],
+    });
+    expect(linesOf(web, NOTABLE, 'en')).toEqual([
+      '+2 Small projectiles',
+      'When enemies are killed: 4 small projectiles all around, 25% damage each',
+    ]);
+    expect(linesOf(web, NOTABLE, 'zh-TW')).toEqual([
+      '小彈數量 +2',
+      '敵人死亡時：朝四周射出 4 發小彈，每發 25% 傷害',
+    ]);
+  });
+
+  it('writes the count link on a linked projectiles effect of any aim, as the barrage entry would fire it (C6b.1)', () => {
+    const entry = {
+      kind: 'projectiles',
+      count: 2,
+      aim: 'distinct',
+      damagePct: 0.25,
+      countStat: 'barrageCount',
+    } as const;
+    const web = withEffects(fire, NOTABLE, {
+      triggers: [{ on: 'kill', do: [entry, { ...entry, aim: 'fan', spreadDeg: 40 }] }],
+    });
+    expect(linesOf(web, NOTABLE, 'en')).toEqual([
+      'When enemies are killed: 2 small projectiles one at each of the nearest enemies, 25% damage each, +1 for each of your small projectiles above 2; 2 small projectiles in a fan at the target, 25% damage each, over 40°, +1 for each of your small projectiles above 2',
+    ]);
+    expect(linesOf(web, NOTABLE, 'zh-TW')).toEqual([
+      '敵人死亡時：分別朝最近的敵人射出 2 發小彈，每發 25% 傷害，彈幕外盤每多 1 發小彈，這裡也多 1 發；呈扇形朝目標射出 2 發小彈，每發 25% 傷害，扇形 40°，彈幕外盤每多 1 發小彈，這裡也多 1 發',
     ]);
   });
 

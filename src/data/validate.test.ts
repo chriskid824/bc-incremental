@@ -1717,6 +1717,31 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('checks a linked count as written, 1 to 64 like any other (C6b.1: the link is applied at compile)', () => {
+    const linked = {
+      kind: 'projectiles',
+      damagePct: 0.25,
+      aim: 'radial',
+      countStat: 'barrageCount',
+    } as const;
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { ...linked, count: 0 },
+          { ...linked, count: 65 },
+          { ...linked, count: 1.5 },
+          { ...linked, count: 64 },
+          { ...linked, count: 2, aim: 'distinct' },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] count must be an integer in [1, 64] (got 0)`,
+      `${at} do[1] count must be an integer in [1, 64] (got 65)`,
+      `${at} do[2] count must be an integer in [1, 64] (got 1.5)`,
+    ]);
+  });
+
   it("rejects homing projectiles without a target on targetless events, but not 'radial' or a selector's", () => {
     const shots = { kind: 'projectiles', count: 2, damagePct: 0.5 } as const;
     expect(triggerIssues({ on: 'periodic', every: 1, do: [{ ...shots, aim: 'target' }] })).toEqual([

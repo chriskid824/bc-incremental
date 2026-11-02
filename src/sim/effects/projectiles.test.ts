@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { toNumber, ZERO } from '../../core/num';
 import type { StatId } from '../../data/stats';
 import { TAG } from '../../data/tags';
+import { BARRAGE_ENTRY_SHOTS, PROJECTILES_COUNT_MAX } from '../../data/triggers';
 import type { ProjectilesSpec, TriggerSpec } from '../../data/triggers';
+import { computeStatBlock } from '../../meta/stats';
 import { liveBurnStacks } from '../ailments/records';
 import { PROJECTILE_CAP, SMALL_PROJECTILE_TICKS } from '../caps';
 import type { Payload } from '../emitters/types';
+import type { TestModule } from '../rules';
 import type { Enemy, RunContext } from '../systems/context';
 import { removeEnemy } from '../systems/death';
 import { moveProjectiles } from '../systems/projectiles';
@@ -616,5 +619,149 @@ describe('projectiles: compile', () => {
       rollsAilments: true,
     });
     expect(p.rng).toBe(ctx.effectsRng);
+  });
+});
+
+describe('projectiles: the count link (docs/v3 C6 design §7.4 C6b.1, H22)', () => {
+  /** The barrage payload as the fixture writes it: 4 bullets at 25 % with the link. */
+  const linked = (count = 4): ProjectilesSpec =>
+    projectiles({ count, damagePct: 0.25, aim: 'radial', countStat: 'barrageCount' });
+  const countAt = (spec: ProjectilesSpec, barrageCount?: number, coef = 1): number => {
+    const fx = compileEffect(spec, 0, coef, 100, undefined, barrageCount);
+    return (fx.spec as ProjectilesSpec).count;
+  };
+
+  it('links at 2 shots from the entry, at most 64 in all', () => {
+    expect([BARRAGE_ENTRY_SHOTS, PROJECTILES_COUNT_MAX]).toEqual([2, 64]);
+  });
+
+  it('fires count + max(0, floor(barrageCount) − 2), at most 64: 4 up to 2.9, 5 at 3, 7 at 5.5, 64 at 70', () => {
+    const at = (barrageCount: number): number => countAt(linked(), barrageCount);
+    expect([0, 2, 2.9, 3, 5.5, 70].map(at)).toEqual([4, 4, 4, 5, 7, 64]);
+    // Below the entry's 2 it never takes one away; at 64 and past it, it holds.
+    expect([-5, 1.5, 62, 63, 1e6].map(at)).toEqual([4, 4, 64, 64, 64]);
+  });
+
+  it('adds to its own count, not to 4: 1 at 3 is 2, 60 at 10 is 64, 64 at 0 is 64', () => {
+    expect(countAt(linked(1), 3)).toBe(2);
+    expect(countAt(linked(60), 10)).toBe(64);
+    expect(countAt(linked(64), 0)).toBe(64);
+  });
+
+  it('leaves an effect without countStat at its count: 4 at barrageCount 10', () => {
+    const plain = projectiles({ count: 4, damagePct: 0.25, aim: 'radial' });
+    expect(countAt(plain, 10)).toBe(4);
+    expect(compileEffect(plain, 0, 1, 100, undefined, 10).spec).toEqual(plain);
+  });
+
+  it('never × the coefficient: the count is the link’s at coef 2 and 0.5, damagePct × coef', () => {
+    expect([countAt(linked(), 5, 2), countAt(linked(), 5, 0.5), countAt(linked(), 0, 2)]).toEqual([
+      7, 7, 4,
+    ]);
+    const fx = compileEffect(linked(), 0, 2, 100, undefined, 5);
+    expect(fx.spec).toEqual({ ...linked(), count: 7, damagePct: 0.5 });
+    expect(toNumber(fx.baseDamage)).toBeCloseTo(50, 12);
+  });
+
+  it('is at barrageCount 0 without one: the count as written', () => {
+    expect(countAt(linked())).toBe(4);
+  });
+
+  it('reads the StatBlock’s barrageCount, not projectileCount, for every linked effect of the build', () => {
+    const ctx = fixture(
+      [],
+      [
+        { on: 'hit', do: [linked(), projectiles({ count: 3, aim: 'radial' })] },
+        { on: 'kill', do: [linked(2)] },
+      ],
+      { barrageCount: 5, projectileCount: 9 },
+    );
+    const counts = ctx.build.effects.map((fx) => (fx.spec as ProjectilesSpec).count);
+    expect(counts).toEqual([7, 3, 5]);
+  });
+
+  it('links a module’s addEffect too, at the StatBlock’s value: a module’s offsetStat does not reach it', () => {
+    let fx = -1;
+    const module: TestModule = (b) => {
+      b.offsetStat('barrageCount', 3);
+      fx = b.addEffect('center', linked());
+    };
+    const ctx = placedEnemies([], {
+      stats: makeStats({ ...NO_ROLLS, barrageCount: 5 }),
+      modules: [module],
+    });
+    expect(ctx.build.values.barrageCount).toBe(8);
+    expect((ctx.build.effects[fx]?.spec as ProjectilesSpec).count).toBe(7);
+  });
+
+  it('links a module’s addTrigger at the StatBlock’s value too: an offsetStat before it does not reach it', () => {
+    const module: TestModule = (b) => {
+      b.offsetStat('barrageCount', 3);
+      b.addTrigger('center', { on: 'hit', do: [linked()] });
+    };
+    const ctx = placedEnemies([], {
+      stats: makeStats({ ...NO_ROLLS, barrageCount: 5 }),
+      modules: [module],
+    });
+    expect(ctx.build.values.barrageCount).toBe(8);
+    const linkedCounts = ctx.build.effects
+      .filter((fx) => fx.kind === 'projectiles')
+      .map((fx) => (fx.spec as ProjectilesSpec).count);
+    expect(linkedCounts).toEqual([7]);
+  });
+
+  it('reads the values of a StatBlock computeStatBlock made, not its base (0): flat 2 + 3, more ×2 fire 12', () => {
+    const stats = computeStatBlock(
+      [
+        { stat: 'barrageCount', kind: 'flat', value: 2 },
+        { stat: 'barrageCount', kind: 'flat', value: 3 },
+        { stat: 'barrageCount', kind: 'more', value: 1 },
+      ],
+      {
+        triggers: [{ source: 'outer.barrage', spec: { on: 'hit', do: [linked()] } }],
+        conversions: [],
+        emitters: [],
+      },
+    );
+    expect([stats.base.barrageCount, stats.values.barrageCount]).toEqual([0, 10]);
+    const ctx = placedEnemies([], { stats });
+    const counts = ctx.build.effects
+      .filter((fx) => fx.kind === 'projectiles')
+      .map((fx) => (fx.spec as ProjectilesSpec).count);
+    expect(counts).toEqual([12]);
+  });
+
+  it('links every aim, not only radial: target, distinct, fan and radial at barrageCount 5', () => {
+    const aims = ['target', 'distinct', 'fan', 'radial'] as const;
+    const counts = aims.map((aim) =>
+      countAt(projectiles({ count: 2, damagePct: 0.25, aim, countStat: 'barrageCount' }), 5),
+    );
+    expect(counts).toEqual([5, 5, 5, 5]);
+  });
+
+  it('fires 7 at barrageCount 5, evenly 360° / 7 apart, from the count the compile linked', () => {
+    const stats = makeStats({ ...NO_ROLLS, barrageCount: 5 }, [], {
+      triggers: [
+        {
+          source: 'outer.barrage',
+          spec: { on: 'periodic', every: 1, do: [{ ...linked(), from: 'player' }] },
+        },
+      ],
+      conversions: [],
+      emitters: [],
+    });
+    const ctx = placedEnemies([], { stats });
+    // Read once, at compile: a stat block changed after it fires the same 7.
+    (stats.values as Record<StatId, number>).barrageCount = 70;
+    (ctx.build.values as Record<StatId, number>).barrageCount = 70;
+    fire(ctx, null);
+    expect(ctx.shots.count).toBe(7);
+    const step = 360 / 7;
+    expect(headings(ctx).map((deg) => Math.round(((deg + 360) % 360) / step))).toEqual([
+      0, 1, 2, 3, 4, 5, 6,
+    ]);
+    for (const [i, deg] of headings(ctx).entries()) {
+      expect((deg + 360) % 360).toBeCloseTo(i * step, 5);
+    }
   });
 });

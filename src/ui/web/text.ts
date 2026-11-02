@@ -1,12 +1,12 @@
 /**
  * Generated text of the v3 web (docs/v3 C6 design D22, §3.9, §4.7): a template per node kind,
- * effect kind, condition, scaling variable and curve, event, grant kind, bonus form, fan-out and
- * buy reason, each registry a Record over its union, so a new member does not compile without its
- * template (H15, L9); STAT_FORMAT; the lookup the text reads through; and describeNode. Modifier
- * lines are written here, through STAT_FORMAT and M1's mod.* templates (web.mod.reduced for an
- * increased value below 0) with the stat's stat.* name, then the scope, tags, conditions and
- * scaling; nothing comes from src/ui/describe.ts, whose describeModifier gives no line for the
- * behaviour modifiers these lines exist for (F52).
+ * effect kind, count link, condition, scaling variable and curve, event, grant kind, bonus form,
+ * fan-out and buy reason, each registry a Record over its union, so a new member does not compile
+ * without its template (H15, L9); STAT_FORMAT; the lookup the text reads through; and
+ * describeNode. Modifier lines are written here, through STAT_FORMAT and M1's mod.* templates
+ * (web.mod.reduced for an increased value below 0) with the stat's stat.* name, then the scope,
+ * tags, conditions and scaling; nothing comes from src/ui/describe.ts, whose describeModifier
+ * gives no line for the behaviour modifiers these lines exist for (F52).
  */
 
 import {
@@ -33,6 +33,7 @@ import type {
   ConversionSpec,
   EffectKind,
   EffectSpec,
+  ProjectilesSpec,
   ScalingCurve,
   ScalingSpec,
   ScalingVar,
@@ -125,6 +126,16 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   slashLine: 'web.effect.slashLine',
   coinHit: 'web.effect.coinHit',
   chainBolt: 'web.effect.chainBolt',
+};
+
+/**
+ * A projectiles effect's count link (ProjectilesSpec.countStat; docs/v3 C6 design §7.4 C6b.1), as
+ * an extra after its count: 「彈幕外盤每多 1 發小彈，這裡也多 1 發」 (gd:564).
+ */
+export const COUNT_STAT_TEXT: Readonly<
+  Record<NonNullable<ProjectilesSpec['countStat']>, MessageKey>
+> = {
+  barrageCount: 'web.extra.barrageCount',
 };
 
 export const CONDITION_TEXT: Readonly<Record<ConditionKey, MessageKey>> = {
@@ -350,6 +361,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   enemyRegen: 'percent',
   toughDropMult: 'percent',
   treasureRate: 'percent',
+  barrageCount: 'number',
 };
 
 /**
@@ -640,6 +652,7 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
         extra('web.extra.bounce', { n, times: word(lookup, 'time', n) });
       }
       if (spec.spreadDeg !== undefined) extra('web.extra.spread', { deg: trim(spec.spreadDeg) });
+      if (spec.countStat !== undefined) extra(COUNT_STAT_TEXT[spec.countStat]);
       delivery(spec.tags, spec.element);
       return text({
         n: spec.count,

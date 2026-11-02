@@ -50,7 +50,8 @@
       "ailmentOnBlock": 0,
       "enemyRegen": 1,
       "toughDropMult": 1,
-      "treasureRate": 1
+      "treasureRate": 1,
+      "barrageCount": 0
     },
     "values": {
       "damage": 450.22067097931824,
@@ -101,7 +102,8 @@
       "ailmentOnBlock": 0,
       "enemyRegen": 1,
       "toughDropMult": 1,
-      "treasureRate": 1
+      "treasureRate": 1,
+      "barrageCount": 0
     },
     "scoped": [
       {

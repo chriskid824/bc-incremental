@@ -430,18 +430,31 @@ export interface DetonateSpec {
  * A straight one hits the enemies on its line, `pierce` (default 0) more after the first, or
  * every one with -1, and turns back at the arena's edge `bounce` (default 0) times. A homing
  * one hits its enemy and ends; when that enemy dies first it turns to the enemy nearest to it,
- * or fades. Each lasts 120 ticks (2 s).
+ * or fades. Each lasts 120 ticks (2 s). With countStat 'barrageCount' (the barrage payload's
+ * bonus, gd:564) it fires one more for each whole barrage count past BARRAGE_ENTRY_SHOTS, at
+ * most PROJECTILES_COUNT_MAX in all, from the build's stat block at compile.
  */
 export interface ProjectilesSpec extends DamagePart {
   readonly kind: 'projectiles';
-  /** Projectiles, 1 to 64. */
+  /** Projectiles, 1 to 64 (PROJECTILES_COUNT_MAX). */
   readonly count: number;
   readonly aim: 'target' | 'distinct' | 'radial' | 'fan';
   readonly from?: 'event' | 'player';
   readonly pierce?: number;
   readonly bounce?: number;
   readonly spreadDeg?: number;
+  /** The stat its count grows with (docs/v3 C6 design §7.4 C6b.1); never × a coefficient. */
+  readonly countStat?: 'barrageCount';
 }
+
+/** The most projectiles one projectiles effect fires, a linked count's included. */
+export const PROJECTILES_COUNT_MAX = 64;
+/**
+ * The barrage count the barrage outer's entry gives (gd §4.11 副彈: 2 more small projectiles an
+ * attack); a linked count grows by one with each whole barrage count past it (H22: count = 4 +
+ * (barrage count − 2) on the barrage payload).
+ */
+export const BARRAGE_ENTRY_SHOTS = 2;
 
 /**
  * A slash: a line `length` long from the event's point, or from the event's enemy with from

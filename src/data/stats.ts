@@ -130,6 +130,13 @@ export const STAT_IDS = [
   'toughDropMult',
   /** Multiplier on the treasure schedule's rate (src/sim/systems/enemyAi.ts treasuresDue). */
   'treasureRate',
+  /**
+   * The barrage outer's extra small projectiles an attack (docs/v3/game-design-v3.md §4.11: 2
+   * from its entry); its whole part counts. A projectiles effect with countStat 'barrageCount'
+   * reads it once a compile and fires one more for each past BARRAGE_ENTRY_SHOTS
+   * (src/data/triggers.ts; src/sim/effects/types.ts compileEffect).
+   */
+  'barrageCount',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -186,6 +193,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   enemyRegen: 1,
   toughDropMult: 1,
   treasureRate: 1,
+  barrageCount: 0,
 };
 
 /**

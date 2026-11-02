@@ -22,8 +22,10 @@ import { mul, num, ONE, ZERO } from '../../core/num';
 import { TAG, tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import {
+  BARRAGE_ENTRY_SHOTS,
   COEF_FIELDS,
   DETONATE_AILMENTS,
+  PROJECTILES_COUNT_MAX,
   TRANSFER_EFFECTS,
   TRIGGER_EVENTS,
   WIRED_EVENTS,
@@ -140,7 +142,10 @@ export type CompiledEffectKind = CompiledEffectSpec['kind'];
 
 export interface CompiledEffect {
   readonly kind: CompiledEffectKind;
-  /** The effect's spec, its COEF_FIELDS × the trigger's coefficient (a missing field as 1). */
+  /**
+   * The effect's spec, its COEF_FIELDS × the trigger's coefficient (a missing field as 1); a
+   * projectiles effect with countStat holds its linked count as `count` (linkCount).
+   */
   readonly spec: CompiledEffectSpec;
   /** Source index of its damage, the source of the trigger or module that compiled it. */
   readonly source: number;
@@ -316,8 +321,22 @@ function withCoef(spec: EffectSpec, coef: number): EffectSpec {
 }
 
 /**
+ * `spec` with a projectiles effect's count linked to the barrage count when its countStat names
+ * it (docs/v3 C6 design §7.4 C6b.1; gd:564 「彈幕外盤每多 1 發小彈，這裡也多 1 發」): one more
+ * for each whole barrage count past BARRAGE_ENTRY_SHOTS, at most PROJECTILES_COUNT_MAX in all.
+ * Any other effect as it is. The count is never × the coefficient.
+ */
+function linkCount(spec: EffectSpec, barrageCount: number): EffectSpec {
+  if (spec.kind !== 'projectiles' || spec.countStat === undefined) return spec;
+  const more = Math.max(0, Math.floor(barrageCount) - BARRAGE_ENTRY_SHOTS);
+  return { ...spec, count: Math.min(PROJECTILES_COUNT_MAX, spec.count + more) };
+}
+
+/**
  * Compiles an effect credited to `source`, with its COEF_FIELDS × coef; `damage` is the build's
- * damage stat, and `target` the selector of its trigger, if any.
+ * damage stat, `target` the selector of its trigger, if any, and `barrageCount` the build's
+ * StatBlock value, which a projectiles effect with countStat links its count to (linkCount),
+ * once here: the executor reads the compiled spec's count.
  */
 export function compileEffect(
   spec: EffectSpec,
@@ -325,10 +344,11 @@ export function compileEffect(
   coef: number,
   damage: number,
   target?: TargetSelector,
+  barrageCount = 0,
 ): CompiledEffect {
   // An effect's damage is damage × (damagePct × coef): the coefficient goes into the field
   // first. Keep that association, or a calibrated effect's damage moves by ulps.
-  const scaled = withCoef(spec, coef);
+  const scaled = linkCount(withCoef(spec, coef), barrageCount);
   const radius = 'radius' in scaled ? (scaled.radius ?? 0) : 0;
   let tags = 0;
   let baseDamage = ZERO;

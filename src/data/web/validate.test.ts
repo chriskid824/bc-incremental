@@ -763,10 +763,20 @@ describe('one golden message per load-time check (D23)', () => {
           `outer 'barrage' (src/data/outer/barrage.ts) on ${event}: triggers[0] do[0] damagePct must be >= 0 (got -1)`,
       ),
       "outer 'bleed' (src/data/outer/bleed.ts): a template outer needs a payload; write its effects, bonus and ranks",
-      "outer 'crit' (src/data/outer/crit.ts): bonus 'inPayload' needs a critScale, a thorns tag or a projectile count in the payload",
+      "outer 'crit' (src/data/outer/crit.ts): bonus 'inPayload' needs a critScale, a thorns tag or a projectiles effect with countStat in the payload",
       "node 'outer.lightning.alpha.r1' (src/data/outer/lightning.ts): modifiers[1] scope 'fusion' is for a fusion's ranks only; scope it to 'outer.lightning'",
       "outer 'poison' (src/data/outer/poison.ts): bonus 'status' needs an applyAilment or addFrost of bleed in the payload",
       "outer 'poison' (src/data/outer/poison.ts): payload.effects[0] applyAilment has a radius, which stops the engine's fan-out on explode and freeze; write it per event in perEvent",
+    ]);
+  });
+
+  it('V12: an inPayload projectiles payload without its count link (C6b.1, F24)', () => {
+    expect(
+      plant((content) => {
+        Reflect.deleteProperty(content.outers.barrage?.payload?.effects[0] as object, 'countStat');
+      }),
+    ).toEqual([
+      "outer 'barrage' (src/data/outer/barrage.ts): bonus 'inPayload' needs a critScale, a thorns tag or a projectiles effect with countStat in the payload",
     ]);
   });
 

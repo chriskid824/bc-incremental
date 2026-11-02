@@ -86,6 +86,7 @@
   "web.extra.pierceAll": ", piercing every enemy",
   "web.extra.bounce": ", bouncing {n} {times}",
   "web.extra.spread": ", over {deg}°",
+  "web.extra.barrageCount": ", +1 for each of your small projectiles above 2",
   "web.extra.alwaysCrit": ", always a crit",
   "web.extra.critScale": ", +{pct} damage per 10% crit chance",
   "web.extra.ignoreShield": ", ignoring shields",
