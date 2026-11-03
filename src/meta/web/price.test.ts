@@ -199,8 +199,8 @@ describe('economyIssues (V16, S-3)', () => {
 
   it('passes DEFAULT_WEB_ECONOMY and its 初始值', () => {
     expect(economyIssues(DEFAULT_WEB_ECONOMY)).toEqual([]);
-    // B1's values, chosen with the simulator (前線節奏 at 10, 20 and 40 min).
-    expect(DEFAULT_WEB_ECONOMY.step).toEqual({ base: 2, growth: 1.1 });
+    // B1's values, chosen with the simulator (前線節奏 at 10, 20 and 40 min; prestige at ~41 min).
+    expect(DEFAULT_WEB_ECONOMY.step).toEqual({ base: 2, growth: 1.11 });
     expect(DEFAULT_WEB_ECONOMY.mastery).toEqual({ base: 50, growth: 1.15 });
     expect(DEFAULT_WEB_ECONOMY.might).toEqual({ base: 50, growth: 1.15 });
     expect(DEFAULT_WEB_ECONOMY.startWaveRatio).toBe(0.5);
