@@ -41,6 +41,21 @@ describe('the renderer on a character run', () => {
     expect(source).toMatch(/const summons = look !== null && !hive && look\.summons;/);
   });
 
+  it('makes 蜂巢’s swarm layer and slot skins only on a hive character run', () => {
+    expect(source).toMatch(
+      /const swarmLook = hive && look !== null \? swarmLooks\(slotSkins\(look\)\) : null;/,
+    );
+    expect(source).toMatch(/this\.swarm =\s*swarmLook === null \? null : new SwarmLayer\(/);
+    expect(source).toMatch(
+      /new DroneLayer\(app\.renderer, textures\.streak, swarmDroneSkin\(swarmLook\)\)/,
+    );
+    // `?hive` and the summons on another construct keep the plain impact ring.
+    expect(source).toMatch(
+      /case 'impact':\s*if \(this\.swarm !== null\) \{\s*this\.swarm\.impact\([\s\S]*?\} else \{\s*this\.rings\.impact\(event\.x, event\.y, event\.radius\);/,
+    );
+    expect(source).toMatch(/if \(this\.swarm !== null\) this\.onTurretFire\(event\);/);
+  });
+
   it('routes each character event to a layer that is null without a character', () => {
     expect(source).toMatch(
       /case 'lob':\s*this\.construct\?\.attack\(Math\.atan2\(event\.y - event\.fromY, event\.x - event\.fromX\)\);/,

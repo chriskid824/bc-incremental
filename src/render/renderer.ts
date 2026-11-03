@@ -19,8 +19,10 @@
  * A v3 character run (RendererOptions.character, B1) draws the character's construct and arena
  * in place of M1's hexagon and floor, its hit numbers in the character colour, the crit slash
  * lines ('slash'), and for 熔核 its attack language (src/render/magma.ts): the bombs, explosions,
- * fire zones and scorch marks, the 火環 nova and the fusion looks (霜焰, 瘟爆, 爆靈). Without it
- * (the M1 page, `?hive`) none of those layers is made and none of those events is drawn.
+ * fire zones and scorch marks, the 火環 nova and the fusion looks (霜焰, 瘟爆, 爆靈); for 蜂巢 its
+ * (src/render/swarm.ts): the dock ring and turret seats, the drones' floor wakes, the impacts and
+ * muzzle flashes, and its drones dressed in the owned fusions' skins by slot. Without it (the M1
+ * page, `?hive`) none of those layers is made and none of those events is drawn.
  *
  * A build with a segment emitter (any construct) also draws its links (src/render/
  * segmentLines.ts, V1): the layer is made the first time render() sees a state with a segment
@@ -41,7 +43,7 @@ import { createArenaBackdrop, createBackdrop } from './backdrop';
 import { BurnTally } from './burnTally';
 import { Bursts } from './bursts';
 import { BulletLayer } from './bullets';
-import { fusionSkin, hitNumberColor } from './characterLook';
+import { fusionSkin, hitNumberColor, slotSkins } from './characterLook';
 import type { CharacterLook } from './characterLook';
 import { ConstructCoreView, HiveCoreView } from './core';
 import type { CoreView } from './core';
@@ -67,6 +69,7 @@ import { SegmentLineLayer } from './segmentLines';
 import { ScreenShake } from './shake';
 import { PlayerShield } from './shieldArc';
 import { SlashLayer } from './slashes';
+import { SwarmLayer, swarmDroneSkin, swarmLooks } from './swarm';
 
 export interface RendererOptions {
   /** Disables screen shake (settings toggle later, docs/ARCHITECTURE.md §10). */
@@ -148,6 +151,8 @@ export class Renderer {
   private readonly construct: ConstructCoreView | null;
   /** 熔核's bombs, explosions, fire zones and scorch marks; only on a magmaCore run. */
   private readonly magma: MagmaLayer | null;
+  /** 蜂巢's docks, wakes, impacts and muzzle flashes; only on a hive character run. */
+  private readonly swarm: SwarmLayer | null;
   /** The crit slash lines; only on a character run. */
   private readonly slashes: SlashLayer | null;
   /**
@@ -198,8 +203,12 @@ export class Renderer {
     // The summon outer's drones and turrets on another construct; one skin for every row, so a
     // build with 火靈's spirits draws its drones in the spirits' colours too.
     const summons = look !== null && !hive && look.summons;
+    // A hive character run's drones wear its fusions' skins by slot (gd §5.3); `?hive` has none.
+    const swarmLook = hive && look !== null ? swarmLooks(slotSkins(look)) : null;
     this.drones = hive
-      ? new DroneLayer(app.renderer, textures.streak)
+      ? swarmLook === null
+        ? new DroneLayer(app.renderer, textures.streak)
+        : new DroneLayer(app.renderer, textures.streak, swarmDroneSkin(swarmLook))
       : spirits || summons
         ? new DroneLayer(
             app.renderer,
@@ -227,6 +236,8 @@ export class Renderer {
             random,
           )
         : null;
+    this.swarm =
+      swarmLook === null ? null : new SwarmLayer(textures, this.fx, this.rings, swarmLook, random);
     this.slashes =
       look === null
         ? null
@@ -245,6 +256,8 @@ export class Renderer {
       backdrop,
       // The floor's scorch marks, fire zones and the bombs' shadows, under the crowd.
       ...(this.magma === null ? [] : this.magma.groundViews),
+      // 蜂巢's wakes, dock ring and turret seats, on the floor.
+      ...(this.swarm === null ? [] : this.swarm.groundViews),
       this.enemies.burnGlow,
       this.flames.view,
       this.enemies.view,
@@ -284,6 +297,7 @@ export class Renderer {
     this.bullets?.clear();
     this.playerShield?.reset();
     this.magma?.reset();
+    this.swarm?.reset();
     this.slashes?.clear();
     this.segmentLines?.clear();
     this.coreHits.reset();
@@ -335,10 +349,15 @@ export class Renderer {
           }
           break;
         case 'impact':
-          this.rings.impact(event.x, event.y, event.radius);
+          if (this.swarm !== null) {
+            this.swarm.impact(event.x, event.y, event.radius, CENTER_X, CENTER_Y);
+          } else {
+            this.rings.impact(event.x, event.y, event.radius);
+          }
           break;
         case 'turretFire':
           this.drones?.turretFired(event.droneId, event.targetId);
+          if (this.swarm !== null) this.onTurretFire(event);
           break;
         case 'playerHit':
         case 'bulletHit':
@@ -416,6 +435,15 @@ export class Renderer {
       state.shotCount,
       state.zones,
       state.zoneCount,
+      state.tick,
+      alpha,
+      dt,
+    );
+    this.swarm?.update(
+      state.drones,
+      state.droneCount,
+      state.player.x,
+      state.player.y,
       state.tick,
       alpha,
       dt,
@@ -512,6 +540,13 @@ export class Renderer {
       magma.thresholdNova(event.x, event.y, event.radius);
     }
     this.bursts.nova(event.x, event.y, event.radius);
+  }
+
+  /** A turret fired: 蜂巢's muzzle flash toward where its target is drawn, if it has a view. */
+  private onTurretFire(event: Extract<SimEvent, { type: 'turretFire' }>): void {
+    const spot = this.enemies.positionOf(event.targetId);
+    if (spot === null) return;
+    this.swarm?.muzzle(event.x, event.y, Math.atan2(spot.y - event.y, spot.x - event.x));
   }
 
   /** An enemy was poisoned: where it is drawn, for the poisoned-explosion check (瘟爆). */
