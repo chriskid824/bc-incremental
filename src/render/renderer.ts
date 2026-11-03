@@ -342,6 +342,7 @@ export class Renderer {
           break;
         case 'playerHit':
         case 'bulletHit':
+        case 'reflectHit':
           if (this.coreHits.flashes(event)) this.core.hit();
           break;
         case 'shieldAbsorbed':
