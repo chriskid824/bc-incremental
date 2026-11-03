@@ -541,7 +541,8 @@ export function emitterPayload(
 /**
  * The payload of a drone emitter's turret shots (turretStep, src/sim/systems/drones.ts): `pct` of
  * the damage stat, the share src/sim/emitters/drone.ts reads (SwarmParams.turretDamagePct for
- * the swarm, the spec's for a grant), tagged hit, minion and projectile, with the emitter's
+ * the swarm, the spec's for a grant), tagged hit, minion and projectile, and area too under
+ * 加農砲's splash (BuildFlags.turretSplash above 0), whose every hit it deals, with the emitter's
  * source and its jump credit by emitterPayload's rule, SIGNATURE when it is the signature's, and
  * its chains, ailment rolls and crits, on `rng`, with the chain policy `policy` by
  * emitterPayload's rule (the signature's; null for the others). Its burns need no credit of
@@ -558,7 +559,7 @@ export function turretPayload(
   const source = build.sources.index(spec.source);
   return createPayload({
     baseDamage: mul(num(build.values.damage), pct),
-    tags: TAG.hit | TAG.minion | TAG.projectile,
+    tags: TAG.hit | TAG.minion | TAG.projectile | (build.flags.turretSplash > 0 ? TAG.area : 0),
     source,
     jumpSource: jumpCredit(build.attribution, source),
     flags: spec.signature ? SIGNATURE : 0,
@@ -638,8 +639,11 @@ export function emitterInterval(build: CompiledBuild, spec: EmitterSpec): number
       // Its judgements or strikes keep their period whatever the attack speed.
       return periodTicks(1 / spec.periodSec);
     case 'drone':
-      // Its turrets' period; its drones keep their own clocks (src/sim/systems/drones.ts).
-      return periodTicks((TURRET_RATE * build.values.attackSpeed) / BASE_ATTACK_SPEED);
+      // Its turrets' period, at 加農砲's factor on their rate (BuildFlags.turretRateMult, 1
+      // without it); its drones keep their own clocks (src/sim/systems/drones.ts).
+      return periodTicks(
+        (TURRET_RATE * build.flags.turretRateMult * build.values.attackSpeed) / BASE_ATTACK_SPEED,
+      );
     case 'aura':
       // A pulse every PHASE_TICKS on its phase (aura.ts), whatever the attack speed; a corona
       // keeps its own period.

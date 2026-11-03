@@ -184,6 +184,7 @@
   "stat.areaSize": "範圍",
   "stat.bombRadius": "爆炸半徑",
   "stat.spreadRadius": "擴散距離",
+  "stat.droneSpeed": "無人機速度",
   "enemy.triangle.name": "三角",
   "enemy.triangle.plural": "三角",
   "enemy.square.name": "方塊",

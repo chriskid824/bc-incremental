@@ -186,6 +186,13 @@ export const STAT_IDS = [
    * which spreadOf multiplies by (src/sim/build/size.ts).
    */
   'spreadRadius',
+  /**
+   * 無人機速度 (機隊's 「無人機傷害、速度」, docs/v3/game-design-v3.md:478): the multiplier on every
+   * drone's and timed row's speed, e.g. 1.2 = 120%, the drone emitters' (grants and the swarm)
+   * and every spawnDrone's. Read once a run, at the drone pool's fill, as max(0, droneSpeed)
+   * (src/sim/emitters/drone.ts); it reaches no dock time, cooldown, turret or shot.
+   */
+  'droneSpeed',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -253,6 +260,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   areaSize: 1,
   bombRadius: 1,
   spreadRadius: 1,
+  droneSpeed: 1,
 };
 
 /**

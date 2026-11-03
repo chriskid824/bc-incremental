@@ -654,6 +654,12 @@ export const clamp01 = (value: number): number => Math.min(1, Math.max(0, value)
 export const focused = (enemy: Enemy): boolean => enemy.tough && enemy.dist <= FOCUS_RANGE;
 
 /**
+ * Elites and bosses at any distance: a turret's focus targets under 鎖定信標
+ * (BuildFlags.summonEliteFirst, src/sim/systems/drones.ts turretStep).
+ */
+export const toughFocus = (enemy: Enemy): boolean => enemy.tough;
+
+/**
  * The block a 守護 elite lends the enemies around it (AffixState.guardBlockPct, docs/v3 C7
  * design §2.7): 「盾兵的護盾」, so the run data's shielder shield threshold, 0 for data whose
  * shielder has no shield behaviour.
@@ -1122,6 +1128,7 @@ export function createRunContext(
       shardsHeld: 0,
       enemiesInAura: 0,
       highestHpId: 0,
+      minionCount: 0,
       ctx: null,
     },
     triggerState: {

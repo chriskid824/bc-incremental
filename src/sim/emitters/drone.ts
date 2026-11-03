@@ -9,9 +9,13 @@
  * angle π/D + 2πj/T, between the drones, or 2πj/T when the emitter has no drone; a turret never
  * picks, so its row's first pick, by the same rule from j, is never read. An emitter's turrets
  * fire its turret payload (turretPayload, src/sim/emitters/types.ts). An emitter's drones are
- * counted (countOf, halved under 巨大化) and its splash sized (sizeOf) here, once for the run;
- * its turrets are not halved. A build with a spawnDrone effect also gets the tables of its timed
- * rows (C5.7, spawnSpecs), which the effects append at run time. Draws nothing.
+ * counted here, once for the run: × 蟲海's droneCountMult, then through countOf (halved under
+ * 巨大化); its turrets are neither. Its splash is sized (sizeOf) and its drones' step takes the
+ * droneSpeed stat, read once as max(0, droneSpeed), as every timed row's does; their dock time
+ * and cooldown do not. The turret shots' 加農砲 splash (sizeOf) and 特斯拉塔 jumps (countOf) are
+ * read here too, once for every turret of the run (C5.9). A build with a spawnDrone effect also
+ * gets the tables of its timed rows (C5.7, spawnSpecs), which the effects append at run time.
+ * Draws nothing.
  */
 
 import type { Rng } from '../../core/rng';
@@ -65,6 +69,9 @@ export function droneLayout(
   const impacts = new Array<number>(size).fill(0);
   const splashSq = new Array<number>(size).fill(0);
   const turretPayloads = new Array<Payload | null>(size).fill(null);
+  // 蟲海's factor and the droneSpeed stat, once for the run; a negative speed is none.
+  const countMult = build.flags.droneCountMult;
+  const speed = Math.max(0, build.values.droneSpeed);
   let refused = 0;
   /** Emitter `i`'s row of `rowKind`, seat `at`, at `angle` and `radius` around the player. */
   const place = (rowKind: number, i: number, at: number, angle: number, radius: number): void => {
@@ -86,8 +93,9 @@ export function droneLayout(
     // Emitter 0, a drone emitter, is the swarm: its rules change its SwarmParams in place.
     const swarm = i === 0 ? build.signature.swarm : null;
     const params = swarm ?? DRONE_DEFAULTS;
-    // 巨大化 halves the drones, here at the fill, and never the turrets (countOf).
-    const drones = countOf(build, swarm === null ? spec.drones : swarm.drones);
+    // 蟲海 multiplies the drones and 巨大化 then halves them (countOf), here at the fill, and
+    // neither touches the turrets.
+    const drones = countOf(build, (swarm === null ? spec.drones : swarm.drones) * countMult);
     const turrets = swarm === null ? spec.turrets : swarm.turrets;
     for (let k = 0; k < drones; k++) {
       place(DRONE_KIND_DRONE, i, k, (2 * Math.PI * k) / drones, DRONE_DEFAULTS.dockRadius);
@@ -98,7 +106,7 @@ export function droneLayout(
       const angle = between + (2 * Math.PI * j) / turrets;
       place(DRONE_KIND_TURRET, i, j, angle, DRONE_DEFAULTS.turretRadius);
     }
-    stepBase[i] = params.speed / TICK_RATE;
+    stepBase[i] = (params.speed * speed) / TICK_RATE;
     dockTicks[i] = params.dockSec * TICK_RATE;
     coolTicks[i] = params.cooldownSec * TICK_RATE;
     impacts[i] = params.impacts;
@@ -107,6 +115,7 @@ export function droneLayout(
     const share = swarm === null ? spec.turretDamagePct : swarm.turretDamagePct;
     turretPayloads[i] = turretPayload(build, spec, share, rng, i === 0 ? policy : null);
   }
+  const turretSplash = sizeOf(build, build.flags.turretSplash);
   return {
     rows: kind.length,
     refused,
@@ -123,17 +132,20 @@ export function droneLayout(
     impacts,
     splashSq,
     turretPayload: turretPayloads,
-    spawnSpecs: build.flags.spawnsDrones ? spawnSpecs(build) : null,
+    spawnSpecs: build.flags.spawnsDrones ? spawnSpecs(build, speed) : null,
+    turretSplashSq: turretSplash * turretSplash,
+    turretJumps: countOf(build, build.flags.turretChains),
   };
 }
 
 /**
  * The tables of `build`'s timed rows, one entry per compiled effect (SpawnSpecs): a spawnDrone's
  * fields with their defaults (maxLive SUMMON_CAP, speed and splash DRONE_DEFAULTS', impacts 1,
- * aim nearest), its splash through sizeOf as a drone's is, its cooldown DRONE_DEFAULTS'; its
- * COEF fields are the compiled spec's, × the coefficient.
+ * aim nearest), its speed × `speed` (the droneSpeed stat, as the drones') and its splash through
+ * sizeOf as a drone's is, its cooldown DRONE_DEFAULTS'; its COEF fields are the compiled spec's,
+ * × the coefficient.
  */
-function spawnSpecs(build: CompiledBuild): SpawnSpecs {
+function spawnSpecs(build: CompiledBuild, speed: number): SpawnSpecs {
   const n = build.effects.length;
   const specs: SpawnSpecs = {
     live: new Int32Array(n),
@@ -152,7 +164,7 @@ function spawnSpecs(build: CompiledBuild): SpawnSpecs {
     const spec = fx.spec;
     if (spec.kind !== 'spawnDrone') return;
     specs.maxLive[f] = spec.maxLive ?? SUMMON_CAP;
-    specs.stepBase[f] = (spec.speed ?? DRONE_DEFAULTS.speed) / TICK_RATE;
+    specs.stepBase[f] = ((spec.speed ?? DRONE_DEFAULTS.speed) * speed) / TICK_RATE;
     specs.coolTicks[f] = DRONE_DEFAULTS.cooldownSec * TICK_RATE;
     const splash = sizeOf(build, spec.splash ?? DRONE_DEFAULTS.splash);
     specs.splashSq[f] = splash * splash;

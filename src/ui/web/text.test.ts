@@ -195,6 +195,7 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'areaSize',
       'bombRadius',
       'spreadRadius',
+      'droneSpeed',
     ]);
   });
 
@@ -1336,6 +1337,44 @@ describe('the per-tick variables and the kill shards (C6b.3)', () => {
       linesOf(withEffects(fire, NOTABLE, { triggers: [coin] }), NOTABLE, locale)[0] ?? '';
     expect(line('en')).toMatch(/, ignoring shields, ignoring armour$/);
     expect(line('zh-TW')).toMatch(/，無視護盾，無視堅甲$/);
+  });
+});
+
+describe('C5.9: droneSpeed and minionCount (lead rulings P6, P7)', () => {
+  const lines = (mod: Modifier): string[] =>
+    LOCALES.map((locale) => modifierLine(mod, lookups[locale]));
+
+  it('writes 無人機速度 as a percentage in both locales', () => {
+    expect(LOCALES.map((locale) => MESSAGES[locale]['stat.droneSpeed'])).toEqual([
+      'Drone speed',
+      '無人機速度',
+    ]);
+    expect(lines(inc('droneSpeed', 0.25))).toEqual([
+      '25% increased Drone speed',
+      '無人機速度提高 25%',
+    ]);
+    expect(lines(more('droneSpeed', 0.5))).toEqual(['50% more Drone speed', '無人機速度總增 50%']);
+  });
+
+  it("writes :572's line, center damage per temporary summon on the field, in both locales", () => {
+    const perMinion = inc('damage', 0.04, {
+      scope: 'center',
+      scaling: { per: 'minionCount', cap: 0.2 },
+    });
+    expect(lines(perMinion)).toEqual([
+      '4% increased Damage (center only, per temporary summon on the field, at most 20%)',
+      '傷害提高 4%（限中心，場上每個臨時召喚物，最多 20%）',
+    ]);
+    expect(lines(flat('critChance', 0.01, { scaling: { per: 'minionCount', every: 3 } }))).toEqual([
+      '+1% Crit chance (per 3 temporary summons on the field)',
+      '暴擊率 +1%（場上每 3 個臨時召喚物）',
+    ]);
+    expect(lines(more('damage', 0.1, { scaling: { per: 'minionCount', curve: 'log10' } }))).toEqual(
+      [
+        '10% more Damage (rising with the temporary summons on the field at a slowing rate (log₁₀))',
+        '傷害總增 10%（隨場上的臨時召喚物數成長，越來越慢（log₁₀））',
+      ],
+    );
   });
 });
 

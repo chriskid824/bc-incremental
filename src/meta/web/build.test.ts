@@ -127,6 +127,7 @@ describe('webBuild (§5.1)', () => {
       shardsHeld: 0,
       enemiesInAura: 0,
       highestHpId: 0,
+      minionCount: 0,
       ctx: null,
     };
     const tables = [modTableFor(merged), modTableFor(unmerged)] as const;

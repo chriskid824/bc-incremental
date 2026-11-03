@@ -359,6 +359,7 @@ const on = (ctx: RunContext, target: Enemy | null): EvalInput => ({
   shardsHeld: 0,
   enemiesInAura: 0,
   highestHpId: 0,
+  minionCount: 0,
   ctx: null,
 });
 

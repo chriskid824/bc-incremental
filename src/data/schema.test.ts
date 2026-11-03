@@ -166,7 +166,7 @@ describe('ModifierSchema', () => {
     ],
     [
       'an unknown scaling variable',
-      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'minionCount' } },
+      { stat: 'critChance', kind: 'flat', value: 0.1, scaling: { per: 'minionLife' } },
     ],
     [
       'an unknown scaling curve',

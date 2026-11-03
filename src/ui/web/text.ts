@@ -233,6 +233,12 @@ export const SCALING_TEXT: Readonly<
     other: 'web.scaling.enemiesInAura.other',
     every: 'number',
   },
+  minionCount: {
+    name: 'web.scaling.minionCount.name',
+    one: 'web.scaling.minionCount.one',
+    other: 'web.scaling.minionCount.other',
+    every: 'number',
+  },
 };
 
 /** powFactor: 「×（{x}的 {e} 次方），最多 ×{cap}」 (H17). */
@@ -401,6 +407,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   areaSize: 'percent',
   bombRadius: 'percent',
   spreadRadius: 'percent',
+  droneSpeed: 'percent',
 };
 
 /**

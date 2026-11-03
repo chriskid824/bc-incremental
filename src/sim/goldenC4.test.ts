@@ -25,6 +25,7 @@ import type { EnemyId, GameData } from '../data/types';
 import { enemySlow, frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
 import { liveBleedStacks, livePoisonStacks } from './ailments/rings';
+import { compileScaling, scaledValue } from './build/eval';
 import { spreadOf } from './build/size';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { KILLED, REPEAT } from './effects/flags';
@@ -64,9 +65,12 @@ import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
   COUNTER_IDS,
+  DRONE_DASH,
+  DRONE_DOCKED,
   DRONE_KIND_DRONE,
   DRONE_KIND_SPIRIT,
   DRONE_KIND_TURRET,
+  DRONE_RETURN,
   DT,
   NO_INPUT,
 } from './types';
@@ -2300,6 +2304,120 @@ function wildfireModule(seen?: (distance: number) => void): TestModule {
   };
 }
 
+/**
+ * C5.9's summon policies (gd:193, :476-481; lead rulings P2–P6): a drone grant of 6 drones and 2
+ * turrets on outer.summon beside M1's volley, with a test module standing in for B1's four:
+ * 鎖定信標 (summonEliteFirst), 蟲海 (droneCountMult 2, so 12 drones, and dronesStay), 加農砲
+ * (turretRateMult 1/3 and turretSplash 60) and 特斯拉塔 (turretChains 2); droneSpeed 1.5; and
+ * every attack spawning two 3 s spirits of 2 impacts at the outer aim at the player, which the
+ * 14 fixed rows leave 10 places for under the summon cap of 24, so later spawns are refused.
+ * Their data halves ride along: 鎖定信標's +30 % on the minions against elites and bosses, 加農砲's
+ * ×4 on the turret shots. From wave 8 of the v3 fixture waves, as highestHp: elites from wave 9
+ * and the onion boss of wave 10 to pick first.
+ */
+const SUMMON_POLICY_MODS: readonly Modifier[] = [
+  ...(['elite', 'boss'] as const).map((kind): Modifier => ({
+    stat: 'damage',
+    kind: 'increased',
+    value: 0.3,
+    tags: ['minion'],
+    when: [{ targetKind: kind }],
+  })),
+  { stat: 'damage', kind: 'more', value: 3, tags: ['minion', 'projectile'] },
+];
+const SUMMON_POLICY_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1,
+    attackSpeed: 6,
+    droneSpeed: 1.5,
+  },
+  SUMMON_POLICY_MODS,
+  {
+    triggers: [
+      {
+        source: 'outer.summon',
+        spec: {
+          on: 'nthAttack',
+          every: 1,
+          target: { pick: 'player' },
+          do: [
+            { kind: 'spawnDrone', lifeSec: 3, damagePct: 0.5, count: 2, impacts: 2, aim: 'outer' },
+          ],
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [{ source: 'outer.summon', grant: { kind: 'drone', drones: 6, turrets: 2 } }],
+  },
+);
+/** B1's four modules in one: what 鎖定信標, 蟲海, 加農砲 and 特斯拉塔 write. */
+const summonPolicyModule = (): TestModule => (b) =>
+  void Object.assign(b.flags, {
+    summonEliteFirst: true,
+    droneCountMult: 2,
+    dronesStay: true,
+    turretRateMult: 1 / 3,
+    turretSplash: 60,
+    turretChains: 2,
+  });
+
+/**
+ * C5.9's minionCount (gd:572 「場上每有 1 架小無人機，中心傷害 +4%（最多 +20%）」; lead ruling P7):
+ * :572's line as data, center damage increased 4 % per live temporary summon up to 20 %, on M1's
+ * volley, whose every second attack spawns a 2.5 s spirit of 3 impacts at the nearest aim at the
+ * player, at most 8 live, beside a drone grant of 2 drones and a turret on outer.summon (fixed
+ * rows, which never count); from wave 12 of the fixture waves. The count climbs past the cap's 5
+ * and falls as the rows leave.
+ */
+const MINION_SCALING_STATS = makeStats(
+  {
+    damage: 8,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    attackSpeed: 6,
+  },
+  [
+    {
+      stat: 'damage',
+      kind: 'increased',
+      value: 0.04,
+      scope: 'center',
+      scaling: { per: 'minionCount', cap: 0.2 },
+    },
+  ],
+  {
+    triggers: [
+      {
+        source: 'outer.summon',
+        spec: {
+          on: 'nthAttack',
+          every: 2,
+          target: { pick: 'player' },
+          do: [
+            {
+              kind: 'spawnDrone',
+              lifeSec: 2.5,
+              damagePct: 0.3,
+              impacts: 3,
+              aim: 'nearest',
+              maxLive: 8,
+            },
+          ],
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [{ source: 'outer.summon', grant: { kind: 'drone', drones: 2, turrets: 1 } }],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2719,6 +2837,18 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: SPREAD_STATS, rules: [], startWave: 12 },
     modules: () => [wildfireModule()],
     expected: ['fb019c0af84ff0b5', 'd4f3333e8e4dd4a4'],
+  },
+  {
+    name: 'summonPolicies',
+    config: { stats: SUMMON_POLICY_STATS, rules: [], startWave: 8 },
+    data: () => v3TestData(),
+    modules: () => [summonPolicyModule()],
+    expected: ['e8902de222de4ff1', 'f9ddb7ea027e6525'],
+  },
+  {
+    name: 'minionScaling',
+    config: { stats: MINION_SCALING_STATS, rules: [], startWave: 12 },
+    expected: ['2c05d44828f0dc2f', 'ab0c793413743f91'],
   },
 ];
 
@@ -4632,6 +4762,161 @@ describe('golden C4 runs', () => {
         pick: { picks: 40, atEdge: 28 },
         wildfire: { passes: 27, atEdge: 4, farthest: 84.33918221116593 },
         capped: 0,
+      },
+    });
+  });
+
+  it('picks the tough enemies first in summonPolicies, its drones staying out and its turrets splashing and chaining (C5.9)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'summonPolicies') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each drone's and spirit's target, impacts left and mode at the last tick's end, by id.
+      const prev = new Map<number, { target: number; left: number; mode: number }>();
+      const c = {
+        tough: 0,
+        other: 0,
+        toughOverFarther: 0,
+        stays: 0,
+        keptStays: 0,
+        returns: 0,
+        fires: 0,
+        splashes: 0,
+        listed: 0,
+        mostListed: 0,
+        jumps: 0,
+        refused: 0,
+      };
+      watchRun(entry, seed, (_now, events, ctx) => {
+        const ds = ctx.sys.drones;
+        for (let s = 0; s < ds.count; s++) {
+          const id = ds.id[s] as number;
+          const kind = ds.kind[s];
+          if (kind !== DRONE_KIND_DRONE && kind !== DRONE_KIND_SPIRIT) continue;
+          const target = ds.targetId[s] as number;
+          const left = ds.impactsLeft[s] as number;
+          const mode = ds.mode[s] as number;
+          const was = prev.get(id) ?? { target: -1, left, mode };
+          if (target !== -1 && target !== was.target) {
+            const e = ds.target[s] as NonNullable<(typeof ds.target)[number]>;
+            if (e.tough) {
+              c.tough++;
+              const fartherPlain = ctx.enemies.some(
+                (o) =>
+                  o.alive &&
+                  !o.tough &&
+                  o.dist > e.dist &&
+                  o.x >= 0 &&
+                  o.x <= ARENA_WIDTH &&
+                  o.y >= 0 &&
+                  o.y <= ARENA_HEIGHT,
+              );
+              if (fartherPlain) c.toughOverFarther++;
+            } else c.other++;
+          }
+          if (kind === DRONE_KIND_DRONE) {
+            // A full sortie again away from the dock: a stay (蟲海), kept when it dashes on at the
+            // target its sortie ended on (the pick found nothing else); a flight home: a return.
+            if (left > was.left && mode !== DRONE_DOCKED) c.stays++;
+            if (left > was.left && mode === DRONE_DASH && target === was.target) c.keptStays++;
+            if (mode === DRONE_RETURN && was.mode !== DRONE_RETURN) c.returns++;
+          }
+          prev.set(id, { target, left, mode });
+        }
+        for (const event of events) {
+          if (event.type === 'turretFire') c.fires++;
+          else if (event.type === 'impact' && event.droneId === -1) {
+            c.splashes++;
+            c.listed += event.count;
+            c.mostListed = Math.max(c.mostListed, event.count);
+          } else if (
+            event.type === 'hit' &&
+            event.chainIndex > 0 &&
+            (event.tags & TAG.minion) !== 0
+          ) {
+            c.jumps++;
+          }
+        }
+        c.refused = ctx.counters.summonCapped;
+      });
+      bySeed[seed] = c;
+    }
+    // Tough picks, some over a farther ordinary enemy; the spirits past the cap refused; stays,
+    // some on the target a sortie ended on, and returns home both; every turret arrival but
+    // those still in flight at the end splashes, up to 6 listed; the turrets' jumps.
+    expect(bySeed).toEqual({
+      1: {
+        tough: 72,
+        other: 513,
+        toughOverFarther: 50,
+        stays: 102,
+        keptStays: 16,
+        returns: 24,
+        fires: 40,
+        splashes: 76,
+        listed: 99,
+        mostListed: 6,
+        jumps: 58,
+        refused: 111,
+      },
+      2: {
+        tough: 70,
+        other: 476,
+        toughOverFarther: 7,
+        stays: 107,
+        keptStays: 33,
+        returns: 21,
+        fires: 40,
+        splashes: 68,
+        listed: 94,
+        mostListed: 6,
+        jumps: 54,
+        refused: 107,
+      },
+    });
+  });
+
+  it('scales the center damage of minionScaling 4 % per live temporary summon up to 20 %, the count past the cap and back (C5.9)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'minionScaling') as GoldenC4Entry;
+    // The modifier's factor as the run's evaluation reads it, off the run's EvalInput.
+    const scaling = compileScaling({ per: 'minionCount', cap: 0.2 });
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const ticksAt: Record<number, number> = {};
+      const centerHits: Record<number, number> = {};
+      const factors: Record<number, number> = {};
+      let live = 0;
+      watchRun(entry, seed, (now, events, ctx) => {
+        const n = ctx.evalInput.minionCount;
+        // The live spirits the tick's globals step found: those of the last tick's end whose time
+        // is not up.
+        expect(n, `tick ${now}`).toBe(live);
+        ticksAt[n] = (ticksAt[n] ?? 0) + 1;
+        factors[n] =
+          Math.round((1 + scaledValue(0.04, scaling, scaling.read(ctx.evalInput))) * 1e9) / 1e9;
+        for (const event of events) {
+          if (event.type === 'hit' && event.source === 0) centerHits[n] = (centerHits[n] ?? 0) + 1;
+        }
+        const ds = ctx.sys.drones;
+        live = 0;
+        for (let s = 0; s < ds.count; s++) {
+          if (ds.kind[s] === DRONE_KIND_SPIRIT && (ds.until[s] as number) > now + 1) live++;
+        }
+      });
+      bySeed[seed] = { ticksAt, centerHits, factors };
+    }
+    // Every count from 0 to 8 (seed 1) or 7 (seed 2), the factor 1.04 a spirit up to its cap of
+    // 1.2 at 5 and held past it; center hits at every count from 1.
+    const FACTORS = { 0: 1, 1: 1.04, 2: 1.08, 3: 1.12, 4: 1.16, 5: 1.2, 6: 1.2, 7: 1.2 };
+    expect(bySeed).toEqual({
+      1: {
+        ticksAt: { 0: 20, 1: 25, 2: 220, 3: 516, 4: 193, 5: 90, 6: 89, 7: 46, 8: 1 },
+        centerHits: { 1: 4, 2: 42, 3: 109, 4: 28, 5: 20, 6: 12, 7: 11, 8: 1 },
+        factors: { ...FACTORS, 8: 1.2 },
+      },
+      2: {
+        ticksAt: { 0: 20, 1: 26, 2: 130, 3: 549, 4: 320, 5: 108, 6: 41, 7: 6 },
+        centerHits: { 1: 6, 2: 24, 3: 106, 4: 63, 5: 22, 6: 7, 7: 2 },
+        factors: FACTORS,
       },
     });
   });
