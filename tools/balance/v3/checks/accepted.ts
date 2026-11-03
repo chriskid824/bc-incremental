@@ -23,4 +23,12 @@ export function acceptedFails(
 }
 
 /** Accepted FAILs by acceptedKey, each with its reason; checked when this module loads. */
-export const ACCEPTED_CHECK_FAILS: Readonly<Record<string, string>> = acceptedFails({});
+export const ACCEPTED_CHECK_FAILS: Readonly<Record<string, string>> = acceptedFails({
+  // B2 (PR #6) lands the real prestige: sessions now prestige at about 45 min and climb back
+  // from wave 1, so the 60-min front reads the climb. B1 owns the economy and re-tunes it
+  // against the hook, then drops these entries.
+  'pacing:fire @ 60 min':
+    'real prestige landed in PR #6; post-prestige climb back to be re-tuned by B1',
+  'pacing:summon @ 60 min':
+    'real prestige landed in PR #6; post-prestige climb back to be re-tuned by B1',
+});

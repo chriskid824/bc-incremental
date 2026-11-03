@@ -125,14 +125,14 @@ export const SUMMON = defineCharacter({
     branches: [
       // 蜂群: drone damage and speed.
       centerBranch('swarm', {
-        r1: ranked('damage', 0.3, 4, 'increased', DRONE),
-        r2: ranked('attackSpeed', 0.18, 4, 'more', DRONE),
+        r1: ranked('damage', 0.15, 4, 'increased', DRONE),
+        r2: ranked('attackSpeed', 0.12, 4, 'more', DRONE),
         // 分巢: every 5 kills spawn a temporary drone for 6 s.
         a: notable('split', {
           rules: [{ id: 'hiveSplit', every: 5, lifeSec: 6, damagePct: 2, maxLive: 8 }],
         }),
-        r3: ranked('damage', 0.3, 3, 'increased', DRONE),
-        r4: ranked('attackSpeed', 0.18, 3, 'more', DRONE),
+        r3: ranked('damage', 0.45, 3, 'increased', DRONE),
+        r4: ranked('attackSpeed', 0.3, 3, 'more', DRONE),
         // 自爆協議: a drone's last impact before it flies home explodes (radius 80, 150%).
         // Interim until the engine's lastImpact (P1): a third of the impacts explode.
         b: notable('self-destruct', {
@@ -144,8 +144,8 @@ export const SUMMON = defineCharacter({
             },
           ],
         }),
-        r5: ranked('damage', 0.3, 3, 'increased', DRONE),
-        r6: ranked('attackSpeed', 0.18, 3, 'more', DRONE),
+        r5: ranked('damage', 0.45, 3, 'increased', DRONE),
+        r6: ranked('attackSpeed', 0.3, 3, 'more', DRONE),
         // 蜂后: one drone becomes the queen (×1.5 size, ×2 damage); the others deal +20% to its
         // target. Interim until the engine's per-drone roles (P2): the swarm's average, +40%.
         c: notable('queen', { modifiers: [more('damage', 0.4, DRONE)] }),
@@ -153,19 +153,19 @@ export const SUMMON = defineCharacter({
       }),
       // 工兵: turret damage and attack speed.
       centerBranch('engineer', {
-        r1: ranked('damage', 0.3, 4, 'increased', TURRET),
+        r1: ranked('damage', 0.15, 4, 'increased', TURRET),
         r2: ranked('attackSpeed', 0.06, 4, 'more', TURRET),
         // 量產: +2 turrets, each −20% damage.
         a: notable('mass-production', {
           modifiers: [more('damage', -0.2, TURRET)],
           rules: [{ id: 'swarmTune', turrets: 2, dockSecMult: 1 }],
         }),
-        r3: ranked('damage', 0.3, 3, 'increased', TURRET),
+        r3: ranked('damage', 0.45, 3, 'increased', TURRET),
         r4: ranked('attackSpeed', 0.06, 3, 'more', TURRET),
         // 前哨: the turrets sit at radius 220, reaching farther. Interim until the engine's turret
         // radius (P4): +25% turret damage.
         b: notable('outpost', { modifiers: [inc('damage', 0.25, TURRET)] }),
-        r5: ranked('damage', 0.3, 3, 'increased', TURRET),
+        r5: ranked('damage', 0.45, 3, 'increased', TURRET),
         r6: ranked('attackSpeed', 0.06, 3, 'more', TURRET),
         // 集火指令: every summon goes for the enemy with the most hp, +25% damage (答案：Boss).
         // Interim until the engine's highest-hp pick (P3): elites and bosses first (鎖定信標's
