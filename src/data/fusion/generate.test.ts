@@ -321,7 +321,7 @@ describe('place', () => {
     explode: { from: 'event', toward: 'nearest' },
     freeze: { from: 'target', toward: 'outward' },
     chainJump: { from: 'target', toward: 'along' },
-    droneImpact: { from: 'target', toward: 'outward' },
+    droneImpact: { from: 'event', toward: 'flight' },
   };
   interface Cell {
     readonly effect: PayloadEffect;
@@ -398,6 +398,39 @@ describe('place', () => {
       for (const cell of CELLS) {
         expect(place(cell.effect, event)).toEqual({ ...cell.effect, ...cell.placed(event) });
       }
+    }
+  });
+
+  it("places a slash on droneImpact from the impact's point along the drone's flight, as the fixture's hive crit fusion carries it (FL, lead rulings F4 and FL-R1)", () => {
+    // Planted bugs: the generator still placing 'outward' on droneImpact, or placing it from
+    // 'target' (a killing impact would cut nothing).
+    expect(place(SLASH, 'droneImpact')).toEqual({ ...SLASH, from: 'event', toward: 'flight' });
+    expect(coreOf(fusion('summon.crit')).effects.triggers).toEqual([
+      {
+        on: 'droneImpact',
+        do: [
+          {
+            kind: 'slashLine',
+            length: 300,
+            width: 24,
+            damagePct: 1,
+            alwaysCrit: true,
+            critScale: 1,
+            from: 'event',
+            toward: 'flight',
+          },
+        ],
+      },
+    ]);
+    // The other characters' crit fusions keep their placements.
+    const others = [
+      ['fire', 'event', 'nearest'],
+      ['ice', 'target', 'outward'],
+      ['lightning', 'target', 'along'],
+    ] as const;
+    for (const [c, from, toward] of others) {
+      const [trigger] = coreOf(fusion(`${c}.crit`)).effects.triggers;
+      expect(trigger?.do[0]).toEqual({ ...SLASH, from, toward });
     }
   });
 

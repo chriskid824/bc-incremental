@@ -530,7 +530,9 @@ export const BARRAGE_ENTRY_SHOTS = 2;
  * - 'nearest': at the enemy nearest to its start but one right on it (the event's enemy, when
  *   the slash starts on it);
  * - 'eventTarget': at the event's enemy (or the one the trigger's selector picked);
- * - 'along' (chainJump only): on along the jump, the way it went from the enemy it jumped from.
+ * - 'along' (chainJump only): on along the jump, the way it went from the enemy it jumped from;
+ * - 'flight' (droneImpact only): along the drone's flight, the way it last flew in to its target
+ *   (away from the player for a drone that has not flown in since it docked).
  * Without a direction (its start on the player or on the enemy it runs at, or no enemy to run
  * at) it does nothing. Its hits crit and roll ailments as any hit does, and always crit with
  * alwaysCrit; `critScale` k (default 0) scales its damage by 1 + k × the crit chance.
@@ -540,7 +542,7 @@ export interface SlashLineSpec {
   readonly length: number;
   readonly width: number;
   readonly damagePct: number;
-  readonly toward: 'outward' | 'nearest' | 'eventTarget' | 'along';
+  readonly toward: 'outward' | 'nearest' | 'eventTarget' | 'along' | 'flight';
   readonly from?: 'event' | 'target';
   readonly alwaysCrit?: boolean;
   readonly critScale?: number;

@@ -2418,6 +2418,49 @@ const MINION_SCALING_STATS = makeStats(
   },
 );
 
+/**
+ * FL's flight slash (gd:643 刃翼 「撞擊時沿飛行方向畫一條必定暴擊的斬擊線」; lead rulings F1–F3, F7,
+ * FL-R1): the swarm with five drones and no turret over the swarm entry's base (crits, ignites and
+ * a chain jump), for the 蜂巢 character, from wave 12 of the fixture waves. Each drone impact
+ * raises droneImpact, whose trigger on fusion.summon.crit, at coef 1, is the crit outer's payload
+ * as the generator places it on droneImpact: a slash from the impact's point, the target's center,
+ * along the drone's flight, 300 long and 24 wide, always a crit, critScale 1. The drones fly out
+ * from five docks at the farthest enemies, so they fly in from every side, and the slashes run the
+ * way each flew in, mostly off the outward line; every impact cuts one, a killing one too.
+ */
+const FLIGHT_SLASH_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
+  triggers: [
+    {
+      source: 'fusion.summon.crit',
+      spec: {
+        on: 'droneImpact',
+        do: [
+          {
+            kind: 'slashLine',
+            length: 300,
+            width: 24,
+            damagePct: 1,
+            alwaysCrit: true,
+            critScale: 1,
+            from: 'event',
+            toward: 'flight',
+          },
+        ],
+      },
+      coef: 1,
+    },
+  ],
+  conversions: [],
+  emitters: [],
+});
+/** Five swarm drones and no turret. */
+const fiveDrones = (): TestModule[] => [
+  (b) => {
+    const swarm = b.signature().swarm;
+    if (swarm !== null) Object.assign(swarm, { drones: 5, turrets: 0 });
+  },
+];
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2849,6 +2892,18 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'minionScaling',
     config: { stats: MINION_SCALING_STATS, rules: [], startWave: 12 },
     expected: ['2c05d44828f0dc2f', 'ab0c793413743f91'],
+  },
+  {
+    name: 'flightSlash',
+    config: {
+      stats: FLIGHT_SLASH_STATS,
+      rules: [],
+      signature: { id: 'swarm' },
+      character: { id: 'summon', rules: [] },
+      startWave: 12,
+    },
+    modules: fiveDrones,
+    expected: ['6cf25678e219387e', 'd983258df11dc284'],
   },
 ];
 
@@ -4917,6 +4972,87 @@ describe('golden C4 runs', () => {
         ticksAt: { 0: 20, 1: 26, 2: 130, 3: 549, 4: 320, 5: 108, 6: 41, 7: 6 },
         centerHits: { 1: 6, 2: 24, 3: 106, 4: 63, 5: 22, 6: 7, 7: 2 },
         factors: FACTORS,
+      },
+    });
+  });
+
+  it('cuts each drone impact’s slash in flightSlash from the impact’s point along the drone’s flight, a killing impact’s too, from every side and mostly off the outward line, every hit a crit (FL, FL-R1)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'flightSlash') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        impacts: 0,
+        // The impacts that killed their target, and the slashes cut from such an impact's point.
+        killing: 0,
+        slashes: 0,
+        onKills: 0,
+        hits: 0,
+        crits: 0,
+        offOutward: 0,
+        atOutward: 0,
+        // The slashes by the quarter their angle falls in, from −π.
+        quarters: [0, 0, 0, 0],
+        first: [] as number[],
+      };
+      watchRun(entry, seed, (_now, events, ctx) => {
+        const source = ctx.state.sources.indexOf('fusion.summon.crit');
+        // Kills resolve at the hit, so a target the impact killed has its kill event before it.
+        const killed = new Set<number>();
+        const killPoints = new Set<string>();
+        for (const event of events) {
+          if (event.type === 'enemyKilled') killed.add(event.enemyId);
+          else if (event.type === 'impact' && event.droneId > 0) {
+            c.impacts++;
+            if (killed.has(event.targetId)) {
+              c.killing++;
+              killPoints.add(`${event.x},${event.y}`);
+            }
+          } else if (event.type === 'slash') {
+            c.slashes++;
+            if (killPoints.has(`${event.x1},${event.y1}`)) c.onKills++;
+            const angle = Math.atan2(event.y2 - event.y1, event.x2 - event.x1);
+            const outward = Math.atan2(event.y1 - ctx.player.y, event.x1 - ctx.player.x);
+            const off = Math.abs(Math.atan2(Math.sin(angle - outward), Math.cos(angle - outward)));
+            if (off > 0.05) c.offOutward++;
+            else if (off < 1e-9) c.atOutward++;
+            const q = Math.min(3, Math.floor((angle + Math.PI) / (Math.PI / 2)));
+            c.quarters[q] = (c.quarters[q] as number) + 1;
+            if (c.first.length < 3) c.first.push(Math.round(angle * 1e9) / 1e9);
+          } else if (event.type === 'hit' && event.source === source) {
+            c.hits++;
+            if (event.crit) c.crits++;
+          }
+        }
+      });
+      bySeed[seed] = c;
+    }
+    // A slash for every impact, the killing impacts' cut from their point too (FL-R1), every
+    // slash hit a crit; slashes in every quarter, none on the outward line exactly (no drone met
+    // its target within its body) and most off it by more than 0.05; the first three's angles.
+    expect(bySeed).toEqual({
+      1: {
+        impacts: 81,
+        killing: 9,
+        slashes: 81,
+        onKills: 9,
+        hits: 85,
+        crits: 85,
+        offOutward: 71,
+        atOutward: 0,
+        quarters: [26, 17, 18, 20],
+        first: [-1.338164943, -1.42159069, -1.830768879],
+      },
+      2: {
+        impacts: 83,
+        killing: 8,
+        slashes: 83,
+        onKills: 8,
+        hits: 90,
+        crits: 90,
+        offOutward: 71,
+        atOutward: 0,
+        quarters: [12, 11, 36, 24],
+        first: [-1.422365095, -1.492312199, 0.107866274],
       },
     });
   });

@@ -1279,24 +1279,28 @@ function effectIssues(
       positive('damagePct', effect.damagePct);
       nonNegative('critScale', effect.critScale);
       // The schema takes only the directions the simulation runs; data checked without it can
-      // still carry another, such as a drone's flight.
+      // still carry another, such as 'player'.
       const toward: string = effect.toward;
-      if (toward === 'flight') {
-        issues.push("toward 'flight' needs a drone direction, which the simulation adds in C5");
-      } else if (
+      if (
         toward !== 'outward' &&
         toward !== 'nearest' &&
         toward !== 'eventTarget' &&
-        toward !== 'along'
+        toward !== 'along' &&
+        toward !== 'flight'
       ) {
         issues.push(
-          `toward must be 'outward', 'nearest', 'eventTarget' or 'along' (got ${toward})`,
+          `toward must be 'outward', 'nearest', 'eventTarget', 'along' or 'flight' (got ${toward})`,
         );
       } else if (toward === 'eventTarget' && target === undefined && ENEMYLESS_EVENTS.has(on)) {
         issues.push(`toward 'eventTarget' needs the event's enemy, which '${on}' events have not`);
       } else if (toward === 'along' && on !== 'chainJump') {
         // Its direction is the jump's angle, the chainJump event's value.
         issues.push("toward 'along' follows a chain jump, which only 'chainJump' events have");
+      } else if (toward === 'flight' && on !== 'droneImpact') {
+        // Its direction is the drone's flight, the droneImpact event's value.
+        issues.push(
+          "toward 'flight' follows a drone's flight, which only 'droneImpact' events have",
+        );
       }
       delivery(effect.tags);
       break;

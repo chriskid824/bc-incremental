@@ -1997,13 +1997,57 @@ describe('trigger validation', () => {
     ]);
   });
 
-  it("rejects toward 'flight' until C5, and a direction the simulation does not run", () => {
+  it("rejects a direction the simulation does not run, naming 'flight' among those it runs (FL)", () => {
     const cut = { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5 } as const;
     const toward = (direction: string): SlashLineSpec =>
       ({ ...cut, toward: direction }) as unknown as SlashLineSpec;
-    expect(triggerIssues({ on: 'hit', do: [toward('flight'), toward('sideways')] })).toEqual([
-      `${at} do[0] toward 'flight' needs a drone direction, which the simulation adds in C5`,
-      `${at} do[1] toward must be 'outward', 'nearest', 'eventTarget' or 'along' (got sideways)`,
+    expect(
+      triggerIssues({ on: 'droneImpact', do: [toward('sideways'), toward('player')] }),
+    ).toEqual([
+      `${at} do[0] toward must be 'outward', 'nearest', 'eventTarget', 'along' or 'flight' (got sideways)`,
+      `${at} do[1] toward must be 'outward', 'nearest', 'eventTarget', 'along' or 'flight' (got player)`,
+    ]);
+  });
+
+  it("takes toward 'flight' on droneImpact events alone, whose value is the drone's flight (FL, lead ruling F3)", () => {
+    // Planted bug: validation accepting 'flight' on explode (or on any other event).
+    const cut = { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5 } as const;
+    expect(
+      triggerIssues({
+        on: 'droneImpact',
+        do: [
+          { ...cut, toward: 'flight' },
+          { ...cut, toward: 'flight', from: 'target', alwaysCrit: true },
+        ],
+      }),
+    ).toEqual([]);
+    const message =
+      "toward 'flight' follows a drone's flight, which only 'droneImpact' events have";
+    expect(
+      triggerIssues(
+        {
+          on: 'explode',
+          do: [
+            { ...cut, toward: 'flight' },
+            { ...cut, toward: 'flight', from: 'target' },
+          ],
+        },
+        { on: 'hit', do: [{ ...cut, toward: 'flight' }] },
+        { on: 'chainJump', do: [{ ...cut, toward: 'flight' }] },
+        { on: 'freeze', do: [{ ...cut, toward: 'flight' }] },
+        { on: 'droneExpire', do: [{ ...cut, toward: 'flight' }] },
+      ),
+    ).toEqual([
+      `${at} do[0] ${message}`,
+      `${at} do[1] ${message}`,
+      `talent 'vitality': triggers[1] do[0] ${message}`,
+      `talent 'vitality': triggers[2] do[0] ${message}`,
+      `talent 'vitality': triggers[3] do[0] ${message}`,
+      `talent 'vitality': triggers[4] do[0] ${message}`,
+    ]);
+    // 'along' keeps its chainJump rule on droneImpact too.
+    expect(triggerIssues({ on: 'droneImpact', do: [{ ...cut, toward: 'along' }] })).toEqual([
+      `${at} do[0] toward 'along' follows a chain jump, which only 'chainJump' events have`,
     ]);
   });
 

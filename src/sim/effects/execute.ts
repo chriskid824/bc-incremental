@@ -39,9 +39,10 @@
  *
  * A slashLine cuts a line `length` long from the event's point, or from its live target, away
  * from the player, at the alive enemy nearest to its start (but one right on it), at the live
- * target, or on along a chain jump, at the angle its chainJump event carries as its value;
- * without a direction it does nothing. Its slash event comes before its hits. It hits
- * once each, in id order, the enemies within half its width and their radius of the line: those
+ * target, on along a chain jump, at the angle its chainJump event carries as its value, or along
+ * a drone's flight, at the angle its droneImpact event carries; without a direction it does
+ * nothing. Its slash event comes before its hits. It hits once each, in id order, the enemies
+ * within half its width and their radius of the line: those
  * whose centre lies in the line's box grown by half the width and ctx.shotPad
  * (grid.inSegmentBox), then the tough ones outside the box, whose radius is larger than the pad,
  * from the grid's marked list (as a straight shot's path, shots.ts). With alwaysCrit its hits
@@ -754,10 +755,11 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   },
   // A line from the event's point, or from the live target with from 'target', `length` long:
   // away from the player ('outward'), at the alive enemy nearest to its start ('nearest'), at
-  // the live target ('eventTarget'), or on along the chain jump whose angle is the event's value
-  // ('along'); nothing without a direction. Each enemy within half its width and its own radius
-  // of the line is hit once, in id order, on the effect's payload (its critScale already in the
-  // base), forced to crit with alwaysCrit.
+  // the live target ('eventTarget'), on along the chain jump whose angle is the event's value
+  // ('along'), or along the drone's flight, the droneImpact event's value ('flight'), which
+  // always has a direction; nothing without a direction. Each enemy within half its width and
+  // its own radius of the line is hit once, in id order, on the effect's payload (its critScale
+  // already in the base), forced to crit with alwaysCrit.
   slashLine(ctx, spec, _fx, entry) {
     const target = liveTarget(entry);
     let ax = entry.x;
@@ -772,7 +774,7 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     if (spec.toward === 'outward') {
       dx = ax - ctx.player.x;
       dy = ay - ctx.player.y;
-    } else if (spec.toward === 'along') {
+    } else if (spec.toward === 'along' || spec.toward === 'flight') {
       dx = Math.cos(entry.value);
       dy = Math.sin(entry.value);
     } else {
