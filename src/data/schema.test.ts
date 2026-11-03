@@ -60,6 +60,10 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
     maxLive: 6,
   },
   poisonSlow: { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 },
+  lockBeacon: { id: 'lockBeacon' },
+  cannon: { id: 'cannon', rateMult: 1 / 3, splash: 60 },
+  teslaTower: { id: 'teslaTower', chains: 2 },
+  bugSea: { id: 'bugSea', countMult: 2 },
 };
 
 describe('ModifierSchema', () => {

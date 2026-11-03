@@ -145,7 +145,25 @@ export type RuleSpec =
       readonly stacksPer: number;
       readonly slowPer: number;
       readonly max: number;
-    };
+    }
+  /**
+   * 鎖定信標 (the summon outer's answer, gd §4.10): drones and spirits take elites and bosses
+   * first once they are in the arena, turrets at any distance (BuildFlags.summonEliteFirst).
+   */
+  | { readonly id: 'lockBeacon' }
+  /**
+   * 加農砲 (gd §4.10): turrets fire rateMult as often (BuildFlags.turretRateMult) and their shots
+   * hit every enemy within splash of the target (turretSplash). Rates multiply, the largest splash.
+   */
+  | { readonly id: 'cannon'; readonly rateMult: number; readonly splash: number }
+  /** 特斯拉塔 (gd §4.10): a turret's shot chains `chains` times (turretChains); they add up. */
+  | { readonly id: 'teslaTower'; readonly chains: number }
+  /**
+   * 蟲海 (the summon outer's ★, shared with 蜂巢; gd:193): grant and swarm drones × countMult
+   * (droneCountMult) and drones that ran out of impacts pick again instead of flying home
+   * (dronesStay). The largest countMult.
+   */
+  | { readonly id: 'bugSea'; readonly countMult: number };
 
 export type RuleId = RuleSpec['id'];
 
@@ -165,6 +183,10 @@ export const RULE_IDS: readonly RuleId[] = [
   'gigantism',
   'blastSpirit',
   'poisonSlow',
+  'lockBeacon',
+  'cannon',
+  'teslaTower',
+  'bugSea',
 ];
 
 /**
@@ -246,8 +268,6 @@ export const RULE_COEF_FIELDS: {
 } = {
   // 霜焰: the chill and the zone's slow scale; the burn cap bonus is a whole stack count.
   frostflame: { frostPct: 'chance', zoneSlow: 'chance' },
-  // 爆靈: the spirit's hit and its burn scale; its rhythm, life, stacks and count stay.
-  blastSpirit: { damagePct: 'pct', burnDamagePct: 'pct' },
 };
 
 /**
@@ -284,4 +304,9 @@ export const POLICY_RULES: readonly RuleId[] = [];
  * member can write, only its rule module, as 神經毒's poison-stack slow (gd:389). Each such module
  * adds its id when it lands.
  */
-export const NOTABLE_RULES: readonly RuleId[] = ['poisonSlow'];
+export const NOTABLE_RULES: readonly RuleId[] = [
+  'poisonSlow',
+  'lockBeacon',
+  'cannon',
+  'teslaTower',
+];

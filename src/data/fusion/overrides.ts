@@ -49,7 +49,7 @@ export const ACCEPTED_FAILS: Readonly<Partial<Record<FusionKey, string>>> = {
   'fire.poison':
     'B1: insensitive at the probe (wave ~4): every enemy a bomb reaches dies to its hit, so poison and 瘟爆 have nothing left to kill there',
   'fire.summon':
-    'B1: spread at the probe (median 1.15 at coef 0.631, seeds 1.02–1.87): at wave ~4 a run gets only a few spirits, so whether one meets a crowd decides the seed',
+    'B1: no coef search: at the probe (wave ~4) a run gets a few spirits, and 8 seeds read 0.99–2.79 at gd numbers (median 1.53); a lower hit share did not lower the median, so 爆靈 keeps coef 1',
   'fire.ice':
     'B1: weak at the probe (median 1.17 at the top of its range): at wave ~4 the burn cap and the frost-fire slow matter little; 霜焰 keeps the gd numbers',
 };

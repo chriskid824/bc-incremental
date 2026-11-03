@@ -789,6 +789,27 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`poisonSlow.max must be in (0, 1] (got ${rule.max})`);
       }
       break;
+    case 'lockBeacon':
+      break;
+    case 'cannon':
+      // The engine refuses a turret rate factor that is not finite and above 0, and a negative splash.
+      if (!(Number.isFinite(rule.rateMult) && rule.rateMult > 0)) {
+        issues.push(`cannon.rateMult must be finite and > 0 (got ${rule.rateMult})`);
+      }
+      if (!(rule.splash >= 0)) {
+        issues.push(`cannon.splash must be >= 0 (got ${rule.splash})`);
+      }
+      break;
+    case 'teslaTower':
+      if (!(Number.isInteger(rule.chains) && rule.chains >= 0)) {
+        issues.push(`teslaTower.chains must be a non-negative integer (got ${rule.chains})`);
+      }
+      break;
+    case 'bugSea':
+      if (!(Number.isInteger(rule.countMult) && rule.countMult >= 1)) {
+        issues.push(`bugSea.countMult must be an integer >= 1 (got ${rule.countMult})`);
+      }
+      break;
   }
   return issues;
 }
@@ -1556,6 +1577,10 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'gigantism':
     case 'blastSpirit':
     case 'poisonSlow':
+    case 'lockBeacon':
+    case 'cannon':
+    case 'teslaTower':
+    case 'bugSea':
       return [];
   }
 }

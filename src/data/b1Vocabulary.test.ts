@@ -94,7 +94,7 @@ describe('poisonSlow (lead ruling H3)', () => {
   const NEURO: RuleSpec = { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 };
 
   it('is a rule id with its schema', () => {
-    expect(RULE_IDS.at(-1)).toBe('poisonSlow');
+    expect(RULE_IDS).toContain('poisonSlow');
     expect(RuleSpecSchema.parse(NEURO)).toEqual(NEURO);
     for (const bad of [
       { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02 },

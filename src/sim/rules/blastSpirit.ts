@@ -32,6 +32,8 @@ export const blastSpirit: RuleModule<Extract<RuleSpec, { id: 'blastSpirit' }>> =
         ailment: 'burn',
         ailmentStacks: spec.burnStacks,
         ailmentDamagePct: spec.burnDamagePct,
+        // A trigger's hits, as the other trigger effects': drone-only modifiers leave them out.
+        tags: ['trigger'],
       });
       let bombs = 0;
       const trigger = b.hook('onCenterEvent', (ctx, ev) => {

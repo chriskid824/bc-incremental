@@ -71,6 +71,15 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
     case 'poisonSlow':
       // gd:389 words it as 每 5 層毒減速 2%，最多 40%.
       return [[String(rule.stacksPer)], [percent(rule.slowPer)], [percent(rule.max)]];
+    case 'lockBeacon':
+      return [];
+    case 'cannon':
+      // gd's 「攻擊頻率 ÷3」; the splash radius is words.
+      return [[`÷${Math.round(1 / rule.rateMult)}`, percent(rule.rateMult)]];
+    case 'teslaTower':
+      return [[String(rule.chains)]];
+    case 'bugSea':
+      return [[`×${rule.countMult}`]];
   }
 }
 

@@ -52,9 +52,9 @@ function run(
 
 describe('巨大化 (gigantism, gd:268)', () => {
   it('is a rule module registered as glassCannon is: its RuleSpec id, RULE_IDS and RULE_MODULES', () => {
-    // Appended after sixCoils (E1), with B1's modules beside it; E2's poisonSlow comes last.
+    // Appended after sixCoils (E1), with B1's and E2's modules after it.
     expect(RULE_IDS).toContain('gigantism');
-    expect(RULE_IDS.at(-1)).toBe('poisonSlow');
+    expect(RULE_IDS).toContain('poisonSlow');
     expect(RULE_MODULES.gigantism).toBe(gigantism);
     expect(gigantism.id).toBe('gigantism');
   });

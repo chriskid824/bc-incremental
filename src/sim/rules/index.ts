@@ -22,6 +22,7 @@ import { poisonSlow } from './poisonSlow';
 import { sixCoils } from './sixCoils';
 import { steadyAim } from './steadyAim';
 import { swarm } from './swarm';
+import { bugSea, cannon, lockBeacon, teslaTower } from './summonPolicies';
 import { triphaseArc } from './triphaseArc';
 
 export type {
@@ -57,6 +58,10 @@ export const RULE_MODULES: {
   gigantism,
   blastSpirit,
   poisonSlow,
+  lockBeacon,
+  cannon,
+  teslaTower,
+  bugSea,
 };
 
 export const SIGNATURES: {

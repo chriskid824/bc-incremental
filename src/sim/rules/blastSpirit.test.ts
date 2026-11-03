@@ -31,6 +31,7 @@ describe('blastSpirit (爆靈)', () => {
       ailment: 'burn',
       ailmentStacks: 3,
       ailmentDamagePct: 1,
+      tags: ['trigger'],
     });
     expect(build.hooks.onCenterEvent).toHaveLength(plain.hooks.onCenterEvent.length + 1);
   });

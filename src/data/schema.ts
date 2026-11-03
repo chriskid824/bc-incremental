@@ -555,6 +555,10 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         max: finite,
       })
       .readonly(),
+    z.strictObject({ id: z.literal('lockBeacon') }).readonly(),
+    z.strictObject({ id: z.literal('cannon'), rateMult: finite, splash: finite }).readonly(),
+    z.strictObject({ id: z.literal('teslaTower'), chains: finite }).readonly(),
+    z.strictObject({ id: z.literal('bugSea'), countMult: finite }).readonly(),
   ]),
 );
 
