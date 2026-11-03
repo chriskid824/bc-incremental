@@ -44,6 +44,7 @@ import { WebPanel } from '../../ui/v3/webPanel';
 import { GameLoop, SPEEDS } from '../loop';
 import type { Speed } from '../loop';
 import type { ProfileStore } from '../profileStore';
+import { FLAVOR } from '../../platform/flavor';
 import { bindSpeedKeys } from '../input';
 import { ConstructStills, mountCardPreview } from './preview';
 import { characterRendererOptions } from './renderOptions';
@@ -141,10 +142,16 @@ export class GamePage {
       this.notices.show(again.notices);
       this.showSelect();
     });
-    this.loop.speed = this.store.profile.account.settings.speed;
-    bindSpeedKeys(window, (speed) => {
-      if (this.screen === 'run') this.setSpeed(speed);
-    });
+    if (FLAVOR === 'demo') {
+      // The demo plays at 1× only: no buttons, no keys (Hoshi's playtest, 2026-11-03).
+      this.hud.showSpeed(false);
+      this.loop.speed = 1;
+    } else {
+      this.loop.speed = this.store.profile.account.settings.speed;
+      bindSpeedKeys(window, (speed) => {
+        if (this.screen === 'run') this.setSpeed(speed);
+      });
+    }
     window.addEventListener('keydown', (event) => this.key(event));
     // Not before the first pick: a fresh profile written by a visit that picked nothing would
     // take the place of the M1 save's one-time import (profileStore.ts' fresh path).

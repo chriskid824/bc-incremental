@@ -40,6 +40,7 @@ export class Hud<S extends number> {
   private readonly shards: HTMLElement;
   private readonly cores: HTMLElement;
   private readonly speedButtons = new Map<S, HTMLButtonElement>();
+  private readonly speedBox: HTMLElement;
   private readonly shown = new Map<HTMLElement, string>();
   private lifeRatio = -1;
   private speed: number | null = null;
@@ -81,6 +82,7 @@ export class Hud<S extends number> {
     );
 
     const speedBox = el(doc, 'div', 'bc-hud-speed');
+    this.speedBox = speedBox;
     const buttons = el(doc, 'div', 'bc-speed-buttons');
     for (const speed of speeds) {
       const button = el(doc, 'button', 'bc-speed-button', t('hud.speedOption', { speed }));
@@ -99,6 +101,11 @@ export class Hud<S extends number> {
   }
 
   /** A short line at the bottom of the screen, or null to hide it. */
+  /** Shows or hides the speed buttons (the demo plays at 1× only). */
+  showSpeed(show: boolean): void {
+    this.speedBox.style.display = show ? '' : 'none';
+  }
+
   setHint(text: string | null): void {
     this.hint.hidden = text === null;
     this.set(this.hint, text ?? '');
