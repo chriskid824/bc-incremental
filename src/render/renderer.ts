@@ -48,7 +48,7 @@ import type { CoreView } from './core';
 import { CritStopGate } from './critStop';
 import { DamageNumbers } from './damageNumbers';
 import { BLAST_SPIRIT_SKIN, DroneLayer, HIVE_DRONE_SKIN } from './drones';
-import { EnemyLayer, HIT_PUNCH } from './enemies';
+import { EnemyLayer } from './enemies';
 import { FxParticles } from './fx';
 import { createFxTextures } from './fxTextures';
 import { killTier, TIER_BOSS, TIER_ELITE } from './killTier';
@@ -65,6 +65,8 @@ import type { RenderRandom } from './random';
 import { RingLayer } from './rings';
 import { SegmentLineLayer } from './segmentLines';
 import { ScreenShake } from './shake';
+import { CRIT_PUNCH, HIT_PUNCH_STRONG, ImpactShakes } from './impact';
+import type { ShakeKick } from './impact';
 import { PlayerShield } from './shieldArc';
 import { SlashLayer } from './slashes';
 
@@ -164,6 +166,7 @@ export class Renderer {
   private readonly hitStop: (ms: number) => void;
   private readonly critStop = new CritStopGate();
   private critShakeCooldownMs = 0;
+  private readonly impactShakes = new ImpactShakes();
   private killsThisFrame = 0;
   /** pandemic spreads waiting for render() to aim their embers: x, y, radius triples. */
   private readonly pendingNovas = new Float64Array(MAX_PENDING_NOVAS * 3);
@@ -290,6 +293,7 @@ export class Renderer {
     this.shake.reset();
     this.critStop.reset();
     this.critShakeCooldownMs = 0;
+    this.impactShakes.reset();
     this.killsThisFrame = 0;
     this.pendingNovaCount = 0;
     this.numbers.setTypicalHit(typicalHit);
@@ -342,7 +346,10 @@ export class Renderer {
           break;
         case 'playerHit':
         case 'bulletHit':
-          if (this.coreHits.flashes(event)) this.core.hit();
+          if (this.coreHits.flashes(event)) {
+            this.core.hit();
+            this.kick(this.impactShakes.playerHit());
+          }
           break;
         case 'shieldAbsorbed':
           this.coreHits.flashes(event);
@@ -363,6 +370,7 @@ export class Renderer {
           break;
         case 'explosion':
           this.magma?.explosion(event.x, event.y, event.radius);
+          this.kick(this.impactShakes.blast(event.radius));
           break;
         case 'burst':
           if (this.magma !== null) this.onBurst(event);
@@ -393,6 +401,7 @@ export class Renderer {
   render(state: Readonly<SimState>, alpha: number, frameMs: number): void {
     const dt = Math.min(Math.max(0, frameMs), MAX_EFFECT_DT_MS);
     this.critShakeCooldownMs = Math.max(0, this.critShakeCooldownMs - dt);
+    this.impactShakes.update(dt);
     this.critStop.update(dt);
     this.shake.update(dt);
     this.world.position.set(
@@ -454,7 +463,7 @@ export class Renderer {
   private onHit(event: Extract<SimEvent, { type: 'hit' }>): void {
     const { x, y, crit } = event;
     const chain = event.chainIndex > 0;
-    this.enemies.flash(event.targetId, crit ? HIT_PUNCH * 1.8 : HIT_PUNCH);
+    this.enemies.flash(event.targetId, crit ? CRIT_PUNCH : HIT_PUNCH_STRONG);
     if (chain && event.fromX !== null && event.fromY !== null) {
       this.arcs.add(event.fromX, event.fromY, x, y, event.chainIndex);
       this.bursts.chain(x, y);
@@ -483,6 +492,7 @@ export class Renderer {
     const def = this.data.enemies[event.enemy];
     const tier = killTier(def);
     this.killsThisFrame++;
+    this.kick(this.impactShakes.kills(this.killsThisFrame));
     const crowd = 1 / (1 + Math.max(0, this.killsThisFrame - 1) / CROWD_KILLS);
     this.bursts.kill(event.x, event.y, def.color, def.radius, tier, crowd);
     const count = Math.max(3, Math.round(def.radius / 3.5));
@@ -494,6 +504,11 @@ export class Renderer {
       this.shake.add(ELITE_SHAKE, ELITE_SHAKE_CEILING);
       this.hitStop(ELITE_HIT_STOP_MS);
     }
+  }
+
+  /** Adds an impact shake (src/render/impact.ts), if its cooldown let one through. */
+  private kick(kick: ShakeKick | null): void {
+    if (kick !== null) this.shake.add(kick.amount, kick.ceiling);
   }
 
   /**
