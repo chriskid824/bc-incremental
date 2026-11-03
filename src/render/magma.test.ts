@@ -45,6 +45,7 @@ function shotPool(bombs: readonly Bomb[]): ShotPoolState {
     vx: new Float64Array(n),
     vy: new Float64Array(n),
     until: new Int32Array(n),
+    launched: new Int32Array(n),
     form: new Uint8Array(n),
   };
   bombs.forEach((bomb, s) => {
@@ -78,6 +79,8 @@ function zonePool(zones: readonly Zone[]): ZonePoolState {
     created: new Int32Array(n),
     expiresAt: new Int32Array(n),
     signature: new Uint8Array(n),
+    record: new Uint8Array(n),
+    slow: new Float64Array(n),
   };
   zones.forEach((zone, i) => {
     state.id[i] = zone.id;

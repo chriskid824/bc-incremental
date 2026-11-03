@@ -101,7 +101,9 @@ export function createPulseAcc(): PulseAcc {
  * and SIGNATURE_ZONE_CAP signature zones in one pool. Slots 0 .. count − 1 hold the live zones
  * in id order, kept in order when zones end: the view's arrays (ZonePoolState) and `record`,
  * which are indexed by slot. Every other per-zone array is indexed by the zone's record, which
- * it keeps from its creation to its end, so closing a slot moves only the slot arrays.
+ * it keeps from its creation to its end, so closing a slot moves only the slot arrays. The view
+ * also exposes `record` and one record array, `slow`, read only (V1a), so render reads a zone's
+ * slow as slow[record[s]] at no cost to the run.
  */
 export interface ZonePool extends ZonePoolState {
   /** Live zones; effect zones among them, and signature zones. */
@@ -396,6 +398,8 @@ export interface SegmentLines extends SegmentLinesState {
   y1: Float64Array;
   x2: Float64Array;
   y2: Float64Array;
+  id1: Int32Array;
+  id2: Int32Array;
 }
 
 /**
@@ -446,7 +450,8 @@ export interface SegmentState extends SegmentViewState {
 /** Endpoints the scratch of a segment judgement holds at first; it grows past them. */
 const SEGMENT_ENDS = 64;
 
-function createSegmentLines(): SegmentLines {
+/** No links yet for segment emitter `em`, whose endpoints decide the pool its ids name. */
+function createSegmentLines(em: EmitterRuntime): SegmentLines {
   const n = 2 * SEGMENT_ENDS;
   return {
     count: 0,
@@ -454,6 +459,9 @@ function createSegmentLines(): SegmentLines {
     y1: new Float64Array(n),
     x2: new Float64Array(n),
     y2: new Float64Array(n),
+    id1: new Int32Array(n),
+    id2: new Int32Array(n),
+    pool: (em.spec as SegmentSpec).endpoints === 'shocked' ? 'enemies' : 'drones',
   };
 }
 
@@ -473,7 +481,7 @@ export function createSegmentState(
 ): SegmentState {
   return {
     emitters,
-    lines: emitters.map(createSegmentLines),
+    lines: emitters.map((em) => createSegmentLines(em)),
     held: emitters.map((em) => createHeldPairs(em, rows)),
     grid: createEnemyGrid(),
     serial: 0,

@@ -134,6 +134,13 @@ export interface ShotPoolState {
   readonly until: Int32Array;
   /** A lobbed shot's form, for drawing; 0 for the others. */
   readonly form: Uint8Array;
+  /**
+   * The tick it was launched (spawnShot writes ctx.now for every shot). A lobbed shot lands at
+   * `until`, so its flight's progress at tick t is (t − launched) / (until − launched): 0 on its
+   * launch tick, 1 on its landing tick (lobProgress, src/render/simViews.ts). For render only:
+   * nothing in the sim reads it.
+   */
+  readonly launched: Int32Array;
 }
 
 /**
@@ -151,13 +158,33 @@ export interface ZonePoolState {
   readonly expiresAt: Int32Array;
   /** 1: a signature zone (the signature attack's own), 0: an effect zone (groundZone). */
   readonly signature: Uint8Array;
+  /**
+   * The record of the zone in each slot: slot s's zone keeps its terms at record[s] from its
+   * creation to its end, while its slot moves as older zones end (ZonePool, src/sim/systems/
+   * systemState.ts). Indexed by slot, like the arrays above.
+   */
+  readonly record: Uint8Array;
+  /**
+   * The slow each zone holds on the enemies in it (0 for none), indexed by record, not by slot:
+   * the zone in slot s holds slow[record[s]] (zoneSlowAt, src/render/simViews.ts). Past the live
+   * records, stale.
+   */
+  readonly slow: Float64Array;
 }
+
+/**
+ * SegmentLinesState.pool: the pool a segment's endpoint ids name. 'enemies' for a shocked
+ * segment's (SimState.enemies, EnemyState.id), 'drones' for a segment between drones or summons
+ * (SimState.drones, DroneViewState.id).
+ */
+export type SegmentEndPool = 'enemies' | 'drones';
 
 /**
  * The links of a segment emitter's last judgement (src/sim/systems/segments.ts): link i joins
  * (x1[i], y1[i]) and (x2[i], y2[i]), its endpoints' positions at the judgement, for i < count;
  * past count, stale. count is 0 after a judgement that found fewer than 2 endpoints, and before
- * the first.
+ * the first. The judgement may replace the arrays as they grow, so a reader takes them from
+ * SimState.segments each frame.
  */
 export interface SegmentLinesState {
   readonly count: number;
@@ -165,6 +192,16 @@ export interface SegmentLinesState {
   readonly y1: Float64Array;
   readonly x2: Float64Array;
   readonly y2: Float64Array;
+  /**
+   * The ids of link i's two endpoints, (x1[i], y1[i])'s in id1[i] and (x2[i], y2[i])'s in
+   * id2[i], in the pool `pool` names, written with the coordinates; past count, stale. Render
+   * looks them up to draw each end where its endpoint is drawn while it lives (src/render/
+   * segmentLines.ts); nothing in the sim reads them.
+   */
+  readonly id1: Int32Array;
+  readonly id2: Int32Array;
+  /** The pool id1 and id2 name, fixed for the run by the emitter's endpoints. */
+  readonly pool: SegmentEndPool;
 }
 
 /** The segments (src/sim/systems/segments.ts) as render and tools read them. */

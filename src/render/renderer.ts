@@ -21,6 +21,13 @@
  * lines ('slash'), and for 熔核 its attack language (src/render/magma.ts): the bombs, explosions,
  * fire zones and scorch marks, the 火環 nova and the fusion looks (霜焰, 瘟爆, 爆靈). Without it
  * (the M1 page, `?hive`) none of those layers is made and none of those events is drawn.
+ *
+ * A build with a segment emitter (any construct) also draws its links (src/render/
+ * segmentLines.ts, V1): the layer is made the first time render() sees a state with a segment
+ * emitter, under the enemies, and kept for the renderer's life; destroy() destroys it. A
+ * renderer that never draws a segment emitter never makes it. The links between drones or
+ * summons are drawn only by a renderer that draws the drones (the hive construct, the lead's
+ * ruling L2); every renderer draws the shocked ones.
  */
 
 import { Container, Graphics } from 'pixi.js';
@@ -56,6 +63,7 @@ import { ProjectileLayer } from './projectiles';
 import { defaultRandom } from './random';
 import type { RenderRandom } from './random';
 import { RingLayer } from './rings';
+import { SegmentLineLayer } from './segmentLines';
 import { ScreenShake } from './shake';
 import { PlayerShield } from './shieldArc';
 import { SlashLayer } from './slashes';
@@ -142,6 +150,11 @@ export class Renderer {
   private readonly magma: MagmaLayer | null;
   /** The crit slash lines; only on a character run. */
   private readonly slashes: SlashLayer | null;
+  /**
+   * The segment emitters' links, under the enemies; made by the first render() of a state with
+   * a segment emitter (a non-empty SimState.segments.lines), null until then.
+   */
+  private segmentLines: SegmentLineLayer | null = null;
   /** Which player hits flash the core: not one the shield took whole. */
   private readonly coreHits = new CoreHitFilter();
   private readonly shards: ShardParticles;
@@ -182,16 +195,19 @@ export class Renderer {
     const look = options.character ?? null;
     const hive = options.construct === 'hive' || look?.construct === 'hive';
     const spirits = look !== null && !hive && fusionSkin(look, 'summon') !== null;
+    // The summon outer's drones and turrets on another construct; one skin for every row, so a
+    // build with 火靈's spirits draws its drones in the spirits' colours too.
+    const summons = look !== null && !hive && look.summons;
     this.drones = hive
       ? new DroneLayer(app.renderer, textures.streak)
-      : spirits
+      : spirits || summons
         ? new DroneLayer(
             app.renderer,
             textures.streak,
-            look.construct === 'magmaCore' ? BLAST_SPIRIT_SKIN : HIVE_DRONE_SKIN,
+            spirits && look.construct === 'magmaCore' ? BLAST_SPIRIT_SKIN : HIVE_DRONE_SKIN,
           )
         : null;
-    this.poolShots = hive ? new PoolShotLayer(textures) : null;
+    this.poolShots = hive || summons ? new PoolShotLayer(textures) : null;
     this.construct =
       look !== null && look.construct !== 'hive' ? new ConstructCoreView(look.construct) : null;
     this.core =
@@ -269,6 +285,7 @@ export class Renderer {
     this.playerShield?.reset();
     this.magma?.reset();
     this.slashes?.clear();
+    this.segmentLines?.clear();
     this.coreHits.reset();
     this.shake.reset();
     this.critStop.reset();
@@ -384,6 +401,10 @@ export class Renderer {
     );
     this.aimEmbers(state);
     this.enemies.update(state.enemies, state.tick, alpha, dt, this.bursts);
+    if (this.segmentLines === null && state.segments.lines.length > 0) {
+      this.segmentLines = this.makeSegmentLines();
+    }
+    this.segmentLines?.update(state, alpha, dt);
     // After the enemies: the chase brackets and the barrels go by where they were just drawn.
     this.drones?.update(state, alpha, this.enemies, dt);
     this.projectiles.update(state.projectiles, alpha);
@@ -415,6 +436,19 @@ export class Renderer {
 
   destroy(): void {
     this.app.renderer.off('resize', this.onResize);
+    // The lead's ruling J10: the layers go with the renderer, the one made late too.
+    this.segmentLines?.destroy();
+    this.segmentLines = null;
+  }
+
+  /**
+   * The segment-line layer, in the world just under the enemies, over their flames. It draws
+   * the links between the drone pool's rows only when this renderer draws the drones (L2).
+   */
+  private makeSegmentLines(): SegmentLineLayer {
+    const layer = new SegmentLineLayer({ pools: this.drones !== null });
+    this.world.addChildAt(layer.view, this.world.getChildIndex(this.enemies.view));
+    return layer;
   }
 
   private onHit(event: Extract<SimEvent, { type: 'hit' }>): void {

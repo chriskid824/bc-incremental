@@ -9,6 +9,7 @@ const look: CharacterLook = {
   arena: FIRE.arena,
   color: FIRE.color,
   fusions: [{ outer: 'poison', skin: { accent: 0x3fd08a, shape: 'bubble' } }],
+  summons: false,
 };
 
 describe('a character run’s looks', () => {

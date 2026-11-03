@@ -23,6 +23,8 @@ export interface CharacterLook {
   readonly color: number;
   /** The owned fusion cores, in any order. */
   readonly fusions: readonly FusionLook[];
+  /** The build owns a node that places drones or turrets (the summon outer's grants). */
+  readonly summons: boolean;
 }
 
 /** The skin of the owned fusion with `outer`, or null when the build does not own its core. */

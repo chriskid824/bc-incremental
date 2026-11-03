@@ -30,12 +30,15 @@ describe('the renderer on a character run', () => {
     );
   });
 
-  it('keeps `?hive` as it was: the hive skin, its comb and its shots', () => {
+  it('keeps `?hive` as it was: the hive skin, its comb and its shots; summons add the shots', () => {
     expect(source).toMatch(
       /const hive = options\.construct === 'hive' \|\| look\?\.construct === 'hive';/,
     );
     expect(source).toMatch(/\? new DroneLayer\(app\.renderer, textures\.streak\)\s*:/);
-    expect(source).toMatch(/this\.poolShots = hive \? new PoolShotLayer\(textures\) : null;/);
+    expect(source).toMatch(
+      /this\.poolShots = hive \|\| summons \? new PoolShotLayer\(textures\) : null;/,
+    );
+    expect(source).toMatch(/const summons = look !== null && !hive && look\.summons;/);
   });
 
   it('routes each character event to a layer that is null without a character', () => {

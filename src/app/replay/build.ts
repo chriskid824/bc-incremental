@@ -135,7 +135,18 @@ export function characterLookOf(
       fusions.push({ outer, skin: fusion.skin });
     }
   }
-  return { construct: web.def.construct, arena: web.def.arena, color: web.def.color, fusions };
+  const summons = Object.entries(progress.ranks).some(
+    ([id, rank]) =>
+      rank > 0 &&
+      (web.byId.get(id)?.effects.emitters.some((grant) => grant.kind === 'drone') ?? false),
+  );
+  return {
+    construct: web.def.construct,
+    arena: web.def.arena,
+    color: web.def.color,
+    fusions,
+    summons,
+  };
 }
 
 /** A spec's build resolved: a preset loads no content; `fixture` is fixtureContent('B5'). */
