@@ -163,7 +163,89 @@ export type RuleSpec =
    * (droneCountMult) and drones that ran out of impacts pick again instead of flying home
    * (dronesStay). The largest countMult.
    */
-  | { readonly id: 'bugSea'; readonly countMult: number };
+  | { readonly id: 'bugSea'; readonly countMult: number }
+  /**
+   * 分巢 (蜂巢's ◆, gd §1.5): every `every`-th kill spawns a timed drone (spawnDrone) at the
+   * victim that lives lifeSec, dashes at the enemies farthest from the player and impacts them
+   * for damagePct of the damage stat; at most maxLive of the instance's at once. Each instance
+   * counts its own kills.
+   */
+  | {
+      readonly id: 'hiveSplit';
+      readonly every: number;
+      readonly lifeSec: number;
+      readonly damagePct: number;
+      readonly maxLive: number;
+    }
+  /**
+   * 量產 and 回收 (蜂巢's ◆, gd §1.5): the swarm gets `turrets` more turrets and its dock time ×
+   * dockSecMult. Turrets add up, the factors multiply.
+   */
+  | { readonly id: 'swarmTune'; readonly turrets: number; readonly dockSecMult: number }
+  /**
+   * 巨像 (蜂巢's ★, gd:192): the swarm keeps one drone, and its impacts deal damagePerMissing more
+   * (a more multiplier) for each drone it gave up, ascendancy drones included.
+   */
+  | { readonly id: 'colossus'; readonly damagePerMissing: number }
+  /** 擴巢 (女王, gd §1.5): `drones` more in the swarm. */
+  | { readonly id: 'hiveExpand'; readonly drones: number }
+  /** 增建 (機械師, gd §1.5): `turrets` more in the swarm. */
+  | { readonly id: 'hiveBuild'; readonly turrets: number }
+  /** 蜂王漿 (女王, gd §1.5): the ascendancy's timed drones live lifeMult as long. */
+  | { readonly id: 'royalJelly'; readonly lifeMult: number }
+  /**
+   * 繁衍 (女王's final, gd §1.5): a kill spawns, with this chance, a timed drone at the victim
+   * that lives lifeSec and impacts for damagePct of the damage stat; at most maxLive at once.
+   */
+  | {
+      readonly id: 'breed';
+      readonly chance: number;
+      readonly lifeSec: number;
+      readonly damagePct: number;
+      readonly maxLive: number;
+    }
+  /**
+   * 母艦工廠 (機械師's final, gd §1.5): every periodSec each of the swarm's turrets spawns a timed
+   * drone at its seat that lives lifeSec and impacts for damagePct of the damage stat.
+   */
+  | {
+      readonly id: 'motherFactory';
+      readonly periodSec: number;
+      readonly lifeSec: number;
+      readonly damagePct: number;
+    }
+  /**
+   * 連環焚燒 (焚化者's final, gd §1.2): an enemy a 焚屍 detonation kills while it burns detonates
+   * too, at most `depth` links of a chain.
+   */
+  | { readonly id: 'pyreChain'; readonly depth: number }
+  /**
+   * 熔流, 灼地 and 火海 (煉獄, gd §1.2): the bombs' fire zones last durationMult as long, deal
+   * damageMult as much a second and are radiusMult as wide. The factors multiply.
+   */
+  | {
+      readonly id: 'zoneTune';
+      readonly durationMult: number;
+      readonly damageMult: number;
+      readonly radiusMult: number;
+    }
+  /**
+   * 焰蜂 (蜂巢's 火召喚 hand core, gd §5.2): every drone impact ignites burnStacks burn stacks on
+   * its target, and a burning enemy a signature hit kills explodes, blastRadius around it, for
+   * blastDamagePct of the damage stat.
+   */
+  | {
+      readonly id: 'flameBee';
+      readonly burnStacks: number;
+      readonly blastRadius: number;
+      readonly blastDamagePct: number;
+    }
+  /**
+   * 霜蜂 (蜂巢's 冰召喚 hand core, gd §5.2): every drone impact adds frostPct chill to its target,
+   * and an impact on a frozen enemy that is no boss shatters it (an execute: the kill while
+   * frozen is the shatter).
+   */
+  | { readonly id: 'frostBee'; readonly frostPct: number };
 
 export type RuleId = RuleSpec['id'];
 
@@ -187,6 +269,18 @@ export const RULE_IDS: readonly RuleId[] = [
   'cannon',
   'teslaTower',
   'bugSea',
+  'hiveSplit',
+  'swarmTune',
+  'colossus',
+  'hiveExpand',
+  'hiveBuild',
+  'royalJelly',
+  'breed',
+  'motherFactory',
+  'pyreChain',
+  'zoneTune',
+  'flameBee',
+  'frostBee',
 ];
 
 /**
@@ -250,7 +344,7 @@ export const SIGNATURE_FORMS: Readonly<Record<SignatureId, readonly RuleId[]>> =
   magmaBomb: ['farThrow', 'volcano', 'chainBlast'],
   iceFan: ['icicle', 'prism'],
   triphaseArc: ['sixCoils'],
-  swarm: [],
+  swarm: ['swarmTune', 'colossus'],
 };
 
 /** How a fusion's coef scales a rule field: pct and mult × coef, chance min(1, p × coef). */
@@ -268,6 +362,10 @@ export const RULE_COEF_FIELDS: {
 } = {
   // 霜焰: the chill and the zone's slow scale; the burn cap bonus is a whole stack count.
   frostflame: { frostPct: 'chance', zoneSlow: 'chance' },
+  // 焰蜂: the explosion's hit scales; the burn stacks and the radius are not shares.
+  flameBee: { blastDamagePct: 'pct' },
+  // 霜蜂: the chill scales; the shatter on a frozen enemy is all or nothing.
+  frostBee: { frostPct: 'chance' },
 };
 
 /**
@@ -309,4 +407,9 @@ export const NOTABLE_RULES: readonly RuleId[] = [
   'lockBeacon',
   'cannon',
   'teslaTower',
+  'hiveSplit',
+  'hiveExpand',
+  'hiveBuild',
+  'royalJelly',
+  'zoneTune',
 ];

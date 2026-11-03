@@ -810,6 +810,103 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`bugSea.countMult must be an integer >= 1 (got ${rule.countMult})`);
       }
       break;
+    case 'hiveSplit':
+      if (!isPositiveInt(rule.every)) {
+        issues.push(`hiveSplit.every must be a positive integer (got ${rule.every})`);
+      }
+      issues.push(...timedDroneIssues('hiveSplit', rule.lifeSec, rule.damagePct, rule.maxLive));
+      break;
+    case 'swarmTune':
+      if (!(Number.isInteger(rule.turrets) && rule.turrets >= 0)) {
+        issues.push(`swarmTune.turrets must be a non-negative integer (got ${rule.turrets})`);
+      }
+      if (!(rule.dockSecMult >= 0 && Number.isFinite(rule.dockSecMult))) {
+        issues.push(`swarmTune.dockSecMult must be finite and >= 0 (got ${rule.dockSecMult})`);
+      }
+      break;
+    case 'colossus':
+      if (!(rule.damagePerMissing >= 0 && Number.isFinite(rule.damagePerMissing))) {
+        issues.push(
+          `colossus.damagePerMissing must be finite and >= 0 (got ${rule.damagePerMissing})`,
+        );
+      }
+      break;
+    case 'hiveExpand':
+      if (!(Number.isInteger(rule.drones) && rule.drones >= 1)) {
+        issues.push(`hiveExpand.drones must be a positive integer (got ${rule.drones})`);
+      }
+      break;
+    case 'hiveBuild':
+      if (!(Number.isInteger(rule.turrets) && rule.turrets >= 1)) {
+        issues.push(`hiveBuild.turrets must be a positive integer (got ${rule.turrets})`);
+      }
+      break;
+    case 'royalJelly':
+      if (!(rule.lifeMult >= 1 && Number.isFinite(rule.lifeMult))) {
+        issues.push(`royalJelly.lifeMult must be finite and >= 1 (got ${rule.lifeMult})`);
+      }
+      break;
+    case 'breed':
+      if (!(rule.chance > 0 && rule.chance <= 1)) {
+        issues.push(`breed.chance must be in (0, 1] (got ${rule.chance})`);
+      }
+      issues.push(...timedDroneIssues('breed', rule.lifeSec, rule.damagePct, rule.maxLive));
+      break;
+    case 'motherFactory':
+      if (!(rule.periodSec > 0 && Number.isFinite(rule.periodSec))) {
+        issues.push(`motherFactory.periodSec must be finite and > 0 (got ${rule.periodSec})`);
+      }
+      issues.push(...timedDroneIssues('motherFactory', rule.lifeSec, rule.damagePct, 1));
+      break;
+    case 'pyreChain':
+      if (!isPositiveInt(rule.depth)) {
+        issues.push(`pyreChain.depth must be a positive integer (got ${rule.depth})`);
+      }
+      break;
+    case 'zoneTune':
+      for (const field of ['durationMult', 'damageMult', 'radiusMult'] as const) {
+        if (!(rule[field] > 0 && Number.isFinite(rule[field]))) {
+          issues.push(`zoneTune.${field} must be finite and > 0 (got ${rule[field]})`);
+        }
+      }
+      break;
+    case 'flameBee':
+      if (!isPositiveInt(rule.burnStacks)) {
+        issues.push(`flameBee.burnStacks must be a positive integer (got ${rule.burnStacks})`);
+      }
+      if (!(rule.blastRadius > 0)) {
+        issues.push(`flameBee.blastRadius must be > 0 (got ${rule.blastRadius})`);
+      }
+      if (!(rule.blastDamagePct >= 0)) {
+        issues.push(`flameBee.blastDamagePct must be >= 0 (got ${rule.blastDamagePct})`);
+      }
+      break;
+    case 'frostBee':
+      if (!(rule.frostPct > 0 && rule.frostPct <= 1)) {
+        issues.push(`frostBee.frostPct must be in (0, 1] (got ${rule.frostPct})`);
+      }
+      break;
+  }
+  return issues;
+}
+
+/** A timed drone's life, hit and live cap, as spawnDrone's (src/data/triggers.ts). */
+function timedDroneIssues(
+  id: string,
+  lifeSec: number,
+  damagePct: number,
+  maxLive: number,
+): string[] {
+  const issues: string[] = [];
+  if (!(lifeSec > 0 && Number.isFinite(lifeSec))) {
+    issues.push(`${id}.lifeSec must be finite and > 0 (got ${lifeSec})`);
+  }
+  if (!(damagePct >= 0 && Number.isFinite(damagePct))) {
+    issues.push(`${id}.damagePct must be finite and >= 0 (got ${damagePct})`);
+  }
+  // A timed drone is a summon: one instance's live ones fit in the run's cap.
+  if (!(isPositiveInt(maxLive) && maxLive <= SUMMON_SLOTS_MAX)) {
+    issues.push(`${id}.maxLive must be an integer in [1, ${SUMMON_SLOTS_MAX}] (got ${maxLive})`);
   }
   return issues;
 }
@@ -1581,6 +1678,18 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'cannon':
     case 'teslaTower':
     case 'bugSea':
+    case 'hiveSplit':
+    case 'swarmTune':
+    case 'colossus':
+    case 'hiveExpand':
+    case 'hiveBuild':
+    case 'royalJelly':
+    case 'breed':
+    case 'motherFactory':
+    case 'pyreChain':
+    case 'zoneTune':
+    case 'flameBee':
+    case 'frostBee':
       return [];
   }
 }

@@ -35,7 +35,7 @@ describe('signature tables', () => {
       magmaBomb: ['farThrow', 'volcano', 'chainBlast'],
       iceFan: ['icicle', 'prism'],
       triphaseArc: ['sixCoils'],
-      swarm: [],
+      swarm: ['swarmTune', 'colossus'],
     });
   });
 });
@@ -116,14 +116,28 @@ describe('scaleRuleSpec', () => {
 describe('tables the rule modules fill', () => {
   // Empty in C6.2 (docs/v3 C6 design §3.7, §4.2): each hand module adds its RULE_COEF_FIELDS
   // entry, and each chain-policy module its POLICY_RULES id, when it lands, and updates this pin.
-  it('holds the landed hand modules: 霜焰 and 爆靈 (B1)', () => {
+  it('holds the landed hand modules: 霜焰 and 爆靈 (B1), 焰蜂 and 霜蜂 (B2)', () => {
     // 爆靈 keeps gd's numbers: its probe is too noisy to search (ACCEPTED_FAILS).
-    expect(RULE_COEF_FIELDS).toEqual({ frostflame: { frostPct: 'chance', zoneSlow: 'chance' } });
+    expect(RULE_COEF_FIELDS).toEqual({
+      frostflame: { frostPct: 'chance', zoneSlow: 'chance' },
+      flameBee: { blastDamagePct: 'pct' },
+      frostBee: { frostPct: 'chance' },
+    });
     expect(POLICY_RULES).toEqual([]);
   });
 
   // A ◆ rule module adds its NOTABLE_RULES id when it lands (E2: 神經毒's poisonSlow, gd:389).
-  it("admits poisonSlow and the summon outer's policy rules on a ◆", () => {
-    expect(NOTABLE_RULES).toEqual(['poisonSlow', 'lockBeacon', 'cannon', 'teslaTower']);
+  it("admits poisonSlow, the summon outer's policy rules and 蜂巢's on a ◆", () => {
+    expect(NOTABLE_RULES).toEqual([
+      'poisonSlow',
+      'lockBeacon',
+      'cannon',
+      'teslaTower',
+      'hiveSplit',
+      'hiveExpand',
+      'hiveBuild',
+      'royalJelly',
+      'zoneTune',
+    ]);
   });
 });

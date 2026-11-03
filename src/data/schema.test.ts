@@ -64,6 +64,18 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   cannon: { id: 'cannon', rateMult: 1 / 3, splash: 60 },
   teslaTower: { id: 'teslaTower', chains: 2 },
   bugSea: { id: 'bugSea', countMult: 2 },
+  hiveSplit: { id: 'hiveSplit', every: 5, lifeSec: 6, damagePct: 2, maxLive: 8 },
+  swarmTune: { id: 'swarmTune', turrets: 2, dockSecMult: 1 },
+  colossus: { id: 'colossus', damagePerMissing: 0.5 },
+  hiveExpand: { id: 'hiveExpand', drones: 3 },
+  hiveBuild: { id: 'hiveBuild', turrets: 2 },
+  royalJelly: { id: 'royalJelly', lifeMult: 1.5 },
+  breed: { id: 'breed', chance: 0.2, lifeSec: 6, damagePct: 2, maxLive: 12 },
+  motherFactory: { id: 'motherFactory', periodSec: 6, lifeSec: 4, damagePct: 2 },
+  pyreChain: { id: 'pyreChain', depth: 3 },
+  zoneTune: { id: 'zoneTune', durationMult: 2, damageMult: 1, radiusMult: 1.25 },
+  flameBee: { id: 'flameBee', burnStacks: 2, blastRadius: 60, blastDamagePct: 1 },
+  frostBee: { id: 'frostBee', frostPct: 0.12 },
 };
 
 describe('ModifierSchema', () => {
@@ -491,6 +503,7 @@ describe('EffectSpecSchema', () => {
     },
     { kind: 'coinHit', multiplier: 10 },
     { kind: 'coinHit', multiplier: 5, ignoreShield: true, ignoreArmour: false },
+    { kind: 'execute' },
     { kind: 'chainBolt', jumps: 2, damagePct: 0.5 },
     { kind: 'chainBolt', jumps: 0, damagePct: 1, shockStacks: 1, from: 'eventTarget' },
     { kind: 'chainBolt', jumps: 31, damagePct: 0.2, shockStacks: 3, from: 'nearestToPoint' },
