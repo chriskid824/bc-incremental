@@ -313,6 +313,9 @@ describe('swarm (§4.6, D17)', () => {
       impacts: 3,
       splash: 40,
       turretDamagePct: 0.8,
+      roles: [],
+      turretRadius: 90,
+      sizeMult: 1,
     });
     expect([build.signature.lob, build.signature.fan, build.signature.arc]).toEqual([
       null,

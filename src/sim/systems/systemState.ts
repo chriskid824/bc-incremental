@@ -630,6 +630,11 @@ export interface SpawnSpecs {
   readonly ailment: Int8Array;
   readonly stacks: Int32Array;
   readonly ailmentPct: Float64Array;
+  /**
+   * A row's life in ticks, max(1, round(lifeSec × 60 × max(0, summonDuration))), read once a run
+   * (蜂王漿's summonDuration, E4): what its spawnDrone executor gives spawnRows.
+   */
+  readonly lifeTicks: Float64Array;
 }
 
 /** SpawnSpecs.aim: the nearest enemy to the row (pickNearest), or the drones' pick (pickOuter). */
@@ -681,6 +686,19 @@ export interface DroneLayout {
    */
   readonly turretSplashSq: number;
   readonly turretJumps: number;
+  /**
+   * Per row: its role's damage and speed factors (E4: SwarmParams.roles, the swarm's drones
+   * alone; 1 for every other row) and its drawn size (DroneViewState.size).
+   */
+  readonly roleDamage: readonly number[];
+  readonly roleSpeed: readonly number[];
+  readonly size: readonly number[];
+  /**
+   * The row of the swarm's drone whose role leads (蜂后, followBonus above 0), −1 for none, and
+   * 1 + its followBonus (1 for none).
+   */
+  readonly leader: number;
+  readonly followMult: number;
 }
 
 /**
@@ -723,8 +741,8 @@ export interface DronePool extends DroneViewState {
   readonly memUntil: Int32Array;
   /**
    * The tick each slot leaves at, the first on which it is gone: a timed row's spawn tick +
-   * max(1, round(lifeSec × 60)), or the tick its impacts were spent; 2147483647 for a fixed row,
-   * which never leaves.
+   * its effect's SpawnSpecs.lifeTicks, max(1, round(lifeSec × 60 × max(0, summonDuration))), or
+   * the tick its impacts were spent; 2147483647 for a fixed row, which never leaves.
    */
   readonly until: Int32Array;
   /**
@@ -743,6 +761,12 @@ export interface DronePool extends DroneViewState {
    */
   readonly hx: Float64Array;
   readonly hy: Float64Array;
+  /**
+   * Each slot's role's damage factor, its impacts' hit scale, and speed factor, on its every
+   * step (E4; DroneLayout's, 1 for a slot without a role, every timed row's too).
+   */
+  readonly roleDamage: Float64Array;
+  readonly roleSpeed: Float64Array;
   /** Slots marked as leaving in the current stage, dropped at its end (0 outside the stage). */
   left: number;
   /** DroneLayout.spawnSpecs, with its own `live` counts; null in a build without spawnDrone. */
@@ -769,6 +793,13 @@ export interface DronePool extends DroneViewState {
    */
   readonly turretSplashSq: number;
   readonly turretJumps: number;
+  /**
+   * DroneLayout's leader and follow factor (蜂后, E4): an impact of another of the swarm's drones
+   * on the enemy the leader dashes at takes × followMult (impactAt, src/sim/systems/drones.ts).
+   * A fixed row, so its slot never moves.
+   */
+  readonly leader: number;
+  readonly followMult: number;
   /** A turret firing's later picks: shootable, and not one of the firing's targets yet (C5.4). */
   readonly turretAccept: (enemy: Enemy) => boolean;
 }
@@ -836,6 +867,9 @@ export function createDronePool(
     origin: new Int32Array(cap).fill(-1),
     hx: slots(Float64Array, layout.hx),
     hy: slots(Float64Array, layout.hy),
+    roleDamage: slots(Float64Array, layout.roleDamage),
+    roleSpeed: slots(Float64Array, layout.roleSpeed),
+    size: slots(Float64Array, layout.size),
     left: 0,
     specs: spawnSpecs === null ? null : { ...spawnSpecs, live: new Int32Array(spawnSpecs.live) },
     stepBase: Float64Array.from(layout.stepBase),
@@ -849,6 +883,8 @@ export function createDronePool(
     pickedCount: 0,
     turretSplashSq: layout.turretSplashSq,
     turretJumps: layout.turretJumps,
+    leader: layout.leader,
+    followMult: layout.followMult,
     turretAccept: (enemy) => shootable(enemy) && !isPicked(pool, enemy),
   };
   return pool;

@@ -40,7 +40,9 @@
  * projectiles, a firing's later shots never go to an enemy it already picked, focus target or
  * not, while another one is worth a shot: they mark no enemy (Enemy.volleyMark, inbound). Focus
  * targets are the elites and bosses near the player (focused), not near the turret: one up to
- * FOCUS_RANGE + the turret radius from the turret can be one.
+ * FOCUS_RANGE + its seat's radius from the turret can be one (90, or the swarm's
+ * SwarmParams.turretRadius). A turret's pick has no range: the nearest alive enemy anywhere is
+ * its last resort, one outside the arena too.
  *
  * A timed row (C5.7: a spirit, DRONE_KIND_SPIRIT) is one a spawnDrone effect appended at its
  * event's point (spawnRows). It has no emitter, dock or seat: its numbers are its effect's
@@ -67,11 +69,20 @@
  * emitter's interval), the splash around their shots' targets and their shots' chain jumps
  * (src/sim/systems/shots.ts turretArrival). The droneSpeed stat is in every row's step.
  *
+ * E4's are B2's (蜂巢's center board and 女王): 蜂后 and 重錘 are roles of single swarm drones
+ * (SwarmParams.roles, placed by dock index at the fill): a role's damage factor scales its
+ * impacts' hits and its speed factor its every step (DronePool.roleDamage, roleSpeed), and the
+ * leader's (蜂后's followBonus) scales another swarm drone's impact on the enemy the leader dashes
+ * at (followScale). 集火指令 (BuildFlags.summonHighestHp) gives every summon's pick, a turret's
+ * whole firing included, to the highest-hp enemy in the arena (pickHighestHp), before 鎖定信標.
+ * 前哨's seat radius, 巨像's and 蜂后's drawn size (DroneViewState.size, which nothing here reads)
+ * and 蜂王漿's summonDuration (the timed rows' lives, SpawnSpecs.lifeTicks) are the fill's.
+ *
  * Kills inside the stage only mark their enemy dead, and enemy objects are never reused, so a
  * target a slot keeps from an earlier tick is alive or reads dead.
  */
 
-import { mul, num, ZERO } from '../../core/num';
+import { gt, mul, num, ZERO } from '../../core/num';
 import { APPLIED_AILMENTS } from '../../data/triggers';
 import type { AppliedAilment } from '../../data/triggers';
 import { DRONE_COOLDOWN_MAX, DRONE_MEMORY, PICK_TICKS, SMALL_PROJECTILE_TICKS } from '../caps';
@@ -215,7 +226,8 @@ function dash(
     ds.hx[s] = dx;
     ds.hy[s] = dy;
   }
-  const step = (ds.stepBase[em.index] as number) * m;
+  // × its role's speed factor (重錘, E4), 1 without one.
+  const step = (ds.stepBase[em.index] as number) * m * (ds.roleSpeed[s] as number);
   if (dist - step <= t.radius) {
     ds.x[s] = t.x;
     ds.y[s] = t.y;
@@ -284,9 +296,9 @@ function engage(ds: DronePool, s: number, t: Enemy): void {
 }
 
 /**
- * A slot flying home steps towards its dock; arriving, it docks there with its dock time to run
- * down and a full sortie, and no target or heading, so its next sortie's impacts never carry
- * this one's.
+ * A slot flying home steps towards its dock, as fast as it dashes (its role's speed factor
+ * included); arriving, it docks there with its dock time to run down and a full sortie, and no
+ * target or heading, so its next sortie's impacts never carry this one's.
  */
 function flyHome(ds: DronePool, s: number, em: EmitterRuntime, m: number): void {
   const x = ds.x[s] as number;
@@ -297,7 +309,7 @@ function flyHome(ds: DronePool, s: number, em: EmitterRuntime, m: number): void 
   const dy = homeY - y;
   const dist = Math.sqrt(dx * dx + dy * dy);
   const i = em.index;
-  const step = (ds.stepBase[i] as number) * m;
+  const step = (ds.stepBase[i] as number) * m * (ds.roleSpeed[s] as number);
   if (dist <= step) {
     ds.x[s] = homeX;
     ds.y[s] = homeY;
@@ -488,10 +500,14 @@ function chased(ds: DronePool, e: Enemy, s: number): boolean {
  * id on ties; null for none. One reverse scan, which tests the arena, the memory and the chase
  * only on an enemy that would rank first. Under 鎖定信標 (BuildFlags.summonEliteFirst) the same
  * two tiers run over the alive tough enemies first (pickOuterTough), and over every enemy only
- * when they find none; a run without it pays the one flag test. Draws nothing.
+ * when they find none; a run without it pays the one flag test. Under 集火指令
+ * (BuildFlags.summonHighestHp), checked first, it is the highest-hp enemy (pickHighestHp) alone.
+ * Draws nothing.
  */
 export function pickOuter(ctx: RunContext, s: number): Enemy | null {
-  if (ctx.build.flags.summonEliteFirst) {
+  const flags = ctx.build.flags;
+  if (flags.summonHighestHp) return pickHighestHp(ctx);
+  if (flags.summonEliteFirst) {
     const t = pickOuterTough(ctx, s);
     if (t !== null) return t;
   }
@@ -568,10 +584,14 @@ function pickOuterTough(ctx: RunContext, s: number): Enemy | null {
  * another row dashes at, the lowest id on ties; null for none. One forward scan of the enemies,
  * in id order, which tests the arena, the memory and the chase only on an enemy that would rank
  * first; then the other rows' targets. Under 鎖定信標 (BuildFlags.summonEliteFirst) the same
- * two tiers run over the alive tough enemies first (pickNearestTough). Draws nothing.
+ * two tiers run over the alive tough enemies first (pickNearestTough). Under 集火指令
+ * (BuildFlags.summonHighestHp), checked first, it is the highest-hp enemy (pickHighestHp) alone.
+ * Draws nothing.
  */
 export function pickNearest(ctx: RunContext, s: number): Enemy | null {
-  if (ctx.build.flags.summonEliteFirst) {
+  const flags = ctx.build.flags;
+  if (flags.summonHighestHp) return pickHighestHp(ctx);
+  if (flags.summonEliteFirst) {
     const t = pickNearestTough(ctx, s);
     if (t !== null) return t;
   }
@@ -660,18 +680,40 @@ function pickNearestTough(ctx: RunContext, s: number): Enemy | null {
 }
 
 /**
- * Impact of drone slot `s` (−1 for a repeat's) on `target` with payload `p` of emitter `em`, an
- * attack of its own (D8). A `counted` impact, a signature drone's, is first counted as an attack
- * and a shot of `em` (countAttack, nextShotSteady), which makes its hits steady when that shot
- * is. Every enemy alive within the emitter's splash of the target's center is listed before any
- * hit, so that the children its kills split into are not among them, and each one still alive at
- * its turn takes one hit of `p` at scale 1 in id order, the target the only one counted in the
- * attack's budget and, when `p` is the signature's (a repeat's too), the primary hit. Then come
- * the chain from the target when `p` chains, which passes over the enemies the impact hit; the
- * impact event; and the droneImpact center event at the target, without a list, which rule 8
- * raises for the signature's own impacts alone, its value the flight's angle (flightAngle). The
- * repeats waiting for a counted impact follow it. `depth` and `origin` are the hits' trigger
- * depth and origin (0 and −1 for a drone).
+ * 集火指令's pick (BuildFlags.summonHighestHp, E4), every summon's: the alive enemy with the most
+ * hp whose center is in the arena, the lowest id on ties (one forward scan of ctx.enemies with
+ * core/num's strict gt, as highestHpId's, src/sim/systems/globals.ts), at this point of the tick,
+ * whatever a slot's cooldown memory and the chase; null for none. EvalInput.highestHpId is not
+ * read: written before the contact step, it can name an enemy dead since or overtaken. Draws
+ * nothing.
+ */
+export function pickHighestHp(ctx: RunContext): Enemy | null {
+  const enemies = ctx.enemies;
+  let best: Enemy | null = null;
+  // Forwards with a strict >, so ties keep the lower id.
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i] as Enemy;
+    if (!e.alive || (best !== null && !gt(e.hp, best.hp)) || outOfArena(e)) continue;
+    best = e;
+  }
+  return best;
+}
+
+/**
+ * Impact of drone slot `s` on `target` with payload `p` of emitter `em`, an attack of its own
+ * (D8). A `counted` impact, a signature drone's, is first counted as an attack and a shot of `em`
+ * (countAttack, nextShotSteady), which makes its hits steady when that shot is. Every enemy alive
+ * within the emitter's splash of the target's center is listed before any hit, so that the
+ * children its kills split into are not among them, and each one still alive at its turn takes
+ * one hit of `p` in id order, the target the only one counted in the attack's budget and, when
+ * `p` is the signature's, the primary hit. Its hits' scale is the slot's role's damage factor
+ * (DronePool.roleDamage: 1 without a role; E4), × 蜂后's follow factor when another of the
+ * swarm's drones impacts the leader's live target (followScale); a chain jump's is the chain's
+ * own. Then come the chain from the target when `p` chains, which passes over the enemies the
+ * impact hit; the impact event; and the droneImpact center event at the target, without a list,
+ * which rule 8 raises for the signature's own impacts alone, its value the flight's angle
+ * (flightAngle). The repeats waiting for a counted impact follow it. `depth` and `origin` are the
+ * hits' trigger depth and origin (0 and −1 for a drone).
  */
 export function impactAt(
   ctx: RunContext,
@@ -683,15 +725,37 @@ export function impactAt(
   depth: number,
   origin: number,
 ): void {
-  const r2 = ctx.sys.drones.splashSq[em.index] as number;
-  impact(ctx, s, target, p, counted ? em : null, r2, 1, depth, origin);
+  const ds = ctx.sys.drones;
+  const r2 = ds.splashSq[em.index] as number;
+  // A run without a leader pays the one load and the one test.
+  const role = ds.roleDamage[s] as number;
+  const scale = ds.leader < 0 ? role : followScale(ds, s, target, role);
+  impact(ctx, s, target, p, counted ? em : null, r2, scale, depth, origin);
+}
+
+/**
+ * 蜂后's 「其他無人機打蜂后的目標時傷害 +20%」 (E4): `scale` × DronePool.followMult when drone
+ * slot s is another of the swarm's (emitter 0's) than the leader and `target` is the leader's
+ * live target, the alive enemy it dashes at (riding it through its cooldown memory too, still
+ * DASH); `scale` itself otherwise, a leader docked, hovering or flying home having none.
+ */
+function followScale(ds: DronePool, s: number, target: Enemy, scale: number): number {
+  const leader = ds.leader;
+  const follows =
+    s !== leader &&
+    ds.owner[s] === 0 &&
+    ds.mode[leader] === DRONE_DASH &&
+    ds.target[leader] === target &&
+    target.alive;
+  return follows ? scale * ds.followMult : scale;
 }
 
 /**
  * impactAt's impact, its splash radius squared `r2` and its hits' `scale` given (none at 0); a
- * `counted` impact names its emitter, and null counts nothing. A timed row's (spiritImpact) is
- * a granted drone's at its effect's splash and damagePct. Returns how many enemies it listed
- * (DronePool.splash).
+ * `counted` impact names its emitter, and null counts nothing; `s` is −1 for a repeat's
+ * (swarmRepeat), at scale 1, its target the primary hit too, its payload being the signature's.
+ * A timed row's (spiritImpact) is a granted drone's at its effect's splash and damagePct.
+ * Returns how many enemies it listed (DronePool.splash).
  */
 function impact(
   ctx: RunContext,
@@ -788,8 +852,10 @@ function flightAngle(ctx: RunContext, s: number, target: Enemy): number {
  * and the repeats waiting for a counted firing follow it. Under 鎖定信標
  * (BuildFlags.summonEliteFirst) its focus targets, for the first shot and the later ones alike,
  * are the elites and bosses at any distance (toughFocus) rather than those near the player
- * (focused). Allocates nothing but the event once DronePool.picked has grown to the largest
- * count a firing has rolled.
+ * (focused). Under 集火指令 (BuildFlags.summonHighestHp), checked first, the firing's first shot
+ * and every later one go at the highest-hp enemy in the arena (pickHighestHp), focus targets
+ * playing no part, and it fires at none while there is none. Allocates nothing but the event once
+ * DronePool.picked has grown to the largest count a firing has rolled.
  */
 function turretStep(ctx: RunContext, ds: DronePool, s: number, em: EmitterRuntime): void {
   const acc = ds.acc;
@@ -798,10 +864,13 @@ function turretStep(ctx: RunContext, ds: DronePool, s: number, em: EmitterRuntim
   while ((acc[s] as number) >= interval) {
     const x = ds.x[s] as number;
     const y = ds.y[s] as number;
+    const flags = ctx.build.flags;
+    // 集火指令: the whole firing at the highest-hp enemy (E4).
+    const top = flags.summonHighestHp;
     // 鎖定信標: the elites and bosses at any distance are its focus targets, in place of those
     // near the player.
-    const focus = ctx.build.flags.summonEliteFirst ? toughFocus : focused;
-    const first = pickTargetInGrid(ctx.grid, x, y, ctx.shootable, focus);
+    const focus = flags.summonEliteFirst ? toughFocus : focused;
+    const first = top ? pickHighestHp(ctx) : pickTargetInGrid(ctx.grid, x, y, ctx.shootable, focus);
     if (first === null) {
       acc[s] = interval - em.cadence;
       return;
@@ -824,7 +893,7 @@ function turretStep(ctx: RunContext, ds: DronePool, s: number, em: EmitterRuntim
       const steady = counted ? nextShotSteady(ctx, em) : false;
       spawnShot(ctx, MOTION_HOMING, x, y, 0, 0, until, p, 1, 1, 0, 0, -1, steady, -1, em.index, t);
       fired++;
-      if (k + 1 < n) t = pickTargetInGrid(ctx.grid, x, y, ds.turretAccept, focus);
+      if (k + 1 < n && !top) t = pickTargetInGrid(ctx.grid, x, y, ds.turretAccept, focus);
     }
     ds.targetId[s] = first.id;
     ctx.events.push({
@@ -863,7 +932,9 @@ export function pickOuterFromCenter(ctx: RunContext): Enemy | null {
 /**
  * A repeat of the swarm (REPEAT_STEPS, src/sim/effects/execute.ts): an impact of no drone with
  * payload `p` at the enemy farthest from the player (pickOuterFromCenter), as no attack of its
- * own (impactAt, not counted), its hits at `depth` from trigger `origin`; nothing without one.
+ * own (impactAt's impact, not counted, at the emitter's splash), its hits at scale 1, which no
+ * drone's role or follow bonus reaches (E4), at `depth` from trigger `origin`; nothing without
+ * one.
  */
 export function swarmRepeat(
   ctx: RunContext,
@@ -873,17 +944,20 @@ export function swarmRepeat(
   origin: number,
 ): void {
   const target = pickOuterFromCenter(ctx);
-  if (target !== null) impactAt(ctx, -1, target, p, em, false, depth, origin);
+  if (target === null) return;
+  const r2 = ctx.sys.drones.splashSq[em.index] as number;
+  impact(ctx, -1, target, p, null, r2, 1, depth, origin);
 }
 
 /**
  * Appends `count` timed rows (spirits) of spawnDrone effect `f` at (x, y) (K2, K4): each at slot
  * `count` with the next id, in id order, hovering with no target or heading and a pick due at
- * once, its memory empty, its impacts its effect's, leaving `lifeTicks` ticks from now, and
- * keeping `f`, `depth` and `origin`. A row is refused while the pool holds its summon cap of live
- * rows, fixed and timed together, or `f` its maxLive, and each refused row adds 1 to
- * summonCapped. Only a build with a spawnDrone effect runs it (DronePool.specs). The rows first
- * step in the next tick's drone stage.
+ * once, its memory empty, its impacts its effect's, leaving `lifeTicks` ticks from now
+ * (SpawnSpecs.lifeTicks from its executor), keeping `f`, `depth` and `origin`, with no role and
+ * size 1 (E4). A row is refused while the pool holds its summon cap of live rows, fixed and
+ * timed together, or `f` its maxLive, and each refused row adds 1 to summonCapped. Only a build
+ * with a spawnDrone effect runs it (DronePool.specs). The rows first step in the next tick's
+ * drone stage.
  */
 export function spawnRows(
   ctx: RunContext,
@@ -935,6 +1009,10 @@ export function spawnRows(
     ds.origin[s] = origin;
     ds.hx[s] = 0;
     ds.hy[s] = 0;
+    // No role reaches a timed row (E4): its factors and size are 1.
+    ds.roleDamage[s] = 1;
+    ds.roleSpeed[s] = 1;
+    ds.size[s] = 1;
   }
   live[f] = (live[f] as number) + placed;
   ctx.state.droneCount = ds.count;
@@ -1014,4 +1092,7 @@ function moveRow(ds: DronePool, from: number, to: number): void {
   ds.origin[to] = ds.origin[from] as number;
   ds.hx[to] = ds.hx[from] as number;
   ds.hy[to] = ds.hy[from] as number;
+  ds.roleDamage[to] = ds.roleDamage[from] as number;
+  ds.roleSpeed[to] = ds.roleSpeed[from] as number;
+  ds.size[to] = ds.size[from] as number;
 }

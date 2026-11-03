@@ -258,6 +258,13 @@ export interface DroneViewState {
    * a spirit.
    */
   readonly seat: Int16Array;
+  /**
+   * The size its body is drawn at (E4): the swarm's SwarmParams.sizeMult × its drone's role's
+   * sizeMult (巨像, 蜂后), 1 for every other row, turrets, granted drones and spirits alike. Render
+   * reads it (src/render/drones.ts); nothing in the sim does, so the impact splash and every
+   * output stay as they are.
+   */
+  readonly size: Float64Array;
 }
 
 /**
