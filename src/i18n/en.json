@@ -294,6 +294,7 @@
   "panel.price.resonance": "{resonance} resonance",
   "panel.price.free": "Free",
   "panel.tip.price": "Price: {price}",
+  "panel.tip.pathPrice": "The whole path: {count} nodes for {price}",
   "panel.tip.rank": "Rank {rank}/{max}",
   "panel.tip.rankUnlimited": "Rank {rank}",
   "panel.tip.click": "Click to buy",

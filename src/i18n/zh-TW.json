@@ -294,6 +294,7 @@
   "panel.price.resonance": "{resonance} 迴響",
   "panel.price.free": "免費",
   "panel.tip.price": "價格：{price}",
+  "panel.tip.pathPrice": "整條路徑 {count} 個節點，共需 {price}",
   "panel.tip.rank": "等級 {rank}/{max}",
   "panel.tip.rankUnlimited": "等級 {rank}",
   "panel.tip.click": "點一下購買",
