@@ -17,13 +17,14 @@ import { WEB_FUZZ_SEED } from '../../../../src/meta/web/fuzz';
 import { runJobs } from '../../jobs';
 import type { BalanceJob, JobResult } from '../../jobs';
 import type { PoolRun } from '../../pool';
-import { builtCharacters, C10_SEED, formatContentRef, webOf } from '../content';
-import type { ContentRef } from '../content';
+import { builtCharacters, C10_SEED, formatContentRef, scopeLists, webOf } from '../content';
+import type { ContentRef, ScopeName } from '../content';
 import { LEGACY } from '../legacy';
 import type { LegacyHook } from '../legacy';
 import { PRESTIGE } from '../prestige';
 import {
   CLEAR_WAVE,
+  DEMO_SESSION_MINUTES,
   FULL_SESSION_MINUTES,
   OTHER_SESSION_MINUTES,
   PRE_PRESTIGE_MINUTES,
@@ -101,7 +102,7 @@ import {
   PRESTIGE_RETURN_MAX,
 } from './targets';
 import { m1Check, M1_STANDARD, m1Units } from './m1';
-import { checkRow, naRow, sessionUnitId, strategyUnitId } from './types';
+import { checkRow, demoSessionUnitId, naRow, sessionUnitId, strategyUnitId } from './types';
 import type { CheckId, CheckPlan, CheckResult, CheckSetId, PlanUnit, UnitResults } from './types';
 
 /**
@@ -115,6 +116,14 @@ export const NIGHTLY_SESSIONS = 8;
 export const PR_TARGET_SECONDS = 90;
 /** Seconds of menus between runs (impl:489; GDD:243; 初始值): the balance CLI's --menu-seconds default. */
 export const MENU_SECONDS = 20;
+/**
+ * The scopes the nightly and the weekly read (初始值; Q13 (A): the Demo is 熔核 + 蜂巢,
+ * DEMO_SCOPE_A): 'full', whose sessions every check reads, and each Demo scope, whose default
+ * sessions checkSet plans once B2 writes the prestige and whose pacing and length rows evaluate
+ * prints (C10.7). This is C10.4's D9 link: the constant reaches the sessions that run; the pr set
+ * reads no Demo scope (impl:493).
+ */
+export const NIGHTLY_SCOPES: readonly ScopeName[] = ['full', 'demoA'];
 
 /**
  * Each set's checks in the report's order (design §1.4, §1.5). pr is impl:493's list: the built
@@ -194,7 +203,11 @@ const SESSION_CHECKS: ReadonlySet<CheckId> = new Set<CheckId>([
   'budget',
 ]);
 
-/** What each check judges, as its rows print it before B1 (noCenter) and ARCHITECTURE.md §12 lists it. */
+/**
+ * What each check judges, as its rows print it before B1 (noCenter) and ARCHITECTURE.md §12 lists
+ * it. The Demo scopes' pacing and length rows (C10.7, from B1) carry their own targets, so this
+ * text, which only the registered content's reports print before B1, stays the full scope's.
+ */
 export const CHECK_STANDARDS: Readonly<Record<CheckId, string>> = {
   pacing:
     `the default sessions' median bestWave at each V3_PACING_TARGETS minute within ` +
@@ -237,6 +250,12 @@ export const CHECK_STANDARDS: Readonly<Record<CheckId, string>> = {
   performance: "ci.yml's `npm run bench -- --check` passes",
 };
 
+/** The Demo scopes the nightly and the weekly read: NIGHTLY_SCOPES but 'full'; none in pr. */
+export const demoScopesOf = (
+  set: CheckSetId,
+  scopes: readonly ScopeName[] = NIGHTLY_SCOPES,
+): ScopeName[] => (set === 'pr' ? [] : scopes.filter((scope) => scope !== 'full'));
+
 /** A check's standard in `set`: the nightly's fuzz runs its own builds, the pr set's points at ci.yml. */
 export const standardOf = (set: CheckSetId, id: CheckId): string =>
   id === 'fuzz' && set !== 'pr' ? FUZZ_NIGHTLY_STANDARD : CHECK_STANDARDS[id];
@@ -257,11 +276,13 @@ export interface CheckSetOptions {
   readonly accepted?: Readonly<Record<string, string>>;
   /** The nightly fuzz's seed (nightly.ts: WEB_FUZZ_SEED + the commit's first six hex digits). */
   readonly fuzzSeed?: number;
+  /** Test seam: the scopes the nightly and the weekly read, in place of NIGHTLY_SCOPES. */
+  readonly scopes?: readonly ScopeName[];
 }
 
 /**
- * A session of the checks: the C10 seed, the max start wave, a fresh account, the full scope;
- * `strategy`'s, the default build's unless named.
+ * A session of the checks: the C10 seed, the max start wave, a fresh account; `strategy`'s, the
+ * default build's unless named; on `scope`, the full scope unless named (a Demo scope's).
  */
 function defaultSessionConfig(
   ref: ContentRef,
@@ -269,6 +290,7 @@ function defaultSessionConfig(
   session: number,
   minutes: number,
   strategy: WebStrategyId = 'default',
+  scope: ScopeName = 'full',
 ): CharacterSessionConfig {
   return {
     character,
@@ -280,7 +302,7 @@ function defaultSessionConfig(
     economy: DEFAULT_WEB_ECONOMY,
     menuSeconds: MENU_SECONDS,
     content: ref,
-    scope: 'full',
+    scope,
   };
 }
 
@@ -289,8 +311,10 @@ function defaultSessionConfig(
  * their default sessions (PR_SESSIONS in the pr set and a quick nightly, else NIGHTLY_SESSIONS),
  * the strength measures (the pr set's first hand and template fusions with entries, the nightly's
  * every calibrated fusion) and the visible ★; in the nightly, every other strategy's sessions
- * (which deadNodes reads), the mirrors', doubles' and triples' measures, the M1 diffs and the
- * fuzz's builds. Before B1 it has no characters, and only the M1 diffs' units.
+ * (which deadNodes reads), once B2 writes the prestige each Demo scope's default sessions of the
+ * built characters it lists (as many, on the same seed and indices, DEMO_SESSION_MINUTES each),
+ * the mirrors', doubles' and triples' measures, the M1 diffs and the fuzz's builds. Before B1 it
+ * has no characters, and only the M1 diffs' units.
  */
 export function checkSet(
   set: CheckSetId,
@@ -306,6 +330,7 @@ export function checkSet(
   const sessions = options.sessions ?? (set === 'pr' || quick ? PR_SESSIONS : NIGHTLY_SESSIONS);
   const minutes = options.minutes ?? (prestige ? FULL_SESSION_MINUTES : PRE_PRESTIGE_MINUTES);
   const otherMinutes = options.minutes ?? (prestige ? OTHER_SESSION_MINUTES : PRE_PRESTIGE_MINUTES);
+  const demoScopes = demoScopesOf(set, options.scopes);
   const has = (id: CheckId): boolean => checks.includes(id);
   const strength =
     has('fusionStrength') || has('mirrors')
@@ -340,6 +365,30 @@ export function checkSet(
           ),
       )
     : [];
+  // The Demo's default sessions, once the prestige is written (C10.7's E2): before B2 a session
+  // stops at wave 30 and the Demo's webs are the full ones, so they would repeat the full rows.
+  const demoUnits = prestige
+    ? demoScopes.flatMap((scope) =>
+        characters
+          .filter((character) => scopeLists(scope, character))
+          .flatMap((character) =>
+            Array.from({ length: sessions }, (_, session): PlanUnit => ({
+              id: demoSessionUnitId(character, scope, session),
+              job: {
+                kind: 'character',
+                config: defaultSessionConfig(
+                  ref,
+                  character,
+                  session,
+                  options.minutes ?? DEMO_SESSION_MINUTES,
+                  'default',
+                  scope,
+                ),
+              },
+            })),
+          ),
+      )
+    : [];
   return {
     set,
     content: ref,
@@ -352,9 +401,11 @@ export function checkSet(
     legacy,
     // 奇點 and the clear land with 傳承 in B5 (implementation-plan-v3 §8.1).
     singularity: options.singularity ?? LEGACY !== null,
+    demoScopes,
     units: [
       ...sessionUnits,
       ...strategyUnits,
+      ...demoUnits,
       ...(has('fusionStrength') ? strengthUnits(ref, strength) : []),
       ...(has('mirrors') ? mirrorUnits(ref, strength) : []),
       ...(has('doubles') ? comboUnits('double', content, ref, characters) : []),

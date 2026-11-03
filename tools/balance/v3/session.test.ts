@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { num, toNumber } from '../../../src/core/num';
 import { createRng, deriveSeed } from '../../../src/core/rng';
 import { characterGameData } from '../../../src/data';
@@ -23,12 +23,14 @@ import { TEST_V3_WAVES, v3TestData } from '../../../src/sim/testing';
 import { jobOf, runJobs } from '../jobs';
 import { compressIds } from '../session';
 import { builtCharacters, C10_SEED, resolveContent, webOf } from './content';
+import type * as ContentModule from './content';
 import { PRESTIGE } from './prestige';
 import type { PrestigeHook } from './prestige';
 import {
   BOMB_WINDOW_TICKS,
   budgetOf,
   centerShareOf,
+  CLEAR_WAVE,
   characterStartWave,
   damageByClass,
   damageColumns,
@@ -40,6 +42,7 @@ import {
   PRESTIGE_WAVE,
   purchasesOf,
   runCharacterSession,
+  sessionClearWave,
   settlementEarned,
   SNAPSHOT_MINUTES,
   TYPE_COLUMNS,
@@ -52,6 +55,25 @@ import { createStrategy, openNodes } from './strategies';
 import type { WebStrategy, WebStrategyId } from './strategies';
 import { cappedRunConfig, greedySeeds, openVisit, probeFrom, probeFrontiers } from './visit';
 import type { Visit } from './visit';
+
+/**
+ * While `cap` is set, webOf assembles a Demo scope's web with it as the wave cap (lead ruling L3):
+ * a cap the fixture's builds clear, so a session can be seen stopping at its scope's cap.
+ */
+const planted = vi.hoisted(() => ({ cap: null as number | null }));
+vi.mock('./content', async (importOriginal) => {
+  const actual = await importOriginal<typeof ContentModule>();
+  const { assembleWeb } = await import('../../../src/data/web');
+  return {
+    ...actual,
+    webOf: (...args: Parameters<typeof actual.webOf>) => {
+      const [ref, character, scope] = args;
+      if (planted.cap === null || scope === 'full') return actual.webOf(...args);
+      const capped = { ...actual.SCOPE_BY_NAME[scope], waveCap: planted.cap };
+      return assembleWeb(actual.resolveContent(ref), character, capped);
+    },
+  };
+});
 
 const FIXTURE = { fixture: 'B5' } as const;
 const ACCOUNT = { singularityBeaten: false };
@@ -403,6 +425,39 @@ describe('runCharacterSession', () => {
     const demoWeb = webOf(FIXTURE, 'fire', 'demoA');
     expect(cappedRunConfig(demoWeb, webBuild(demoWeb, high), 1, 40).waveCap).toBe(40);
     expect('waveCap' in cappedRunConfig(web, webBuild(web, high), 1, 40)).toBe(false);
+  });
+
+  it("stops a session at its scope's wave cap, else at CLEAR_WAVE, hooks.clearWave over both (C10.7; CLEAR_WAVE kept for a capped scope)", () => {
+    const demoWeb = webOf(FIXTURE, 'fire', 'demoA');
+    expect(demoWeb.scope.waveCap).toBe(40);
+    expect(sessionClearWave(demoWeb.scope)).toBe(40);
+    expect(sessionClearWave(demoWeb.scope, {})).toBe(40);
+    expect(web.scope.waveCap).toBeNull();
+    expect(sessionClearWave(web.scope)).toBe(CLEAR_WAVE);
+    expect(CLEAR_WAVE).toBe(100);
+    expect(sessionClearWave(demoWeb.scope, { clearWave: 7 })).toBe(7);
+    expect(sessionClearWave(web.scope, { clearWave: 7 })).toBe(7);
+    expect(sessionClearWave(webOf(FIXTURE, 'fire', 'demoB').scope)).toBe(40);
+  });
+
+  it("stops at its scope's own wave cap with no clearWave hook: a demoA web capped at 3 ends 'cleared' after the first run clearing wave 3 (C10.7, lead ruling L3; runCharacterSession bypassing sessionClearWave)", () => {
+    const hooks = { prestige: prestigeOnce(() => false) };
+    planted.cap = 3;
+    const capped = (() => {
+      try {
+        return runCharacterSession(config({ scope: 'demoA', minutes: 30 }), hooks);
+      } finally {
+        planted.cap = null;
+      }
+    })();
+    const last = capped.rows.at(-1) as CharacterRunRow;
+    expect(capped.stop).toBe('cleared');
+    expect(last).toMatchObject({ scope: 'demoA', endReason: 'waveCap', highestWaveCleared: 3 });
+    expect(capped.rows.every((row) => row.highestWaveReached <= 3)).toBe(true);
+    expect(capped.rows.slice(0, -1).every((row) => row.highestWaveCleared < 3)).toBe(true);
+    expect(capped.endMinutes).toBeLessThan(30);
+    // The same session uncapped plays to its budget: no fixture build clears CLEAR_WAVE.
+    expect(runCharacterSession(config({ minutes: 30 }), hooks).stop).toBe('budget');
   });
 
   it("floors ratio:x's start wave, at least wave 1 and at most the allowed wave", () => {

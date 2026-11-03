@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { CharacterId } from '../../../../src/data';
-import type { Batch } from '../../../../src/data/web';
+import type { Batch, WebScope } from '../../../../src/data/web';
 import { fixtureContent } from '../../../../src/data/web/testing';
+import type * as ContentModule from '../content';
+import { DEMO_SESSION_MINUTES } from '../session';
 import type { CharacterRunRow, CharacterSessionResult } from '../session';
 import { checkSet } from './run';
 import type { CheckSetOptions } from './run';
@@ -9,6 +11,7 @@ import {
   centerShareCheck,
   centerShareCsv,
   characterFairnessCheck,
+  DEMO_LENGTH_BAND,
   firstHoursCheck,
   legacyCheck,
   legacyUnits,
@@ -20,8 +23,33 @@ import {
   prestigeReturns,
 } from './sessions';
 import { FIRST_HOURS_TOLERANCE, LEGACY_MAX, NEWBIE_BAND } from './targets';
-import { merged, milestones, NO_C7, runRow, sessionResult, sessionResults } from './testing';
+import {
+  demoSessionResults,
+  merged,
+  milestones,
+  NO_C7,
+  runRow,
+  sessionResult,
+  sessionResults,
+} from './testing';
 import type { CheckPlan, CheckResult, UnitResults } from './types';
+
+/** While `cap` is set, SCOPE_BY_NAME's demoA carries it as its wave cap: the rows under a lower cap. */
+const planted = vi.hoisted(() => ({ cap: null as number | null }));
+vi.mock('../content', async (importOriginal) => {
+  const actual = await importOriginal<typeof ContentModule>();
+  const scopes = actual.SCOPE_BY_NAME;
+  return {
+    ...actual,
+    SCOPE_BY_NAME: {
+      full: scopes.full,
+      get demoA(): WebScope {
+        return planted.cap === null ? scopes.demoA : { ...scopes.demoA, waveCap: planted.cap };
+      },
+      demoB: scopes.demoB,
+    },
+  };
+});
 
 /** The nightly plan on the fixture after `batch`: B1 has 熔核 alone, B2 adds 蜂巢, B5 all four. */
 const plan = (batch: Batch = 'B5', options: CheckSetOptions = {}): CheckPlan =>
@@ -679,5 +707,249 @@ describe('prestigeReturn (轉生後回到最遠波次)', () => {
       sessions('fire', 4, () => ({ rows: [runRow()], stop: 'prestigePoint' })),
     );
     expect(statusOf(prestigeReturnCheck(plan('B1'), b1), 'fire')).toBe('n/a noPrestige');
+  });
+});
+
+describe("the Demo's rows (C10.7)", () => {
+  const afterB2 = (): CheckPlan => plan('B2', { prestige: true });
+  /** `count` demoA default sessions of `character`, each made by `make(session)`. */
+  const demo = (
+    character: CharacterId,
+    count: number,
+    make: (session: number) => Partial<CharacterSessionResult>,
+  ): UnitResults =>
+    demoSessionResults(sessions(character, count, (s) => ({ scope: 'demoA', ...make(s) })));
+  /** One run a session at `minutes`, of bestWave `wave`. */
+  const runAt = (character: CharacterId, minutes: number, wave: number) =>
+    ({
+      rows: [runRow({ character, scope: 'demoA', minutes, bestWave: wave, cycleBest: wave })],
+    }) as const;
+
+  it('reads the Demo units at 0, 10, 20, 40 and 60 min only, subject `demoA <c> @ <m> min` (rows past the cap; full sessions read for the Demo)', () => {
+    const p = afterB2();
+    // The full sessions at wave 20, the Demo's at wave 40, by 59 min.
+    const results = merged(
+      sessionResults(
+        sessions('fire', p.sessions, () => ({ rows: [runRow({ minutes: 59, bestWave: 20 })] })),
+      ),
+      demo('fire', p.sessions, () => runAt('fire', 59, 40)),
+    );
+    const rows = pacingCheck(p, results);
+    const demoRows = rows.filter((row) => row.subject.startsWith('demoA'));
+    expect(demoRows.map((row) => row.subject)).toEqual(
+      (['fire', 'summon'] as const).flatMap((c) =>
+        [0, 10, 20, 40, 60].map((m) => `demoA ${c} @ ${m} min`),
+      ),
+    );
+    expect(
+      rows.slice(0, rows.length - demoRows.length).every((row) => !row.subject.startsWith('demoA')),
+    ).toBe(true);
+    expect(statusOf(rows, 'fire @ 60 min')).toBe('FAIL');
+    expect(rowOf(rows, 'demoA fire @ 60 min')).toMatchObject({
+      status: 'pass',
+      target: 'bestWave 40 ±15% (初始值)',
+      measured: `median 40 over ${p.sessions} sessions`,
+      evidence: ['curve_check.csv: fire demoA default 60'],
+    });
+    // 蜂巢 has no Demo session: noData at every minute, never a verdict.
+    expect(
+      demoRows.filter((row) => row.subject.startsWith('demoA summon')).map((row) => row.reason?.id),
+    ).toEqual(['noData', 'noData', 'noData', 'noData', 'noData']);
+    expect(rowOf(rows, 'demoA summon @ 10 min').reason?.detail).toBe(
+      'no demoA default session is read at 10 min',
+    );
+  });
+
+  it("carries a Demo session stopped 'cleared' at 50 min to 60, and drops a budget-stopped one", () => {
+    const p = afterB2();
+    const cleared = demo('fire', 4, () => ({
+      ...runAt('fire', 50, 40),
+      endMinutes: 50 + 1 / 3,
+      stop: 'cleared',
+    }));
+    expect(rowOf(pacingCheck(p, cleared), 'demoA fire @ 60 min')).toMatchObject({
+      status: 'pass',
+      measured: 'median 40 over 4 sessions (4 carried past their end)',
+    });
+    const budget = demo('fire', 4, () => ({
+      ...runAt('fire', 50, 40),
+      endMinutes: 50 + 1 / 3,
+      stop: 'budget',
+    }));
+    expect(statusOf(pacingCheck(p, budget), 'demoA fire @ 60 min')).toBe('n/a noData');
+  });
+
+  it('passes the Demo length at medians 25.5 and 69 min and FAILs at 25.4 and 69.1 (the unwidened 30–60)', () => {
+    const length = (minutes: readonly (number | null)[]): CheckResult =>
+      rowOf(
+        playTimeCheck(
+          afterB2(),
+          demo('fire', minutes.length, (s) => {
+            const value = minutes[s];
+            return value === null || value === undefined
+              ? { stop: 'budget', endMinutes: 90 }
+              : { stop: 'cleared', endMinutes: value };
+          }),
+        ),
+        'demoA fire',
+      );
+    expect([25.5, 69, 25.4, 69.1].map((n) => length([n, n]).status)).toEqual([
+      'pass',
+      'pass',
+      'FAIL',
+      'FAIL',
+    ]);
+    expect(length([45, 45])).toMatchObject({
+      target:
+        'the first run clearing wave 40 ends in 30–60 min ±15% (25.5–69 min) with menus (初始值)',
+      measured: 'median 45 min (2 of 2 sessions clear wave 40; 0 prestiged before the cap)',
+      evidence: ['milestones.csv: fire demoA default endMinutes'],
+    });
+  });
+
+  it('counts a budget-stopped Demo session as never, and prints how many prestiged before the cap (a budget stop counted as a clear)', () => {
+    // One clear at 30 min and two budget stops ending at 40: the median is ∞, not 40.
+    const results = demo('fire', 3, (s) =>
+      s === 0
+        ? {
+            stop: 'cleared',
+            endMinutes: 30,
+            milestones: milestones({ prestigePoint: { minutes: 20, purchases: 60 } }),
+          }
+        : { stop: 'budget', endMinutes: 40 },
+    );
+    expect(rowOf(playTimeCheck(afterB2(), results), 'demoA fire')).toMatchObject({
+      status: 'FAIL',
+      measured: 'median ∞ min (1 of 3 sessions clear wave 40; 1 prestiged before the cap)',
+    });
+    // Pass/FAIL from B2, never info like the full clear's row until B5.
+    expect(
+      rowOf(
+        playTimeCheck(
+          afterB2(),
+          demo('fire', 1, () => ({ stop: 'cleared', endMinutes: 50 })),
+        ),
+        'demoA fire',
+      ).status,
+    ).toBe('pass');
+    expect(statusOf(playTimeCheck(afterB2(), {}), 'demoA fire')).toBe('n/a noData');
+    expect(statusOf(playTimeCheck(afterB2(), {}), 'fire')).toBe('n/a noData');
+  });
+
+  it('gives one demoA n/a noPrestige row in each check before B2, the full rows as without a Demo scope (a Demo row FAILing on missing results; a full row changed)', () => {
+    const results = merged(
+      wavesAt(9, [15, 15, 15, 15]),
+      demo('fire', 4, () => ({ ...runAt('fire', 59, 40), stop: 'cleared', endMinutes: 59.3 })),
+    );
+    for (const prestige of [false, true]) {
+      const p = plan('B2', { prestige });
+      const none: CheckPlan = { ...p, demoScopes: [] };
+      for (const check of [pacingCheck, playTimeCheck]) {
+        const rows = check(p, results);
+        const demoRows = rows.filter((row) => row.subject.startsWith('demoA'));
+        expect(rows.slice(0, rows.length - demoRows.length)).toEqual(check(none, results));
+        if (!prestige) {
+          expect(demoRows).toEqual([
+            {
+              id: check === pacingCheck ? 'pacing' : 'playTime',
+              set: 'nightly',
+              name: check === pacingCheck ? '前線節奏' : '遊玩時間',
+              source: check === pacingCheck ? 'impl:474; GDD:208-219' : 'impl:489; gd:794',
+              subject: 'demoA',
+              target:
+                check === pacingCheck
+                  ? 'bestWave 3, 15, 22, 30, 40 at 0, 10, 20, 40, 60 min ±15% (初始值)'
+                  : 'the first run clearing wave 40 ends in 30–60 min ±15% (25.5–69 min) with menus (初始值)',
+              measured: '—',
+              status: 'n/a',
+              reason: {
+                id: 'noPrestige',
+                detail:
+                  'the demoA sessions play through the first prestige to the wave-40 cap (gd:855); ' +
+                  'they are planned once PRESTIGE is written (B2)',
+              },
+              evidence: [],
+            },
+          ]);
+        } else {
+          expect(demoRows.length).toBeGreaterThan(1);
+        }
+      }
+    }
+    // With the prestige and no Demo result, every Demo row is noData: n/a never fails the run.
+    const p = afterB2();
+    const rows = [...pacingCheck(p, wavesAt(9, [15])), ...playTimeCheck(p, wavesAt(9, [15]))];
+    const demoRows = rows.filter((row) => row.subject.startsWith('demoA'));
+    expect(demoRows).toHaveLength(12);
+    expect(new Set(demoRows.map((row) => `${row.status} ${row.reason?.id}`))).toEqual(
+      new Set(['n/a noData']),
+    );
+  });
+
+  it('counts a Demo session that prestiged and then stopped on its budget as never clearing (a prestiged session counted as a clear)', () => {
+    const results = demo('fire', 2, () => ({
+      stop: 'budget',
+      endMinutes: 50,
+      milestones: milestones({ prestigePoint: { minutes: 20, purchases: 60 } }),
+    }));
+    expect(rowOf(playTimeCheck(afterB2(), results), 'demoA fire')).toMatchObject({
+      status: 'FAIL',
+      measured: 'median ∞ min (0 of 2 sessions clear wave 40; 2 prestiged before the cap)',
+    });
+  });
+
+  it('gives Demo rows to the characters the scope lists only: 熔核 and 蜂巢 on B5, never 霜晶 or 雷塔 (Demo rows for a character the scope does not list)', () => {
+    const p = plan('B5', { prestige: true });
+    expect(p.characters).toEqual(expect.arrayContaining(['fire', 'ice', 'lightning', 'summon']));
+    const subjects = [...pacingCheck(p, {}), ...playTimeCheck(p, {})]
+      .map((row) => row.subject)
+      .filter((subject) => subject.startsWith('demoA'));
+    expect(subjects).toEqual([
+      ...(['fire', 'summon'] as const).flatMap((c) =>
+        [0, 10, 20, 40, 60].map((m) => `demoA ${c} @ ${m} min`),
+      ),
+      'demoA fire',
+      'demoA summon',
+    ]);
+  });
+
+  it("reads the scope's own cap: under a planted cap of 30 the 40-min row (wave 30) stays, the 60-min row goes, and the length row and the before-B2 rows name wave 30 (the 60-min row kept under a lower cap)", () => {
+    planted.cap = 30;
+    try {
+      const p = afterB2();
+      const results = demo('fire', p.sessions, () => ({
+        ...runAt('fire', 39, 30),
+        stop: 'cleared',
+        endMinutes: 39.5,
+      }));
+      const demoRows = pacingCheck(p, results).filter((row) => row.subject.startsWith('demoA'));
+      expect(demoRows.map((row) => row.subject)).toEqual(
+        (['fire', 'summon'] as const).flatMap((c) =>
+          [0, 10, 20, 40].map((m) => `demoA ${c} @ ${m} min`),
+        ),
+      );
+      expect(rowOf(demoRows, 'demoA fire @ 40 min')).toMatchObject({
+        status: 'pass',
+        target: 'bestWave 30 ±15% (初始值)',
+      });
+      expect(rowOf(playTimeCheck(p, results), 'demoA fire')).toMatchObject({
+        status: 'pass',
+        target:
+          'the first run clearing wave 30 ends in 30–60 min ±15% (25.5–69 min) with menus (初始值)',
+        measured: `median 39.5 min (${p.sessions} of ${p.sessions} sessions clear wave 30; 0 prestiged before the cap)`,
+      });
+      expect(rowOf(pacingCheck(plan('B2'), {}), 'demoA')).toMatchObject({
+        target: 'bestWave 3, 15, 22, 30 at 0, 10, 20, 40 min ±15% (初始值)',
+        reason: { id: 'noPrestige', detail: expect.stringContaining('to the wave-30 cap') },
+      });
+    } finally {
+      planted.cap = null;
+    }
+  });
+
+  it('budgets a Demo session DEMO_SESSION_MINUTES 90, above the length band top of 69 min, so a passing session is seen clearing (lead ruling E4; a Demo budget under the band)', () => {
+    expect(DEMO_LENGTH_BAND).toEqual([25.5, 69]);
+    expect(DEMO_SESSION_MINUTES).toBe(90);
+    expect(DEMO_SESSION_MINUTES).toBeGreaterThan(DEMO_LENGTH_BAND[1]);
   });
 });

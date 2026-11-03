@@ -98,13 +98,6 @@ export const NIGHTLY_VERSION = 1;
 export const TRIPLE_PARTS = 1;
 /** A shard's target wall time in minutes (初始值): far under GitHub's 6 h a job (G3); never gated. */
 export const SHARD_TARGET_MINUTES = 45;
-/**
- * The scopes the plan names (初始值): checkSet's `full`. Printed only, on the plan's first line
- * (planText); no shard, unit or session reads it, so editing it changes nothing that runs. The
- * Demo's wave-40 checks (which sessions, which rows, which targets) get their own design before
- * B2, and B2 builds to it (Q9 (A)).
- */
-export const NIGHTLY_SCOPES: readonly ScopeName[] = ['full'];
 
 const NIGHTLY_SETS: readonly NightlySet[] = ['nightly', 'weekly'];
 
@@ -175,10 +168,10 @@ export interface PlanShards {
 
 /**
  * The shards of `checks` (design §1.6), only those with units: per character `<c>-sessions`
- * (every strategy's sessions), `<c>-probes` (strength and the mirrors, and the second phase's
- * measures, which read the character's sessions: lead ruling U11), `<c>-doubles`, in the weekly
- * `<c>-triples` in TRIPLE_PARTS parts; then `global-m1` and `global-fuzz`. Every first-phase unit
- * is in exactly one shard.
+ * (every strategy's sessions, and the Demo scopes' default sessions: C10.7's E5), `<c>-probes`
+ * (strength and the mirrors, and the second phase's measures, which read the character's
+ * sessions: lead ruling U11), `<c>-doubles`, in the weekly `<c>-triples` in TRIPLE_PARTS parts;
+ * then `global-m1` and `global-fuzz`. Every first-phase unit is in exactly one shard.
  */
 export function planShards(checks: CheckPlan): PlanShards {
   const shards: ShardSpec[] = [];
@@ -956,12 +949,24 @@ const errorLines = (errors: readonly string[]): string[] => [
   ...(errors.length > ERRORS_SHOWN ? [`… and ${errors.length - ERRORS_SHOWN} more`] : []),
 ];
 
+/**
+ * The scopes the plan's sessions play (C10.7, E13): 'full', then each of the set's Demo scopes
+ * (checks/run.ts' NIGHTLY_SCOPES) with a planned session unit, read off the units' config.scope.
+ */
+export function plannedScopes(checks: CheckPlan): ScopeName[] {
+  const played = new Set(
+    checks.units.flatMap((unit) => (unit.job.kind === 'character' ? [unit.job.config.scope] : [])),
+  );
+  return ['full', ...checks.demoScopes.filter((scope) => played.has(scope))];
+}
+
 /** The plan as the terminal prints it: one line per shard with its units. */
-function planText(nightly: NightlyPlan): string {
+export function planText(nightly: NightlyPlan): string {
   const { json } = nightly;
+  const scopes = plannedScopes(nightly.checks).join(', ');
   return [
     `nightly plan v${json.version}: ${json.set}${json.quick ? ' (quick)' : ''} on ${json.content}, ` +
-      `commit ${json.commit}, fuzzSeed ${json.fuzzSeed}, scopes ${NIGHTLY_SCOPES.join(', ')}`,
+      `commit ${json.commit}, fuzzSeed ${json.fuzzSeed}, scopes ${scopes}`,
     ...json.shards.map(
       (spec) =>
         `  ${spec.id}: ${spec.kind}, ${nightly.units.get(spec.id)?.length ?? 0} units` +

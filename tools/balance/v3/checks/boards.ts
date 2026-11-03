@@ -478,7 +478,11 @@ export function deadNodes(
   return { median: mid, total: nodes.length, evaluated: evaluated.length, nodes: listed };
 }
 
-/** Every session of `character` the plan holds a result for: its units', then its legacy sessions'. */
+/**
+ * Every full-scope session of `character` the plan holds a result for: its units', then its
+ * legacy sessions'. The Demo scopes' sessions are left out (C10.7): deadNodes judges the full
+ * web, and through B2 a Demo session buys what the full session of its index buys until the cap.
+ */
 function characterSessions(
   plan: CheckPlan,
   results: UnitResults,
@@ -486,7 +490,12 @@ function characterSessions(
 ): CharacterSessionResult[] {
   const ids = [
     ...plan.units
-      .filter((unit) => unit.job.kind === 'character' && unit.job.config.character === character)
+      .filter(
+        (unit) =>
+          unit.job.kind === 'character' &&
+          unit.job.config.character === character &&
+          unit.job.config.scope === 'full',
+      )
       .map((unit) => unit.id),
     ...Array.from({ length: plan.sessions }, (_, session) => legacyUnitId(character, session)),
   ];

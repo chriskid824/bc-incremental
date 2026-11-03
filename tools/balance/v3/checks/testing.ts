@@ -21,7 +21,7 @@ import type {
 } from '../session';
 import type { TestWaveReading } from '../testWave';
 import type { C7Parts } from './c7';
-import { legacyUnitId, sessionUnitId } from './types';
+import { demoSessionUnitId, legacyUnitId, sessionUnitId } from './types';
 import type { CheckPlan, CheckResult, PlanUnit, UnitResults } from './types';
 
 /** No C7 part live: a plan's c7 without the probe. */
@@ -148,6 +148,18 @@ export function sessionResults(
   const results: Record<string, JobResult> = {};
   for (const result of sessions) {
     const id = (legacy ? legacyUnitId : sessionUnitId)(result.character, result.session);
+    results[id] = { kind: 'character', result };
+  }
+  return results;
+}
+
+/** The unit results of Demo scope sessions (each one's `scope`), by demoSessionUnitId. */
+export function demoSessionResults(
+  sessions: readonly CharacterSessionResult[],
+): Record<string, JobResult> {
+  const results: Record<string, JobResult> = {};
+  for (const result of sessions) {
+    const id = demoSessionUnitId(result.character, result.scope, result.session);
     results[id] = { kind: 'character', result };
   }
   return results;

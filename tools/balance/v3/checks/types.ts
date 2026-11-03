@@ -8,7 +8,7 @@
 import type { CharacterId } from '../../../../src/data';
 import type { AccountProgress } from '../../../../src/meta/web';
 import type { BalanceJob, JobResult } from '../../jobs';
-import type { ContentRef } from '../content';
+import type { ContentRef, ScopeName } from '../content';
 import type { MeasureId, MeasureReadings } from '../measures';
 import type { CharacterSessionConfig, CharacterSessionResult } from '../session';
 import type { WebStrategyId } from '../strategies';
@@ -191,8 +191,14 @@ export interface CheckPlan {
   readonly legacy: boolean;
   readonly singularity: boolean;
   /**
-   * The first phase: the default sessions, the nightly's other strategies' sessions, and the
-   * measures that read no session.
+   * The Demo scopes the set reads (run.ts' NIGHTLY_SCOPES but 'full' in the nightly and the
+   * weekly, none in pr), held whether or not their sessions are planned (only once the prestige
+   * is written), so evaluate prints their rows from the plan alone.
+   */
+  readonly demoScopes: readonly ScopeName[];
+  /**
+   * The first phase: the default sessions, the nightly's other strategies' sessions, the Demo
+   * scopes' default sessions, and the measures that read no session.
    */
   readonly units: readonly PlanUnit[];
   /** The fusions strength re-measures, with their entries; the mirrors' pairs come from them. */
@@ -215,6 +221,13 @@ export const strategyUnitId = (
 /** A default session's unit id. */
 export const sessionUnitId = (character: CharacterId, session: number): string =>
   strategyUnitId(character, 'default', session);
+
+/** A Demo scope's default session's unit id: `session:fire:demoA:0`, the strategy ids' pattern. */
+export const demoSessionUnitId = (
+  character: CharacterId,
+  scope: ScopeName,
+  session: number,
+): string => `session:${character}:${scope}:${session}`;
 
 /** A second character's session after the first's 傳承 (LEGACY). */
 export const legacyUnitId = (character: CharacterId, session: number): string =>
@@ -254,9 +267,24 @@ export function defaultSessions(
   results: UnitResults,
   character: CharacterId,
 ): CharacterSessionResult[] {
+  return scopeSessions(plan, results, character, 'full');
+}
+
+/**
+ * A character's default sessions in `scope` with results, by session index: the full scope's
+ * (defaultSessions), or a Demo scope's by demoSessionUnitId.
+ */
+export function scopeSessions(
+  plan: CheckPlan,
+  results: UnitResults,
+  character: CharacterId,
+  scope: ScopeName,
+): CharacterSessionResult[] {
   const found: CharacterSessionResult[] = [];
   for (let s = 0; s < plan.sessions; s++) {
-    const result = sessionResultOf(results, sessionUnitId(character, s));
+    const id =
+      scope === 'full' ? sessionUnitId(character, s) : demoSessionUnitId(character, scope, s);
+    const result = sessionResultOf(results, id);
     if (result !== null) found.push(result);
   }
   return found;

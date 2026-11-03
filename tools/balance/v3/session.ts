@@ -1,8 +1,9 @@
 /**
  * One character session (docs/v3 C10 design §1.2): run → settleWebRun → a strategy's visit → next
  * run, on a character's v3 web and characterGameData(), until the first prestige point, the clear
- * or the play-time budget. Deterministic for a given CharacterSessionConfig, which is plain data
- * for the workers. M1 sessions stay in tools/balance/session.ts.
+ * (a capped scope's wave cap: the Demo ends at wave 40) or the play-time budget. Deterministic for
+ * a given CharacterSessionConfig, which is plain data for the workers. M1 sessions stay in
+ * tools/balance/session.ts.
  */
 
 import { lt, toNumber } from '../../../src/core/num';
@@ -11,7 +12,7 @@ import { characterGameData, sourceClass } from '../../../src/data';
 import type { CharacterId, EnemyId, SourceClass } from '../../../src/data';
 import type { Settlement } from '../../../src/meta';
 import { ROW_ENEMIES, rowEnemyOf } from '../../../src/data/web';
-import type { AssembledWeb, RowEnemy } from '../../../src/data/web';
+import type { AssembledWeb, RowEnemy, WebScope } from '../../../src/data/web';
 import {
   boardCounts,
   emptyProgress,
@@ -46,6 +47,12 @@ export const PRE_PRESTIGE_MINUTES = 60;
 export const FULL_SESSION_MINUTES = 360;
 /** Another strategy's session after B2 (初始值): dead-node and greedy readings differ most in gd §9's first two hours. */
 export const OTHER_SESSION_MINUTES = 120;
+/**
+ * A Demo scope's default session after B2 (初始值): above the Demo length row's top (60 min
+ * +15 %, 69), so every passing session is seen clearing its wave cap; a stuck build costs 90 min
+ * of play, not FULL_SESSION_MINUTES.
+ */
+export const DEMO_SESSION_MINUTES = 90;
 /** Snapshot times (初始值): gd §9's checkpoints before the first prestige (gd:829-833). */
 export const SNAPSHOT_MINUTES: readonly number[] = [10, 20, 30, 45];
 /** Milestone waves (初始值): M1's list (tools/balance/report.ts) on to wave 100 (impl:474). */
@@ -224,6 +231,18 @@ export interface SessionHooks {
     startWave: number,
     seeds: readonly number[],
   ) => readonly number[];
+}
+
+/**
+ * The wave whose clear stops a session after B2 (stop (d)): `hooks.clearWave`, else the scope's
+ * wave cap (the Demo ends at its cap, GDD:250), else CLEAR_WAVE; FULL_SCOPE's cap is null, so a
+ * full session stops at wave 100's 奇點.
+ */
+export function sessionClearWave(
+  scope: Pick<WebScope, 'waveCap'>,
+  hooks: Pick<SessionHooks, 'clearWave'> = {},
+): number {
+  return hooks.clearWave ?? scope.waveCap ?? CLEAR_WAVE;
 }
 
 /**
@@ -420,7 +439,8 @@ function describeProgress(progress: CharacterProgress): string {
  * the run stepped with NO_INPUT, settleWebRun, the strategy's visit, the snapshots due, the menu
  * time and one row. It stops (a) before B2, after the first run that ends with cycleBest ≥
  * PRESTIGE_WAVE, recording the prestige point; with a prestige hook, (b) prestiges when it says so
- * and goes on, and (d) stops once a run clears CLEAR_WAVE; (c) at `minutes` of play.
+ * and goes on, and (d) stops once a run clears sessionClearWave: the scope's wave cap (a Demo
+ * scope's 40), else CLEAR_WAVE; (c) at `minutes` of play.
  */
 export function runCharacterSession(
   config: CharacterSessionConfig,
@@ -428,8 +448,8 @@ export function runCharacterSession(
 ): CharacterSessionResult {
   const { character, economy } = config;
   const prestige = hooks.prestige === undefined ? PRESTIGE : hooks.prestige;
-  const clearWave = hooks.clearWave ?? CLEAR_WAVE;
   const web = webOf(config.content, character, config.scope);
+  const clearWave = sessionClearWave(web.scope, hooks);
   const data = characterGameData();
   const waveCap = web.scope.waveCap;
   const strategy = (hooks.strategy ?? createStrategy)(config.strategy, web);

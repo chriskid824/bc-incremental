@@ -14,7 +14,14 @@ import { SUMMARY_MAX_BYTES, trimSummary } from './report';
 import { affixesCsv, enemyRowCsv, outerRowCsv } from './rows';
 import { checkSet, SET_CHECKS } from './run';
 import type { PlanRun } from './run';
-import { NO_C7, runRow, sessionResult, sessionResults } from './testing';
+import {
+  demoSessionResults,
+  merged,
+  NO_C7,
+  runRow,
+  sessionResult,
+  sessionResults,
+} from './testing';
 import type { CheckPlan, CheckSetId } from './types';
 
 let root = '';
@@ -306,5 +313,56 @@ describe('npm run checks', () => {
     ]);
     const weekly = { ...nightly, set: 'weekly' as const, checks: SET_CHECKS.weekly };
     expect(planOutputs(weekly, {}).at(-1)).toEqual(['triples.csv', triplesCsv(weekly, {})]);
+  });
+
+  it("appends the Demo's sessions after the full ones, the full rows a byte-identical prefix (C10.7; Demo rows interleaved)", () => {
+    const plan = checkSet(
+      'nightly',
+      fixtureContent('B2'),
+      { fixture: 'B2' },
+      {
+        sessions: 2,
+        c7: NO_C7,
+        prestige: true,
+      },
+    );
+    const make = (scope: 'full' | 'demoA') =>
+      (['fire', 'summon'] as const).flatMap((character) =>
+        [0, 1].map((session) =>
+          sessionResult(character, session, {
+            scope,
+            rows: [
+              runRow({
+                character,
+                scope,
+                session,
+                minutes: 9,
+                bestWave: scope === 'full' ? 12 : 13,
+              }),
+            ],
+          }),
+        ),
+      );
+    const full = sessionResults(make('full'));
+    const both = merged(full, demoSessionResults(make('demoA')));
+    const before = new Map(planOutputs(plan, full));
+    const after = new Map(planOutputs(plan, both));
+    expect([...after.keys()]).toEqual([...before.keys()]);
+    const sessionCsvs = ['runs.csv', 'milestones.csv', 'curve_check.csv', 'budget.csv'];
+    for (const name of sessionCsvs) {
+      const [old, now] = [before.get(name) ?? '', after.get(name) ?? ''];
+      expect(now.startsWith(old), name).toBe(true);
+      // Every added line a demoA one, 熔核's first and 蜂巢's last.
+      const added = now.slice(old.length).trimEnd().split('\n');
+      expect(new Set(added.map((line) => line.split(',')[1])), name).toEqual(new Set(['demoA']));
+      expect([added.at(0)?.split(',')[0], added.at(-1)?.split(',')[0]], name).toEqual([
+        'fire',
+        'summon',
+      ]);
+    }
+    // center_share.csv and every check's own CSV read the full sessions only.
+    for (const [name, text] of before) {
+      if (!sessionCsvs.includes(name)) expect(after.get(name), name).toBe(text);
+    }
   });
 });
