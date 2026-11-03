@@ -126,13 +126,13 @@ export const SUMMON = defineCharacter({
       // 蜂群: drone damage and speed.
       centerBranch('swarm', {
         r1: ranked('damage', 0.3, 4, 'increased', DRONE),
-        r2: ranked('attackSpeed', 0.15, 4, 'more', DRONE),
+        r2: ranked('attackSpeed', 0.18, 4, 'more', DRONE),
         // 分巢: every 5 kills spawn a temporary drone for 6 s.
         a: notable('split', {
           rules: [{ id: 'hiveSplit', every: 5, lifeSec: 6, damagePct: 2, maxLive: 8 }],
         }),
         r3: ranked('damage', 0.3, 3, 'increased', DRONE),
-        r4: ranked('attackSpeed', 0.15, 3, 'more', DRONE),
+        r4: ranked('attackSpeed', 0.18, 3, 'more', DRONE),
         // 自爆協議: a drone's last impact before it flies home explodes (radius 80, 150%).
         // Interim until the engine's lastImpact (P1): a third of the impacts explode.
         b: notable('self-destruct', {
@@ -145,7 +145,7 @@ export const SUMMON = defineCharacter({
           ],
         }),
         r5: ranked('damage', 0.3, 3, 'increased', DRONE),
-        r6: ranked('attackSpeed', 0.15, 3, 'more', DRONE),
+        r6: ranked('attackSpeed', 0.18, 3, 'more', DRONE),
         // 蜂后: one drone becomes the queen (×1.5 size, ×2 damage); the others deal +20% to its
         // target. Interim until the engine's per-drone roles (P2): the swarm's average, +40%.
         c: notable('queen', { modifiers: [more('damage', 0.4, DRONE)] }),
