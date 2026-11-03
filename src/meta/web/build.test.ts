@@ -200,6 +200,21 @@ describe('webBuild (§5.1)', () => {
     expect(bare.stats.values.maxLife).toBe(100);
     expect(bare.signature).toBe(fire.def.signature);
   });
+
+  it('adds 5 % damage more per 迴響 ever earned, as one term, and nothing before any', () => {
+    const bare = webBuild(fire, owning({ [R1]: 1 }));
+    expect(webBuild(fire, { ...owning({ [R1]: 1 }), resonanceEarned: 0 })).toEqual(bare);
+    const earned = webBuild(fire, {
+      ...owning({ [R1]: 1 }),
+      resonanceEarned: 11,
+      // The balance does not matter: spending 迴響 never weakens (gd:778).
+      wallet: { shards: ZERO, cores: 0, resonance: 0 },
+    });
+    const extra = earned.stats.scoped.filter(
+      (mod) => !bare.stats.scoped.includes(mod) && mod.stat === 'damage',
+    );
+    expect(extra).toEqual([{ stat: 'damage', kind: 'more', value: 0.05 * 11 }]);
+  });
 });
 
 describe('webRunConfig', () => {
