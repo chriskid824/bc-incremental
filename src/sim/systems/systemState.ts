@@ -663,6 +663,13 @@ export interface DroneLayout {
   readonly turretPayload: readonly (Payload | null)[];
   /** The timed rows' tables in a build with a spawnDrone effect, its `live` all 0; else null. */
   readonly spawnSpecs: SpawnSpecs | null;
+  /**
+   * Every turret shot's 加農砲 splash, its radius squared (BuildFlags.turretSplash through sizeOf;
+   * 0 for none), and its 特斯拉塔 jumps (BuildFlags.turretChains through countOf), for the run's
+   * turrets alike (C5.9).
+   */
+  readonly turretSplashSq: number;
+  readonly turretJumps: number;
 }
 
 /**
@@ -688,7 +695,8 @@ export interface DronePool extends DroneViewState {
   readonly dockY: Float64Array;
   /**
    * The enemy each slot dashes at (every DRONE_DASH slot has one), or that its sortie ended on
-   * while it flies home; null for none.
+   * while it flies home or, under 蟲海 (BuildFlags.dronesStay), hovers to pick again; null for
+   * none.
    */
   readonly target: (Enemy | null)[];
   /** The first tick each slot may pick again. */
@@ -727,11 +735,21 @@ export interface DronePool extends DroneViewState {
   readonly impacts: Int16Array;
   readonly splashSq: Float64Array;
   readonly turretPayload: (Payload | null)[];
-  /** An impact's within() output (impactAt, src/sim/systems/drones.ts). */
+  /**
+   * An impact's within() output (impactAt, src/sim/systems/drones.ts), and a turret shot's
+   * splash's (turretArrival, src/sim/systems/shots.ts), which the projectile stage lists after
+   * the drone stage's last impact.
+   */
   readonly splash: Enemy[];
   /** One turret firing's targets, picked[0 .. pickedCount) (C5.4). */
   readonly picked: Enemy[];
   pickedCount: number;
+  /**
+   * DroneLayout's turret splash squared and jumps, read by every turret shot's arrival
+   * (turretArrival, src/sim/systems/shots.ts), which lists the splash in `splash`.
+   */
+  readonly turretSplashSq: number;
+  readonly turretJumps: number;
   /** A turret firing's later picks: shootable, and not one of the firing's targets yet (C5.4). */
   readonly turretAccept: (enemy: Enemy) => boolean;
 }
@@ -808,6 +826,8 @@ export function createDronePool(
     splash: [],
     picked: [],
     pickedCount: 0,
+    turretSplashSq: layout.turretSplashSq,
+    turretJumps: layout.turretJumps,
     turretAccept: (enemy) => shootable(enemy) && !isPicked(pool, enemy),
   };
   return pool;

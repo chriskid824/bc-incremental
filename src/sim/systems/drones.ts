@@ -55,6 +55,15 @@
  * the others keeping their order. A spawn past the summon cap, fixed and timed rows together, or
  * past its effect's maxLive is refused and counted (summonCapped).
  *
+ * The summon policies (C5.9) are BuildFlags that B1's rule modules set: 鎖定信標
+ * (summonEliteFirst) runs pickOuter's and pickNearest's tiers over the elites and bosses first
+ * and makes them a turret's focus targets at any distance; 蟲海 multiplies the drones at the fill
+ * (droneCountMult, src/sim/emitters/drone.ts) and sends a drone whose sortie is spent at the next
+ * target rather than home, or on at the one it ended on while that lives in the arena and no
+ * other is found (dronesStay); 加農砲 and 特斯拉塔 change the turrets' rate (their
+ * emitter's interval), the splash around their shots' targets and their shots' chain jumps
+ * (src/sim/systems/shots.ts turretArrival). The droneSpeed stat is in every row's step.
+ *
  * Kills inside the stage only mark their enemy dead, and enemy objects are never reused, so a
  * target a slot keeps from an earlier tick is alive or reads dead.
  */
@@ -84,7 +93,7 @@ import {
   DRONE_KIND_TURRET,
   DRONE_RETURN,
 } from '../types';
-import { focused } from './context';
+import { focused, toughFocus } from './context';
 import type { Enemy, RunContext } from './context';
 import { MOTION_HOMING, spawnShot } from './shots';
 import { AIM_OUTER, NEVER_LEAVES } from './systemState';
@@ -173,7 +182,10 @@ function docked(
  * A dashing slot: a target that died or was pushed out of the arena is lost (lose). Otherwise
  * the slot steps towards the target's center and arrives when the step reaches its edge: it
  * snaps to the center and impacts, unless the target is in its cooldown memory, where it waits
- * on it until the entry expires.
+ * on it until the entry expires. Its sortie's last impact sends it home, or under 蟲海
+ * (BuildFlags.dronesStay) refills its impacts, and the slot picks the next target as one that
+ * lost its target does, at once when its clock allows and hovering until then, but keeps this
+ * one for a pick that finds nothing (repick).
  */
 function dash(
   ctx: RunContext,
@@ -203,8 +215,16 @@ function dash(
     remember(ds, s, t.id, now + cooldownTicks(ds.coolTicks[em.index] as number, m));
     const left = (ds.impactsLeft[s] as number) - 1;
     ds.impactsLeft[s] = left;
-    if (left === 0) ds.mode[s] = DRONE_RETURN;
-    else if (!t.alive) lose(ctx, ds, s, now);
+    if (left === 0) {
+      // 蟲海 (BuildFlags.dronesStay): a full sortie at once, at the next target, as a drone that
+      // lost its target picks, but keeping this one: on at it when that finds nothing, home
+      // only when it is dead or out of the arena too (repick).
+      if (ctx.build.flags.dronesStay) {
+        ds.impactsLeft[s] = ds.impacts[em.index] as number;
+        if (now >= (ds.nextPick[s] as number)) repick(ctx, ds, s, now);
+        else ds.mode[s] = DRONE_HOVER;
+      } else ds.mode[s] = DRONE_RETURN;
+    } else if (!t.alive) lose(ctx, ds, s, now);
   } else {
     const k = step / dist;
     ds.x[s] = x + dx * k;
@@ -223,12 +243,27 @@ function lose(ctx: RunContext, ds: DronePool, s: number, now: number): void {
   else ds.mode[s] = DRONE_HOVER;
 }
 
-/** Slot s picks: it dashes at what it found from the next tick on, or flies home. */
+/**
+ * Slot s picks: it dashes at what it found from the next tick on, or flies home. Under 蟲海
+ * (BuildFlags.dronesStay) a pick that finds nothing falls back on the target the slot's spent
+ * sortie ended on (kept), so the slot dashes on at it and waits out its cooldown memory, as
+ * between a sortie's impacts; it flies home only when there is none.
+ */
 function repick(ctx: RunContext, ds: DronePool, s: number, now: number): void {
-  const t = pickOuter(ctx, s);
+  const t = pickOuter(ctx, s) ?? (ctx.build.flags.dronesStay ? kept(ds, s) : null);
   ds.nextPick[s] = now + PICK_TICKS;
   if (t !== null) engage(ds, s, t);
   else ds.mode[s] = DRONE_RETURN;
+}
+
+/**
+ * 蟲海 (BuildFlags.dronesStay): the target slot s's spent sortie ended on, which it keeps while it
+ * picks again (dash), hovering too, when that target is still alive in the arena; null when it is
+ * not, and for a slot that lost its target (lose), which keeps none.
+ */
+function kept(ds: DronePool, s: number): Enemy | null {
+  const e = ds.target[s] as Enemy | null;
+  return e !== null && e.alive && !outOfArena(e) ? e : null;
 }
 
 /** Slot s dashes at `t`: the only way into DASH, which writes the target, its id and the mode. */
@@ -437,9 +472,15 @@ function chased(ds: DronePool, e: Enemy, s: number): boolean {
  * center is in the arena, not in the slot's cooldown memory, and that no other slot dashes at,
  * the lowest id on ties; failing that, the farthest such one another slot dashes at, the lowest
  * id on ties; null for none. One reverse scan, which tests the arena, the memory and the chase
- * only on an enemy that would rank first. Draws nothing.
+ * only on an enemy that would rank first. Under 鎖定信標 (BuildFlags.summonEliteFirst) the same
+ * two tiers run over the alive tough enemies first (pickOuterTough), and over every enemy only
+ * when they find none; a run without it pays the one flag test. Draws nothing.
  */
 export function pickOuter(ctx: RunContext, s: number): Enemy | null {
+  if (ctx.build.flags.summonEliteFirst) {
+    const t = pickOuterTough(ctx, s);
+    if (t !== null) return t;
+  }
   const ds = ctx.sys.drones;
   const now = ctx.now;
   const enemies = ctx.enemies;
@@ -472,14 +513,54 @@ export function pickOuter(ctx: RunContext, s: number): Enemy | null {
 }
 
 /**
+ * pickOuter's tiers over the alive tough enemies (Enemy.tough: elites and bosses) alone, at any
+ * distance: the farthest unchased one, then the farthest one another slot dashes at, each
+ * the lowest id on ties, with pickOuter's rejects; null for none (鎖定信標, C5.9).
+ */
+function pickOuterTough(ctx: RunContext, s: number): Enemy | null {
+  const ds = ctx.sys.drones;
+  const now = ctx.now;
+  const enemies = ctx.enemies;
+  let best = -1;
+  let bestE: Enemy | null = null;
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i] as Enemy;
+    if (!e.alive || !e.tough) continue;
+    const d = e.dist;
+    if (d < best) continue;
+    if (outOfArena(e) || inMemory(ds, s, e.id, now) || chased(ds, e, s)) continue;
+    best = d;
+    bestE = e;
+  }
+  if (bestE !== null) return bestE;
+  const mode = ds.mode;
+  const target = ds.target;
+  let bestC: Enemy | null = null;
+  for (let o = 0; o < ds.count; o++) {
+    if (o === s || mode[o] !== DRONE_DASH) continue;
+    const e = target[o] as Enemy;
+    if (!e.tough || !e.alive || outOfArena(e) || inMemory(ds, s, e.id, now)) continue;
+    if (bestC === null || e.dist > bestC.dist || (e.dist === bestC.dist && e.id < bestC.id)) {
+      bestC = e;
+    }
+  }
+  return bestC;
+}
+
+/**
  * The enemy spirit s picks with aim 'nearest' (K6): the alive enemy nearest to the row (squared
  * distance from its position) whose center is in the arena, not in the row's cooldown memory,
  * and that no other row dashes at, the lowest id on ties; failing that, the nearest such one
  * another row dashes at, the lowest id on ties; null for none. One forward scan of the enemies,
  * in id order, which tests the arena, the memory and the chase only on an enemy that would rank
- * first; then the other rows' targets. Draws nothing.
+ * first; then the other rows' targets. Under 鎖定信標 (BuildFlags.summonEliteFirst) the same
+ * two tiers run over the alive tough enemies first (pickNearestTough). Draws nothing.
  */
 export function pickNearest(ctx: RunContext, s: number): Enemy | null {
+  if (ctx.build.flags.summonEliteFirst) {
+    const t = pickNearestTough(ctx, s);
+    if (t !== null) return t;
+  }
   const ds = ctx.sys.drones;
   const now = ctx.now;
   const enemies = ctx.enemies;
@@ -509,6 +590,50 @@ export function pickNearest(ctx: RunContext, s: number): Enemy | null {
     if (o === s || mode[o] !== DRONE_DASH) continue;
     const e = target[o] as Enemy;
     if (!e.alive || outOfArena(e) || inMemory(ds, s, e.id, now)) continue;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    const d = dx * dx + dy * dy;
+    if (bestC === null || d < bestD || (d === bestD && e.id < bestC.id)) {
+      bestC = e;
+      bestD = d;
+    }
+  }
+  return bestC;
+}
+
+/**
+ * pickNearest's tiers over the alive tough enemies alone: the nearest unchased one to the row,
+ * then the nearest one another row dashes at, each the lowest id on ties, with pickNearest's
+ * rejects; null for none (鎖定信標, C5.9).
+ */
+function pickNearestTough(ctx: RunContext, s: number): Enemy | null {
+  const ds = ctx.sys.drones;
+  const now = ctx.now;
+  const enemies = ctx.enemies;
+  const x = ds.x[s] as number;
+  const y = ds.y[s] as number;
+  let best = Infinity;
+  let bestE: Enemy | null = null;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i] as Enemy;
+    if (!e.alive || !e.tough) continue;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    const d = dx * dx + dy * dy;
+    if (!(d < best)) continue;
+    if (outOfArena(e) || inMemory(ds, s, e.id, now) || chased(ds, e, s)) continue;
+    best = d;
+    bestE = e;
+  }
+  if (bestE !== null) return bestE;
+  const mode = ds.mode;
+  const target = ds.target;
+  let bestC: Enemy | null = null;
+  let bestD = Infinity;
+  for (let o = 0; o < ds.count; o++) {
+    if (o === s || mode[o] !== DRONE_DASH) continue;
+    const e = target[o] as Enemy;
+    if (!e.tough || !e.alive || outOfArena(e) || inMemory(ds, s, e.id, now)) continue;
     const dx = e.x - x;
     const dy = e.y - y;
     const d = dx * dx + dy * dy;
@@ -617,8 +742,11 @@ function impact(
  * picked yet, focus targets first (DronePool.turretAccept), else at the nearest alive one. Each
  * shot of a signature turret counts as a shot of the attack (nextShotSteady), a refused one too.
  * The turretFire event carries the shots the firing tried, PROJECTILE_CAP's refusals included,
- * and the repeats waiting for a counted firing follow it. Allocates nothing but the event once
- * DronePool.picked has grown to the largest count a firing has rolled.
+ * and the repeats waiting for a counted firing follow it. Under 鎖定信標
+ * (BuildFlags.summonEliteFirst) its focus targets, for the first shot and the later ones alike,
+ * are the elites and bosses at any distance (toughFocus) rather than those near the player
+ * (focused). Allocates nothing but the event once DronePool.picked has grown to the largest
+ * count a firing has rolled.
  */
 function turretStep(ctx: RunContext, ds: DronePool, s: number, em: EmitterRuntime): void {
   const acc = ds.acc;
@@ -627,7 +755,10 @@ function turretStep(ctx: RunContext, ds: DronePool, s: number, em: EmitterRuntim
   while ((acc[s] as number) >= interval) {
     const x = ds.x[s] as number;
     const y = ds.y[s] as number;
-    const first = pickTargetInGrid(ctx.grid, x, y, ctx.shootable, focused);
+    // 鎖定信標: the elites and bosses at any distance are its focus targets, in place of those
+    // near the player.
+    const focus = ctx.build.flags.summonEliteFirst ? toughFocus : focused;
+    const first = pickTargetInGrid(ctx.grid, x, y, ctx.shootable, focus);
     if (first === null) {
       acc[s] = interval - em.cadence;
       return;
@@ -650,7 +781,7 @@ function turretStep(ctx: RunContext, ds: DronePool, s: number, em: EmitterRuntim
       const steady = counted ? nextShotSteady(ctx, em) : false;
       spawnShot(ctx, MOTION_HOMING, x, y, 0, 0, until, p, 1, 1, 0, 0, -1, steady, -1, em.index, t);
       fired++;
-      if (k + 1 < n) t = pickTargetInGrid(ctx.grid, x, y, ds.turretAccept, focused);
+      if (k + 1 < n) t = pickTargetInGrid(ctx.grid, x, y, ds.turretAccept, focus);
     }
     ds.targetId[s] = first.id;
     ctx.events.push({

@@ -190,6 +190,7 @@ describe('shock', () => {
     shardsHeld: 0,
     enemiesInAura: 0,
     highestHpId: 0,
+    minionCount: 0,
     ctx: null,
   });
 
@@ -280,6 +281,7 @@ describe('poison', () => {
       shardsHeld: 0,
       enemiesInAura: 0,
       highestHpId: 0,
+      minionCount: 0,
       ctx: null,
     };
     expect(scaling.read(ev)).toBe(5);

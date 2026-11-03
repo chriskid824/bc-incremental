@@ -25,11 +25,14 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
  * combo stacks as they are at the instance (src/sim/systems/combo.ts). `shardsHeld`: the shards
  * the player holds, the wallet the run started with (RunConfig.walletShards) plus the run's own
  * (SimState.shards). `enemiesInAura`: the alive enemies an aura pulse of the build would reach, 0
- * without an aura emitter (src/sim/emitters/aura.ts). Both are computed once a tick, after the
- * enemies move and before the first stage that can hit (src/sim/systems/globals.ts). The last
- * three are run variables that need no target. A target variable reads 0 without a target, and a
- * run variable 0 outside a run (estimates). The simulation reads each variable through a registry
- * typed over this list (src/sim/build/eval.ts), so a new variable lands with its reader.
+ * without an aura emitter (src/sim/emitters/aura.ts). `minionCount`: the live timed rows a
+ * spawnDrone effect appended to the drone pool (its spirits and small drones; gd:572's
+ * 「場上每有 1 架小無人機」), never the fixed drones and turrets. The three are computed once a tick,
+ * after the enemies move and before the first stage that can hit (src/sim/systems/globals.ts).
+ * The last four are run variables that need no target. A target variable reads 0 without a
+ * target, and a run variable 0 outside a run (estimates). The simulation reads each variable
+ * through a registry typed over this list (src/sim/build/eval.ts), so a new variable lands with
+ * its reader.
  */
 export const SCALING_VARS = [
   'chainJump',
@@ -42,6 +45,7 @@ export const SCALING_VARS = [
   'comboStacks',
   'shardsHeld',
   'enemiesInAura',
+  'minionCount',
 ] as const;
 export type ScalingVar = (typeof SCALING_VARS)[number];
 

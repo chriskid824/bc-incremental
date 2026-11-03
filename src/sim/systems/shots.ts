@@ -21,8 +21,10 @@
  * which begins the attack and runs its chain, and its other cone hits are plain hits
  * (src/sim/emitters/fan.ts); and so is the arrival of a signature emitter's homing shot, a
  * turret's (src/sim/systems/drones.ts): its hit is the attack's primary hit and its chain
- * follows, as at a volley projectile's arrival (chainAttack, src/sim/combat/chain.ts). The
- * volley's projectiles and the pool share PROJECTILE_CAP (src/sim/caps.ts).
+ * follows, as at a volley projectile's arrival (chainAttack, src/sim/combat/chain.ts). A granted
+ * turret's shot is one too under 特斯拉塔's jumps, and every turret shot's arrival hits the
+ * splash around its target under 加農砲 (turretArrival, C5.9). The volley's projectiles and the
+ * pool share PROJECTILE_CAP (src/sim/caps.ts).
  */
 
 import { PROJECTILE_CAP, SHOT_MEMORY } from '../caps';
@@ -289,11 +291,10 @@ function moveSlot(shots: ShotPool, from: number, to: number): void {
 /**
  * A homing shot: it expires at `until`; a dead target gives way to the alive enemy nearest to
  * the shot, any enemy, or the shot fizzles; then it flies projectileStep towards the target and
- * arrives by the volley's arrival rule. A signature emitter's shot (owner ≥ 0 and SIGNATURE: a
- * turret's of the swarm) arrives as a volley projectile does, as one attack: its primary hit,
- * with PRIMARY, and its chain (chainAttack). Any other, an effect's or a granted turret's, hits
- * its target at its scale as a plain hit. Its targets are not the volley's: they count nothing
- * in Enemy.inbound.
+ * arrives by the volley's arrival rule. An emitter's shot (owner ≥ 0: a turret's, the only
+ * homing shots an emitter fires) arrives as turretArrival says. An effect's hits its target at
+ * its scale as a plain hit. Its targets are not the volley's: they count nothing in
+ * Enemy.inbound.
  */
 function stepHoming(ctx: RunContext, s: number): void {
   const shots = ctx.shots;
@@ -326,16 +327,72 @@ function stepHoming(ctx: RunContext, s: number): void {
     const origin = shots.origin[s] as number;
     const owner = shots.owner[s] as number;
     endShot(shots, s);
-    if (owner >= 0 && (p.flags & SIGNATURE) !== 0) {
-      chainAttack(ctx, p, target, ctx.chainCount, steady, depth, origin);
-    } else {
-      hitWithPayload(ctx, target, p, 0, scale, null, null, steady, depth, origin);
-    }
+    // Turret shots are the only homing shots that carry an owner (an effect's shot has −1); a
+    // new homing emitter whose shots carry one must not take this path.
+    if (owner >= 0) turretArrival(ctx, target, p, scale, steady, depth, origin);
+    else hitWithPayload(ctx, target, p, 0, scale, null, null, steady, depth, origin);
   } else {
     const k = step / dist;
     shots.x[s] = x + dx * k;
     shots.y[s] = y + dy * k;
   }
+}
+
+/**
+ * A turret's shot of payload `p` arrives at `target` (C5.4, C5.9). Under 加農砲's splash
+ * (DronePool.turretSplashSq above 0) every enemy alive within it of the target's center is
+ * listed first (DronePool.splash), as a drone's impact lists its splash, so the children its
+ * kills split into are not among them. The target then takes its hit: a signature turret's shot
+ * is one attack of the signature, as a volley projectile's arrival, its primary hit with PRIMARY
+ * and its chain (chainAttack) of ctx.chainCount + 特斯拉塔's jumps (DronePool.turretJumps) when
+ * the payload chains; a granted turret's is a plain hit at the shot's scale, or with jumps an
+ * attack of its own, the hit counted in its budget, whose chain takes the jumps whatever the
+ * payload's `chains`. Then each other listed enemy still alive at its turn takes one plain hit of
+ * `p` at the shot's scale, in id order, none of which chains, and one impact event follows, of no
+ * drone (droneId −1), at the target with the splash's radius and its listed count, which the
+ * renderer draws; it raises no center event.
+ */
+function turretArrival(
+  ctx: RunContext,
+  target: Enemy,
+  p: Payload,
+  scale: number,
+  steady: boolean,
+  depth: number,
+  origin: number,
+): void {
+  const ds = ctx.sys.drones;
+  const r2 = ds.turretSplashSq;
+  const splash = ds.splash;
+  const n = r2 > 0 ? ctx.grid.within(target.x, target.y, r2, splash) : 0;
+  const jumps = ds.turretJumps;
+  if ((p.flags & SIGNATURE) !== 0) {
+    chainAttack(ctx, p, target, ctx.chainCount + jumps, steady, depth, origin);
+  } else if (jumps > 0) {
+    beginAttack(ctx);
+    ctx.chainBudget.hits++;
+    hitWithPayload(ctx, target, p, 0, scale, null, null, steady, depth, origin);
+    chainFrom(ctx, p, target, jumps, steady, depth, origin);
+    endAttack(ctx);
+  } else {
+    hitWithPayload(ctx, target, p, 0, scale, null, null, steady, depth, origin);
+  }
+  if (n === 0) return;
+  for (let i = 0; i < n; i++) {
+    const e = splash[i] as Enemy;
+    if (e !== target && e.alive) {
+      hitWithPayload(ctx, e, p, 0, scale, null, null, steady, depth, origin);
+    }
+  }
+  ctx.events.push({
+    type: 'impact',
+    droneId: -1,
+    x: target.x,
+    y: target.y,
+    radius: Math.sqrt(r2),
+    targetId: target.id,
+    count: n,
+  });
 }
 
 /**

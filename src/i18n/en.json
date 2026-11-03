@@ -184,6 +184,7 @@
   "stat.areaSize": "Area size",
   "stat.bombRadius": "Explosion radius",
   "stat.spreadRadius": "Spread distance",
+  "stat.droneSpeed": "Drone speed",
   "enemy.triangle.name": "Triangle",
   "enemy.triangle.plural": "Triangles",
   "enemy.square.name": "Square",

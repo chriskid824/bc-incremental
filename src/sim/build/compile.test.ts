@@ -108,6 +108,13 @@ describe('compileBuild', () => {
       poisonSlowPer: 0,
       poisonSlowMax: 0,
       spreadFactor: 1,
+      summonEliteFirst: false,
+      droneCountMult: 1,
+      dronesStay: false,
+      turretRateMult: 1,
+      turretSplash: 0,
+      turretChains: 0,
+      minionCount: false,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

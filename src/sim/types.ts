@@ -183,8 +183,8 @@ export const DRONE_KIND_TURRET = 1;
 export const DRONE_KIND_SPIRIT = 2;
 /**
  * DroneViewState.mode: a drone docked at its dock, dashing at its target, hovering where it lost
- * its target until it may pick again, or flying home to dock; a turret fixed in its seat. A
- * spirit only dashes or hovers.
+ * its target, or under 蟲海 where its spent sortie ended, until it may pick again, or flying home
+ * to dock; a turret fixed in its seat. A spirit only dashes or hovers.
  */
 export const DRONE_DOCKED = 0;
 export const DRONE_DASH = 1;
@@ -210,8 +210,8 @@ export interface DroneViewState {
   readonly prevX: Float64Array;
   readonly prevY: Float64Array;
   /**
-   * The id of the enemy a drone dashes at, or that its sortie ended on while it flies home, or
-   * of a turret's last firing's first target; −1 none.
+   * The id of the enemy a drone dashes at, or that its sortie ended on while it flies home or,
+   * under 蟲海, hovers to pick again, or of a turret's last firing's first target; −1 none.
    */
   readonly targetId: Int32Array;
   /** Its emitter's index in CompiledBuild.emitters; −1 for a spirit. */
@@ -461,6 +461,7 @@ export type SimEvent =
    * Drone `droneId` (DroneViewState.id) impacted enemy `targetId` at (x, y), its center, after
    * its hits: `count` enemies were alive within `radius` of the point as it struck, the target
    * among them, and each that was still alive took one hit (none from a spirit of damagePct 0).
+   * `droneId` −1: a repeat's impact, or a turret shot's 加農砲 splash around its target (C5.9).
    */
   | {
       readonly type: 'impact';

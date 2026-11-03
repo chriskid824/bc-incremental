@@ -167,7 +167,7 @@ describe('computeStatBlock', () => {
   });
 
   it("appends C6b.1's barrageCount: base 0, unscoped, its flat values summed", () => {
-    expect(STAT_IDS.slice(-5, -3)).toEqual(['treasureRate', 'barrageCount']);
+    expect(STAT_IDS.slice(55, 57)).toEqual(['treasureRate', 'barrageCount']);
     expect(BASE_STATS.barrageCount).toBe(0);
     expect(isScopedStat('barrageCount')).toBe(false);
     expect(SCOPED_STATS).toHaveLength(18);
@@ -182,7 +182,7 @@ describe('computeStatBlock', () => {
   });
 
   it("appends E1's areaSize and bombRadius after barrageCount: base 1, unscoped multipliers that increased raises and more multiplies", () => {
-    expect(STAT_IDS.slice(-4, -1)).toEqual(['barrageCount', 'areaSize', 'bombRadius']);
+    expect(STAT_IDS.slice(56, 59)).toEqual(['barrageCount', 'areaSize', 'bombRadius']);
     expect(SCOPED_STATS).toHaveLength(18);
     for (const stat of ['areaSize', 'bombRadius'] as const) {
       expect(BASE_STATS[stat], stat).toBe(1);
@@ -203,9 +203,8 @@ describe('computeStatBlock', () => {
     }
   });
 
-  it("appends E3's spreadRadius: last of 60, base 1, an unscoped multiplier that increased raises and more multiplies", () => {
-    expect(STAT_IDS).toHaveLength(60);
-    expect(STAT_IDS.slice(-2)).toEqual(['bombRadius', 'spreadRadius']);
+  it("appends E3's spreadRadius after bombRadius: base 1, an unscoped multiplier that increased raises and more multiplies", () => {
+    expect(STAT_IDS.slice(58, 60)).toEqual(['bombRadius', 'spreadRadius']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.spreadRadius).toBe(1);
     expect(isScopedStat('spreadRadius')).toBe(false);
@@ -222,6 +221,38 @@ describe('computeStatBlock', () => {
     expect(() => block([tagged])).toThrow(/Tags/);
     const scoped = { stat: 'spreadRadius', kind: 'increased', value: 0.2, scope: 'hub' } as const;
     expect(() => block([scoped])).toThrow(/Tags/);
+  });
+
+  it("appends C5.9's droneSpeed: last of 61, base 1, an unscoped multiplier that increased raises and more multiplies", () => {
+    expect(STAT_IDS).toHaveLength(61);
+    expect(STAT_IDS.slice(-2)).toEqual(['spreadRadius', 'droneSpeed']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.droneSpeed).toBe(1);
+    expect(isScopedStat('droneSpeed')).toBe(false);
+    expect(block([]).values.droneSpeed).toBe(1);
+    // (1 + 0.25 + 0.25) × 1.2: 機隊's 「無人機傷害、速度」 ranks are increased, a ★ may be more.
+    const stats = block([
+      { stat: 'droneSpeed', kind: 'increased', value: 0.25 },
+      { stat: 'droneSpeed', kind: 'increased', value: 0.25 },
+      { stat: 'droneSpeed', kind: 'more', value: 0.2 },
+    ]);
+    expect(stats.values.droneSpeed).toBeCloseTo(1.8, 12);
+    expect(stats.scoped).toEqual([]);
+    // A penalty may take it below 0; the drone pool's fill clamps it there (drone.ts).
+    expect(
+      block([{ stat: 'droneSpeed', kind: 'increased', value: -1.5 }]).values.droneSpeed,
+    ).toBeCloseTo(-0.5, 12);
+    const tagged = { stat: 'droneSpeed', kind: 'increased', value: 0.2, tags: ['minion'] } as const;
+    expect(() => block([tagged])).toThrow(/Tags/);
+    const scoped = { stat: 'droneSpeed', kind: 'increased', value: 0.2, scope: 'hub' } as const;
+    expect(() => block([scoped])).toThrow(/Tags/);
+    const when = {
+      stat: 'droneSpeed',
+      kind: 'increased',
+      value: 0.2,
+      when: [{ targetKind: 'elite' }],
+    } as const;
+    expect(() => block([when])).toThrow(/Tags/);
   });
 
   it('passes the triggers and conversions through', () => {

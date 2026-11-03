@@ -64,8 +64,8 @@ const CURVE_CODE: Readonly<Record<ScalingCurve, CompiledScaling['curve']>> = {
  * (RunContext.evalInput). `now`, `target` and `chainJump` are set before each damage instance
  * reads its stats; `playerLifeFrac`, life / max life, once per tick after the contact step;
  * `comboStacks` wherever the stacks change (src/sim/systems/combo.ts); `shardsHeld`,
- * `enemiesInAura` and `highestHpId` once per tick before the contact step, in a run whose build
- * reads them (src/sim/systems/globals.ts).
+ * `enemiesInAura`, `highestHpId` and `minionCount` once per tick before the contact step, in a
+ * run whose build reads them (src/sim/systems/globals.ts).
  */
 export interface EvalInput {
   now: number;
@@ -94,6 +94,12 @@ export interface EvalInput {
    */
   highestHpId: number;
   /**
+   * The live timed rows (a spawnDrone's spirits) of the drone pool at this tick's globals step,
+   * never its fixed drones and turrets; 0 outside a run and in a run whose build reads no
+   * minionCount (BuildFlags.minionCount).
+   */
+  minionCount: number;
+  /**
    * The run, whose stack caps stacksAtLeast 'max' reads; null outside a run, where no such
    * condition is met.
    */
@@ -103,7 +109,7 @@ export interface EvalInput {
 /**
  * An input for estimates outside a run: no target (target conditions are not met, target
  * variables read 0), full life, no combo stacks, no shards held, no enemy in an aura, no
- * highest-hp enemy and no run.
+ * highest-hp enemy, no timed row and no run.
  */
 export const staticInput = (chainJump = 0): EvalInput => ({
   now: 0,
@@ -114,6 +120,7 @@ export const staticInput = (chainJump = 0): EvalInput => ({
   shardsHeld: 0,
   enemiesInAura: 0,
   highestHpId: 0,
+  minionCount: 0,
   ctx: null,
 });
 
@@ -196,6 +203,7 @@ const SCALING_READERS: { readonly [K in ScalingVar]: (ev: Readonly<EvalInput>) =
   comboStacks: (ev) => ev.comboStacks,
   shardsHeld: (ev) => ev.shardsHeld,
   enemiesInAura: (ev) => ev.enemiesInAura,
+  minionCount: (ev) => ev.minionCount,
 };
 
 /** A ScalingSpec compiled for per-instance evaluation. */

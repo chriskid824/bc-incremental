@@ -380,6 +380,7 @@ describe('frost readers', () => {
       shardsHeld: 0,
       enemiesInAura: 0,
       highestHpId: 0,
+      minionCount: 0,
       ctx: null,
     });
     expect([chilled, frozen, boss, null].map((e) => scaling.read(evOn(e)))).toEqual([0.4, 1, 0, 0]);

@@ -193,6 +193,54 @@ export interface BuildFlags {
    * (src/sim/build/size.ts). 1 for a build without spreadRadius.
    */
   spreadFactor: number;
+  /**
+   * 鎖定信標 (gd:479 「召喚物優先打菁英與 Boss」): every summon's pick takes the elites and bosses
+   * (Enemy.tough) first (src/sim/systems/drones.ts): the drones' and the outer spirits' pickOuter
+   * and the nearest spirits' pickNearest run their tiers over the alive tough enemies before
+   * every enemy, and a turret's focus targets are the tough enemies at any distance, not only
+   * near the player (focused). False: every pick as before. Its +30 % is data.
+   */
+  summonEliteFirst: boolean;
+  /**
+   * 蟲海 (gd:193, :480 「無人機數量 ×2」): every drone emitter's drones, a grant's and the swarm's,
+   * × this whole number ≥ 1 at the fill, before 巨大化 halves them (src/sim/emitters/drone.ts);
+   * never the turrets or the timed rows. The summon cap refuses the rows past it, as ever. 1
+   * without it; compileBuild refuses any other value.
+   */
+  droneCountMult: number;
+  /**
+   * 蟲海's 「撞完不回巢，直接找下一個目標」: a drone whose sortie's impacts are spent starts a full one
+   * at once and picks again as a drone that lost its target does; when that finds nothing it
+   * stays on the target it ended on while that is alive in the arena, waiting out its cooldown
+   * memory, and flies home only when it is not (src/sim/systems/drones.ts dash, repick). The
+   * spirits are not drones: they leave spent. False: it flies home.
+   */
+  dronesStay: boolean;
+  /**
+   * 加農砲 (gd:477 「砲台攻擊頻率 ÷3、傷害 ×4、範圍爆炸」): the factor on every drone emitter's turret
+   * rate (TURRET_RATE, the swarm's turrets too; src/sim/emitters/types.ts emitterInterval), 1/3
+   * for ÷3, and the radius of the explosion around a turret shot's target, sized once through
+   * sizeOf at the fill (src/sim/systems/shots.ts turretArrival): 0 is none, and above it the
+   * turret payloads are tagged area too. Defaults 1 and 0; compileBuild refuses a rate factor
+   * that is not finite and above 0, and a splash below 0 or not finite.
+   */
+  turretRateMult: number;
+  turretSplash: number;
+  /**
+   * 特斯拉塔 (gd:477 「砲台的攻擊連鎖 2 次」): chain jumps every turret shot's arrival adds, a whole
+   * number ≥ 0 read through countOf once at the fill, so 巨大化 halves them: a signature turret's
+   * chain takes ctx.chainCount + these, and a granted turret's hit becomes an attack of its own
+   * whose chain takes them. 0 without it; compileBuild refuses any other value.
+   */
+  turretChains: number;
+  /**
+   * The run counts the live timed rows of its drone pool once a tick into EvalInput.minionCount
+   * (src/sim/systems/globals.ts), which a modifier's scaling reads as minionCount: compileBuild
+   * sets it once the modules have run when a modifier scales on minionCount, the build's or a
+   * module's, and a module that reads the variable otherwise sets it itself. False: the variable
+   * stays 0 and nothing counts it.
+   */
+  minionCount: boolean;
 }
 
 /**
@@ -465,6 +513,13 @@ export function compileBuild(
     poisonSlowPer: 0,
     poisonSlowMax: 0,
     spreadFactor: 1,
+    summonEliteFirst: false,
+    droneCountMult: 1,
+    dronesStay: false,
+    turretRateMult: 1,
+    turretSplash: 0,
+    turretChains: 0,
+    minionCount: false,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -666,6 +721,7 @@ export function compileBuild(
   // So too the per-tick variables (lead ruling G2).
   flags.shardsHeld ||= scoped.some((mod) => mod.scaling?.per === 'shardsHeld');
   flags.enemiesInAura ||= scoped.some((mod) => mod.scaling?.per === 'enemiesInAura');
+  flags.minionCount ||= scoped.some((mod) => mod.scaling?.per === 'minionCount');
   // Only a build that spawns timed rows sizes its drone pool past its fixed rows (C5.7, lead
   // ruling K3).
   flags.spawnsDrones = effects.some((fx) => fx.spec.kind === 'spawnDrone');
@@ -686,6 +742,19 @@ export function compileBuild(
       `comboEcho: delaySec ${echo.delaySec} must be positive and finite, ` +
         `damagePct ${echo.damagePct} in (0, 1]`,
     );
+  }
+  // The summon policies only modules write (C5.9): the fill reads them as they are.
+  if (!(Number.isInteger(flags.droneCountMult) && flags.droneCountMult >= 1)) {
+    throw new Error(`droneCountMult: ${flags.droneCountMult} must be a whole number >= 1`);
+  }
+  if (!(Number.isFinite(flags.turretRateMult) && flags.turretRateMult > 0)) {
+    throw new Error(`turretRateMult: ${flags.turretRateMult} must be finite and above 0`);
+  }
+  if (!(Number.isFinite(flags.turretSplash) && flags.turretSplash >= 0)) {
+    throw new Error(`turretSplash: ${flags.turretSplash} must be finite and >= 0`);
+  }
+  if (!(Number.isInteger(flags.turretChains) && flags.turretChains >= 0)) {
+    throw new Error(`turretChains: ${flags.turretChains} must be a whole number >= 0`);
   }
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
