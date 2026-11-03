@@ -9,6 +9,8 @@ import {
   buy,
   DEFAULT_WEB_ECONOMY,
   emptyProgress,
+  prestige,
+  PRESTIGE_RULES,
   webBuild,
   webStartWave,
 } from '../../../src/meta/web';
@@ -24,7 +26,7 @@ import { jobOf, runJobs } from '../jobs';
 import { compressIds } from '../session';
 import { builtCharacters, C10_SEED, resolveContent, webOf } from './content';
 import type * as ContentModule from './content';
-import { PRESTIGE } from './prestige';
+import { FIRST_PRESTIGE_STALL, LATER_PRESTIGE_STALL, PRESTIGE } from './prestige';
 import type { PrestigeHook } from './prestige';
 import {
   BOMB_WINDOW_TICKS,
@@ -246,14 +248,15 @@ describe('runCharacterSession', () => {
     }
   });
 
-  it('stops before B2 after the first run that ends with cycleBest ≥ PRESTIGE_WAVE', () => {
-    expect(PRESTIGE).toBeNull();
-    expect(defaultSessionMinutes('default')).toBe(PRE_PRESTIGE_MINUTES);
-    expect(defaultSessionMinutes('greedy')).toBe(PRE_PRESTIGE_MINUTES);
+  it('stops without a prestige hook after the first run that ends with cycleBest ≥ PRESTIGE_WAVE', () => {
+    const none = { prestige: null };
+    expect(defaultSessionMinutes('default', null)).toBe(PRE_PRESTIGE_MINUTES);
+    expect(defaultSessionMinutes('greedy', null)).toBe(PRE_PRESTIGE_MINUTES);
 
     const at = (wave: number) => ({ ...emptyProgress('fire'), cycleBest: wave, bestWave: wave });
     const stopped = runCharacterSession(
       config({ minutes: 10, initialProgress: at(PRESTIGE_WAVE) }),
+      none,
     );
     const row = stopped.rows[0] as CharacterRunRow;
     expect(stopped.stop).toBe('prestigePoint');
@@ -267,6 +270,7 @@ describe('runCharacterSession', () => {
 
     const below = runCharacterSession(
       config({ minutes: 6, initialProgress: at(PRESTIGE_WAVE - 1) }),
+      none,
     );
     expect(below.stop).toBe('budget');
     expect(below.milestones.prestigePoint).toBeNull();
@@ -281,12 +285,45 @@ describe('runCharacterSession', () => {
   it("counts the prestige point's purchases after its visit", () => {
     const start = { ...funded(1e30, 1000), cycleBest: PRESTIGE_WAVE, bestWave: PRESTIGE_WAVE };
     const result = runCharacterSession(config({ minutes: 10, initialProgress: start }), {
+      prestige: null,
       strategy: oneEachVisit,
     });
     const row = result.rows[0] as CharacterRunRow;
     expect(result.stop).toBe('prestigePoint');
     expect(row.purchases).toBe(1);
     expect(result.milestones.prestigePoint).toEqual({ minutes: row.minutes, purchases: 1 });
+  });
+
+  it("is B2's: src/meta's transition, prestiging on a stall that leaves the wall observable", () => {
+    expect(PRESTIGE).not.toBeNull();
+    const hook = PRESTIGE as PrestigeHook;
+    expect(defaultSessionMinutes('default')).toBe(FULL_SESSION_MINUTES);
+    expect(PRESTIGE_WAVE).toBe(PRESTIGE_RULES.wave);
+    const at = (cycleBest: number, prestiges = 0) => ({
+      ...emptyProgress('fire'),
+      cycleBest,
+      bestWave: cycleBest,
+      prestiges,
+    });
+    const asks = (cycleBest: number, runsSinceNewBest: number, prestiges = 0): boolean =>
+      hook.shouldPrestige({
+        progress: at(cycleBest, prestiges),
+        runsSinceNewBest,
+        minutes: 40,
+        prestiges,
+      });
+    // Never below wave 30; the first once the cycle stalls FIRST_PRESTIGE_STALL runs.
+    expect(asks(PRESTIGE_WAVE - 1, 50)).toBe(false);
+    expect(asks(PRESTIGE_WAVE, FIRST_PRESTIGE_STALL - 1)).toBe(false);
+    expect(asks(PRESTIGE_WAVE, FIRST_PRESTIGE_STALL)).toBe(true);
+    // Later ones only past the wall's WALL_STALL_RUNS, so the wall milestone is read first.
+    expect(LATER_PRESTIGE_STALL).toBeGreaterThan(WALL_STALL_RUNS);
+    expect(asks(55, WALL_STALL_RUNS, 1)).toBe(false);
+    expect(asks(55, LATER_PRESTIGE_STALL, 1)).toBe(true);
+    const progress = { ...at(40), ranks: { 'fire.center.alpha.r1': 1 } };
+    const applied = hook.apply(web, progress, ACCOUNT, DEFAULT_WEB_ECONOMY);
+    expect(applied.account).toBe(ACCOUNT);
+    expect(applied.progress).toEqual(prestige(progress));
   });
 
   it('gives default sessions the clear and the others two hours once a prestige hook exists', () => {

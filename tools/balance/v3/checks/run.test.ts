@@ -107,7 +107,7 @@ describe('the check sets', () => {
       'fuzz',
       'performance',
     ]);
-    const plan = checkSet('pr', fixtureContent('B2'), B2, { c7: NO_C7 });
+    const plan = checkSet('pr', fixtureContent('B2'), B2, { c7: NO_C7, prestige: false });
     expect(plan.characters).toEqual(['fire', 'summon']);
     expect(plan.units.map((unit) => unit.id)).toEqual(
       (['fire', 'summon'] as const).flatMap((character) =>
@@ -130,7 +130,9 @@ describe('the check sets', () => {
     }
     expect(plan.keystones).toEqual([]);
     // --quick is the nightly's flag: the pr set reads PR_SESSIONS either way.
-    expect(checkSet('pr', fixtureContent('B2'), B2, { c7: NO_C7, quick: true })).toEqual({
+    expect(
+      checkSet('pr', fixtureContent('B2'), B2, { c7: NO_C7, prestige: false, quick: true }),
+    ).toEqual({
       ...plan,
       quick: true,
     });
@@ -172,7 +174,7 @@ describe('the check sets', () => {
       return counts;
     };
     for (const set of ['nightly', 'weekly'] as const) {
-      const plan = checkSet(set, fixtureContent('B2'), B2, { c7: NO_C7 });
+      const plan = checkSet(set, fixtureContent('B2'), B2, { c7: NO_C7, prestige: false });
       expect(plan.checks).toEqual(SET_CHECKS[set]);
       expect(plan.sessions).toBe(NIGHTLY_SESSIONS);
       const units = (sessions: number) => ({
@@ -185,7 +187,11 @@ describe('the check sets', () => {
       });
       expect(kinds(plan)).toEqual(units(NIGHTLY_SESSIONS));
       expect(plan.keystones.length).toBeGreaterThan(0);
-      const quick = checkSet(set, fixtureContent('B2'), B2, { c7: NO_C7, quick: true });
+      const quick = checkSet(set, fixtureContent('B2'), B2, {
+        c7: NO_C7,
+        prestige: false,
+        quick: true,
+      });
       expect([quick.quick, quick.sessions, kinds(quick)]).toEqual([
         true,
         PR_SESSIONS,
@@ -300,7 +306,11 @@ describe("the Demo's sessions (C10.7)", () => {
     expect(
       pr.units.every((unit) => unit.job.kind !== 'character' || unit.job.config.scope === 'full'),
     ).toBe(true);
-    const before = checkSet('nightly', fixtureContent('B2'), B2, { c7: NO_C7, sessions: 2 });
+    const before = checkSet('nightly', fixtureContent('B2'), B2, {
+      c7: NO_C7,
+      prestige: false,
+      sessions: 2,
+    });
     // Held before the prestige, so evaluate prints the Demo's n/a rows; nothing planned.
     expect([before.demoScopes, demoIds(before)]).toEqual([['demoA'], []]);
     const fullOnly = checkSet('nightly', fixtureContent('B2'), B2, {

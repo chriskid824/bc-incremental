@@ -422,10 +422,53 @@ function randomVisit(v: Visit): void {
   }
 }
 
+/**
+ * The ascendancy chain a visit buys after a prestige (gd §1.7, F10): the chosen chain's nodes,
+ * else the first open chain's in web order (n1, n2, final); empty before a prestige or on a web
+ * without ascendancies.
+ */
+export function ascendancyOrder(web: AssembledWeb, progress: CharacterProgress): string[] {
+  if (progress.prestiges < 1) return [];
+  const chosen = progress.ascendancy;
+  const board = web.boards.find(
+    (slot) =>
+      slot.kind === 'asc' &&
+      slot.status === 'open' &&
+      (chosen === null || slot.id === `${web.character}.asc.${chosen}`),
+  );
+  if (board === undefined) return [];
+  const step = (node: WebNode): number => (node.slot.at === 'asc' ? node.slot.step : 0);
+  return web.nodes
+    .filter((node) => node.board === board.id)
+    .sort((a, b) => step(a) - step(b))
+    .map((node) => node.id);
+}
+
+/**
+ * Every strategy's first step after a prestige but random's (which draws them among the rest) and
+ * cheapest's (they cost no shards, so it takes them first anyway): the route to the chain's first
+ * node, then the chain, bought with 迴響. A refusal leaves the rest of the chain to a later visit;
+ * the strategy's own rule runs either way.
+ */
+function ascendancyVisit(v: Visit): void {
+  const order = ascendancyOrder(v.web, v.progress());
+  const first = order[0];
+  if (first === undefined) return;
+  if (!routeTo(v, first) || storedRank(v.progress(), first) === 0) return;
+  walk(v, order);
+}
+
 /** The strategy `id` for one session on `web`; it may keep state from visit to visit. */
 export function createStrategy(id: WebStrategyId, web: AssembledWeb): WebStrategy {
   const evaluations: GreedyEvaluation[] = [];
-  const of = (visit: (v: Visit) => void): WebStrategy => ({ id, visit, evaluations });
+  const of = (visit: (v: Visit) => void): WebStrategy => ({
+    id,
+    visit: (v) => {
+      ascendancyVisit(v);
+      visit(v);
+    },
+    evaluations,
+  });
   const outer = focusOuter(id);
   if (outer !== null) {
     if (!openOuters(web).includes(outer)) {
@@ -443,9 +486,9 @@ export function createStrategy(id: WebStrategyId, web: AssembledWeb): WebStrateg
     case 'greedy':
       return of((v) => greedyRule(v, evaluations));
     case 'random':
-      return of(randomVisit);
+      return { id, visit: randomVisit, evaluations };
     case 'cheapest':
-      return of(cheapestVisit);
+      return { id, visit: cheapestVisit, evaluations };
     case 'balanced':
       return of(balancedVisit(web));
     case 'might-only':

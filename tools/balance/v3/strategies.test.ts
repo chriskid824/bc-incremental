@@ -16,6 +16,7 @@ import { GATED_KINDS } from '../../../src/meta/web/counts';
 import { shortestRoute } from '../../../src/meta/web/path';
 import { webOf } from './content';
 import {
+  ascendancyOrder,
   BASE_WEB_STRATEGIES,
   createStrategy,
   focusOuter,
@@ -442,5 +443,38 @@ describe('cheapest, balanced, might-only and focus', () => {
     // A core short of the eighth: the visit saves, buying nothing past the seven it can.
     const short = visitOf('focus:ice', funded(1e6, 1));
     expect(short.bought).toEqual(centerEight.slice(0, 7));
+  });
+});
+
+describe('ascendancy after a prestige', () => {
+  const ONE = ['n1', 'n2', 'final'].map((step) => `fire.asc.path-one.${step}`);
+  const TWO = ['n1', 'n2', 'final'].map((step) => `fire.asc.path-two.${step}`);
+  const prestiged = (extra: Partial<CharacterProgress> = {}): CharacterProgress => ({
+    ...funded(1e6, 10),
+    wallet: { shards: num(1e6), cores: 10, resonance: 11 },
+    prestiges: 1,
+    ...extra,
+  });
+
+  it('orders the chosen chain, else the first, and none before a prestige', () => {
+    expect(ascendancyOrder(web, funded(1e6))).toEqual([]);
+    expect(ascendancyOrder(web, prestiged())).toEqual(ONE);
+    expect(ascendancyOrder(web, prestiged({ ascendancy: 'path-two' }))).toEqual(TWO);
+  });
+
+  it.each(['default', 'greedy', 'balanced', 'might-only', 'focus:ice'] as const)(
+    '%s routes to the chain and buys it with 迴響 first',
+    (id) => {
+      const { progress } = visitOf(id, prestiged());
+      for (const node of ONE) expect(progress.ranks[node], node).toBe(1);
+      expect(progress.ascendancy).toBe('path-one');
+      expect(progress.wallet.resonance).toBe(8);
+      for (const node of TWO) expect(progress.ranks[node]).toBeUndefined();
+    },
+  );
+
+  it('buys nothing of a chain before a prestige', () => {
+    const { progress } = visitOf('default', funded(1e6, 10));
+    for (const node of [...ONE, ...TWO]) expect(progress.ranks[node]).toBeUndefined();
   });
 });
