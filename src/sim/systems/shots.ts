@@ -130,6 +130,7 @@ export function createShotPool(): ShotPool {
     vy: new Float64Array(n),
     until: new Int32Array(n),
     form: new Uint8Array(n),
+    launched: new Int32Array(n),
     radius: new Float64Array(n),
     scale: new Float64Array(n),
     pierce: new Int32Array(n),
@@ -162,8 +163,9 @@ export function liveProjectiles(ctx: RunContext): number {
  * `scale`, `pierce` of them at most (−1: no limit), and it bounces off the arena's edge
  * `bounce` times. `depth`, `origin` and `steady` are its hits'; `round` the fan round of a cone
  * (−1: none), `owner` its emitter's index (−1: an effect's), `target` a homing shot's first
- * target. Its radius and form start at 0. Returns its slot, or −1 when PROJECTILE_CAP
- * projectiles are in flight, which refuses the shot and counts it in projectilesCapped.
+ * target. Its radius and form start at 0, and its launch tick (ShotPoolState.launched, which
+ * only render reads) is now. Returns its slot, or −1 when PROJECTILE_CAP projectiles are in
+ * flight, which refuses the shot and counts it in projectilesCapped.
  */
 export function spawnShot(
   ctx: RunContext,
@@ -198,6 +200,7 @@ export function spawnShot(
   shots.vy[s] = vy;
   shots.until[s] = until;
   shots.form[s] = 0;
+  shots.launched[s] = ctx.now;
   shots.radius[s] = 0;
   shots.scale[s] = scale;
   shots.pierce[s] = pierce;
@@ -268,6 +271,7 @@ function moveSlot(shots: ShotPool, from: number, to: number): void {
   shots.vy[to] = shots.vy[from] as number;
   shots.until[to] = shots.until[from] as number;
   shots.form[to] = shots.form[from] as number;
+  shots.launched[to] = shots.launched[from] as number;
   shots.radius[to] = shots.radius[from] as number;
   shots.scale[to] = shots.scale[from] as number;
   shots.pierce[to] = shots.pierce[from] as number;

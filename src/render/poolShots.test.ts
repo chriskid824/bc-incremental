@@ -24,6 +24,7 @@ function pool(shots: readonly Shot[]): ShotPoolState {
     vy: new Float64Array(n),
     until: new Int32Array(n),
     form: new Uint8Array(n),
+    launched: new Int32Array(n),
   };
   shots.forEach((shot, s) => {
     state.id[s] = shot.id;

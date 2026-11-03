@@ -26,7 +26,9 @@
  * The hits crit, roll no ailments (Hoshi's Q4 (B) names zone and aura hits only, so segments
  * keep (A)'s: Q4/F7) and raise no hit events: they add to the judgement's tally (PulseAcc), and
  * a judgement with 2 endpoints or more raises one pulse event. The links' endpoints, where they
- * stood at the judgement, go to the emitter's SimState.segments lines for render. The stage runs
+ * stood at the judgement, and their ids (an enemy's, or a drone pool row's) go to the emitter's
+ * SimState.segments lines for render, which draws each end where its endpoint is while it lives
+ * (src/render/segmentLines.ts); nothing in the sim reads the ids. The stage runs
  * after the projectiles and before the zones; nothing it reaches adds a segment emitter or moves
  * a row of the pool.
  */
@@ -138,6 +140,8 @@ function judge(
   const y1 = ln.y1;
   const x2 = ln.x2;
   const y2 = ln.y2;
+  const id1 = ln.id1;
+  const id2 = ln.id2;
   for (let s = 0; s < pairs; s++) {
     const a = ends[pa[s] as number] as Enemy;
     const b = ends[pb[s] as number] as Enemy;
@@ -145,6 +149,8 @@ function judge(
     y1[s] = a.y;
     x2[s] = b.x;
     y2[s] = b.y;
+    id1[s] = a.id;
+    id2[s] = b.id;
   }
   ln.count = pairs;
 }
@@ -199,6 +205,9 @@ function judgePool(
   const y1 = ln.y1;
   const x2 = ln.x2;
   const y2 = ln.y2;
+  const id1 = ln.id1;
+  const id2 = ln.id2;
+  const id = ds.id;
   let pairs = 0;
   if (pair) {
     if (sg.pick1.length < n) growPicks(sg, n);
@@ -234,7 +243,6 @@ function judgePool(
       p2[i] = both ? i1 : -1;
     }
     // Each link once: from i, unless its other end q came first and linked to i too.
-    const id = ds.id;
     for (let i = 0; i < n; i++) {
       if (!all && kind[i] !== DRONE_KIND_DRONE) continue;
       for (let side = 0; side < 2; side++) {
@@ -245,6 +253,8 @@ function judgePool(
         y1[pairs] = y[i] as number;
         x2[pairs] = x[q] as number;
         y2[pairs] = y[q] as number;
+        id1[pairs] = id[i] as number;
+        id2[pairs] = id[q] as number;
         if (every > 0) {
           held.a[pairs] = id[i] as number;
           held.b[pairs] = id[q] as number;
@@ -268,6 +278,8 @@ function judgePool(
       y1[pairs] = y[sa] as number;
       x2[pairs] = x[sb] as number;
       y2[pairs] = y[sb] as number;
+      id1[pairs] = a[h] as number;
+      id2[pairs] = b[h] as number;
       pairs++;
     }
     held.count = pairs;
@@ -412,11 +424,13 @@ function growPairs(sg: SegmentState, n: number): void {
   sg.b = new Int32Array(size);
 }
 
-/** Grows an emitter's line arrays to hold at least `n` links. */
+/** Grows an emitter's line arrays, its endpoints' ids with them, to hold at least `n` links. */
 function growLines(ln: SegmentLines, n: number): void {
   const size = Math.max(n, 2 * ln.x1.length);
   ln.x1 = new Float64Array(size);
   ln.y1 = new Float64Array(size);
   ln.x2 = new Float64Array(size);
   ln.y2 = new Float64Array(size);
+  ln.id1 = new Int32Array(size);
+  ln.id2 = new Int32Array(size);
 }

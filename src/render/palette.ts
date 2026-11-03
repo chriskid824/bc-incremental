@@ -39,6 +39,11 @@ export const COLORS = {
   bulletCore: 0xffe4dc,
   /** The player's shield arc (PlayerState.shield): the player's cyan, lighter. */
   playerShield: 0xcff6ff,
+  /**
+   * A segment's links between drones or summons (src/render/segmentLines.ts): a cooler blue than
+   * the chain cyan of shocked links, so a laser fence reads apart from 雷網.
+   */
+  droneLink: 0x86a8ff,
 } as const;
 
 /** Linear blend of two 0xRRGGBB colors; t = 0 gives a, t = 1 gives b. */

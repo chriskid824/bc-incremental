@@ -535,6 +535,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - **直線碰撞**：每 tick 用 `grid.boxIndices` 取掃過範圍的框（加 `ctx.shotPad` 與子彈半徑）裡的敵人，再加框外的大型敵人（`grid.marked`），精確測試後依（路徑參數、ID）排序，依序打到穿透用完；最近 `SHOT_MEMORY` 個打過的直接穿過。碰到場地邊緣時還有反彈次數就反射，否則結束。`shotPad` 是這局可能生成的種類（`reachableEnemies`，§6）裡非大型敵人的最大半徑，所以生成得到的非大型敵人一定在框內；新的生成來源要加進 `reachableEnemies`，非大型敵人的 `radiusScale` 也不能大於 1，否則會打破這個保證。
 - 池子彈的擊中不是攻擊（沒有序號、連鎖與 `PRIMARY`），只有三個例外：熔岩彈落地、冰錐扇一輪的主要命中（`ShotPool.roundTaken`）、招牌砲台子彈的抵達（§4.6.3）。
 - 效果的小投射物（`projectiles`）的 `owner` 與 `round` 是 −1，不加 `Enemy.inbound`，所以 M1 分散目標的選法不受影響；追蹤的目標死了就改找最近的敵人，沒有就消失。
+- **發射 tick**（V1，給 B1 畫熔岩彈）：`ShotPoolState.launched` 是每一發在 `spawnShot` 寫下的 `ctx.now`（直線、追蹤、拋物都寫，一發一次 store），`compactShots` 的 `moveSlot` 跟著其他槽陣列一起搬。拋物子彈在 `until` 落地，所以 tick t 的飛行進度是 (t − `launched`) ÷ (`until` − `launched`)：發射那個 tick 是 0、落地那個 tick 是 1；`src/render/simViews.ts` 的 `lobProgress(shots, s, now)` 算它（夾在 0 到 1，`now` 可以是 `SimState.tick − 1 + alpha` 這種兩個 tick 之間的值，`until ≤ launched` 讀 1）。模擬不讀它，只給畫面用。
 
 #### 4.7.4 熔岩彈、冰錐扇、三相雷
 
@@ -566,6 +567,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - **脈衝的規則（C8）**：ID 為 `id`、在 tick c 建立、共 n 次的區域，在 (c, c + 15n] 裡 `t ≡ id (mod 15)` 的 tick 脈衝，剛好 n 次，不管是哪個階段建立的，所以同時建立的區域在不同 tick 脈衝。`n = max(1, round(durationSec × 4))`；`expiresAt` = c + 15n，到了 `expiresAt` 或之後的第一個 zones 階段（先跑這個 tick 該有的脈衝）才釋放它、發 `zoneEnd`，所以最後一次脈衝之後它最多還在池裡 14 tick，照樣算進上限。
 - **上限（K5）**：一個來源已經有 16 個效果區域時，新的擠掉它自己最舊的；否則池裡滿 64 個效果區域時擠掉全場最舊的效果區域；招牌區域滿 16 個時擠掉最舊的招牌區域。每次擠掉記 `zonesEvicted`、發 `zoneEnd`（`evicted: true`）。
 - **記錄**：一個區域的參數從建立到結束都留在它的記錄（`ZonePool.record`、`free`），結束時只搬依 ID 排列的槽。沒有任何擊中會新增或結束區域（擊殺與凍結只排佇列），所以脈衝進行中槽不會移動。
+- **畫面讀減速**（V1，給 B1 依資料畫霜火地，不必看角色有沒有冰核心）：`ZonePoolState` 多了兩個唯讀成員，就是池自己的陣列、不另外複製：`record`（依槽，槽 s 的區域的記錄）與 `slow`（依記錄，不是依槽；0 是沒有減速）。槽 s 的減速是 `slow[record[s]]`，`src/render/simViews.ts` 的 `zoneSlowAt(zones, s)` 讀它；較舊的區域結束或被擠掉、槽往前搬時，記錄跟著區域走，所以讀到的一直是那個區域自己的減速。一局每個 tick 不多做任何事。
 - **每次脈衝**：`grid.within` 寫進 `zones.targets`，每隻活著的敵人依 ID 先吃區域的擊中（每秒傷害比例 ÷ 4 不為 0 時），再套區域自己的狀態（異常狀態層數、冰冷、減速），最後是 `inZone` 標記（只有某個 `inZone` 條件指名的來源才寫）。減速與標記維持 16 tick，所以待在區域裡的敵人一直帶著；有區域減速時移動不走快速路徑（`sys.zones.slowApplied`）。只有狀態的區域（`damagePctPerSec` 0）沒有擊中，也不擲骰。
 - **擊中**（`hitPulse`）照 `hitWithPayload` 的順序擲骰並施加異常狀態（Hoshi 的 Q4 (B)）：暴擊 → 點燃 → 中毒、流血、感電的擲骰 → 傷害 → 燃燒 → 其他異常狀態 → frostOnHit；效果區域在 `effects` stream，火地在 `combat`。和一般命中不同的三點：
   - 不發 `hit` 事件：擊中加進脈衝的統計（`ctx.sys.pulse`，`PulseAcc`），打到東西的脈衝發一個 `pulse` 事件（`kind: 'zone'`）。施加的異常狀態照樣發它們的事件與觸發。
@@ -580,7 +582,8 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - `'shocked'`：帶感電的活敵人（依 ID）。每個端點用端點自己的空間格（`segments.grid`、`nearestTwo`）連到 `range` 內最近的 1 或 2 個端點，兩邊互連的只算一條。每條線用主空間格的框查詢（加 `ctx.shotPad`）與大型敵人的補查，標記半徑內的敵人（`Enemy.segMark`）；然後依 ID 掃一次，被標記的各吃一下，沒被全部擋下也沒死的加 `shockStacks` 層感電（不擲骰；§4.3 的 R1）。端點在自己的線上，所以也會被打。
 - `'drones'` 與 `'summons'`（C5.8，`judgePool`）：`'drones'` 是無人機池裡活著的無人機（`DRONE_KIND_DRONE`：每個 drone 發射器的，蜂巢招牌攻擊的也算，停靠或飛行中都算；不含砲台與靈體），`'summons'` 是池裡的每一列（無人機、砲台與 spawnDrone 生出的靈體，和召喚上限算的一樣）。兩種都依 slot（＝ID）順序，位置是無人機階段留下的 `x`／`y`；這個 tick 在 6b 離開的列不是端點，效果階段才加的列要等下一個 tick。連線規則和 `'shocked'` 一樣：每個端點連 `range` 內（含 `range`）歐氏距離最近的 `links` 個，同距離取較低的 slot，距離 0 也算；q < i 而且 q 也選了 i 的那條只算一次。選法是直接掃過 k 個端點（不建空間格），結果和 `SpatialGrid.nearestTwo` 相同（有測試在亂數位置上對照，含同距離）。端點少於 2 個：沒有線、沒有擊中、沒有事件。擊中照 `'shocked'` 的做法：主空間格的框查詢與補查、依 ID 掃一次、深度 0、origin −1、命中而沒死的加感電、端點有 2 個以上發一個 `pulse` 事件。
 - **配對週期**（`pairPeriodSec`，選填、有限、≥ 0，預設 0＝每次判定都重新配對；大於 0 只能用在 `'drones'`／`'summons'`，`'shocked'` 的端點隨感電來去，驗證會擋）：`SegmentSpec.pairTicks` 是 `periodTicks(1 / pairPeriodSec)`（雷網蜂的 0.5 秒是 30 tick），0 就是 0。`pairTicks` 大於 0 時，每次判定先把 `EmitterRuntime.pairTimer`（C5.8 唯一新增的成員，每種發射器的字面值都是 0）加上 `em.interval`；還沒配過對、或 `pairTimer ≥ pairTicks` 時重新配對並把 `pairTimer` 歸 0，否則沿用上次配對的線。配對以兩端列的 ID 存在 `SegmentState.held`（`HeldPairs`，在 `lines` 旁邊，大小是池的 2 × `rows`；`RunContext` 沒有新屬性）。沿用時，一端已離開的線丟掉，配對之後才來的列要等下一次配對才有線，`range` 只在配對時檢查，線段的座標取兩端現在的位置。端點少於 2 個的判定照樣走時鐘（到期就做一次空的配對並歸 0），保留的線全部丟掉。`pairTicks` 是 0 的發射器從不碰 `pairTimer`。
-- 擊中標籤 `hit|lightning|area`，無人機或召喚物之間的線再加 `minion`（D14：minion 涵蓋無人機、砲台與靈體，所以吃 minion 範圍的加成；`'shocked'` 的線沒有）。沒有 `chain`（不吃過載、不算預算、不發 chainJump），會暴擊、**不擲異常狀態**（Q4 (B) 只指名區域與光環，線段維持 (A)，Q4/F7），在 `combat` stream；加進脈衝統計，端點有 2 個以上的判定發一個 `pulse` 事件（`kind: 'segment'`），線的端點寫進 `SimState.segments`（目前沒有畫面讀它）。
+- 擊中標籤 `hit|lightning|area`，無人機或召喚物之間的線再加 `minion`（D14：minion 涵蓋無人機、砲台與靈體，所以吃 minion 範圍的加成；`'shocked'` 的線沒有）。沒有 `chain`（不吃過載、不算預算、不發 chainJump），會暴擊、**不擲異常狀態**（Q4 (B) 只指名區域與光環，線段維持 (A)，Q4/F7），在 `combat` stream；加進脈衝統計，端點有 2 個以上的判定發一個 `pulse` 事件（`kind: 'segment'`），線的端點寫進 `SimState.segments`，畫面的線段圖層讀它（V1，§10.1）。
+- **端點 ID**（V1，lead 對 C5.8 驗證的裁定 (b)）：`SegmentLinesState` 在 `x1`／`y1`／`x2`／`y2` 旁邊多了 `id1`、`id2`（`Int32Array`，第 i 條線兩端的 ID，(x1, y1) 那端在 `id1`）與每個發射器一個的 `pool`（`SegmentEndPool`：`'shocked'` 的發射器是 `'enemies'`，ID 是 `EnemyState.id`；`'drones'` 與 `'summons'` 是 `'drones'`，ID 是無人機池的 `DroneViewState.id`），成員從 5 個變成 8 個。ID 和座標在同一個地方寫：`judge` 在擊中之後寫線時寫兩端敵人的 ID（判定自己的擊中殺死的端點照樣留 ID 與它站的座標）；`judgePool` 配對時寫兩列的 ID，沿用時寫保留的配對的 ID（和 `HeldPairs` 一樣）；`growLines` 連 ID 陣列一起放大。座標照舊是判定時兩端的位置。`pool` 在 `createSegmentLines` 依發射器的端點定好，一局不變。模擬不讀 ID，每條線多兩個 store，每個 tick 不多做任何事。
 
 #### 4.7.8 授予：荊棘、落雷、光環、環繞
 
@@ -665,7 +668,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 | `ctx.shots.distinct` | `projectiles` 效果的 `'distinct'` | 沒有：只產生子彈 |
 | `ctx.sys.segments` 的 `ends`、`pick1/2`、`a/b`、`nearTwo` | `stepSegments` | 擊中 |
 
-可以長大的陣列（`ctx.candidates`、`shotHits.t`、`segments` 的 `pick1/2`、`a/b`、線的座標、敵人子彈池的陣列：只在敵人 AI 走名單、射手開槍時長大，`stepBullets` 的迴圈裡不開槍）長大後要重新讀；其他成員從不換掉，迴圈前讀進區域變數就一直有效。
+可以長大的陣列（`ctx.candidates`、`shotHits.t`、`segments` 的 `pick1/2`、`a/b`、線的座標與 ID、敵人子彈池的陣列：只在敵人 AI 走名單、射手開槍時長大，`stepBullets` 的迴圈裡不開槍）長大後要重新讀；其他成員從不換掉，迴圈前讀進區域變數就一直有效。
 
 #### 4.7.15 物件形狀與 import 規則
 
@@ -675,7 +678,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
   - 系統自己的狀態放進 `ctx.sys`（`SystemState`）的成員，一個系統一個：`pulse`、`zones`、`lob`、`repeat`、`split`、`segments`、`chain`、`drones`、`enemyAi`、`defence`、`bullets`、`affixes`，C6b.2 的 `combo`。
   - 每個發射器的緩衝放 `EmitterRuntime`（`em.targets`、`em.orbs`：每種發射器都在 `createEmitterRuntime` 的字面值裡，用不到的是 `null`），投射物系統的放 `ShotPool`。
   - 一組相關的暫存放一個子物件：`ctx.selection`（選擇器）、`ctx.centerEvents`（誰聽中心事件、freeze 清單的查詢緩衝）。
-- **一個形狀一個字面值**：熱路徑讀的物件（`Enemy` 58 個屬性、`Payload` 19、`EmitterRuntime` 18、`ShotPool` 28、`CompiledTrigger` 18、`CompiledBuild` 15、`ctx.triggerState`、`ctx.centerScratch`）都由一個字面值（或成員與順序都相同的幾個）建立，每個成員都初始化，之後不再加成員；新成員加在擁有者的字面值裡。`createPayload` 依固定順序寫每個成員、不展開 `PayloadSpec`（選用的鍵會讓酬載有不同的 map）；`extraJumpPayload` 先放型別化的佔位，建好之後再指向酬載自己。
+- **一個形狀一個字面值**：熱路徑讀的物件（`Enemy` 58 個屬性、`Payload` 19、`EmitterRuntime` 18、`ShotPool` 29（V1 的 `launched`）、`CompiledTrigger` 18、`CompiledBuild` 15、`ctx.triggerState`、`ctx.centerScratch`）都由一個字面值（或成員與順序都相同的幾個）建立，每個成員都初始化，之後不再加成員；新成員加在擁有者的字面值裡。`createPayload` 依固定順序寫每個成員、不展開 `PayloadSpec`（選用的鍵會讓酬載有不同的 map）；`extraJumpPayload` 先放型別化的佔位，建好之後再指向酬載自己。
 - `ctx.counters` 是在迴圈裡逐鍵寫進 `{}` 的，到 19 個鍵還是快速模式；現在 19 個，`simulation.perf.test.ts` 擋在 20 以下，加第 20 個之前要改成一個字面值。
 - 熱路徑的區域變數：每次擊中、每發子彈、每個區域或每隻敵人跑一次的迴圈，把用到的子物件（`ctx.sys.zones`、`ctx.shots`、`ctx.chainBudget`…）在迴圈前讀進區域變數，一次呼叫最多讀一次 `ctx.sys`；脈衝的統計由擁有者讀一次，當參數 `acc` 往下傳。
 - `createRunContext` 的建立順序：`chainRetention` 與連鎖策略在發射器的酬載之前；發射器（落雷的選擇器、冰柱與日冕的酬載、環繞的 `OrbMemory` 在這裡建好傳進去）；`zones`、`segments` 與 `shots` 在 `SimState` 的字面值之前；重複攻擊的酬載在效果酬載旁邊；最後是 ctx 的字面值，`sys` 在裡面一次建好。工廠函式都不讀 `ctx`。
@@ -836,6 +839,7 @@ interface Platform {
 | 背景 | 格線、地面光、暗角，快取成一張貼圖 | — |
 | 燃燒光暈（add） | 每隻燃燒中的敵人一個深橘色光暈，隨層數放大 | 跟著燃燒中的敵人數 |
 | 敵人火焰（add） | 燃燒中的敵人冒出的火舌、瘟疫餘燼落地的火團，畫在怪群**下面** | 火舌 520、火團光暈 110；全場每秒最多 650 個新火舌，超過時每隻敵人按比例少噴 |
+| 線段（V1） | 每個線段發射器上次判定的線：雷網的（感電的敵人之間）用連鎖閃電的青色，無人機或召喚物之間的（雷射柵欄、雷網蜂）用較冷的藍（`COLORS.droneLink`），只在畫無人機的 renderer（`?hive`）畫；只在 build 有線段發射器時建立 | 不設上限：只畫 `count` 以內的線，壓力場景最多約 250 條（全部感電時約 465 條） |
 | 敵人 | 每隻一個 `EnemyView`：船身是一個 `Graphics`，暗色底＋半透明填色＋實心外框，用 tint 上色；v3 的種類與詞綴另有部件（§10.6）；菁英與 Boss 在小怪下面 | 每種敵人一個物件池 |
 | 環（add） | 擊殺衝擊波、瘟疫火環；v3 另有元素護盾破裂的白環、洋蔥外殼碎裂的環 | 衝擊波 40（外殼碎裂可以換掉最舊的）；完整火環 3，再多只畫外圈（10） |
 | 角色、護盾弧、投射物、射手的子彈（add） | 護盾弧與子彈只在 v3 資料建立（§10.6） | — |
@@ -843,6 +847,8 @@ interface Platform {
 | 特效粒子（add） | 擊殺碎片、火花、閃光、瘟疫擴散的火焰與餘燼；v3 另有擊中被擋下（`hitBlocked`）的灰色火花 | 碎片 420、火花 360、閃光 110、火焰 520、餘燼 64 |
 | 掉落碎片 | 飛向角色的碎片 | — |
 | 傷害數字 | 一般數字池在下，大暴擊池在最上層 | 見 10.2 |
+
+**線段圖層**（`src/render/segmentLines.ts`，V1）：`render()` 第一次看到有線段發射器的狀態（`SimState.segments.lines` 不是空的）時才建立 `SegmentLineLayer`，放在敵人圖層正下方、敵人火焰之上（目前沒有區域的圖層；B1 加區域時放在它下面），之後跟著 renderer 一直留著（`beginRun` 清掉線、把脈動時鐘歸 0），`Renderer.destroy()` 把它 destroy 掉（J10）；從沒畫過有線段發射器的狀態的 renderer 不會建立它，M1 頁面每一格都和之前一樣。無人機或召喚物之間的線（`'drones'`、`'summons'` 發射器）只在 renderer 畫無人機的時候畫，也就是有 `DroneLayer` 的時候（目前是 `?hive`；lead 的裁定 L2，建立圖層時給 `SegmentLineOptions.pools`），否則整個發射器跳過、不查 ID；所以回放、片段牆與沒有 `?hive` 的頁面只畫感電的線，不會在沒畫出來的無人機之間浮著線（這樣的 renderer 遇到只有無人機線的 build 照樣建立圖層，只是畫不出東西）。每一格畫每個發射器 i < `count` 的線，一個 `Graphics`、每種樣式兩道 stroke（寬而淡的光暈，加上細而亮的線芯，平頭 `cap: 'butt'`：lead 的裁定 L1，圓頭讓 Pixi 每格的三角化在約 208 條線多約 5.6 ms、約 413 條多約 10.7 ms，兩端又在敵人與無人機的中心、蓋在它們的形狀下面，平頭看起來一樣）：每一端用它的 ID 在自己的池裡找端點（兩個池都依 ID 排列，二分搜尋；ID 查找每格不配置記憶體、也不是 O(n²) 的搜尋，Pixi 照樣每格重建 `Graphics` 的路徑），端點還在就畫在它這一格的插值位置（`prev + (現在 − prev) × alpha`，和敵人、無人機圖層一樣），已經不在（死了、離開池）就畫在線存的座標，也就是判定時它站的地方；兩端都不在的線不畫，`count` 之後的舊資料不畫。一般混色、透明度適中（光暈 0.14–0.16、線芯 0.65–0.7），密的雷網不會疊成一片白；脈動只用圖層自己的畫面時間，不抽亂數。實際的每格成本（headless Chromium、軟體 GL、1920 × 1080，跑 1,200 tick 之後圖層隔格顯示與隱藏、量 `app.render()` 的中位數，兩次）：renderStress 的局（畫在 hive 的 renderer 上，中位數 208 條線）多 0.6–0.7 ms，每隻活著的敵人都感電的上限（中位數 413 條）多 0.7–0.8 ms；沒有 `?hive` 的 renderer 上的柵欄（14 條無人機線）一條都不畫，顯示與隱藏都是 0.5 ms。
 
 畫布之上是 DOM 的 HUD（`src/ui`）。燃燒的敵人：火焰與光暈在下、敵人的外框與原本的顏色在上（燃燒只讓 tint 偏橘 6–20%），暗色底讓形狀在亮的特效上仍是清楚的剪影；火焰的強度在 4 層封頂（`eternalFlame` 沒有層數上限，畫面不跟著無限放大）。同一個畫面死掉的敵人越多，每一隻的白色爆心越暗、碎片越少，怪群一起死時不會變成一團白光。瘟疫火環的火舌從同一點出發會疊加，所以用半透明的橘色起頭，火環中心不會是一片白。
 
