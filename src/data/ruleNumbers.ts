@@ -80,6 +80,35 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
       return [[String(rule.chains)]];
     case 'bugSea':
       return [[`×${rule.countMult}`]];
+    case 'hiveSplit':
+      // gd §1.5's 「每 5 次擊殺生出 1 架臨時無人機，存在 6 秒」.
+      return [[String(rule.every)], [String(rule.lifeSec)]];
+    case 'swarmTune':
+      // 量產's 「砲台 +2」; 回收 is words.
+      return rule.turrets > 0 ? [[`+${rule.turrets}`]] : [];
+    case 'colossus':
+      return [[signedPercent(rule.damagePerMissing)]];
+    case 'hiveExpand':
+      return [[`+${rule.drones}`]];
+    case 'hiveBuild':
+      return [[`+${rule.turrets}`]];
+    case 'royalJelly':
+      return [[signedPercent(rule.lifeMult - 1)]];
+    case 'breed':
+      return [[percent(rule.chance)], [String(rule.lifeSec)]];
+    case 'motherFactory':
+      return [[String(rule.periodSec)], [String(rule.lifeSec)]];
+    case 'pyreChain':
+      return [[String(rule.depth)]];
+    case 'zoneTune':
+      // Each ◆ quotes its own factor; 1 is no change and quotes nothing.
+      return [rule.durationMult, rule.damageMult, rule.radiusMult]
+        .filter((factor) => factor !== 1)
+        .map((factor) => [`×${factor}`, signedPercent(factor - 1)]);
+    case 'flameBee':
+      return [[String(rule.burnStacks)], [String(rule.blastRadius)]];
+    case 'frostBee':
+      return [[percent(rule.frostPct), signedPercent(rule.frostPct)]];
   }
 }
 
@@ -111,6 +140,8 @@ export function conditionNumbers(condition: Condition): string[][] {
  */
 export function effectNumbers(effect: EffectSpec): string[][] {
   switch (effect.kind) {
+    case 'execute':
+      return [];
     case 'applyAilment':
       return [
         ...(effect.stacks === undefined ? [] : [[String(effect.stacks)]]),

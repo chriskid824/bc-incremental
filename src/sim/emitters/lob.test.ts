@@ -257,7 +257,7 @@ describe('magmaBomb', () => {
       farThrowEvery: 0,
       volcano: null,
       chainBlast: null,
-      zone: { slow: 0 },
+      zone: { slow: 0, durationMult: 1, damageMult: 1, radiusMult: 1 },
     });
     expect(build.emitters[0]).toMatchObject({
       kind: 'lob',
@@ -1579,7 +1579,12 @@ describe('遠投 (farThrow; C10, Q3 (B))', () => {
   const F = LOB_FAR;
 
   it('counts the shot a bomb will be: every Nth, none at 0', () => {
-    const lob = { farThrowEvery: 4, volcano: null, chainBlast: null, zone: { slow: 0 } };
+    const lob = {
+      farThrowEvery: 4,
+      volcano: null,
+      chainBlast: null,
+      zone: { slow: 0, durationMult: 1, damageMult: 1, radiusMult: 1 },
+    };
     expect([1, 2, 3, 4, 5, 8, 12].map((s) => isFar(lob, s))).toEqual([
       false,
       false,

@@ -233,6 +233,7 @@ const [
   chainBolt,
   comboStack,
   buff,
+  execute,
 ] = EffectSpecSchema.options;
 
 /**
@@ -261,6 +262,7 @@ export const PayloadEffectSchema = exact<PayloadEffect>()(
     chainBolt,
     comboStack,
     buff,
+    execute,
   ]),
 );
 

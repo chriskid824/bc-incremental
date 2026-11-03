@@ -15,7 +15,12 @@ const CHAIN_BLAST: RuleSpec = { id: 'chainBlast', radius: 40, damagePct: 0.5, pe
 
 describe('lob forms', () => {
   it('leave the lob params neutral without a form, and set one member each', () => {
-    const neutral = { farThrowEvery: 0, volcano: null, chainBlast: null, zone: { slow: 0 } };
+    const neutral = {
+      farThrowEvery: 0,
+      volcano: null,
+      chainBlast: null,
+      zone: { slow: 0, durationMult: 1, damageMult: 1, radiusMult: 1 },
+    };
     expect(compileBuild(makeStats(), [], MAGMA).signature.lob).toEqual(neutral);
     expect(compileBuild(makeStats(), [FAR], MAGMA).signature.lob).toEqual({
       ...neutral,

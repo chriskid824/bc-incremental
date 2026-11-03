@@ -82,7 +82,7 @@ import { addShock } from '../ailments/shock';
 import { sizeOf } from '../build/size';
 import { REPEAT_CHARGE_CAP, SMALL_PROJECTILE_TICKS } from '../caps';
 import { beginAttack, endAttack } from '../combat/chain';
-import { hitWithPayload } from '../combat/hit';
+import { applyHitDamage, hitWithPayload } from '../combat/hit';
 import { chainGeneral } from '../combat/policy';
 import { fireArcRepeat } from '../emitters/arc';
 import { fireFanRepeat } from '../emitters/fan';
@@ -805,6 +805,28 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   },
   // One hit on the live target, at multiplier × the damage stat (its payload's base), whose
   // payload carries its bypass bits.
+  // The live target, if no boss, takes exactly its hp left as a hit of the effect's payload,
+  // past every defence and modifier: the kill goes the usual way, a frozen enemy's shatter too.
+  execute(ctx, _spec, _fx, entry) {
+    const target = liveTarget(entry);
+    if (target === null || target.def.boss) return;
+    const p = ctx.effectPayloads[entry.effect] as Payload;
+    applyHitDamage(
+      ctx,
+      target,
+      target.hp,
+      p.tags,
+      p.source,
+      false,
+      0,
+      entry.depth,
+      entry.origin,
+      p.flags,
+      null,
+      null,
+      false,
+    );
+  },
   coinHit(ctx, _spec, _fx, entry) {
     const target = liveTarget(entry);
     if (target === null) return;

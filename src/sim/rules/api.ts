@@ -5,6 +5,7 @@
  */
 
 import { ZERO } from '../../core/num';
+import type { Num } from '../../core/num';
 import { enqueue } from '../effects/queue';
 import { MAX_DEPTH } from '../effects/types';
 import type { CompiledEffect } from '../effects/types';
@@ -29,13 +30,15 @@ export interface ModuleEvent {
  * Queues effect `effectIndex` (from addEffect) for the module instance `triggerIndex` (from
  * hook() or instanceTrigger(), which share it) on event `ev`, at one depth more, with the
  * instance as its origin. Nothing is queued for an event the instance's own effects raised
- * (rule 3) or at the maximum depth.
+ * (rule 3) or at the maximum depth. `value` is the entry's value (ZERO by default): a detonate
+ * on a dead enemy deals it as what the victim had left (src/sim/effects/execute.ts).
  */
 export function enqueueModuleEffect(
   ctx: RunContext,
   triggerIndex: number,
   effectIndex: number,
   ev: ModuleEvent,
+  value: Num = ZERO,
 ): void {
   if (ev.origin === triggerIndex) return;
   if (ev.depth >= MAX_DEPTH) {
@@ -52,7 +55,7 @@ export function enqueueModuleEffect(
     ev.target ?? null,
     ev.x,
     ev.y,
-    ZERO,
+    value,
     ev.flags,
   );
 }

@@ -431,6 +431,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
       })
       .readonly(),
+    z.strictObject({ kind: z.literal('execute') }).readonly(),
   ]),
 );
 
@@ -559,6 +560,55 @@ export const RuleSpecSchema = exact<RuleSpec>()(
     z.strictObject({ id: z.literal('cannon'), rateMult: finite, splash: finite }).readonly(),
     z.strictObject({ id: z.literal('teslaTower'), chains: finite }).readonly(),
     z.strictObject({ id: z.literal('bugSea'), countMult: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('hiveSplit'),
+        every: finite,
+        lifeSec: finite,
+        damagePct: finite,
+        maxLive: finite,
+      })
+      .readonly(),
+    z.strictObject({ id: z.literal('swarmTune'), turrets: finite, dockSecMult: finite }).readonly(),
+    z.strictObject({ id: z.literal('colossus'), damagePerMissing: finite }).readonly(),
+    z.strictObject({ id: z.literal('hiveExpand'), drones: finite }).readonly(),
+    z.strictObject({ id: z.literal('hiveBuild'), turrets: finite }).readonly(),
+    z.strictObject({ id: z.literal('royalJelly'), lifeMult: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('breed'),
+        chance: finite,
+        lifeSec: finite,
+        damagePct: finite,
+        maxLive: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('motherFactory'),
+        periodSec: finite,
+        lifeSec: finite,
+        damagePct: finite,
+      })
+      .readonly(),
+    z.strictObject({ id: z.literal('pyreChain'), depth: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('zoneTune'),
+        durationMult: finite,
+        damageMult: finite,
+        radiusMult: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('flameBee'),
+        burnStacks: finite,
+        blastRadius: finite,
+        blastDamagePct: finite,
+      })
+      .readonly(),
+    z.strictObject({ id: z.literal('frostBee'), frostPct: finite }).readonly(),
   ]),
 );
 

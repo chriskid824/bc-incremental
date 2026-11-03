@@ -462,15 +462,17 @@ export function land(ctx: RunContext, s: number, spec: LobSpec): void {
   const zonePayload = p.zoneVariant;
   if (zonePayload !== null) {
     const zone = spec.zone;
+    // 煉獄's factors (LobParams.zone): 1 each on every other build.
+    const tune = (build.signature.lob as LobParams).zone;
     addZone(
       ctx,
       true,
       x,
       y,
-      lobRadius(build, zone.radius, grow),
-      Math.max(1, Math.round(zone.durationSec * PULSES_PER_SECOND)),
+      lobRadius(build, zone.radius * tune.radiusMult, grow),
+      Math.max(1, Math.round(zone.durationSec * tune.durationMult * PULSES_PER_SECOND)),
       zonePayload,
-      zone.damagePctPerSec / PULSES_PER_SECOND,
+      (zone.damagePctPerSec * tune.damageMult) / PULSES_PER_SECOND,
       p.source,
       -1,
       depth,

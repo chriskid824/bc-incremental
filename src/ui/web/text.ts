@@ -129,6 +129,7 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   chainBolt: 'web.effect.chainBolt',
   comboStack: 'web.effect.comboStack',
   buff: 'web.effect.buff',
+  execute: 'web.effect.execute',
 };
 
 /**
@@ -438,6 +439,7 @@ export const COEF_FORMAT: {
   coinHit: { multiplier: 'mult' },
   chainBolt: { damagePct: 'pct' },
   comboStack: {},
+  execute: {},
   buff: {},
 };
 
@@ -620,6 +622,8 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
       extra('web.extra.element', { element: say(lookup, `web.tag.${element}`) });
   };
   switch (spec.kind) {
+    case 'execute':
+      return text({});
     case 'applyAilment': {
       const n = spec.stacks ?? 1;
       mult(spec.damagePct);

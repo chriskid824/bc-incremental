@@ -45,6 +45,11 @@ export const magmaBomb: SignatureModule<Extract<SignatureSpec, { id: 'magmaBomb'
       tags: ['area', 'projectile'],
       notTags: ['trigger'],
     });
-    b.signature().lob = { farThrowEvery: 0, volcano: null, chainBlast: null, zone: { slow: 0 } };
+    b.signature().lob = {
+      farThrowEvery: 0,
+      volcano: null,
+      chainBlast: null,
+      zone: { slow: 0, durationMult: 1, damageMult: 1, radiusMult: 1 },
+    };
   },
 };
