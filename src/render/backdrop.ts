@@ -7,6 +7,7 @@
 
 import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../sim';
+import { COMB_CELL, COMB_HOT_EVERY, combCells } from './combLattice';
 import { ARENA_COLORS, COLORS } from './palette';
 
 const GRID_STEP = 80;
@@ -74,10 +75,11 @@ const HEAT_RADIUS = 520;
 /**
  * The arena of a v3 character run (CharacterDef.arena): 熔核's ('fire') is charcoal with a forge
  * grate, concentric rings and spokes around the player, and a faint heat at its center; the
- * scorch marks are a layer of their own (src/render/magma.ts). Any other arena is M1's backdrop
- * until its batch draws it.
+ * scorch marks are a layer of their own (src/render/magma.ts). 蜂巢's ('summon') is its comb
+ * (createHiveBackdrop). Any other arena is M1's backdrop until its batch draws it.
  */
 export function createArenaBackdrop(arena: string): Container {
+  if (arena === 'summon') return createHiveBackdrop();
   if (arena !== 'fire') return createBackdrop();
   const A = ARENA_COLORS.fire;
   const root = new Container({ label: 'backdrop-fire' });
@@ -122,6 +124,84 @@ export function createArenaBackdrop(arena: string): Container {
     alignment: 1,
   });
   root.addChild(grate, hot);
+
+  const vignette = new Sprite(createVignetteTexture());
+  vignette.width = ARENA_WIDTH;
+  vignette.height = ARENA_HEIGHT;
+  root.addChild(vignette);
+  return root;
+}
+
+/** No floor cells this close to the center, where the hive's own comb sits. */
+const COMB_HUB = 64;
+/** The turret seats' track (DRONE_DEFAULTS.turretRadius) and 前哨's (gd §1.5: radius 220). */
+export const SEAT_RADII = [90, 220] as const;
+const SEAT_DASH = 10;
+const SEAT_GAP = 9;
+const NEST_GLOW_RADIUS = 360;
+
+/**
+ * 蜂巢's arena ('summon', gd §11.5): deep teal with a faint hex lattice around the nest, every
+ * COMB_HOT_EVERY-th ring of cells a little brighter, and the dashed tracks of the turret seats;
+ * drawn once. The seat plates under the turrets, the dock ring and the drones' wakes are the
+ * swarm layer's (src/render/swarm.ts).
+ */
+function createHiveBackdrop(): Container {
+  const A = ARENA_COLORS.summon;
+  const root = new Container({ label: 'backdrop-summon' });
+  const cx = ARENA_WIDTH / 2;
+  const cy = ARENA_HEIGHT / 2;
+  root.addChild(new Graphics().rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT).fill(A.floor));
+
+  const glow = new Sprite(createGlowTexture());
+  glow.anchor.set(0.5);
+  glow.position.set(cx, cy);
+  glow.width = NEST_GLOW_RADIUS * 2;
+  glow.height = NEST_GLOW_RADIUS * 2;
+  glow.tint = A.glow;
+  glow.alpha = 0.6;
+  glow.blendMode = 'add';
+  root.addChild(glow);
+
+  const comb = new Graphics();
+  const hot = new Graphics();
+  // Cells a little smaller than the lattice, so neighbours' walls read as a double line.
+  const wall = COMB_CELL - 2;
+  for (const cell of combCells(ARENA_WIDTH, ARENA_HEIGHT, cx, cy, COMB_CELL)) {
+    if (Math.hypot(cell.x - cx, cell.y - cy) < COMB_HUB) continue;
+    const g = cell.ring % COMB_HOT_EVERY === 0 ? hot : comb;
+    for (let k = 0; k <= 6; k++) {
+      const a = ((60 * k - 90) * Math.PI) / 180;
+      const x = cell.x + Math.cos(a) * wall;
+      const y = cell.y + Math.sin(a) * wall;
+      if (k === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+  }
+  comb.stroke({ width: 1.2, color: A.comb, alpha: 0.5 });
+  hot.stroke({ width: 1.6, color: A.combHot, alpha: 0.65 });
+  hot.rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT).stroke({
+    width: 2,
+    color: A.edge,
+    alpha: 0.9,
+    alignment: 1,
+  });
+  root.addChild(comb, hot);
+
+  const seats = new Graphics();
+  for (const radius of SEAT_RADII) {
+    const pieces = Math.round((Math.PI * 2 * radius) / (SEAT_DASH + SEAT_GAP));
+    const step = (Math.PI * 2) / pieces;
+    const span = step * (SEAT_DASH / (SEAT_DASH + SEAT_GAP));
+    for (let i = 0; i < pieces; i++) {
+      const a = i * step;
+      seats
+        .moveTo(cx + Math.cos(a) * radius, cy + Math.sin(a) * radius)
+        .arc(cx, cy, radius, a, a + span);
+    }
+    seats.stroke({ width: radius === SEAT_RADII[0] ? 2 : 1.4, color: A.seat, alpha: 0.55 });
+  }
+  root.addChild(seats);
 
   const vignette = new Sprite(createVignetteTexture());
   vignette.width = ARENA_WIDTH;
