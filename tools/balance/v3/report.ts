@@ -17,18 +17,27 @@ export { V3_PACING_TARGETS } from './checks/targets';
 const ascending = (values: readonly number[]): number[] => [...values].sort((a, b) => a - b);
 const nullIfNaN = (value: number): number | null => (Number.isNaN(value) ? null : value);
 
-/** The sessions' (character, strategy) pairs, in the order the results first name them. */
+/**
+ * The sessions' (character, scope, strategy) groups, in the order the results first name them, so
+ * a Demo scope's sessions are never read with the full scope's (C10.7); `key` is the summary's
+ * label: `character strategy` for the full scope, as before, and `character scope strategy` for a
+ * Demo scope's (`fire demoA default`, lead ruling L1).
+ */
 function groups(
   results: readonly CharacterSessionResult[],
 ): { readonly key: string; readonly sessions: CharacterSessionResult[] }[] {
-  const byKey = new Map<string, CharacterSessionResult[]>();
+  const byKey = new Map<string, { key: string; sessions: CharacterSessionResult[] }>();
   for (const result of results) {
-    const key = `${result.character} ${result.strategy}`;
-    const list = byKey.get(key) ?? [];
-    list.push(result);
-    byKey.set(key, list);
+    const id = [result.character, result.scope, result.strategy].join('|');
+    const key =
+      result.scope === 'full'
+        ? `${result.character} ${result.strategy}`
+        : `${result.character} ${result.scope} ${result.strategy}`;
+    const group = byKey.get(id) ?? { key, sessions: [] };
+    group.sessions.push(result);
+    byKey.set(id, group);
   }
-  return [...byKey].map(([key, sessions]) => ({ key, sessions }));
+  return [...byKey.values()];
 }
 
 // ---- runs.csv ----

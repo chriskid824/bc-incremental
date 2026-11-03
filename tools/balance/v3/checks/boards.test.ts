@@ -35,6 +35,7 @@ import {
 import { checkSet } from './run';
 import {
   ALL_C7,
+  demoSessionResults,
   measureResults,
   merged,
   rowWith,
@@ -565,6 +566,26 @@ describe('deadNodes (死節點)', () => {
     );
     const [row] = deadNodesCheck(plan, results);
     expect(row?.measured).toMatch(/^never bought 153 of 155 over 2 sessions; /);
+  });
+
+  it("leaves the Demo's sessions out: a node only a demoA session bought stays never bought (C10.7; Demo sessions in the union)", () => {
+    const plan = checkSet('nightly', fixtureContent('B1'), B1, {
+      sessions: 1,
+      minutes: 35,
+      c7: ALL_C7,
+      prestige: true,
+    });
+    expect(plan.units.map((unit) => unit.id)).toContain('session:fire:demoA:0');
+    const full = sessionResults([sessionResult('fire', 0, { bought: ['fire.center.alpha.r1'] })]);
+    const demo = demoSessionResults([
+      sessionResult('fire', 0, { scope: 'demoA', bought: ['fire.center.beta.r1'] }),
+    ]);
+    const [row] = deadNodesCheck(plan, merged(full, demo));
+    expect(row).toEqual(deadNodesCheck(plan, full)[0]);
+    expect(row?.measured).toMatch(/^never bought 154 of 155 over 1 sessions; /);
+    expect(deadNodesCsv(plan, merged(full, demo))).toBe(deadNodesCsv(plan, full));
+    // A demoA session alone is no session of the character's: noData.
+    expect(deadNodesCheck(plan, demo)[0]?.reason?.id).toBe('noData');
   });
 
   it('is one info row per character over its sessions, noData without one, and dead_nodes.csv lists them', () => {

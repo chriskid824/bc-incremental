@@ -318,6 +318,33 @@ describe('v3 report', () => {
     expect(summary).toMatch(/^ice default /m);
   });
 
+  it('checks a full and a demoA group of one character apart in the curve check, the summary labelling them `fire default` and `fire demoA default` (C10.7, lead ruling L1; groups keyed without the scope)', () => {
+    const fire = results[0] as CharacterSessionResult;
+    const demo: CharacterSessionResult = {
+      ...fire,
+      scope: 'demoA',
+      rows: fire.rows.map((row) => ({ ...row, scope: 'demoA', bestWave: 40 })),
+    };
+    const sessions = [fire, demo, results[1] as CharacterSessionResult];
+    const [, ...points] = lines(characterCurveCheckCsv(sessions));
+    const n = V3_PACING_TARGETS.length;
+    expect(points.map((point) => point[1])).toEqual([
+      ...Array.from({ length: n }, () => 'full'),
+      ...Array.from({ length: n }, () => 'demoA'),
+    ]);
+    // At 0 min: the full scope's two sessions, the Demo's one at wave 40.
+    expect([points[0]?.slice(5, 6), points[n]?.slice(5, 6), points[n]?.[9]]).toEqual([
+      ['2'],
+      ['1'],
+      '40',
+    ]);
+    const summary = characterSummaryTable(sessions);
+    expect(summary.match(/^fire default /gm)).toHaveLength(1);
+    expect(summary.match(/^fire demoA default /gm)).toHaveLength(1);
+    // A full-scope summary keeps the label it had before C10.7.
+    expect(characterSummaryTable([fire]).split('\n')[2]).toMatch(/^fire default +/);
+  });
+
   it("writes the last run's bestWave as endBestWave", () => {
     const base = results[0] as CharacterSessionResult;
     const first = base.rows[0] as CharacterRunRow;

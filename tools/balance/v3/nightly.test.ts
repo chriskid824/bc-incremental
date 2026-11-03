@@ -48,6 +48,7 @@ import {
   parsePlanJson,
   partOf,
   planShards,
+  planText,
   runShard,
   shardDir,
   TRIPLE_PARTS,
@@ -347,6 +348,64 @@ describe('the nightly plan', () => {
     expect(weekly.units.get('summon-triples')).toHaveLength(4 * TRIPLE_SEEDS);
     expect(nightly.units.get('global-m1')).toHaveLength(2);
     expect(nightly.units.get('global-fuzz')).toHaveLength(WEB_FUZZ_BUILDS);
+  });
+
+  it("puts the Demo's sessions in their character's sessions shard, the shards and Plan JSON v1 as before (C10.7; a new shard for the Demo)", () => {
+    const demo = fixed({ checks: { sessions: 2, c7: BASE_C7, prestige: true } });
+    for (const set of ['nightly', 'weekly'] as const) {
+      const before = planOf(set, 'B2');
+      const after = planOf(set, 'B2', demo);
+      // Plan JSON v1 unchanged in shape and shards: the workflow's matrix is the same.
+      expect(after.json).toEqual(before.json);
+      expect(Object.keys(after.json)).toEqual(Object.keys(before.json));
+      for (const character of ['fire', 'summon'] as const) {
+        const own = after.units.get(`${character}-sessions`) ?? [];
+        const demoUnits = own.filter((unit) => unit.id.split(':')[2] === 'demoA');
+        expect(demoUnits.map((unit) => unit.id)).toEqual(
+          [0, 1].map((s) => `session:${character}:demoA:${s}`),
+        );
+        expect(own).toHaveLength(10 * 2 + 2);
+        // The full sessions first, as without the prestige (only their minutes differ).
+        expect(own.slice(0, 10 * 2).map((unit) => unit.id)).toEqual(
+          (before.units.get(`${character}-sessions`) ?? []).map((unit) => unit.id),
+        );
+        // No probes shard replays a Demo session.
+        const reads = derivedReads(after.checks, character);
+        expect([...reads.sessions, ...reads.whole].filter((id) => id.includes(':demoA:'))).toEqual(
+          [],
+        );
+      }
+      const demoIds = after.checks.units.filter((unit) => unit.id.includes(':demoA:'));
+      expect(demoIds).toHaveLength(4);
+      for (const spec of after.json.shards) {
+        if (spec.kind === 'sessions') continue;
+        expect((after.units.get(spec.id) ?? []).some((unit) => unit.id.includes(':demoA:'))).toBe(
+          false,
+        );
+      }
+    }
+  });
+
+  it("prints the scopes the plan's sessions play on its first line (C10.7; planText printing a constant)", () => {
+    const first = (deps: NightlyDeps, content: 'B1' | 'B2' = 'B2'): string =>
+      planText(planOf('nightly', content, deps)).split('\n')[0] ?? '';
+    expect(first(fixed())).toMatch(/, scopes full$/);
+    expect(first(fixed({ checks: { sessions: 2, c7: BASE_C7, prestige: true } }))).toMatch(
+      /, scopes full, demoA$/,
+    );
+    expect(first(fixed({ checks: { sessions: 2, c7: BASE_C7, prestige: true } }), 'B1')).toMatch(
+      /, scopes full, demoA$/,
+    );
+    expect(
+      first(fixed({ checks: { sessions: 2, c7: BASE_C7, prestige: true, scopes: ['full'] } })),
+    ).toMatch(/, scopes full$/);
+    const registered = nightlyPlan({
+      set: 'nightly',
+      quick: false,
+      content: 'registered',
+      commit: SHA,
+    });
+    expect(planText(registered).split('\n')[0]).toMatch(/, scopes full$/);
   });
 
   it('plans no shard without units: one fusion gives no doubles or triples shard (OWN 6)', () => {
@@ -740,6 +799,52 @@ describe('npm run nightly', () => {
         `  shard fire-sessions: unit ${session} has an unknown job kind 'warp'`,
         `  shard global-fuzz: unit ${build} has an unknown measure 'teleport'`,
       ]),
+    );
+    expect(existsSync(out)).toBe(false);
+  }, 60_000);
+
+  it("names a missing Demo unit in the merge and exits 1; with every unit the report holds the Demo's rows (C10.7)", async () => {
+    const demo = fixed({ checks: { sessions: 2, c7: BASE_C7, prestige: true } });
+    // The stub's sessions in the scope their unit plays.
+    const scoped: RunJobs = (jobs, workers, log) =>
+      stubPool()(jobs, workers, log).then((pool) => ({
+        ...pool,
+        results: pool.results.map((result, i) => {
+          const job = jobs[i];
+          return result.kind === 'character' && job?.kind === 'character'
+            ? { ...result, result: { ...result.result, scope: job.config.scope } }
+            : result;
+        }),
+      }));
+    const deps = { ...demo, run: scoped };
+    const dir = join(root, 'shards-demo');
+    const args = ['--quick', '--content', 'fixture:B2'];
+    for (const spec of planOf('nightly', 'B2', demo).json.shards) {
+      expect(await main([...args, '--shard', spec.id, '--out', dir], capture(), deps)).toBe(0);
+    }
+    const whole = join(root, 'merged-demo');
+    const io = capture();
+    await main(['--merge', dir, '--out', whole], io, deps);
+    const { results } = JSON.parse(read(whole, 'checks.json')) as { results: CheckResult[] };
+    expect(
+      results.filter((row) => row.subject.startsWith('demoA ')).map((row) => row.subject),
+    ).toEqual([
+      ...(['fire', 'summon'] as const).flatMap((c) =>
+        [0, 10, 20, 40, 60].map((m) => `demoA ${c} @ ${m} min`),
+      ),
+      'demoA fire',
+      'demoA summon',
+    ]);
+    expect(read(whole, 'milestones.csv')).toContain('\nfire,demoA,default,0,');
+    edit(dir, 'fire-sessions', 'units.json', (file) => ({
+      ...file,
+      units: (file.units as RecordedUnit[]).filter((unit) => unit.id !== 'session:fire:demoA:1'),
+    }));
+    const missing = capture();
+    const out = join(root, 'merged-missing');
+    expect(await main(['--merge', dir, '--out', out], missing, deps)).toBe(1);
+    expect(missing.lines).toContain(
+      '  unit session:fire:demoA:1 of shard fire-sessions has no result',
     );
     expect(existsSync(out)).toBe(false);
   }, 60_000);

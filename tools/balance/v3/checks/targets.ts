@@ -97,6 +97,13 @@ export const POINT_BUDGET = {
 
 /** impl:489; gd:794 「第一個角色破關 4–6 小時」, with the 20 s between runs (初始值). */
 export const PLAY_TIME_MINUTES: readonly [number, number] = [240, 360];
+/**
+ * The Demo's length: CLAUDE.md:61 and GDD:249 「30–60 分鐘內容」, menus included, judged
+ * ±PACING_TOLERANCE at both ends (25.5–69 min, 初始值): the sources give no tolerance, C10.2 widens
+ * such a range by GDD's ±15 % (its D9), and GDD:217 puts wave 40 at 60 min, so an on-curve build
+ * must pass.
+ */
+export const DEMO_LENGTH_MINUTES: readonly [number, number] = [30, 60];
 
 /** impl:488; gd:792 「第二個角色到第 30 波的時間 ≤ 第一個角色的 60%」 (初始值). */
 export const LEGACY_MAX = 0.6;

@@ -43,7 +43,7 @@ import { checkSet, evaluate, exitCodeOf, PR_SESSIONS, PR_TARGET_SECONDS, runPlan
 import type { CheckSetOptions, PlanRun } from './run';
 import { affixesCsv, enemyRowCsv, outerRowCsv } from './rows';
 import { centerShareCsv } from './sessions';
-import { defaultSessions } from './types';
+import { defaultSessions, scopeSessions } from './types';
 import type { CheckId, CheckPlan, UnitResults } from './types';
 
 const HELP = `Usage: npm run checks -- [options]
@@ -165,13 +165,17 @@ const CHECK_CSVS: readonly (readonly [
 
 /**
  * The files beside report.md, checks.json and checks.csv, by name: the default sessions' runs,
- * milestones, curve check and budget, the center share, then each CHECK_CSVS file whose check the
- * set holds.
+ * milestones, curve check and budget, each Demo scope's after the full ones (C10.7: the full rows
+ * a byte-identical prefix), the center share (full sessions only), then each CHECK_CSVS file whose
+ * check the set holds.
  */
 export function planOutputs(plan: CheckPlan, results: UnitResults): [string, string][] {
-  const sessions = plan.characters.flatMap((character) =>
-    defaultSessions(plan, results, character),
-  );
+  const sessions = [
+    ...plan.characters.flatMap((character) => defaultSessions(plan, results, character)),
+    ...plan.demoScopes.flatMap((scope) =>
+      plan.characters.flatMap((character) => scopeSessions(plan, results, character, scope)),
+    ),
+  ];
   return [
     ['runs.csv', characterRunsCsv(sessions)],
     ['milestones.csv', characterMilestonesCsv(sessions)],

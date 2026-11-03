@@ -3,7 +3,9 @@
  * 角色公平, 中心主體性, 一輪轉生的點數, 傳承, 遊玩時間 and 轉生後回到最遠波次. Each reads the
  * default sessions of the plan's characters (傳承 also the legacy sessions), takes medians over
  * sessions, and counts a milestone a session never reaches as never (∞). Before B2 a session stops
- * at its first prestige point, so what lies past it is noPrestige.
+ * at its first prestige point, so what lies past it is noPrestige. 前線節奏 and 遊玩時間 also read
+ * the plan's Demo scopes (C10.7): their default sessions play to the scope's wave-40 cap once B2
+ * writes the prestige, and their rows follow the full ones.
  */
 
 import { PACING_TOLERANCE } from '../../../../src/data';
@@ -11,13 +13,17 @@ import type { CharacterId } from '../../../../src/data';
 import { median } from '../../../../src/meta/web/calibrate';
 import { toCsv } from '../../csv';
 import type { CsvValue } from '../../csv';
+import { SCOPE_BY_NAME, scopeLists } from '../content';
+import type { ScopeName } from '../content';
 import type { LegacyHook } from '../legacy';
 import { characterCurvePoints, characterRowAt } from '../report';
-import { centerShareOf, CLEAR_WAVE, PRESTIGE_WAVE } from '../session';
+import type { CharacterCurvePoint } from '../report';
+import { centerShareOf, CLEAR_WAVE, PRESTIGE_WAVE, sessionClearWave } from '../session';
 import type { CharacterRunRow, CharacterSessionResult } from '../session';
 import {
   CENTER_SHARE_MIN,
   CENTER_SHARE_WAVE,
+  DEMO_LENGTH_MINUTES,
   FAIRNESS_MAX,
   FAIRNESS_WAVES,
   FIRST_HOURS,
@@ -38,6 +44,7 @@ import {
   FRESH_ACCOUNT,
   legacyUnitId,
   naRow,
+  scopeSessions,
   sessionConfigOf,
   sessionResultOf,
   sessionUnitId,
@@ -57,6 +64,21 @@ const clock = (minutes: number): string =>
 
 const PRESTIGE_STOP = `a session stops at its first prestige point (wave ${PRESTIGE_WAVE}) until B2`;
 
+/**
+ * A Demo scope's wave cap (DEMO_SCOPE_A's 40); CLEAR_WAVE for a scope without one. The same
+ * rule as a session's stop, so the rows and the stop cannot drift apart.
+ */
+const capOf = (scope: ScopeName): number => sessionClearWave(SCOPE_BY_NAME[scope]);
+
+/** The plan's characters `scope` lists: the Demo characters whose sessions it plans (熔核, 蜂巢). */
+const demoCharacters = (plan: CheckPlan, scope: ScopeName): CharacterId[] =>
+  plan.characters.filter((character) => scopeLists(scope, character));
+
+/** Why a Demo scope's rows are noPrestige before B2. */
+const demoUnplanned = (scope: ScopeName): string =>
+  `the ${scope} sessions play through the first prestige to the wave-${capOf(scope)} cap ` +
+  '(gd:855); they are planned once PRESTIGE is written (B2)';
+
 /** The median over sessions of a session's minutes to `wave`, a session never there counting ∞. */
 export function medianMinutesToWave(
   sessions: readonly CharacterSessionResult[],
@@ -67,35 +89,89 @@ export function medianMinutesToWave(
 
 // ---- 前線節奏 ----
 
+const PACING_BAND = `±${num(PACING_TOLERANCE * 100)}%`;
+
+/**
+ * A pacing row of `subject` at `goal` from the sessions' curve point there (characterCurvePoints);
+ * noData when no session is read at that minute.
+ */
+function pacingRow(
+  plan: CheckPlan,
+  subject: string,
+  goal: (typeof V3_PACING_TARGETS)[number],
+  point: CharacterCurvePoint | undefined,
+  sessions: string,
+  evidence: string,
+): CheckResult {
+  const target = `bestWave ${goal.frontierWave} ${PACING_BAND} (初始值)`;
+  if (point === undefined || point.sessions === 0) {
+    const detail = `no ${sessions} session is read at ${goal.minutes} min`;
+    return naRow('pacing', plan.set, subject, target, 'noData', detail);
+  }
+  return checkRow('pacing', plan.set, {
+    subject,
+    target,
+    measured:
+      `median ${num(point.waveMedian)} over ${point.sessions} sessions` +
+      (point.carried > 0 ? ` (${point.carried} carried past their end)` : ''),
+    status: point.withinTolerance === true ? 'pass' : 'FAIL',
+    evidence: [evidence],
+  });
+}
+
 /**
  * Per character and V3_PACING_TARGETS minute m: the default sessions' median bestWave at m (the
  * last row ending by m, a session stopped at its prestige point carried; v3/report.ts'
  * characterCurvePoints) within ±PACING_TOLERANCE of the target. Past wave 30, noPrestige until B2.
+ * Then the Demo's rows (demoPacingRows).
  */
 export function pacingCheck(plan: CheckPlan, results: UnitResults): CheckResult[] {
-  const band = `±${num(PACING_TOLERANCE * 100)}%`;
-  return plan.characters.flatMap((character) => {
+  const full = plan.characters.flatMap((character) => {
     const points = characterCurvePoints(defaultSessions(plan, results, character));
     return V3_PACING_TARGETS.map((goal, index) => {
       const subject = `${character} @ ${goal.minutes} min`;
-      const target = `bestWave ${goal.frontierWave} ${band} (初始值)`;
       if (!plan.prestige && goal.frontierWave > PRESTIGE_WAVE) {
+        const target = `bestWave ${goal.frontierWave} ${PACING_BAND} (初始值)`;
         return naRow('pacing', plan.set, subject, target, 'noPrestige', PRESTIGE_STOP);
       }
-      const point = points[index];
-      if (point === undefined || point.sessions === 0) {
-        const detail = `no default session is read at ${goal.minutes} min`;
-        return naRow('pacing', plan.set, subject, target, 'noData', detail);
-      }
-      return checkRow('pacing', plan.set, {
-        subject,
-        target,
-        measured:
-          `median ${num(point.waveMedian)} over ${point.sessions} sessions` +
-          (point.carried > 0 ? ` (${point.carried} carried past their end)` : ''),
-        status: point.withinTolerance === true ? 'pass' : 'FAIL',
-        evidence: [`curve_check.csv: ${character} default ${goal.minutes}`],
-      });
+      const evidence = `curve_check.csv: ${character} default ${goal.minutes}`;
+      return pacingRow(plan, subject, goal, points[index], 'default', evidence);
+    });
+  });
+  return [...full, ...demoPacingRows(plan, results)];
+}
+
+/** The V3_PACING_TARGETS a Demo scope reads: those whose target wave is within its cap. */
+const demoPacingTargets = (scope: ScopeName): (typeof V3_PACING_TARGETS)[number][] =>
+  V3_PACING_TARGETS.filter((goal) => goal.frontierWave <= capOf(scope));
+
+/**
+ * The Demo's pacing rows (C10.7 §2): per Demo scope and character it lists, its default sessions'
+ * median bestWave at each minute whose target is within the scope's cap (0, 10, 20, 40, 60 min:
+ * waves 3, 15, 22, 30, 40), read as the full rows read theirs (a session stopped at the cap is
+ * carried past its end), subject `demoA fire @ 60 min`. Before B2, one noPrestige row per scope.
+ */
+function demoPacingRows(plan: CheckPlan, results: UnitResults): CheckResult[] {
+  return plan.demoScopes.flatMap((scope) => {
+    const goals = demoPacingTargets(scope);
+    if (!plan.prestige) {
+      const target =
+        `bestWave ${goals.map((goal) => goal.frontierWave).join(', ')} at ` +
+        `${goals.map((goal) => goal.minutes).join(', ')} min ${PACING_BAND} (初始值)`;
+      return [naRow('pacing', plan.set, scope, target, 'noPrestige', demoUnplanned(scope))];
+    }
+    return demoCharacters(plan, scope).flatMap((character) => {
+      const points = characterCurvePoints(scopeSessions(plan, results, character, scope));
+      return goals.map((goal) =>
+        pacingRow(
+          plan,
+          `${scope} ${character} @ ${goal.minutes} min`,
+          goal,
+          points.find((point) => point.minutes === goal.minutes),
+          `${scope} default`,
+          `curve_check.csv: ${character} ${scope} default ${goal.minutes}`,
+        ),
+      );
     });
   });
 }
@@ -528,12 +604,12 @@ export function legacyCheck(plan: CheckPlan, results: UnitResults): CheckResult[
 /**
  * Per character, from a fresh account: the default sessions' median minutes to the clear (wave
  * CLEAR_WAVE, menus included; ∞ for a session that does not clear) in PLAY_TIME_MINUTES. noPrestige
- * until B2; info until B5 builds 奇點.
+ * until B2; info until B5 builds 奇點. Then the Demo length rows (demoLengthRows).
  */
 export function playTimeCheck(plan: CheckPlan, results: UnitResults): CheckResult[] {
   const [lo, hi] = PLAY_TIME_MINUTES;
   const target = `a fresh account clears wave ${CLEAR_WAVE} in ${lo}–${hi} min with menus (初始值)`;
-  return plan.characters.map((character) => {
+  const full = plan.characters.map((character): CheckResult => {
     if (!plan.prestige) {
       return naRow('playTime', plan.set, character, target, 'noPrestige', PRESTIGE_STOP);
     }
@@ -552,6 +628,58 @@ export function playTimeCheck(plan: CheckPlan, results: UnitResults): CheckResul
       measured: `median ${num(mid)} min (${cleared} of ${sessions.length} sessions clear)`,
       status: !plan.singularity ? 'info' : inside(mid, PLAY_TIME_MINUTES) ? 'pass' : 'FAIL',
       evidence: [`milestones.csv: ${character} default endMinutes`],
+    });
+  });
+  return [...full, ...demoLengthRows(plan, results)];
+}
+
+/** DEMO_LENGTH_MINUTES widened ±PACING_TOLERANCE at both ends: 25.5–69 min. */
+export const DEMO_LENGTH_BAND: readonly [number, number] = [
+  DEMO_LENGTH_MINUTES[0] * (1 - PACING_TOLERANCE),
+  DEMO_LENGTH_MINUTES[1] * (1 + PACING_TOLERANCE),
+];
+
+/** The Demo length row's target for `scope`. */
+const demoLengthTarget = (scope: ScopeName): string =>
+  `the first run clearing wave ${capOf(scope)} ends in ${DEMO_LENGTH_MINUTES[0]}–` +
+  `${DEMO_LENGTH_MINUTES[1]} min ${PACING_BAND} (${num(DEMO_LENGTH_BAND[0])}–` +
+  `${num(DEMO_LENGTH_BAND[1])} min) with menus (初始值)`;
+
+/**
+ * The Demo length rows (C10.7 §2): per Demo scope and character it lists, its default sessions'
+ * median minutes, menus included, to the end of the first run that clears the scope's cap (a
+ * session stopped 'cleared' at its endMinutes, any other ∞) within DEMO_LENGTH_BAND, pass/FAIL
+ * from B2; the measured text adds how many sessions prestiged before the cap. Before B2, one
+ * noPrestige row per scope.
+ */
+function demoLengthRows(plan: CheckPlan, results: UnitResults): CheckResult[] {
+  return plan.demoScopes.flatMap((scope) => {
+    const target = demoLengthTarget(scope);
+    if (!plan.prestige) {
+      return [naRow('playTime', plan.set, scope, target, 'noPrestige', demoUnplanned(scope))];
+    }
+    return demoCharacters(plan, scope).map((character) => {
+      const subject = `${scope} ${character}`;
+      const sessions = scopeSessions(plan, results, character, scope);
+      if (sessions.length === 0) {
+        const detail = `no ${scope} default session`;
+        return naRow('playTime', plan.set, subject, target, 'noData', detail);
+      }
+      const minutes = sessions.map((result) =>
+        result.stop === 'cleared' ? result.endMinutes : Infinity,
+      );
+      const mid = median(minutes);
+      const cleared = minutes.filter(Number.isFinite).length;
+      const prestiged = sessions.filter((result) => result.milestones.prestigePoint !== null);
+      return checkRow('playTime', plan.set, {
+        subject,
+        target,
+        measured:
+          `median ${num(mid)} min (${cleared} of ${sessions.length} sessions clear wave ` +
+          `${capOf(scope)}; ${prestiged.length} prestiged before the cap)`,
+        status: inside(mid, DEMO_LENGTH_BAND) ? 'pass' : 'FAIL',
+        evidence: [`milestones.csv: ${character} ${scope} default endMinutes`],
+      });
     });
   });
 }

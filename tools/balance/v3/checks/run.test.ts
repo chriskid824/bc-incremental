@@ -7,7 +7,7 @@ import type { BalanceJob, JobResult } from '../../jobs';
 import { C10_SEED, resolveContent, webOf } from '../content';
 import type { LegacyHook } from '../legacy';
 import type { KeystoneReading } from '../measures';
-import { PRE_PRESTIGE_MINUTES } from '../session';
+import { DEMO_SESSION_MINUTES, PRE_PRESTIGE_MINUTES } from '../session';
 import { webStrategiesFor } from '../strategies';
 import { DOUBLE_SEEDS, strengthUnitId, TRIPLE_SEEDS } from './fusions';
 import { KEYSTONE_SEEDS } from './keystones';
@@ -18,6 +18,7 @@ import {
   evaluate,
   exitCodeOf,
   MENU_SECONDS,
+  NIGHTLY_SCOPES,
   NIGHTLY_SESSIONS,
   PR_SESSIONS,
   runPlan,
@@ -27,7 +28,7 @@ import {
 import type { RunJobs } from './run';
 import { centerShareCsv } from './sessions';
 import { milestones, NO_C7, runRow, sessionResult, sessionResults } from './testing';
-import { CHECK_IDS, checkRow, naRow, NA_UNLOCKS, sessionUnitId } from './types';
+import { CHECK_IDS, checkRow, demoSessionUnitId, naRow, NA_UNLOCKS, sessionUnitId } from './types';
 import type { CheckPlan, CheckResult, CheckSetId, UnitResults } from './types';
 
 const B1 = { fixture: 'B1' } as const;
@@ -214,6 +215,130 @@ describe('the check sets', () => {
     }
     expect(JSON.parse(JSON.stringify(two))).toStrictEqual(two);
   }, 30_000);
+});
+
+describe("the Demo's sessions (C10.7)", () => {
+  const B3 = { fixture: 'B3' } as const;
+  const demoIds = (plan: CheckPlan): string[] =>
+    plan.units.filter((unit) => unit.id.split(':')[2] === 'demoA').map((unit) => unit.id);
+
+  it("plans demoA's default sessions after the full ones in the nightly and the weekly once the prestige is written (the scope left 'full')", () => {
+    expect(NIGHTLY_SCOPES).toEqual(['full', 'demoA']);
+    for (const set of ['nightly', 'weekly'] as const) {
+      const plan = checkSet(set, fixtureContent('B2'), B2, {
+        c7: NO_C7,
+        prestige: true,
+        sessions: 2,
+      });
+      expect(plan.demoScopes).toEqual(['demoA']);
+      expect(demoIds(plan)).toEqual([
+        'session:fire:demoA:0',
+        'session:fire:demoA:1',
+        'session:summon:demoA:0',
+        'session:summon:demoA:1',
+      ]);
+      for (const id of demoIds(plan)) {
+        const session = Number(id.split(':')[3]);
+        expect(plan.units.find((unit) => unit.id === id)?.job).toEqual({
+          kind: 'character',
+          config: {
+            character: id.split(':')[1],
+            strategy: 'default',
+            session,
+            seed: C10_SEED,
+            minutes: DEMO_SESSION_MINUTES,
+            startWave: { kind: 'max' },
+            economy: expect.anything(),
+            menuSeconds: MENU_SECONDS,
+            content: B2,
+            scope: 'demoA',
+          },
+        });
+      }
+      // After the full sessions of every strategy, before the measures.
+      const index = (test: (id: string, measure: boolean) => boolean): number[] =>
+        plan.units.flatMap((unit, i) => (test(unit.id, unit.job.kind === 'measure') ? [i] : []));
+      const demo = index((id) => id.split(':')[2] === 'demoA');
+      const full = index((id, measure) => !measure && id.split(':')[2] !== 'demoA');
+      const measures = index((_, measure) => measure);
+      expect(Math.min(...demo)).toBe(Math.max(...full) + 1);
+      expect(Math.min(...measures)).toBe(Math.max(...demo) + 1);
+      // The same session indices and seed as the full default sessions: only the scope differs.
+      const fullConfig = plan.units.find((unit) => unit.id === sessionUnitId('fire', 1))?.job;
+      const demoConfig = plan.units.find(
+        (unit) => unit.id === demoSessionUnitId('fire', 'demoA', 1),
+      )?.job;
+      if (fullConfig?.kind !== 'character' || demoConfig?.kind !== 'character') {
+        throw new Error('no character units');
+      }
+      expect({ ...demoConfig.config, scope: 'full', minutes: 0 }).toEqual({
+        ...fullConfig.config,
+        minutes: 0,
+      });
+      // The minutes seam overrides DEMO_SESSION_MINUTES; --quick plays PR_SESSIONS of each.
+      const seamed = checkSet(set, fixtureContent('B2'), B2, {
+        c7: NO_C7,
+        prestige: true,
+        sessions: 1,
+        minutes: 3,
+      });
+      expect(seamed.units.find((unit) => unit.id === 'session:fire:demoA:0')?.job).toMatchObject({
+        config: { minutes: 3, scope: 'demoA' },
+      });
+      const quick = checkSet(set, fixtureContent('B2'), B2, {
+        c7: NO_C7,
+        prestige: true,
+        quick: true,
+      });
+      expect(demoIds(quick)).toHaveLength(2 * PR_SESSIONS);
+      const full8 = checkSet(set, fixtureContent('B2'), B2, { c7: NO_C7, prestige: true });
+      expect(demoIds(full8)).toHaveLength(2 * NIGHTLY_SESSIONS);
+    }
+  });
+
+  it('plans none in the pr set, before the prestige or without a Demo scope (Demo units in the pr set)', () => {
+    const pr = checkSet('pr', fixtureContent('B2'), B2, { c7: NO_C7, prestige: true });
+    expect([pr.demoScopes, demoIds(pr)]).toEqual([[], []]);
+    expect(
+      pr.units.every((unit) => unit.job.kind !== 'character' || unit.job.config.scope === 'full'),
+    ).toBe(true);
+    const before = checkSet('nightly', fixtureContent('B2'), B2, { c7: NO_C7, sessions: 2 });
+    // Held before the prestige, so evaluate prints the Demo's n/a rows; nothing planned.
+    expect([before.demoScopes, demoIds(before)]).toEqual([['demoA'], []]);
+    const fullOnly = checkSet('nightly', fixtureContent('B2'), B2, {
+      c7: NO_C7,
+      prestige: true,
+      sessions: 2,
+      scopes: ['full'],
+    });
+    expect([fullOnly.demoScopes, demoIds(fullOnly)]).toEqual([[], []]);
+    // Without a Demo scope the plan is the one before C10.7: the same units, in the same order.
+    const withDemo = checkSet('nightly', fixtureContent('B2'), B2, {
+      c7: NO_C7,
+      prestige: true,
+      sessions: 2,
+    });
+    expect(fullOnly.units).toEqual(
+      withDemo.units.filter((unit) => !demoIds(withDemo).includes(unit.id)),
+    );
+  });
+
+  it('plans only the characters the scope lists: 熔核 on B1, never 霜晶 on B3 (a character the scope does not list)', () => {
+    const b1 = checkSet('nightly', fixtureContent('B1'), B1, {
+      c7: NO_C7,
+      prestige: true,
+      sessions: 2,
+    });
+    expect(demoIds(b1)).toEqual(['session:fire:demoA:0', 'session:fire:demoA:1']);
+    const b3 = checkSet('nightly', fixtureContent('B3'), B3, {
+      c7: NO_C7,
+      prestige: true,
+      sessions: 1,
+    });
+    expect(b3.characters).toContain('ice');
+    expect(demoIds(b3)).toEqual(['session:fire:demoA:0', 'session:summon:demoA:0']);
+    expect(b3.units.map((unit) => unit.id)).toContain(sessionUnitId('ice', 0));
+  });
 });
 
 describe('derivedUnits', () => {
