@@ -45,13 +45,13 @@ export const ACCEPTED_FAILS: Readonly<Partial<Record<FusionKey, string>>> = {
   // the bombs' coverage holds the frontier and every enemy a bomb reaches dies to its hit; what a
   // payload adds after the hit cannot move it. 前線節奏 passes at 10, 20 and 40 min without it.
   'fire.crit':
-    'B1: one seed of 8 reads 0.99 at coef 0.458 (median 1.21); the probe sits at wave ~4, where 熔核 is held by bomb coverage, not damage',
+    'B1: spread at coef 0.436 (median 1.15, seeds 1.03–1.28); the probe sits at wave ~4, where 熔核 is held by bomb coverage, not damage',
   'fire.poison':
     'B1: insensitive at the probe (wave ~4): every enemy a bomb reaches dies to its hit, so poison and 瘟爆 have nothing left to kill there',
   'fire.summon':
-    'B1: spread at the probe (median 1.21 at coef 0.313, seeds 0.95–1.70): at wave ~4 a run gets only a few spirits, so whether one meets a crowd decides the seed',
+    'B1: spread at the probe (median 1.15 at coef 0.631, seeds 1.02–1.87): at wave ~4 a run gets only a few spirits, so whether one meets a crowd decides the seed',
   'fire.ice':
-    'B1: weak at the probe (median 1.14 at the top of its range): at wave ~4 the burn cap and the frost-fire slow matter little; 霜焰 keeps the gd numbers',
+    'B1: weak at the probe (median 1.17 at the top of its range): at wave ~4 the burn cap and the frost-fire slow matter little; 霜焰 keeps the gd numbers',
 };
 
 /**

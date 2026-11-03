@@ -119,10 +119,10 @@ export const FIRE = defineCharacter({
         }),
         mastery: mastery(),
       }),
-      // 擴散: blast radius and spread.
+      // 擴散: blast radius (r1, r3, r5) and spread distance (r2, r4, r6; E3's spreadRadius).
       centerBranch('spread', {
         r1: blast(0.1, 4),
-        r2: ranked('burnDamage', 0.12, 4),
+        r2: ranked('spreadRadius', 0.1, 4),
         // 瘟疫: a burning enemy that dies spreads 40% of its burns within 250 (答案：三角).
         a: answers(
           notable('pandemic', {
@@ -137,7 +137,7 @@ export const FIRE = defineCharacter({
           'triangle',
         ),
         r3: blast(0.08, 3),
-        r4: ranked('burnDamage', 0.12, 3),
+        r4: ranked('spreadRadius', 0.1, 3),
         // 餘燼彈: a burning enemy that dies throws a small fireball at the nearest enemy.
         b: notable('ember-shot', {
           triggers: [
@@ -150,7 +150,7 @@ export const FIRE = defineCharacter({
           ],
         }),
         r5: blast(0.08, 3),
-        r6: ranked('burnDamage', 0.12, 3),
+        r6: ranked('spreadRadius', 0.1, 3),
         // 連環爆: an enemy a bomb kills explodes again (radius 40, 50%), twice a bomb at most.
         c: notable('chain-blast', {
           rules: [{ id: 'chainBlast', radius: 40, damagePct: 0.5, perBomb: 2 }],
