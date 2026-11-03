@@ -23,6 +23,12 @@ export interface CharacterLook {
   readonly color: number;
   /** The owned fusion cores, in any order. */
   readonly fusions: readonly FusionLook[];
+  /**
+   * The owned cores' outers in fusion-slot order (fusionSlotOrder, src/meta/web/rules.ts):
+   * 蜂巢's drones take their fill from slot 1's skin, their trail from slot 2's and their impact
+   * from slot 3's (gd §5.3). Left out: `fusions` in their order.
+   */
+  readonly slots?: readonly OuterId[];
   /** The build owns a node that places drones or turrets (the summon outer's grants). */
   readonly summons: boolean;
 }
@@ -31,6 +37,20 @@ export interface CharacterLook {
 export function fusionSkin(look: CharacterLook, outer: OuterId): Skin | null {
   for (const fusion of look.fusions) if (fusion.outer === outer) return fusion.skin;
   return null;
+}
+
+/**
+ * The owned fusions' skins in fusion-slot order (CharacterLook.slots, else `fusions` in their
+ * order); a slot whose outer has no owned fusion is skipped.
+ */
+export function slotSkins(look: CharacterLook): Skin[] {
+  if (look.slots === undefined) return look.fusions.map((fusion) => fusion.skin);
+  const skins: Skin[] = [];
+  for (const outer of look.slots) {
+    const skin = fusionSkin(look, outer);
+    if (skin !== null) skins.push(skin);
+  }
+  return skins;
 }
 
 /**

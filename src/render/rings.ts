@@ -77,10 +77,11 @@ export class RingLayer {
   /**
    * A drone's impact over its splash `radius`. Impacts have a cap of their own, and a new one
    * past it replaces the oldest impact, so they never take a shockwave's or a nova's place.
+   * `color` is hive green unless a fusion skin colours it (src/render/hive.ts).
    */
-  impact(x: number, y: number, radius: number): void {
+  impact(x: number, y: number, radius: number, color: number = CONSTRUCT_COLORS.hive.main): void {
     if (this.isFull(STYLE_IMPACT)) this.evictOldest(STYLE_IMPACT);
-    this.push(STYLE_IMPACT, x, y, radius, CONSTRUCT_COLORS.hive.main, 0, IMPACT_MS);
+    this.push(STYLE_IMPACT, x, y, radius, color, 0, IMPACT_MS);
   }
 
   clear(): void {
