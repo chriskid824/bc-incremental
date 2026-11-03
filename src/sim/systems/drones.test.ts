@@ -208,6 +208,7 @@ const PER_SLOT = [
   'hy',
   'roleDamage',
   'roleSpeed',
+  'surging',
 ] as const;
 /** The pool's per-emitter arrays, by name. */
 const PER_EMITTER = [
@@ -220,6 +221,8 @@ const PER_EMITTER = [
 ] as const;
 /** Its scratch lists. */
 const SCRATCH = ['splash', 'picked'] as const;
+/** Its per-guard array (攔截守衛's orbit angles, E5). */
+const PER_GUARD = ['guardAngle'] as const;
 
 const lengthOf = (ds: DronePool, name: keyof DronePool): number =>
   (ds[name] as ArrayLike<unknown>).length;
@@ -255,7 +258,7 @@ describe('the drone pool', () => {
       ([, value]) => ArrayBuffer.isView(value) || Array.isArray(value),
     );
     expect(arrays.map(([name]) => name).sort()).toEqual(
-      [...PER_SLOT, ...PER_EMITTER, ...SCRATCH].sort(),
+      [...PER_SLOT, ...PER_EMITTER, ...SCRATCH, ...PER_GUARD].sort(),
     );
     for (const [name, value] of arrays) expect((value as ArrayLike<unknown>).length, name).toBe(0);
     expect(ctx.state.drones).toBe(ds);
@@ -1348,7 +1351,7 @@ describe('the drone stage in a run', () => {
     const ds = (ctx as RunContext | null)?.sys.drones;
     expect(ds).toBe(sim.state.drones);
     expect([ds?.count, ds?.rows]).toEqual([0, 0]);
-    for (const name of [...PER_SLOT, ...PER_EMITTER, ...SCRATCH]) {
+    for (const name of [...PER_SLOT, ...PER_EMITTER, ...SCRATCH, ...PER_GUARD]) {
       expect(lengthOf(ds as DronePool, name), name).toBe(0);
     }
     expect(sim.result().counters.summonCapped).toBe(0);

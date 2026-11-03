@@ -368,6 +368,22 @@ export interface SwarmParams {
    * ★巨像's 「變大」, E4), finite and above 0: render reads it, the sim never.
    */
   sizeMult: number;
+  /**
+   * 自爆協議 (C5b, E5): the impact that spends a swarm drone's sortie explodes, at `radius`
+   * (before sizeOf) and `damagePct` of the damage stat in place of the splash and the payload's
+   * share; null for none (src/sim/systems/drones.ts).
+   */
+  lastImpact: { radius: number; damagePct: number } | null;
+  /**
+   * 攔截守衛: the swarm's last `count` drones (its last dock indices) orbit the player at
+   * `radius` (DRONE_GUARD), charging dashers first; null for none.
+   */
+  guards: { count: number; radius: number } | null;
+  /**
+   * 蜂潮: every `periodSec` every swarm drone dashes at the densest enemy, its next impact on it
+   * × `damageMult`; null for none.
+   */
+  surge: { periodSec: number; damageMult: number } | null;
 }
 
 /**
@@ -851,6 +867,51 @@ export function compileBuild(
   }
   if (!(Number.isInteger(flags.turretChains) && flags.turretChains >= 0)) {
     throw new Error(`turretChains: ${flags.turretChains} must be a whole number >= 0`);
+  }
+  // 蜂巢's self-destruct, guards and surge (C5b, E5), which only modules write: the fill reads
+  // them as they are.
+  const blast = swarm?.lastImpact ?? null;
+  if (
+    blast !== null &&
+    !(
+      Number.isFinite(blast.radius) &&
+      blast.radius > 0 &&
+      Number.isFinite(blast.damagePct) &&
+      blast.damagePct > 0
+    )
+  ) {
+    throw new Error(
+      `lastImpact: radius ${blast.radius} and damagePct ${blast.damagePct} must be finite and above 0`,
+    );
+  }
+  const guards = swarm?.guards ?? null;
+  if (
+    guards !== null &&
+    !(
+      Number.isInteger(guards.count) &&
+      guards.count >= 1 &&
+      Number.isFinite(guards.radius) &&
+      guards.radius > 0
+    )
+  ) {
+    throw new Error(
+      `guards: count ${guards.count} must be a whole number >= 1, ` +
+        `radius ${guards.radius} finite and above 0`,
+    );
+  }
+  const surge = swarm?.surge ?? null;
+  if (
+    surge !== null &&
+    !(
+      Number.isFinite(surge.periodSec) &&
+      surge.periodSec > 0 &&
+      Number.isFinite(surge.damageMult) &&
+      surge.damageMult > 0
+    )
+  ) {
+    throw new Error(
+      `surge: periodSec ${surge.periodSec} and damageMult ${surge.damageMult} must be finite and above 0`,
+    );
   }
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),

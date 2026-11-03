@@ -49,6 +49,10 @@ export const swarm: SignatureModule<Extract<SignatureSpec, { id: 'swarm' }>> = {
       roles: [],
       turretRadius: 90,
       sizeMult: 1,
+      // No 自爆協議, 攔截守衛 or 蜂潮 (E5): their rules set them.
+      lastImpact: null,
+      guards: null,
+      surge: null,
     };
   },
 };

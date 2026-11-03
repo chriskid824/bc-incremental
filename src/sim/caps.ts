@@ -81,6 +81,12 @@ export const PICK_TICKS = 30;
 /** The longest same-enemy cooldown of a drone, in ticks, which keeps DRONE_MEMORY enough. */
 export const DRONE_COOLDOWN_MAX = 90;
 /**
+ * Turns a second of a guard's orbit (攔截守衛, SwarmParams.guards; src/sim/systems/drones.ts),
+ * whatever the attack frequency: its own angle advances by this a tick on its orbit only, and
+ * holds while it is away (lead ruling K2-R1).
+ */
+export const GUARD_REV_PER_SEC = 0.5;
+/**
  * Enemies one orb remembers having hit, each until its cooldown ends (src/sim/emitters/orbit.ts);
  * a power of two, so its ring buffer wraps with a mask. An orb that hits one more while it
  * remembers this many forgets the oldest, counted in orbMemoryFull, and may hit that one again

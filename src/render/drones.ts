@@ -11,7 +11,9 @@
  * layer above the turrets, its track dropped once it has left the pool; it brackets nothing, and
  * its leaving (the droneExpire event) draws nothing yet. A drone's kite is drawn at its row's size
  * (DroneViewState.size, E4: the swarm's sizeMult × its role's) about its centre; its trail keeps
- * its width. Reads the simulation state and never writes it.
+ * its width. A guard (攔截守衛, E5) on its orbit (DRONE_GUARD) is a drone's kite and trail at its
+ * position on the guards' ring, nose along its orbit, and is out of the comb (dockedFraction);
+ * 蜂潮's droneSurge draws nothing yet. Reads the simulation state and never writes it.
  */
 
 import { Container, Graphics, Particle, ParticleContainer } from 'pixi.js';
@@ -119,7 +121,10 @@ export function turnToward(angle: number, goal: number, maxStep: number): number
   return angle + (delta > 0 ? maxStep : -maxStep);
 }
 
-/** Share of the drones (kind DRONE) of the first `count` slots docked; 1 when there are none. */
+/**
+ * Share of the drones (kind DRONE) of the first `count` slots docked in the comb (DRONE_DOCKED: a
+ * guard on its orbit, DRONE_GUARD, is out of it, its cell empty); 1 when there are none.
+ */
 export function dockedFraction(drones: DroneViewState, count: number): number {
   let total = 0;
   let docked = 0;
