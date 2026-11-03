@@ -5,8 +5,11 @@
  * there. Sizes and positions are in arena units.
  */
 
-/** How a number is drawn; 'critSmall' is a crit shown at normal size once big pops run out. */
-export type NumberStyle = 'hit' | 'chain' | 'burn' | 'crit' | 'critSmall';
+/**
+ * How a number is drawn; 'critSmall' is a crit shown at normal size once big pops run out.
+ * 'poison' and 'bleed' are the damage-over-time ticks of those ailments, as 'burn' is burn's.
+ */
+export type NumberStyle = 'hit' | 'chain' | 'burn' | 'poison' | 'bleed' | 'crit' | 'critSmall';
 
 interface SizeRule {
   /** Height at the typical hit. */
@@ -24,6 +27,9 @@ const SIZES: Readonly<Record<NumberStyle, SizeRule>> = {
   hit: { base: NORMAL_SIZE, perDecade: 0.3, max: NORMAL_SIZE * 1.3 },
   chain: { base: 20, perDecade: 0.3, max: NORMAL_SIZE * 1.2 },
   burn: { base: 16, perDecade: 0.25, max: NORMAL_SIZE },
+  // A poison build's main damage: a step above burn so the green ticks read in a crowd.
+  poison: { base: 17, perDecade: 0.25, max: NORMAL_SIZE },
+  bleed: { base: 16, perDecade: 0.25, max: NORMAL_SIZE },
   // Big crit pops grow slowly and stop at about 1.6x a normal number (1.8x at the pop's peak).
   crit: { base: 30, perDecade: 0.12, max: NORMAL_SIZE * 1.6 },
   critSmall: { base: NORMAL_SIZE * 1.1, perDecade: 0.1, max: NORMAL_SIZE * 1.25 },
