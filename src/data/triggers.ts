@@ -413,17 +413,17 @@ export interface GroundZoneSpec {
 
 /**
  * Timed rows of the drone pool (src/sim/systems/drones.ts; 火靈, 小無人機): `count` (default 1)
- * of them appear at the event's point and live round(lifeSec × 60) ticks (one at least). Each
- * dashes at an enemy picked by `aim` ('nearest', the default: the nearest to it; 'outer': the
- * drones' pick), at `speed` (default DRONE_DEFAULTS.speed) × the attack speed over the base,
- * and impacts it, hitting every enemy within `splash` (default DRONE_DEFAULTS.splash) of the
- * target for damagePct of the damage stat (0: no hit), tagged hit, minion and area plus its tags
- * and element; its hits crit and roll ailments as any hit does. Then each enemy in its splash
- * that is still alive takes `ailmentStacks` (default 1) of `ailment`, each as an applyAilment of
- * damagePct `ailmentDamagePct` (default 1) would apply it. After `impacts` (default 1) impacts,
- * or when its time is up, the row leaves and raises droneExpire. Rows count in the run's summon
- * cap with the fixed drones and turrets (SUMMON_CAP); a spawn past it, or past `maxLive` (default
- * SUMMON_CAP) live rows of this effect, is refused and counted.
+ * of them appear at the event's point and live round(lifeSec × 60 × summonDuration) ticks (one at
+ * least; the summonDuration stat is E4's). Each dashes at an enemy picked by `aim` ('nearest', the
+ * default: the nearest to it; 'outer': the drones' pick), at `speed` (default DRONE_DEFAULTS.speed)
+ * × the attack speed over the base, and impacts it, hitting every enemy within `splash` (default
+ * DRONE_DEFAULTS.splash) of the target for damagePct of the damage stat (0: no hit), tagged hit,
+ * minion and area plus its tags and element; its hits crit and roll ailments as any hit does. Then
+ * each enemy in its splash that is still alive takes `ailmentStacks` (default 1) of `ailment`, each
+ * as an applyAilment of damagePct `ailmentDamagePct` (default 1) would apply it. After `impacts`
+ * (default 1) impacts, or when its time is up, the row leaves and raises droneExpire. Rows count in
+ * the run's summon cap with the fixed drones and turrets (SUMMON_CAP); a spawn past it, or past
+ * `maxLive` (default SUMMON_CAP) live rows of this effect, is refused and counted.
  */
 export interface SpawnDroneSpec {
   readonly kind: 'spawnDrone';

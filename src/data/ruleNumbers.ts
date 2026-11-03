@@ -92,6 +92,14 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
       return [[`+${rule.drones}`]];
     case 'hiveBuild':
       return [[`+${rule.turrets}`]];
+    case 'queenRole':
+      return [[`×${rule.sizeMult}`], [`×${rule.damageMult}`], [signedPercent(rule.followBonus)]];
+    case 'hammerRole':
+      return [[`×${rule.damageMult}`], [`×${rule.speedMult}`]];
+    case 'focusFire':
+      return [];
+    case 'outpost':
+      return [[String(rule.turretRadius)]];
     case 'royalJelly':
       return [[signedPercent(rule.lifeMult - 1)]];
     case 'breed':

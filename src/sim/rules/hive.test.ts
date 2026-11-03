@@ -6,7 +6,7 @@ import { createSimulation } from '../simulation';
 import type { DronePool } from '../systems/systemState';
 import { makeConfig, makeStats, makeTestData } from '../testing';
 import { DRONE_KIND_SPIRIT, NO_INPUT } from '../types';
-import { HIVE_TIMED_IMPACTS } from './hive';
+import { COLOSSUS_GROWTH, HAMMER_SLOT, HIVE_TIMED_IMPACTS, QUEEN_SLOT } from './hive';
 
 const SWARM: SignatureSpec = { id: 'swarm' };
 const MAGMA: SignatureSpec = { id: 'magmaBomb' };
@@ -153,5 +153,46 @@ describe('timed drones (hiveSplit, breed, royalJelly, motherFactory)', () => {
     expect(one.spawned).toBeLessThanOrEqual(10);
     expect(three.spawned).toBeGreaterThanOrEqual(27);
     expect(three.spawned).toBeLessThanOrEqual(30);
+  });
+});
+
+describe('E4-backed ◆ (queenRole, hammerRole, focusFire, outpost, 巨像 size)', () => {
+  it('蜂后 and 重錘 take slots 0 and 1, the queen leading', () => {
+    const build = compileBuild(
+      makeStats(),
+      [
+        { id: 'queenRole', damageMult: 2, sizeMult: 1.5, followBonus: 0.2 },
+        { id: 'hammerRole', damageMult: 5, speedMult: 0.4 },
+      ],
+      SWARM,
+    );
+    expect(build.signature.swarm?.roles).toEqual([
+      { slot: QUEEN_SLOT, damageMult: 2, speedMult: 1, sizeMult: 1.5, followBonus: 0.2 },
+      { slot: HAMMER_SLOT, damageMult: 5, speedMult: 0.4, sizeMult: 1, followBonus: 0 },
+    ]);
+  });
+
+  it('集火指令 sets the highest-hp pick; 前哨 moves the turrets out', () => {
+    const build = compileBuild(
+      makeStats(),
+      [{ id: 'focusFire' }, { id: 'outpost', turretRadius: 220 }],
+      SWARM,
+    );
+    expect(build.flags.summonHighestHp).toBe(true);
+    expect(build.signature.swarm?.turretRadius).toBe(220);
+  });
+
+  it('巨像 grows its drone by COLOSSUS_GROWTH per drone given up, 擴巢 included', () => {
+    const one = compileBuild(makeStats(), [{ id: 'colossus', damagePerMissing: 0.5 }], SWARM);
+    expect(one.signature.swarm?.sizeMult).toBeCloseTo(1 + 2 * COLOSSUS_GROWTH, 12);
+    const more = compileBuild(
+      makeStats(),
+      [
+        { id: 'colossus', damagePerMissing: 0.5 },
+        { id: 'hiveExpand', drones: 3 },
+      ],
+      SWARM,
+    );
+    expect(more.signature.swarm?.sizeMult).toBeCloseTo(1 + 5 * COLOSSUS_GROWTH, 12);
   });
 });

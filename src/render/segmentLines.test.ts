@@ -94,6 +94,7 @@ function dronePool(rows: readonly Row[]): DroneViewState {
     targetId: new Int32Array(n),
     owner: new Int16Array(n),
     seat: new Int16Array(n),
+    size: new Float64Array(n).fill(1),
   };
   rows.forEach((row, s) => {
     ds.id[s] = row.id;

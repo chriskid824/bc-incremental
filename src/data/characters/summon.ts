@@ -5,8 +5,8 @@
  *
  * The swarm's drones impact for 200% tagged hit, minion and area; its turret shoots for 80% tagged
  * hit, minion and projectile (src/sim/rules/swarm.ts), which is how the branches tell them apart.
- * The ◆ that need the drone pool's per-drone work (自爆協議, 蜂后, 重錘, 集火指令's pick, 前哨,
- * 攔截守衛, 蜂潮) carry interim data until the engine lands it; each comment says what it waits on.
+ * The ◆ that need the engine's E5 (自爆協議, 攔截守衛, 蜂潮) carry interim data until it lands; each
+ * comment says what it waits on.
  */
 
 import {
@@ -16,7 +16,6 @@ import {
   ascNode,
   centerBranch,
   defineCharacter,
-  flat,
   inc,
   keystone,
   mastery,
@@ -147,8 +146,10 @@ export const SUMMON = defineCharacter({
         r5: ranked('damage', 0.45, 3, 'increased', DRONE),
         r6: ranked('attackSpeed', 0.3, 3, 'more', DRONE),
         // 蜂后: one drone becomes the queen (×1.5 size, ×2 damage); the others deal +20% to its
-        // target. Interim until the engine's per-drone roles (P2): the swarm's average, +40%.
-        c: notable('queen', { modifiers: [more('damage', 0.4, DRONE)] }),
+        // target (E4 roles).
+        c: notable('queen', {
+          rules: [{ id: 'queenRole', damageMult: 2, sizeMult: 1.5, followBonus: 0.2 }],
+        }),
         mastery: mastery(),
       }),
       // 工兵: turret damage and attack speed.
@@ -162,18 +163,16 @@ export const SUMMON = defineCharacter({
         }),
         r3: ranked('damage', 0.45, 3, 'increased', TURRET),
         r4: ranked('attackSpeed', 0.06, 3, 'more', TURRET),
-        // 前哨: the turrets sit at radius 220, reaching farther. Interim until the engine's turret
-        // radius (P4): +25% turret damage.
-        b: notable('outpost', { modifiers: [inc('damage', 0.25, TURRET)] }),
+        // 前哨: the turrets sit at radius 220, reaching farther (E4 turretRadius).
+        b: notable('outpost', { rules: [{ id: 'outpost', turretRadius: 220 }] }),
         r5: ranked('damage', 0.45, 3, 'increased', TURRET),
         r6: ranked('attackSpeed', 0.06, 3, 'more', TURRET),
-        // 集火指令: every summon goes for the enemy with the most hp, +25% damage (答案：Boss).
-        // Interim until the engine's highest-hp pick (P3): elites and bosses first (鎖定信標's
-        // policy), and the +25% on the highest-hp enemy.
+        // 集火指令: every summon goes for the enemy with the most hp (E4 summonHighestHp), +25%
+        // damage (答案：Boss).
         c: answers(
           notable('focus-fire', {
-            rules: [{ id: 'lockBeacon' }],
-            modifiers: [inc('damage', 0.25, { ...SUMMONS, when: [{ targetIs: 'highestHp' }] })],
+            rules: [{ id: 'focusFire' }],
+            modifiers: [inc('damage', 0.25, SUMMONS)],
           }),
           'boss',
         ),
@@ -194,9 +193,11 @@ export const SUMMON = defineCharacter({
         ),
         r3: ranked('maxLife', 0.1, 3),
         r4: ranked('areaSize', 0.08, 3),
-        // 重錘: one drone ×5 damage, ×0.4 speed (答案：盾兵). Interim until the engine's per-drone
-        // roles (P2): the drones' impacts pass shields.
-        b: answers(notable('hammer', { modifiers: [flat('ignoreShield', 1, DRONE)] }), 'shielder'),
+        // 重錘: one drone ×5 damage, ×0.4 speed (答案：盾兵; E4 roles).
+        b: answers(
+          notable('hammer', { rules: [{ id: 'hammerRole', damageMult: 5, speedMult: 0.4 }] }),
+          'shielder',
+        ),
         r5: ranked('maxLife', 0.1, 3),
         r6: ranked('areaSize', 0.08, 3),
         // 回收: drones fly out again as soon as they are home, never resting on the dock ring.
@@ -250,7 +251,7 @@ export const SUMMON = defineCharacter({
       // 擴巢: +3 drones.
       n1: ascNode({ rules: [{ id: 'hiveExpand', drones: 3 }] }),
       // 蜂王漿: temporary drones live 50% longer.
-      n2: ascNode({ rules: [{ id: 'royalJelly', lifeMult: 1.5 }] }),
+      n2: ascNode({ modifiers: [inc('summonDuration', 0.5)] }),
       // 繁衍: a kill has a 20% chance to hatch a temporary drone for 6 s.
       final: ascFinal({
         rules: [{ id: 'breed', chance: 0.2, lifeSec: 6, damagePct: 2, maxLive: 12 }],

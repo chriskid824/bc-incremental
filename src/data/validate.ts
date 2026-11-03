@@ -806,6 +806,7 @@ function ruleIssues(rule: RuleSpec): string[] {
       }
       break;
     case 'lockBeacon':
+    case 'focusFire':
       break;
     case 'cannon':
       // The engine refuses a turret rate factor that is not finite and above 0, and a negative splash.
@@ -855,6 +856,30 @@ function ruleIssues(rule: RuleSpec): string[] {
     case 'hiveBuild':
       if (!(Number.isInteger(rule.turrets) && rule.turrets >= 1)) {
         issues.push(`hiveBuild.turrets must be a positive integer (got ${rule.turrets})`);
+      }
+      break;
+    case 'queenRole':
+      for (const [field, value] of [
+        ['damageMult', rule.damageMult],
+        ['sizeMult', rule.sizeMult],
+      ] as const) {
+        if (!(value > 0)) issues.push(`queenRole.${field} must be above 0 (got ${value})`);
+      }
+      if (!(rule.followBonus >= 0)) {
+        issues.push(`queenRole.followBonus must be >= 0 (got ${rule.followBonus})`);
+      }
+      break;
+    case 'hammerRole':
+      for (const [field, value] of [
+        ['damageMult', rule.damageMult],
+        ['speedMult', rule.speedMult],
+      ] as const) {
+        if (!(value > 0)) issues.push(`hammerRole.${field} must be above 0 (got ${value})`);
+      }
+      break;
+    case 'outpost':
+      if (!(rule.turretRadius > 0)) {
+        issues.push(`outpost.turretRadius must be above 0 (got ${rule.turretRadius})`);
       }
       break;
     case 'royalJelly':
@@ -1703,6 +1728,10 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'colossus':
     case 'hiveExpand':
     case 'hiveBuild':
+    case 'queenRole':
+    case 'hammerRole':
+    case 'focusFire':
+    case 'outpost':
     case 'royalJelly':
     case 'breed':
     case 'motherFactory':

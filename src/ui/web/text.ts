@@ -409,6 +409,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   bombRadius: 'percent',
   spreadRadius: 'percent',
   droneSpeed: 'percent',
+  summonDuration: 'percent',
 };
 
 /**

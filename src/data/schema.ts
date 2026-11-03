@@ -575,6 +575,19 @@ export const RuleSpecSchema = exact<RuleSpec>()(
     z.strictObject({ id: z.literal('colossus'), damagePerMissing: finite }).readonly(),
     z.strictObject({ id: z.literal('hiveExpand'), drones: finite }).readonly(),
     z.strictObject({ id: z.literal('hiveBuild'), turrets: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('queenRole'),
+        damageMult: finite,
+        sizeMult: finite,
+        followBonus: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({ id: z.literal('hammerRole'), damageMult: finite, speedMult: finite })
+      .readonly(),
+    z.strictObject({ id: z.literal('focusFire') }).readonly(),
+    z.strictObject({ id: z.literal('outpost'), turretRadius: finite }).readonly(),
     z.strictObject({ id: z.literal('royalJelly'), lifeMult: finite }).readonly(),
     z
       .strictObject({

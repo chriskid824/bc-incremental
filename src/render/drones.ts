@@ -9,8 +9,9 @@
  * shots are drawn by the shot pool's layer (src/render/poolShots.ts). A spirit, a timed row of a
  * spawnDrone effect (C5.7), is a drone's kite and trail at SPIRIT_SCALE of their size, in its own
  * layer above the turrets, its track dropped once it has left the pool; it brackets nothing, and
- * its leaving (the droneExpire event) draws nothing yet. Reads the simulation state and never
- * writes it.
+ * its leaving (the droneExpire event) draws nothing yet. A drone's kite is drawn at its row's size
+ * (DroneViewState.size, E4: the swarm's sizeMult × its role's) about its centre; its trail keeps
+ * its width. Reads the simulation state and never writes it.
  */
 
 import { Container, Graphics, Particle, ParticleContainer } from 'pixi.js';
@@ -643,6 +644,8 @@ export class DroneLayer {
     let kiteCount = 0;
     let spiritCount = 0;
     let turretCount = 0;
+    // A kite's scale is a static property of its container: a change of it uploads it again.
+    let resized = false;
     for (let s = 0; s < count; s++) {
       const kind = ds.kind[s];
       if (kind === DRONE_KIND_TURRET) {
@@ -656,19 +659,23 @@ export class DroneLayer {
       const py = ds.prevY[s] as number;
       const hx = px + ((ds.x[s] as number) - px) * alpha;
       const hy = py + ((ds.y[s] as number) - py) * alpha;
-      const size = droneSize(ds, s) * (spirit ? SPIRIT_SCALE : 1);
-      streakCount = this.drawTrail(track.trail, hx, hy, streakCount, this.trailWidth * size);
+      const base = spirit ? SPIRIT_SCALE : 1;
+      const size = droneSize(ds, s) * base;
+      // The kite grows with its row's size; its trail keeps its width (E4).
+      streakCount = this.drawTrail(track.trail, hx, hy, streakCount, this.trailWidth * base);
       const kite = spirit ? this.spirit(spiritCount++) : this.kite(kiteCount++);
       kite.x = hx;
       kite.y = hy;
       kite.rotation = track.heading;
-      kite.scaleX = size;
-      kite.scaleY = size;
+      if (kite.scaleX !== size) {
+        kite.scaleX = kite.scaleY = size;
+        resized = true;
+      }
     }
     streaks.length = streakCount;
     if (streakCount !== previousStreaks) this.trails.update();
     kites.length = kiteCount;
-    if (kiteCount !== previousKites) this.kites.update();
+    if (kiteCount !== previousKites || resized) this.kites.update();
     spirits.length = spiritCount;
     if (spiritCount !== previousSpirits) this.spirits.update();
     this.bases.particleChildren.length = turretCount;

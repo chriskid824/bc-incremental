@@ -59,9 +59,9 @@
  * its window on the cadence of the emitters it takes (src/sim/systems/combo.ts).
  *
  * A spawnDrone appends its timed rows to the drone pool (spawnRows, src/sim/systems/drones.ts)
- * at the event's point, each keeping the entry's effect, depth and origin; a row past the summon
- * cap or its maxLive is refused and counted (summonCapped). They first step in the next tick's
- * drone stage, which runs before this phase.
+ * at the event's point, each keeping the entry's effect, depth and origin and living its
+ * effect's SpawnSpecs.lifeTicks; a row past the summon cap or its maxLive is refused and counted
+ * (summonCapped). They first step in the next tick's drone stage, which runs before this phase.
  */
 
 import type { Num } from '../../core/num';
@@ -96,8 +96,8 @@ import type { Enemy, RunContext } from '../systems/context';
 import { spawnRows, swarmRepeat } from '../systems/drones';
 import { rebuildGrid } from '../systems/grid';
 import { MOTION_HOMING, MOTION_STRAIGHT, spawnShot } from '../systems/shots';
+import type { SpawnSpecs } from '../systems/systemState';
 import { addZone, PULSES_PER_SECOND } from '../systems/zones';
-import { TICK_RATE } from '../types';
 import { raiseFreeze } from './centerEvents';
 import { fireApplied, fireOne } from './dispatch';
 import { REPEAT } from './flags';
@@ -594,14 +594,15 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     );
   },
   // `count` timed rows of the drone pool at the event's point, or on the enemy or player its
-  // trigger's selector picked, living round(lifeSec × 60) ticks (one at least), their hits on the
-  // effect's payload at the entry's depth and origin (src/sim/systems/drones.ts).
+  // trigger's selector picked, living round(lifeSec × 60 × summonDuration) ticks (one at least,
+  // SpawnSpecs.lifeTicks, which the fill reads once; E4), their hits on the effect's payload at
+  // the entry's depth and origin (src/sim/systems/drones.ts).
   spawnDrone(ctx, spec, fx, entry) {
     spawnRows(
       ctx,
       entry.effect,
       spec.count ?? 1,
-      Math.max(1, Math.round(spec.lifeSec * TICK_RATE)),
+      (ctx.sys.drones.specs as SpawnSpecs).lifeTicks[entry.effect] as number,
       centerX(ctx, fx, entry),
       centerY(ctx, fx, entry),
       entry.depth,

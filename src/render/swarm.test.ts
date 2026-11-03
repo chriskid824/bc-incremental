@@ -61,7 +61,6 @@ interface Slot {
 /** A drone pool of `slots`, ids 1 up (or `ids`), with a `size` row when any slot sets one. */
 function pool(slots: readonly Slot[], ids?: readonly number[]): DroneViewState {
   const n = Math.max(1, slots.length);
-  const sized = slots.some((slot) => slot.size !== undefined);
   const ds = {
     id: new Int32Array(n),
     kind: new Uint8Array(n),
@@ -73,7 +72,7 @@ function pool(slots: readonly Slot[], ids?: readonly number[]): DroneViewState {
     targetId: new Int32Array(n).fill(-1),
     owner: new Int16Array(n),
     seat: new Int16Array(n),
-    ...(sized ? { size: new Float64Array(n).fill(1) } : {}),
+    size: new Float64Array(n).fill(1),
   };
   slots.forEach((slot, s) => {
     ds.id[s] = ids?.[s] ?? s + 1;
@@ -83,7 +82,7 @@ function pool(slots: readonly Slot[], ids?: readonly number[]): DroneViewState {
     ds.y[s] = slot.y ?? CENTER.y;
     ds.prevX[s] = slot.prevX ?? slot.x ?? CENTER.x + 43;
     ds.prevY[s] = slot.prevY ?? slot.y ?? CENTER.y;
-    if (slot.size !== undefined && 'size' in ds) ds.size[s] = slot.size;
+    if (slot.size !== undefined) ds.size[s] = slot.size;
   });
   return ds;
 }

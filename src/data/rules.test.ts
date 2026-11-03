@@ -136,6 +136,10 @@ describe('tables the rule modules fill', () => {
       'hiveSplit',
       'hiveExpand',
       'hiveBuild',
+      'queenRole',
+      'hammerRole',
+      'focusFire',
+      'outpost',
       'royalJelly',
       'zoneTune',
     ]);

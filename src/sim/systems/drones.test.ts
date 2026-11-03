@@ -190,6 +190,7 @@ const PER_SLOT = [
   'targetId',
   'owner',
   'seat',
+  'size',
   'dockX',
   'dockY',
   'target',
@@ -205,6 +206,8 @@ const PER_SLOT = [
   'origin',
   'hx',
   'hy',
+  'roleDamage',
+  'roleSpeed',
 ] as const;
 /** The pool's per-emitter arrays, by name. */
 const PER_EMITTER = [

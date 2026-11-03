@@ -35,6 +35,7 @@ function pool(slots: readonly Slot[]): DroneViewState {
     targetId: new Int32Array(n),
     owner: new Int16Array(n),
     seat: new Int16Array(n),
+    size: new Float64Array(n).fill(1),
   };
   slots.forEach((slot, s) => {
     ds.id[s] = s + 1;

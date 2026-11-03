@@ -109,6 +109,12 @@ export const swarmTune: RuleModule<Extract<RuleSpec, { id: 'swarmTune' }>> = {
   },
 };
 
+/** 巨像's growth as drawn: × (1 + this × the drones given up), render only (E4 sizeMult). */
+export const COLOSSUS_GROWTH = 0.2;
+/** The swarm drone slots 蜂后 and 重錘 take (E4 roles: distinct, the leader at 0). */
+export const QUEEN_SLOT = 0;
+export const HAMMER_SLOT = 1;
+
 export const colossus: RuleModule<Extract<RuleSpec, { id: 'colossus' }>> = {
   id: 'colossus',
   compile(b, specs) {
@@ -119,6 +125,7 @@ export const colossus: RuleModule<Extract<RuleSpec, { id: 'colossus' }>> = {
     swarm.drones = Math.min(swarm.drones, 1);
     notesOf(b).colossus = { perMissing: spec.damagePerMissing, missing };
     droneMore(b, spec.damagePerMissing * missing);
+    swarm.sizeMult *= 1 + COLOSSUS_GROWTH * missing;
   },
 };
 
@@ -136,6 +143,7 @@ export const hiveExpand: RuleModule<Extract<RuleSpec, { id: 'hiveExpand' }>> = {
       const { perMissing: p, missing: m } = colossal;
       const d = spec.drones;
       droneMore(b, (1 + p * (m + d)) / (1 + p * m) - 1);
+      swarm.sizeMult *= (1 + COLOSSUS_GROWTH * (m + d)) / (1 + COLOSSUS_GROWTH * m);
       colossal.missing = m + d;
     }
   },
@@ -206,5 +214,57 @@ export const motherFactory: RuleModule<Extract<RuleSpec, { id: 'motherFactory' }
         }
       });
     }
+  },
+};
+
+/** 蜂后: the swarm's first drone leads, ×damage and ×size, the others ×(1 + followBonus) on its target. */
+export const queenRole: RuleModule<Extract<RuleSpec, { id: 'queenRole' }>> = {
+  id: 'queenRole',
+  compile(b, specs) {
+    const swarm = swarmParams(b, 'queenRole');
+    const spec = specs[0];
+    if (spec === undefined) return;
+    swarm.roles.push({
+      slot: QUEEN_SLOT,
+      damageMult: spec.damageMult,
+      speedMult: 1,
+      sizeMult: spec.sizeMult,
+      followBonus: spec.followBonus,
+    });
+  },
+};
+
+/** 重錘: the swarm's second drone hits ×damageMult and flies ×speedMult. */
+export const hammerRole: RuleModule<Extract<RuleSpec, { id: 'hammerRole' }>> = {
+  id: 'hammerRole',
+  compile(b, specs) {
+    const swarm = swarmParams(b, 'hammerRole');
+    const spec = specs[0];
+    if (spec === undefined) return;
+    swarm.roles.push({
+      slot: HAMMER_SLOT,
+      damageMult: spec.damageMult,
+      speedMult: spec.speedMult,
+      sizeMult: 1,
+      followBonus: 0,
+    });
+  },
+};
+
+/** 集火指令: every summon picks the enemy with the most hp (E4 summonHighestHp); its +25% is data. */
+export const focusFire: RuleModule<Extract<RuleSpec, { id: 'focusFire' }>> = {
+  id: 'focusFire',
+  compile(b, specs) {
+    swarmParams(b, 'focusFire');
+    if (specs.length > 0) b.flags.summonHighestHp = true;
+  },
+};
+
+/** 前哨: the swarm's turrets sit at turretRadius (E4); granted turrets keep theirs. */
+export const outpost: RuleModule<Extract<RuleSpec, { id: 'outpost' }>> = {
+  id: 'outpost',
+  compile(b, specs) {
+    const swarm = swarmParams(b, 'outpost');
+    for (const spec of specs) swarm.turretRadius = Math.max(swarm.turretRadius, spec.turretRadius);
   },
 };

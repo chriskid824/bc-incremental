@@ -193,6 +193,14 @@ export const STAT_IDS = [
    * (src/sim/emitters/drone.ts); it reaches no dock time, cooldown, turret or shot.
    */
   'droneSpeed',
+  /**
+   * 召喚物存在時間 (女王's ◆蜂王漿 「臨時無人機存在時間 +50%」, docs/v3/game-design-v3.md:199): the
+   * multiplier on every timed row's life, e.g. 1.5 = 150%: each row a spawnDrone effect appends
+   * lives max(1, round(lifeSec × 60 × summonDuration)) ticks. Read once a run, at the drone pool's
+   * fill, as max(0, summonDuration) (src/sim/emitters/drone.ts); it reaches no fixed row, zone,
+   * shot or dock time.
+   */
+  'summonDuration',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -261,6 +269,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   bombRadius: 1,
   spreadRadius: 1,
   droneSpeed: 1,
+  summonDuration: 1,
 };
 
 /**

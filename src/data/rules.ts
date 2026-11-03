@@ -191,6 +191,15 @@ export type RuleSpec =
   | { readonly id: 'hiveExpand'; readonly drones: number }
   /** 增建 (機械師, gd §1.5): `turrets` more in the swarm. */
   | { readonly id: 'hiveBuild'; readonly turrets: number }
+  | {
+      readonly id: 'queenRole';
+      readonly damageMult: number;
+      readonly sizeMult: number;
+      readonly followBonus: number;
+    }
+  | { readonly id: 'hammerRole'; readonly damageMult: number; readonly speedMult: number }
+  | { readonly id: 'focusFire' }
+  | { readonly id: 'outpost'; readonly turretRadius: number }
   /** 蜂王漿 (女王, gd §1.5): the ascendancy's timed drones live lifeMult as long. */
   | { readonly id: 'royalJelly'; readonly lifeMult: number }
   /**
@@ -274,6 +283,10 @@ export const RULE_IDS: readonly RuleId[] = [
   'colossus',
   'hiveExpand',
   'hiveBuild',
+  'queenRole',
+  'hammerRole',
+  'focusFire',
+  'outpost',
   'royalJelly',
   'breed',
   'motherFactory',
@@ -410,6 +423,10 @@ export const NOTABLE_RULES: readonly RuleId[] = [
   'hiveSplit',
   'hiveExpand',
   'hiveBuild',
+  'queenRole',
+  'hammerRole',
+  'focusFire',
+  'outpost',
   'royalJelly',
   'zoneTune',
 ];
