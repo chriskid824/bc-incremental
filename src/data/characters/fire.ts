@@ -1,11 +1,14 @@
 /**
  * 熔核 (fire): its select card from gd (colour and difficulty gd:30, reveal sets gd:304-305, enemy
- * row gd:735) and its center board (gd §1.2), B1's. Its ascendancies are B2's; until then they are
- * null. Every number is an initial value for the balance simulator (CLAUDE.md).
+ * row gd:735) and its center board (gd §1.2), B1's; its ascendancies 焚化者 and 煉獄 (gd §1.2,
+ * §1.7), B2's. Every number is an initial value for the balance simulator (CLAUDE.md).
  */
 
 import {
   answers,
+  ascendancy,
+  ascFinal,
+  ascNode,
   centerBranch,
   defineCharacter,
   flat,
@@ -219,7 +222,47 @@ export const FIRE = defineCharacter({
       ranked('maxLife', 0.1, 3),
     ],
   },
-  ascendancies: null,
+  ascendancies: [
+    // 焚化者: burned to death, they blow up, and the blasts chain.
+    ascendancy('incinerator', {
+      // 焚屍: a burning enemy that dies explodes with the burn it had left (M1's ascendancy rule).
+      n1: ascNode({
+        triggers: [
+          {
+            on: 'kill',
+            when: [{ victimHas: 'burn' }],
+            do: [{ kind: 'detonate', ailment: 'burn', radius: 60 }],
+          },
+        ],
+      }),
+      // 助燃: 焚屍's explosion ignites 2 stacks.
+      n2: ascNode({
+        triggers: [
+          {
+            on: 'kill',
+            when: [{ victimHas: 'burn' }],
+            do: [{ kind: 'applyAilment', ailment: 'burn', stacks: 2, radius: 60 }],
+          },
+        ],
+      }),
+      // 連環焚燒: enemies 焚屍's explosion kills set off 焚屍 too, 3 links deep at most.
+      final: ascFinal({ rules: [{ id: 'pyreChain', depth: 3 }] }),
+    }),
+    // 煉獄: fire zones that last, hurt and join into a sea of fire.
+    ascendancy('inferno', {
+      // 熔流: fire zones last ×2 as long.
+      n1: ascNode({ rules: [{ id: 'zoneTune', durationMult: 2, damageMult: 1, radiusMult: 1 }] }),
+      // 灼地: fire zones deal 50% a second instead of 30%.
+      n2: ascNode({
+        rules: [{ id: 'zoneTune', durationMult: 1, damageMult: 5 / 3, radiusMult: 1 }],
+      }),
+      // 火海: fire zones grow and run together, ×2 damage (初始值: radius ×1.25; the joining is
+      // how the wider zones look, not a rule of its own).
+      final: ascFinal({
+        rules: [{ id: 'zoneTune', durationMult: 1, damageMult: 2, radiusMult: 1.25 }],
+      }),
+    }),
+  ],
   recommendedOuter: ['ice', 'crit', 'summon'],
   revealAt15: ['poison', 'lightning', 'thorns'],
   enemyRow: {

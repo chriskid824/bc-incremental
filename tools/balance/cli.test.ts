@@ -223,7 +223,7 @@ describe('balance CLI', () => {
     const one = capture();
     expect(await main(['--character', 'ice'], one)).toBe(2);
     expect(one.lines.join('\n')).toMatch(
-      /ice has no center in the registered content \(built: fire\).*--content fixture/s,
+      /ice has no center in the registered content \(built: fire, summon\).*--content fixture/s,
     );
   });
 

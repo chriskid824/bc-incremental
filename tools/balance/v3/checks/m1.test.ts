@@ -183,8 +183,8 @@ describe('m1 (the M1 diffs)', () => {
     ]);
   });
 
-  it('reports pass or FAIL on the registered content, alongside 熔核 from B1 (lead ruling U15)', () => {
-    expect(plan.characters).toEqual(['fire']);
+  it('reports pass or FAIL on the registered content, alongside 熔核 from B1 and 蜂巢 from B2 (lead ruling U15)', () => {
+    expect(plan.characters).toEqual(['fire', 'summon']);
     expect(plan.units).toEqual(expect.arrayContaining(m1Units()));
     expect(m1Units().map((unit) => unit.id)).toEqual([m1UnitId('fingerprint'), m1UnitId('probe')]);
     const rows = evaluate(plan, m1Results(stubTsx(BASELINE).run));

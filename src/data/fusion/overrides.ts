@@ -37,6 +37,14 @@ export const OVERRIDES: Readonly<Partial<Record<FusionKey, FusionOverride>>> = {
       maxLive: 6,
     },
   },
+  // 火召喚「焰蜂」 (gd §5.2): drone impacts ignite 2 stacks; a burning enemy a drone kills explodes
+  // (radius 60). The explosion's hit is B2's initial value.
+  'summon.fire': {
+    rule: { id: 'flameBee', burnStacks: 2, blastRadius: 60, blastDamagePct: 1 },
+  },
+  // 冰召喚「霜蜂」 (gd §5.2): drone impacts add 12% chill; an impact on a frozen enemy (no boss)
+  // shatters it.
+  'summon.ice': { rule: { id: 'frostBee', frostPct: 0.12 } },
 };
 
 /** Fusions accepted outside the band, each with the reason the batch PR quotes (F21). */
@@ -52,6 +60,18 @@ export const ACCEPTED_FAILS: Readonly<Partial<Record<FusionKey, string>>> = {
     'B1: no coef search: at the probe (wave ~4) a run gets a few spirits, and 8 seeds read 0.99–2.79 at gd numbers (median 1.53); a lower hit share did not lower the median, so 爆靈 keeps coef 1',
   'fire.ice':
     'B1: weak at the probe (median 1.17 at the top of its range): at wave ~4 the burn cap and the frost-fire slow matter little; 霜焰 keeps the gd numbers',
+  // B2: 蜂巢's probe (8 center nodes at rank 1 + 6 outer) dies to leaks at wave ~4 (fire) to ~7
+  // (ice): every drone impact there kills its target outright, so what an impact puts on the
+  // target (burn, chill, poison, a crit's bleed) has no one left to act on. The frontier is held
+  // by how many enemies the few drones reach, not by damage per target.
+  'summon.fire':
+    'B2: insensitive at the probe (wave ~4): every drone impact kills its target, so 焰蜂 never finds a burning target; it keeps the gd numbers',
+  'summon.ice':
+    'B2: insensitive at the probe (wave ~7): every drone impact kills its target before the chill can freeze it; 霜蜂 keeps the gd numbers',
+  'summon.poison':
+    'B2: insensitive at the probe: drone impacts kill their targets, so 毒泡 has nothing left to poison; the template keeps coef 1',
+  'summon.crit':
+    'B2: insensitive at the probe (median 1.01): the probe is held by leaks, not damage per target, so 刃翼 cannot move it; the template keeps coef 1',
 };
 
 /**

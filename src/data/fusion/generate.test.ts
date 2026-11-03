@@ -122,9 +122,10 @@ describe('registries', () => {
     ]);
   });
 
-  it('OVERRIDES and CALIBRATED hold only B1 pairs so far; 冰光 and 雷光 may add rules', () => {
-    for (const key of Object.keys(OVERRIDES)) expect(key.startsWith('fire.')).toBe(true);
-    for (const key of Object.keys(CALIBRATED)) expect(key.startsWith('fire.')).toBe(true);
+  it('OVERRIDES and CALIBRATED hold only B1 and B2 pairs so far; 冰光 and 雷光 may add rules', () => {
+    const landed = (key: string): boolean => key.startsWith('fire.') || key.startsWith('summon.');
+    for (const key of Object.keys(OVERRIDES)) expect(landed(key)).toBe(true);
+    for (const key of Object.keys(CALIBRATED)) expect(landed(key)).toBe(true);
     expect(TEMPLATE_RULE_OVERRIDES).toEqual(['ice.aura', 'lightning.aura']);
     for (const key of TEMPLATE_RULE_OVERRIDES) expect(HAND_PAIRS.has(key)).toBe(false);
   });
