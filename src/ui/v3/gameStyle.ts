@@ -90,7 +90,7 @@ const CSS = `
   pointer-events: auto;
 }
 .bc-game-wave-hint { font-size: 13px; color: #8e98b3; margin-top: 6px; }
-.bc-game-pause { inset: auto auto 20px 24px; }
+.bc-game-pause { inset: auto auto 20px 24px; display: flex; gap: 8px; }
 .bc-game-paused {
   position: fixed;
   top: 50%;

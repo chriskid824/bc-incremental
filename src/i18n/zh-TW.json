@@ -342,6 +342,8 @@
   "v3.pause": "暫停・P",
   "v3.resume": "繼續・P",
   "v3.paused": "暫停中",
+  "v3.sound.on": "音效：開・M",
+  "v3.sound.off": "音效：關・M",
   "v3.startWave.hint": "最高可選第 {max} 波，越打越遠就會提高。",
   "v3.result.toWeb": "天賦網・Space",
   "v3.result.again": "再打一局",
