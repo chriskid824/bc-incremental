@@ -110,7 +110,8 @@ describe('CoreHitFilter (C7.2’s hand-off, the lead’s ruling P4)', () => {
     const calls = source.match(/\bcore\.hit\(\)/g) ?? [];
     expect(calls).toHaveLength(1);
     expect(source).toMatch(
-      /case 'playerHit':\s*case 'bulletHit':\s*if \(this\.coreHits\.flashes\(event\)\) this\.core\.hit\(\);\s*break;/,
+      // The flash brings the core-hit shake (src/render/impact.ts) with it.
+      /case 'playerHit':\s*case 'bulletHit':\s*if \(this\.coreHits\.flashes\(event\)\) \{\s*this\.core\.hit\(\);\s*this\.kick\(this\.impactShakes\.playerHit\(\)\);\s*\}\s*break;/,
     );
     expect(source).toMatch(/case 'shieldAbsorbed':\s*this\.coreHits\.flashes\(event\);/);
     // A new run forgets a shieldAbsorbed left over.

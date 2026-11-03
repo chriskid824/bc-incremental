@@ -138,3 +138,30 @@ export class PauseControl {
     this.button.textContent = t((on ? 'v3.resume' : 'v3.pause') satisfies MessageKey);
   }
 }
+
+/** The run's sound toggle, beside the pause button (game.ts appends it there). */
+export class MuteControl {
+  readonly button: HTMLButtonElement;
+  private mutedValue = false;
+
+  constructor(doc: Document, onToggle: () => void) {
+    this.button = el(
+      doc,
+      'button',
+      'bc-button bc-button-small bc-game-mute-button',
+      t('v3.sound.on'),
+    );
+    this.button.type = 'button';
+    this.button.addEventListener('click', () => onToggle());
+  }
+
+  get muted(): boolean {
+    return this.mutedValue;
+  }
+
+  set muted(on: boolean) {
+    this.mutedValue = on;
+    this.button.textContent = t((on ? 'v3.sound.off' : 'v3.sound.on') satisfies MessageKey);
+    this.button.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+}
