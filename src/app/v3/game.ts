@@ -2,7 +2,9 @@
  * The v3 game page (game.html; docs/v3/game-design-v3.md §1, §1.1, §7, A.4; the B1 row of
  * docs/v3/implementation-plan-v3.md §8.1): select a character → its talent web → a run from the
  * chosen start wave (HUD, 1x/2x/4x, pause, the new-enemy banner) → the result screen → back to the
- * web, each step saved as save v2 through the ProfileStore with the M1 import. The M1 page
+ * web, each step saved as save v2 through the ProfileStore with the M1 import. The Demo build
+ * (FLAVOR 'demo') assembles every web in DEMO_SCOPE_A (./scope.ts), which locks 霜晶 and 雷塔 with
+ * 「完整版」 and caps runs at its wave 40; the full build in FULL_SCOPE. The M1 page
  * (src/app/main.ts) is untouched; this page shares its loop, HUD and renderer.
  */
 
@@ -13,12 +15,13 @@ import { characterGameData } from '../../data';
 import { CHARACTER_IDS } from '../../data/sources';
 import type { CharacterId } from '../../data/sources';
 import type { EnemyId, GameData } from '../../data/types';
-import { assembleWeb, FULL_SCOPE, scopeHolds } from '../../data/web';
-import type { AssembledWeb, CharacterDef, Content } from '../../data/web';
+import { assembleWeb } from '../../data/web';
+import type { AssembledWeb, CharacterDef, Content, WebScope } from '../../data/web';
 import { FIRST_PICK } from '../../data/characters';
 import { t } from '../../i18n';
 import type { Locale } from '../../i18n';
 import type { CharacterProgress } from '../../meta/web';
+import { FLAVOR } from '../../platform/flavor';
 import { Renderer } from '../../render';
 import {
   accountProgress,
@@ -49,6 +52,7 @@ import { ConstructStills, mountCardPreview } from './preview';
 import { characterRendererOptions } from './renderOptions';
 import { CharacterRunState, maxStartWave, startWaveOf, storedPick } from './run';
 import type { FinishedRun } from './run';
+import { cardLock, gameScope, showsSwitchHint } from './scope';
 
 /** Becomes a settings toggle later (docs/ARCHITECTURE.md §10). */
 const REDUCED_MOTION = false;
@@ -68,6 +72,8 @@ export interface GamePageOptions {
   readonly locale: Locale;
   readonly content: Content;
   readonly store: ProfileStore;
+  /** The scope the webs are assembled in; gameScope(FLAVOR) when omitted. */
+  readonly scope?: WebScope;
 }
 
 export class GamePage {
@@ -76,6 +82,7 @@ export class GamePage {
   private readonly locale: Locale;
   private readonly content: Content;
   private readonly store: ProfileStore;
+  private readonly scope: WebScope;
   private readonly data: GameData = characterGameData();
   private readonly webs = new Map<CharacterId, AssembledWeb | null>();
   private readonly hud: Hud<Speed>;
@@ -103,12 +110,16 @@ export class GamePage {
     this.locale = options.locale;
     this.content = options.content;
     this.store = options.store;
+    this.scope = options.scope ?? gameScope(FLAVOR);
     const doc = this.root.ownerDocument;
     this.hud = new Hud(doc, SPEEDS, (speed) => this.setSpeed(speed));
     this.hud.root.hidden = true;
     this.results = new V3ResultPanel(doc, this.data.enemies, {
       toWeb: () => this.openWeb(),
       nextRun: () => this.startRun(),
+      toSelect: () => {
+        if (this.screen === 'result') this.showSelect();
+      },
     });
     this.picker = new StartWavePicker(doc, (wave) => this.pickStartWave(wave));
     this.pause = new PauseControl(doc, () => this.togglePause());
@@ -177,11 +188,11 @@ export class GamePage {
     return this.content.characters[c];
   }
 
-  /** c's web in FULL_SCOPE, or null while c is 「製作中」 (no center) or outside the scope. */
+  /** c's web in the page's scope, or null while c is 「製作中」 (no center) or outside the scope. */
   private webOf(c: CharacterId): AssembledWeb | null {
     if (!this.webs.has(c)) {
-      const playable = this.def(c).center !== null && scopeHolds(FULL_SCOPE.characters, c);
-      this.webs.set(c, playable ? assembleWeb(this.content, c, FULL_SCOPE) : null);
+      const playable = cardLock(this.content, this.scope, c) === null;
+      this.webs.set(c, playable ? assembleWeb(this.content, c, this.scope) : null);
     }
     return this.webs.get(c) ?? null;
   }
@@ -208,6 +219,7 @@ export class GamePage {
       cards: CHARACTER_IDS.map((c) => ({
         def: this.def(c),
         playable: this.webOf(c) !== null,
+        lock: cardLock(this.content, this.scope, c),
         bestWave: this.progressOf(c).bestWave,
       })),
       cursor,
@@ -384,6 +396,10 @@ export class GamePage {
       skipCores: settlement.skipCores,
       bestWave: progress.bestWave,
       walletShards: progress.wallet.shards,
+      switchHint: showsSwitchHint(
+        this.profile.account.stats.runs,
+        CHARACTER_IDS.filter((c) => this.webOf(c) !== null).length,
+      ),
     };
   }
 

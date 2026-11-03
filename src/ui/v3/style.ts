@@ -47,6 +47,40 @@ const CSS = `
 .v3p-start { background: #ff7a2f !important; border-color: #ff7a2f !important; color: #0b0d12 !important; font-weight: 800; padding: 8px 26px !important; font-size: 17px !important; }
 .v3p-start:hover { filter: brightness(1.1); }
 .v3p-refund[data-armed='true'] { border-color: #ff9a6b; color: #ffcf70; }
+.v3p-prestige { border-color: #c9a7ff !important; color: #e3d2ff !important; font-weight: 800; }
+.v3p-prestige[hidden] { display: none; }
+.v3p-dialog {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  max-width: min(460px, calc(100% - 32px));
+  padding: 16px 18px;
+  background: rgba(17, 21, 31, 0.98);
+  border: 1px solid #c9a7ff;
+  border-radius: 12px;
+  line-height: 1.45;
+}
+.v3p-dialog[hidden], .v3p-asc[hidden] { display: none; }
+.v3p-dialog-title { font-size: 18px; font-weight: 800; margin-bottom: 8px; color: #e3d2ff; }
+.v3p-dialog-line { margin: 4px 0; }
+.v3p-dialog-buttons { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+.v3p .v3p-dialog .v3p-confirm { background: #c9a7ff; border-color: #c9a7ff; color: #0b0d12; font-weight: 800; }
+.v3p-asc {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 2;
+  padding: 6px 12px;
+  background: rgba(17, 21, 31, 0.9);
+  border: 1px solid #c9a7ff;
+  border-radius: 8px;
+  color: #e3d2ff;
+  font-weight: 700;
+  pointer-events: none;
+}
 .v3p-slots {
   display: flex;
   align-items: center;

@@ -99,6 +99,16 @@ describe('describeV3RunEnd', () => {
     expect(text.tip).not.toContain('Vitality');
   });
 
+  it("says the Demo's wave cap, not M1's prototype line, at the cap", () => {
+    const capped = facts({ endReason: 'waveCap', highestWave: 40 });
+    expect(describeV3RunEnd(capped, ENEMIES).cause).toBe(
+      'Wave 40 cleared, the last wave of the demo',
+    );
+    expect(describeV3RunEnd(capped, ENEMIES).tip).toBeNull();
+    setLocale('zh-TW');
+    expect(describeV3RunEnd(capped, ENEMIES).cause).toBe('清完第 40 波，這是 Demo 的最後一波');
+  });
+
   it('has no tip outside a death', () => {
     const text = describeV3RunEnd(facts({ endReason: 'timeout' }), ENEMIES);
     expect(text.tip).toBeNull();

@@ -185,7 +185,8 @@ const stubPool =
 
 /** The world a test fixes: the stub pool, a clock that never moves, a date, the commit and a ref. */
 const fixed = (overrides: NightlyDeps = {}): NightlyDeps => ({
-  checks: { sessions: 2, c7: BASE_C7 },
+  // Before B2's prestige unless a test says otherwise, as the plans below were written.
+  checks: { sessions: 2, c7: BASE_C7, prestige: false },
   run: stubPool(),
   now: () => new Date(Date.UTC(2026, 9, 28, 19, 17)),
   clock: () => 0,
@@ -418,7 +419,8 @@ describe('the nightly plan', () => {
       content: 'registered',
       commit: SHA,
     });
-    expect(planText(registered).split('\n')[0]).toMatch(/, scopes full$/);
+    // B2 wrote the prestige, so the registered content's plan plays the Demo too.
+    expect(planText(registered).split('\n')[0]).toMatch(/, scopes full, demoA$/);
   });
 
   it('plans no shard without units: one fusion gives no doubles or triples shard (OWN 6)', () => {

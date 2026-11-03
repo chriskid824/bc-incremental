@@ -24,6 +24,7 @@ import type { SettleTarget } from '../settle';
 import { computeStatBlock } from '../stats';
 import type { Settlement } from '../types';
 import { outerOfBoard, storedRank } from './counts';
+import { resonanceDamageMore } from './prestige';
 import { DEFAULT_WEB_ECONOMY } from './price';
 import type { CharacterProgress, WebEconomy } from './types';
 
@@ -50,7 +51,9 @@ function merged(mod: Modifier, rank: number): Modifier {
  * modifier without a scaling goes in once, merged (P4), while one with a scaling goes in r times,
  * its cap applying per copy; triggers and conversions r times and emitter grants once, each with
  * its node's source; a fusion board's triggers with the fusion's coef. Rules go in once each, as
- * { source, spec, coef }, coef 1 off fusion boards (D9, D10). The wallet's shards, as
+ * { source, spec, coef }, coef 1 off fusion boards (D9, D10). The 迴響 ever earned adds one
+ * independent all-damage more of 5 % per point (gd:778, GDD:174), last and only when above 0, so
+ * a build before its first prestige compiles as it did. The wallet's shards, as
  * settleWebRun reads them, go to the run's config (webRunConfig).
  */
 export function webBuild(web: AssembledWeb, progress: CharacterProgress): WebRun {
@@ -80,6 +83,8 @@ export function webBuild(web: AssembledWeb, progress: CharacterProgress): WebRun
     for (const grant of effects.emitters) emitters.push({ source, grant });
     for (const spec of effects.rules) rules.push({ source, spec, coef: coef ?? 1 });
   }
+  const resonance = resonanceDamageMore(progress.resonanceEarned);
+  if (resonance > 0) modifiers.push({ stat: 'damage', kind: 'more', value: resonance });
   return {
     stats: computeStatBlock(modifiers, { triggers, conversions, emitters }),
     signature: web.def.signature,

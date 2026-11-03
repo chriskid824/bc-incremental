@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { characterGameData } from '../../data';
-import { assembleWeb, FULL_SCOPE, loadContent } from '../../data/web';
+import { assembleWeb, DEMO_SCOPE_A, FULL_SCOPE, loadContent } from '../../data/web';
 import { emptyProgress } from '../../meta/web';
 import type { CharacterProgress } from '../../meta/web';
 import { CharacterRunState, maxStartWave, runSeed, startWaveOf, storedPick } from './run';
@@ -30,6 +30,21 @@ describe('start waves', () => {
     expect(startWaveOf(web, progress, 0)).toBe(1);
     expect(storedPick(web, progress, max)).toBeNull();
     expect(storedPick(web, progress, 2)).toBe(2);
+  });
+});
+
+describe("the Demo's wave cap (DEMO_SCOPE_A)", () => {
+  const demo = assembleWeb(loadContent(), 'fire', DEMO_SCOPE_A);
+
+  it('caps the start-wave picker and the run at wave 40', () => {
+    const far = reached(100);
+    expect(maxStartWave(web, far)).toBeGreaterThan(40);
+    expect(maxStartWave(demo, far)).toBe(40);
+    expect(startWaveOf(demo, far, null)).toBe(40);
+    expect(startWaveOf(demo, far, 90)).toBe(40);
+    const run = new CharacterRunState(demo, far, startWaveOf(demo, far, null), characterGameData());
+    expect(run.config.waveCap).toBe(40);
+    expect(new CharacterRunState(web, far, 1, characterGameData()).config.waveCap).toBeUndefined();
   });
 });
 

@@ -48,4 +48,11 @@ export { outerView, revealedOuters } from './reveal';
 export { settleWebRun, webBuild, webRunConfig, webStartWave } from './build';
 export type { WebRun } from './build';
 export { defaultProgress, progressFromOrder, unlockInvestment } from './invest';
+export {
+  canPrestige,
+  prestige,
+  PRESTIGE_RULES,
+  prestigeResonance,
+  resonanceDamageMore,
+} from './prestige';
 export { buyabilityIssues, orderIssues } from './buyable';

@@ -2,7 +2,8 @@
  * The select screen (docs/v3/game-design-v3.md §1.1, §8 item 10): four cards, one per character,
  * each with its construct on a preview, its one-liner, its difficulty stars and the enemies it is
  * strong and weak against (its enemyRow). A playable card's preview is a fixed-seed loop of a real
- * run; a 「製作中」 card shows its construct still and cannot be picked. The cursor starts on the
+ * run; a locked card shows its construct still and cannot be picked: 「完整版」 outside the build's
+ * scope (the Demo's 霜晶 and 雷塔, gd §1.1, §10), else 「製作中」. The cursor starts on the
  * last character picked, else on the first pick, which carries 「第一次玩推薦」. Only the card under
  * the cursor animates (docs/v3/implementation-plan-v3.md §6's fallback): the others pause.
  */
@@ -21,10 +22,15 @@ export interface CardPreview {
   destroy(): void;
 }
 
+/** Why a card cannot be picked (src/app/v3/scope.ts' cardLock); null when it can. */
+export type SelectLock = 'fullVersion' | 'inProgress' | null;
+
 export interface SelectCard {
   readonly def: CharacterDef;
   /** False while the character is 「製作中」 (center null) or outside the scope. */
   readonly playable: boolean;
+  /** The locked card's label: 「完整版」 outside the scope, 「製作中」 otherwise. */
+  readonly lock?: SelectLock;
   /** The character's all-time best wave; 0 before a run. */
   readonly bestWave: number;
 }
@@ -97,7 +103,15 @@ export class SelectScreen {
       preview.append(el(doc, 'div', 'bc-game-card-badge', t('select.firstPick')));
     }
     if (!card.playable) {
-      preview.append(el(doc, 'div', 'bc-game-card-badge bc-game-card-wip', t('select.inProgress')));
+      const full = card.lock === 'fullVersion';
+      const badge = el(
+        doc,
+        'div',
+        'bc-game-card-badge bc-game-card-wip',
+        t(full ? 'select.fullVersion' : 'select.inProgress'),
+      );
+      badge.dataset['lock'] = full ? 'fullVersion' : 'inProgress';
+      preview.append(badge);
     }
 
     const name = el(doc, 'div', 'bc-game-card-name', t(def.nameKey));

@@ -53,7 +53,13 @@ vi.mock('../content', async (importOriginal) => {
 
 /** The nightly plan on the fixture after `batch`: B1 has 熔核 alone, B2 adds 蜂巢, B5 all four. */
 const plan = (batch: Batch = 'B5', options: CheckSetOptions = {}): CheckPlan =>
-  checkSet('nightly', fixtureContent(batch), { fixture: batch }, { c7: NO_C7, ...options });
+  checkSet(
+    'nightly',
+    fixtureContent(batch),
+    { fixture: batch },
+    // Before B2 unless a test says otherwise: the rows read both states through this seam.
+    { c7: NO_C7, prestige: false, ...options },
+  );
 
 /** `count` default sessions of `character`, each made by `make(session)`. */
 const sessions = (

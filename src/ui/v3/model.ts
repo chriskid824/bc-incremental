@@ -25,12 +25,15 @@ import {
   boardCounts,
   buyPath,
   canBuy,
+  canPrestige,
   fusionProgress,
   fusionSlotOrder,
   fusionSlots,
   outerView,
   planPath,
+  prestigeResonance,
   refundPreview,
+  resonanceDamageMore,
   revealedOuters,
   WEB_RULES,
 } from '../../meta/web';
@@ -44,7 +47,7 @@ import type {
   Price,
   RefundPreview,
 } from '../../meta/web';
-import { fusionName, fusionTitle, nodeName, say } from '../web/names';
+import { contentText, fusionName, fusionTitle, nodeName, say } from '../web/names';
 import { buyCheckText, describeNode } from '../web/text';
 import type { TextLookup } from '../web/text';
 
@@ -326,6 +329,61 @@ function branchLabels(web: AssembledWeb, drawnNodes: ReadonlyMap<string, NodeVie
     key,
     at: { x: x / count, y: y / count },
   }));
+}
+
+// The prestige (gd §1.7, §7).
+
+/** What the 轉生 button offers: the 迴響 a prestige pays now, and the damage it adds (percent). */
+export interface PrestigeOffer {
+  readonly resonance: number;
+  /** All damage more, in percent, the 迴響 earned holds after the prestige. */
+  readonly damagePercent: number;
+  /** The cycle best the prestige resets. */
+  readonly cycleBest: number;
+}
+
+/** The offer while canPrestige allows a prestige; null before this cycle's best reaches wave 30. */
+export function prestigeOffer(progress: CharacterProgress): PrestigeOffer | null {
+  if (!canPrestige(progress)) return null;
+  const resonance = prestigeResonance(progress.cycleBest);
+  const earned = progress.resonanceEarned + resonance;
+  return {
+    resonance,
+    damagePercent: Math.round(resonanceDamageMore(earned) * 100),
+    cycleBest: progress.cycleBest,
+  };
+}
+
+/** The 轉生 dialog's lines: what resets, what is kept, what it pays. */
+export function prestigeLines(offer: PrestigeOffer, lookup: TextLookup): readonly string[] {
+  return [
+    say(lookup, 'panel.prestige.resets', { wave: offer.cycleBest }),
+    say(lookup, 'panel.prestige.keeps'),
+    say(lookup, 'panel.prestige.gains', {
+      resonance: offer.resonance,
+      damage: offer.damagePercent,
+    }),
+  ];
+}
+
+/**
+ * The ascendancy line over the web after a prestige (gd §1.7): 「用迴響從 2 個昇華選 1 個」 while
+ * none is chosen, the chosen one's name after; null before a prestige or on a web without them.
+ */
+export function ascendancyLine(
+  web: AssembledWeb,
+  progress: CharacterProgress,
+  lookup: TextLookup,
+): string | null {
+  if (progress.prestiges < 1) return null;
+  const chains = web.boards.filter((board) => board.kind === 'asc' && board.status === 'open');
+  if (chains.length === 0) return null;
+  const chosen = chains.find((board) => board.id === `${web.character}.asc.${progress.ascendancy}`);
+  if (progress.ascendancy === null || chosen === undefined) {
+    return say(lookup, 'panel.asc.pick', { count: chains.length });
+  }
+  const name = contentText(lookup, `web.asc.${chosen.id.replace('.asc.', '.')}.name`);
+  return say(lookup, 'panel.asc.chosen', { name });
 }
 
 // Prices and the click plan (§8 item 5).
