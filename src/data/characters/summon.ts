@@ -83,21 +83,37 @@ const DEFAULT_ORDER: readonly string[] = [
   ...ranks(`${C}swarm.r5`, 3),
   ...ranks('hub.might.might', 8),
   'outer.crit.main.entry',
+  ...ranks('hub.might.might', 2),
   ...ranks('outer.crit.precision.r1', 4),
+  ...ranks('hub.might.might', 2),
   ...ranks('outer.crit.heavy.r1', 4),
+  ...ranks('hub.might.might', 2),
   ...ranks('outer.crit.precision.r2', 2),
+  ...ranks('hub.might.might', 2),
   ...ranks('outer.crit.heavy.r2', 2),
+  ...ranks('hub.might.might', 2),
   'outer.crit.heavy.execute',
+  ...ranks('hub.might.might', 2),
   'fusion.summon.crit.core',
+  ...ranks('hub.might.might', 2),
   ...ranks('fusion.summon.fire.r1', 3),
+  ...ranks('hub.might.might', 2),
   'hub.defense.wave-shield',
+  ...ranks('hub.might.might', 2),
   ...ranks(`${C}engineer.r5`, 3),
+  ...ranks('hub.might.might', 2),
   ...ranks(`${C}engineer.r6`, 2),
+  ...ranks('hub.might.might', 2),
   `${C}engineer.focus-fire`,
+  ...ranks('hub.might.might', 2),
   ...ranks('fusion.summon.crit.r1', 3),
+  ...ranks('hub.might.might', 2),
   ...ranks(`${C}swarm.r6`, 3),
+  ...ranks('hub.might.might', 2),
   `${C}swarm.queen`,
+  ...ranks('hub.might.might', 2),
   `${C}main.threshold`,
+  ...ranks('hub.might.might', 2),
   ...ranks('hub.might.might', 8),
 ];
 
@@ -110,13 +126,13 @@ export const SUMMON = defineCharacter({
       // 蜂群: drone damage and speed.
       centerBranch('swarm', {
         r1: ranked('damage', 0.3, 4, 'increased', DRONE),
-        r2: ranked('droneSpeed', 0.4, 4),
+        r2: ranked('attackSpeed', 0.15, 4, 'more', DRONE),
         // 分巢: every 5 kills spawn a temporary drone for 6 s.
         a: notable('split', {
           rules: [{ id: 'hiveSplit', every: 5, lifeSec: 6, damagePct: 2, maxLive: 8 }],
         }),
         r3: ranked('damage', 0.3, 3, 'increased', DRONE),
-        r4: ranked('droneSpeed', 0.4, 3),
+        r4: ranked('attackSpeed', 0.15, 3, 'more', DRONE),
         // 自爆協議: a drone's last impact before it flies home explodes (radius 80, 150%).
         // Interim until the engine's lastImpact (P1): a third of the impacts explode.
         b: notable('self-destruct', {
@@ -129,7 +145,7 @@ export const SUMMON = defineCharacter({
           ],
         }),
         r5: ranked('damage', 0.3, 3, 'increased', DRONE),
-        r6: ranked('droneSpeed', 0.4, 3),
+        r6: ranked('attackSpeed', 0.15, 3, 'more', DRONE),
         // 蜂后: one drone becomes the queen (×1.5 size, ×2 damage); the others deal +20% to its
         // target. Interim until the engine's per-drone roles (P2): the swarm's average, +40%.
         c: notable('queen', { modifiers: [more('damage', 0.4, DRONE)] }),
