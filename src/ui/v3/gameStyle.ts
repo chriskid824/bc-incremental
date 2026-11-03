@@ -7,6 +7,11 @@
 const STYLE_ID = 'bc-game-game-style';
 
 const CSS = `
+/* The talent web over the arena canvas: in flow it would sit below the full-height canvas. */
+#app > .v3p {
+  position: absolute;
+  inset: 0;
+}
 .bc-game-select {
   pointer-events: auto;
   display: flex;
