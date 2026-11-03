@@ -39,6 +39,7 @@ import { Hud } from '../../ui/hud';
 import { NoticeList, PauseControl, StartWavePicker } from '../../ui/v3/controls';
 import { V3ResultPanel } from '../../ui/v3/result';
 import type { V3ResultInfo } from '../../ui/v3/result';
+import { damageBreakdown } from '../../ui/v3/damageBreakdown';
 import { SelectScreen } from '../../ui/v3/select';
 import { WebPanel } from '../../ui/v3/webPanel';
 import { GameLoop, SPEEDS } from '../loop';
@@ -389,6 +390,7 @@ export class GamePage {
       skipCores: settlement.skipCores,
       bestWave: progress.bestWave,
       walletShards: progress.wallet.shards,
+      damage: damageBreakdown(result.damageBySource, result.damage, t(web.def.nameKey)),
     };
   }
 
