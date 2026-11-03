@@ -100,6 +100,12 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
       return [];
     case 'outpost':
       return [[String(rule.turretRadius)]];
+    case 'selfDestruct':
+      return [[String(rule.radius)], [percent(rule.damagePct)]];
+    case 'interceptors':
+      return [[String(rule.count)], [String(rule.radius)]];
+    case 'swarmSurge':
+      return [[String(rule.periodSec)], [`×${rule.damageMult}`]];
     case 'royalJelly':
       return [[signedPercent(rule.lifeMult - 1)]];
     case 'breed':

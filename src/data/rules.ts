@@ -200,6 +200,12 @@ export type RuleSpec =
   | { readonly id: 'hammerRole'; readonly damageMult: number; readonly speedMult: number }
   | { readonly id: 'focusFire' }
   | { readonly id: 'outpost'; readonly turretRadius: number }
+  /** 自爆協議 (蜂巢 ◆, gd:183): a sortie's last impact explodes at radius for damagePct (E5). */
+  | { readonly id: 'selfDestruct'; readonly radius: number; readonly damagePct: number }
+  /** 攔截守衛 (蜂巢 ◆, gd:188): `count` drones orbit at radius and ram charging dashers (E5). */
+  | { readonly id: 'interceptors'; readonly count: number; readonly radius: number }
+  /** 蜂潮 (蜂巢 threshold, gd:194): every periodSec the swarm dives, ×damageMult (E5). */
+  | { readonly id: 'swarmSurge'; readonly periodSec: number; readonly damageMult: number }
   /** 蜂王漿 (女王, gd §1.5): the ascendancy's timed drones live lifeMult as long. */
   | { readonly id: 'royalJelly'; readonly lifeMult: number }
   /**
@@ -287,6 +293,9 @@ export const RULE_IDS: readonly RuleId[] = [
   'hammerRole',
   'focusFire',
   'outpost',
+  'selfDestruct',
+  'interceptors',
+  'swarmSurge',
   'royalJelly',
   'breed',
   'motherFactory',
@@ -427,6 +436,9 @@ export const NOTABLE_RULES: readonly RuleId[] = [
   'hammerRole',
   'focusFire',
   'outpost',
+  'selfDestruct',
+  'interceptors',
+  'swarmSurge',
   'royalJelly',
   'zoneTune',
 ];

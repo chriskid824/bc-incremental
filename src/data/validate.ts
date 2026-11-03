@@ -882,6 +882,30 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`outpost.turretRadius must be above 0 (got ${rule.turretRadius})`);
       }
       break;
+    case 'selfDestruct':
+      for (const [field, value] of [
+        ['radius', rule.radius],
+        ['damagePct', rule.damagePct],
+      ] as const) {
+        if (!(value > 0)) issues.push(`selfDestruct.${field} must be above 0 (got ${value})`);
+      }
+      break;
+    case 'interceptors':
+      if (!(Number.isInteger(rule.count) && rule.count >= 1)) {
+        issues.push(`interceptors.count must be a positive integer (got ${rule.count})`);
+      }
+      if (!(rule.radius > 0)) {
+        issues.push(`interceptors.radius must be above 0 (got ${rule.radius})`);
+      }
+      break;
+    case 'swarmSurge':
+      for (const [field, value] of [
+        ['periodSec', rule.periodSec],
+        ['damageMult', rule.damageMult],
+      ] as const) {
+        if (!(value > 0)) issues.push(`swarmSurge.${field} must be above 0 (got ${value})`);
+      }
+      break;
     case 'royalJelly':
       if (!(rule.lifeMult >= 1 && Number.isFinite(rule.lifeMult))) {
         issues.push(`royalJelly.lifeMult must be finite and >= 1 (got ${rule.lifeMult})`);
@@ -1732,6 +1756,9 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'hammerRole':
     case 'focusFire':
     case 'outpost':
+    case 'selfDestruct':
+    case 'interceptors':
+    case 'swarmSurge':
     case 'royalJelly':
     case 'breed':
     case 'motherFactory':

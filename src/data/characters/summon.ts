@@ -5,8 +5,7 @@
  *
  * The swarm's drones impact for 200% tagged hit, minion and area; its turret shoots for 80% tagged
  * hit, minion and projectile (src/sim/rules/swarm.ts), which is how the branches tell them apart.
- * The ◆ that need the engine's E5 (自爆協議, 攔截守衛, 蜂潮) carry interim data until it lands; each
- * comment says what it waits on.
+ * 自爆協議, 攔截守衛 and 蜂潮 use the engine's E5 swarm fields (lastImpact, guards, surge).
  */
 
 import {
@@ -132,16 +131,9 @@ export const SUMMON = defineCharacter({
         }),
         r3: ranked('damage', 0.45, 3, 'increased', DRONE),
         r4: ranked('attackSpeed', 0.3, 3, 'more', DRONE),
-        // 自爆協議: a drone's last impact before it flies home explodes (radius 80, 150%).
-        // Interim until the engine's lastImpact (P1): a third of the impacts explode.
+        // 自爆協議: a drone's last impact before it flies home explodes (radius 80, 150%; E5).
         b: notable('self-destruct', {
-          triggers: [
-            {
-              on: 'droneImpact',
-              when: [{ chance: 1 / 3 }],
-              do: [{ kind: 'explode', radius: 80, damagePct: 1.5 }],
-            },
-          ],
+          rules: [{ id: 'selfDestruct', radius: 80, damagePct: 1.5 }],
         }),
         r5: ranked('damage', 0.45, 3, 'increased', DRONE),
         r6: ranked('attackSpeed', 0.3, 3, 'more', DRONE),
@@ -182,13 +174,9 @@ export const SUMMON = defineCharacter({
       centerBranch('guard', {
         r1: ranked('maxLife', 0.1, 4),
         r2: ranked('areaSize', 0.08, 4),
-        // 攔截守衛: 2 drones circle at 120 and ram dashers charging up (答案：衝刺者). Interim
-        // until the engine's guard mode (P5): summons deal +60% to enemies standing still
-        // (a dasher charging its dash).
+        // 攔截守衛: 2 drones circle at 120 and ram dashers charging up (答案：衝刺者; E5 guards).
         a: answers(
-          notable('interceptor', {
-            modifiers: [inc('damage', 0.6, { ...SUMMONS, when: [{ targetState: 'stopped' }] })],
-          }),
+          notable('interceptor', { rules: [{ id: 'interceptors', count: 2, radius: 120 }] }),
           'dasher',
         ),
         r3: ranked('maxLife', 0.1, 3),
@@ -214,17 +202,8 @@ export const SUMMON = defineCharacter({
         rules: [{ id: 'bugSea', countMult: 2 }],
       }),
     ],
-    // 蜂潮: every 8 s every drone dives at the densest spot together, ×2 damage. Interim until the
-    // engine's surge (P6): every 8 s the summons attack ×3 as often for 1.5 s.
-    threshold: threshold({
-      triggers: [
-        {
-          on: 'periodic',
-          every: 8,
-          do: [{ kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 1.5, tags: ['minion'] }],
-        },
-      ],
-    }),
+    // 蜂潮: every 8 s every drone dives at the densest enemy together, ×2 damage (E5 surge).
+    threshold: threshold({ rules: [{ id: 'swarmSurge', periodSec: 8, damageMult: 2 }] }),
     connectors: [
       ranked('damage', 0.08, 3),
       ranked('attackSpeed', 0.05, 3),

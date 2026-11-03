@@ -1108,14 +1108,14 @@ function formProblem(form: string, node: WebNode, board: Board): string | null {
 }
 
 /**
- * Rules a node of this kind may hold besides forms (D8, F50): ★, cores, finals; a ◆ a chain policy
- * or a NOTABLE_RULES rule.
+ * Rules a node of this kind may hold besides forms (D8, F50): ★, cores, finals; a ◆ or a center
+ * threshold (蜂巢's 蜂潮) a chain policy or a NOTABLE_RULES rule.
  */
 const holdsRule = (node: WebNode, rule: string): boolean =>
   node.kind === 'keystone' ||
   node.kind === 'core' ||
   node.kind === 'ascFinal' ||
-  ((node.kind === 'notable' || node.kind === 'asc') &&
+  ((node.kind === 'notable' || node.kind === 'asc' || node.kind === 'threshold') &&
     ((POLICY_RULES as readonly string[]).includes(rule) ||
       (NOTABLE_RULES as readonly string[]).includes(rule)));
 

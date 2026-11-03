@@ -268,3 +268,36 @@ export const outpost: RuleModule<Extract<RuleSpec, { id: 'outpost' }>> = {
     for (const spec of specs) swarm.turretRadius = Math.max(swarm.turretRadius, spec.turretRadius);
   },
 };
+
+/** 自爆協議: the impact that spends a swarm drone's sortie explodes (E5 lastImpact). */
+export const selfDestruct: RuleModule<Extract<RuleSpec, { id: 'selfDestruct' }>> = {
+  id: 'selfDestruct',
+  compile(b, specs) {
+    const swarm = swarmParams(b, 'selfDestruct');
+    const spec = specs[0];
+    if (spec === undefined) return;
+    swarm.lastImpact = { radius: spec.radius, damagePct: spec.damagePct };
+  },
+};
+
+/** 攔截守衛: the swarm's last `count` drones orbit at `radius` and ram charging dashers (E5). */
+export const interceptors: RuleModule<Extract<RuleSpec, { id: 'interceptors' }>> = {
+  id: 'interceptors',
+  compile(b, specs) {
+    const swarm = swarmParams(b, 'interceptors');
+    const spec = specs[0];
+    if (spec === undefined) return;
+    swarm.guards = { count: spec.count, radius: spec.radius };
+  },
+};
+
+/** 蜂潮: every periodSec the swarm dives at the densest enemy, ×damageMult on that impact (E5). */
+export const swarmSurge: RuleModule<Extract<RuleSpec, { id: 'swarmSurge' }>> = {
+  id: 'swarmSurge',
+  compile(b, specs) {
+    const swarm = swarmParams(b, 'swarmSurge');
+    const spec = specs[0];
+    if (spec === undefined) return;
+    swarm.surge = { periodSec: spec.periodSec, damageMult: spec.damageMult };
+  },
+};

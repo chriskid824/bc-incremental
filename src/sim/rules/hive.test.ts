@@ -196,3 +196,56 @@ describe('E4-backed ◆ (queenRole, hammerRole, focusFire, outpost, 巨像 size)
     expect(more.signature.swarm?.sizeMult).toBeCloseTo(1 + 5 * COLOSSUS_GROWTH, 12);
   });
 });
+
+describe('E5-backed ◆ (selfDestruct, interceptors, swarmSurge)', () => {
+  it('自爆協議, 攔截守衛 and 蜂潮 write the swarm’s lastImpact, guards and surge', () => {
+    const build = compileBuild(
+      makeStats(),
+      [
+        { id: 'selfDestruct', radius: 80, damagePct: 1.5 },
+        { id: 'interceptors', count: 2, radius: 120 },
+        { id: 'swarmSurge', periodSec: 8, damageMult: 2 },
+      ],
+      SWARM,
+    );
+    expect(build.signature.swarm).toMatchObject({
+      lastImpact: { radius: 80, damagePct: 1.5 },
+      guards: { count: 2, radius: 120 },
+      surge: { periodSec: 8, damageMult: 2 },
+    });
+  });
+
+  it.each([
+    { id: 'selfDestruct', radius: 80, damagePct: 1.5 },
+    { id: 'interceptors', count: 2, radius: 120 },
+    { id: 'swarmSurge', periodSec: 8, damageMult: 2 },
+  ] as const)('$id is a compile error in a run of another signature', (spec) => {
+    expect(() => compileBuild(makeStats(), [spec], MAGMA)).toThrow(
+      `rule '${spec.id}' tunes the swarm signature, but this run's signature is 'magmaBomb'`,
+    );
+  });
+
+  it('all three play together with the E4 roles for a minute', () => {
+    const sim = createSimulation(
+      makeConfig({
+        stats: makeStats({ maxLife: 1e12 }),
+        signature: SWARM,
+        rules: [
+          { id: 'queenRole', damageMult: 2, sizeMult: 1.5, followBonus: 0.2 },
+          { id: 'hammerRole', damageMult: 5, speedMult: 0.4 },
+          { id: 'focusFire' },
+          { id: 'selfDestruct', radius: 80, damagePct: 1.5 },
+          { id: 'interceptors', count: 2, radius: 120 },
+          { id: 'swarmSurge', periodSec: 8, damageMult: 2 },
+        ],
+        maxTicks: 1800,
+      }),
+      makeTestData(),
+    );
+    let surges = 0;
+    while (!sim.state.finished) {
+      surges += sim.step(NO_INPUT).filter((e) => e.type === 'droneSurge').length;
+    }
+    expect(surges).toBeGreaterThan(0);
+  });
+});

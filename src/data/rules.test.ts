@@ -140,6 +140,9 @@ describe('tables the rule modules fill', () => {
       'hammerRole',
       'focusFire',
       'outpost',
+      'selfDestruct',
+      'interceptors',
+      'swarmSurge',
       'royalJelly',
       'zoneTune',
     ]);

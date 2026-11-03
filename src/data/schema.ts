@@ -588,6 +588,11 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       .readonly(),
     z.strictObject({ id: z.literal('focusFire') }).readonly(),
     z.strictObject({ id: z.literal('outpost'), turretRadius: finite }).readonly(),
+    z.strictObject({ id: z.literal('selfDestruct'), radius: finite, damagePct: finite }).readonly(),
+    z.strictObject({ id: z.literal('interceptors'), count: finite, radius: finite }).readonly(),
+    z
+      .strictObject({ id: z.literal('swarmSurge'), periodSec: finite, damageMult: finite })
+      .readonly(),
     z.strictObject({ id: z.literal('royalJelly'), lifeMult: finite }).readonly(),
     z
       .strictObject({
