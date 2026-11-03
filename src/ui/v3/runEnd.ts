@@ -52,8 +52,14 @@ export function describeV3RunEnd(facts: V3RunEndFacts, enemies: V3Enemies): V3Ru
   };
 }
 
-/** A bullet death's own line; null leaves M1's. */
+/**
+ * A bullet death's own line, and a capped run's: the only cap a v3 scope has is the Demo's (gd
+ * §10), where M1's 「這是原型的最後一波」 would be wrong; null leaves M1's.
+ */
 function causeText(facts: V3RunEndFacts): string | null {
+  if (facts.endReason === 'waveCap') {
+    return t('v3.result.cause.waveCap', { wave: facts.highestWave });
+  }
   if (facts.endReason !== 'death' || !facts.killedByBullet || facts.killedBy === null) return null;
   return t('v3.result.cause.bullet', { enemy: enemyName(facts.killedBy) });
 }
