@@ -178,6 +178,14 @@ export const STAT_IDS = [
    * areaSize (src/sim/emitters/lob.ts lobRadius).
    */
   'bombRadius',
+  /**
+   * 擴散距離 (熔核's 擴散 and the fire outer's 野火, docs/v3/game-design-v3.md §1.2, §4.1): the
+   * multiplier on how far a spread reaches, e.g. 1.5 = 150%: every spreadAilment's radius, the
+   * radius of an applyAilment and the range of a target selector that node data marks `spread`,
+   * and a rule module's own spread distances. Read once a compile into BuildFlags.spreadFactor,
+   * which spreadOf multiplies by (src/sim/build/size.ts).
+   */
+  'spreadRadius',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -244,6 +252,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   barrageCount: 0,
   areaSize: 1,
   bombRadius: 1,
+  spreadRadius: 1,
 };
 
 /**

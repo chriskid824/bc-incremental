@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { EmitterGrant } from '../../data/emitters';
-import { mentions, quotedNumbers } from '../../data/ruleNumbers';
+import { mentions, quotedNumbers, triggerNumbers } from '../../data/ruleNumbers';
 import { ALWAYS_STATS, STAT_IDS } from '../../data/stats';
 import type { Modifier } from '../../data/stats';
 import { DAMAGE_TAGS } from '../../data/tags';
@@ -194,6 +194,7 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'treasureRate',
       'areaSize',
       'bombRadius',
+      'spreadRadius',
     ]);
   });
 
@@ -1376,5 +1377,73 @@ describe('E1: areaSize, bombRadius and 巨大化 (docs/v3 C4 design D29)', () =>
     // Every other rule keeps the fallback until its node's hand description names it.
     const glass = withEffects(fire, NOTABLE, { rules: [{ id: 'glassCannon', damageMore: 1 }] });
     expect(linesOf(glass, NOTABLE, 'en')).toEqual(['Special rule (glassCannon)']);
+  });
+});
+
+describe('E3: spreadRadius and the spread mark', () => {
+  it('writes 擴散距離 as a percentage in both locales', () => {
+    const lines = (mod: Modifier): string[] =>
+      LOCALES.map((locale) => modifierLine(mod, lookups[locale]));
+    expect(lines(flat('spreadRadius', 0.2))).toEqual(['+20% Spread distance', '擴散距離 +20%']);
+    expect(lines(inc('spreadRadius', 0.25))).toEqual([
+      '25% increased Spread distance',
+      '擴散距離提高 25%',
+    ]);
+    expect(lines(more('spreadRadius', 0.5))).toEqual([
+      '50% more Spread distance',
+      '擴散距離總增 50%',
+    ]);
+    expect(MESSAGES.en['stat.spreadRadius']).toBe('Spread distance');
+    expect(MESSAGES['zh-TW']['stat.spreadRadius']).toBe('擴散距離');
+  });
+
+  it('gives the mark no text of its own: a marked radius or range reads as written, as the unmarked one does', () => {
+    // 火星's form (gd:376) and a marked selector; their node's description says the spread.
+    const spark: TriggerSpec = {
+      on: 'diedWithAilment',
+      when: [{ victimHas: 'burn' }],
+      do: [
+        {
+          kind: 'applyAilment',
+          ailment: 'burn',
+          radius: 90,
+          maxTargets: 2,
+          order: 'nearest',
+          spread: true,
+        },
+      ],
+    };
+    const picked: TriggerSpec = {
+      on: 'kill',
+      target: { pick: 'farthest', range: 120, spread: true },
+      do: [{ kind: 'applyAilment', ailment: 'shock' }],
+    };
+    const unmarkedSpark: TriggerSpec = {
+      ...spark,
+      do: [{ kind: 'applyAilment', ailment: 'burn', radius: 90, maxTargets: 2, order: 'nearest' }],
+    };
+    const unmarkedPick: TriggerSpec = { ...picked, target: { pick: 'farthest', range: 120 } };
+    const line = (trigger: TriggerSpec, locale: Locale): readonly string[] =>
+      linesOf(withEffects(fire, NOTABLE, { triggers: [trigger] }), NOTABLE, locale);
+    for (const [marked, unmarked, written] of [
+      [spark, unmarkedSpark, '90'],
+      [picked, unmarkedPick, '120'],
+    ] as const) {
+      for (const locale of LOCALES) {
+        const lines = line(marked, locale);
+        expect(lines, locale).toEqual(line(unmarked, locale));
+        expect(
+          lines.some((text) => mentions(text, written)),
+          `${locale} ${written}`,
+        ).toBe(true);
+        expect(lines.some(isFaulty), locale).toBe(false);
+      }
+      // V17's numbers: the mark adds none, and a radius is never one (arena units are words).
+      expect(triggerNumbers(marked)).toEqual(triggerNumbers(unmarked));
+    }
+    expect(LOCALES.map((locale) => line(spark, locale)[0])).toEqual([
+      'When burning enemies are killed: 1 burn stack, on the enemies within 90, at most 2 enemies, nearest first',
+      '燃燒中的敵人死亡時：燃燒 1 層，對半徑 90 內的敵人，最多 2 隻，由近到遠',
+    ]);
   });
 });

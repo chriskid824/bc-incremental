@@ -249,6 +249,9 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         radius: finite.exactOptional(),
         maxTargets: finite.exactOptional(),
         order,
+        // validate.ts takes it only as true beside a radius; a spreadAilment, always a spread,
+        // takes none.
+        spread: z.boolean().exactOptional(),
       })
       .readonly(),
     // A burn spread may move records, which M1's spread copies whole to every enemy in range:
@@ -440,6 +443,8 @@ export const TargetSelectorSchema = exact<TargetSelector>()(
       range: finite.exactOptional(),
       excludeEventTarget: z.boolean().exactOptional(),
       excludeBoss: z.boolean().exactOptional(),
+      // validate.ts takes it only as true beside a range.
+      spread: z.boolean().exactOptional(),
     })
     .readonly(),
 );

@@ -167,7 +167,7 @@ describe('computeStatBlock', () => {
   });
 
   it("appends C6b.1's barrageCount: base 0, unscoped, its flat values summed", () => {
-    expect(STAT_IDS.slice(-4, -2)).toEqual(['treasureRate', 'barrageCount']);
+    expect(STAT_IDS.slice(-5, -3)).toEqual(['treasureRate', 'barrageCount']);
     expect(BASE_STATS.barrageCount).toBe(0);
     expect(isScopedStat('barrageCount')).toBe(false);
     expect(SCOPED_STATS).toHaveLength(18);
@@ -181,9 +181,8 @@ describe('computeStatBlock', () => {
     expect(() => block([tagged])).toThrow(/Tags/);
   });
 
-  it("appends E1's areaSize and bombRadius: last of 59, base 1, unscoped multipliers that increased raises and more multiplies", () => {
-    expect(STAT_IDS).toHaveLength(59);
-    expect(STAT_IDS.slice(-3)).toEqual(['barrageCount', 'areaSize', 'bombRadius']);
+  it("appends E1's areaSize and bombRadius after barrageCount: base 1, unscoped multipliers that increased raises and more multiplies", () => {
+    expect(STAT_IDS.slice(-4, -1)).toEqual(['barrageCount', 'areaSize', 'bombRadius']);
     expect(SCOPED_STATS).toHaveLength(18);
     for (const stat of ['areaSize', 'bombRadius'] as const) {
       expect(BASE_STATS[stat], stat).toBe(1);
@@ -202,6 +201,27 @@ describe('computeStatBlock', () => {
       const scoped = { stat, kind: 'increased', value: 0.2, scope: 'hub' } as const;
       expect(() => block([scoped]), stat).toThrow(/Tags/);
     }
+  });
+
+  it("appends E3's spreadRadius: last of 60, base 1, an unscoped multiplier that increased raises and more multiplies", () => {
+    expect(STAT_IDS).toHaveLength(60);
+    expect(STAT_IDS.slice(-2)).toEqual(['bombRadius', 'spreadRadius']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.spreadRadius).toBe(1);
+    expect(isScopedStat('spreadRadius')).toBe(false);
+    expect(block([]).values.spreadRadius).toBe(1);
+    // (1 + 0.2 + 0.3) × 1.5: the 擴散距離 ranks are increased, a ★ may be more.
+    const stats = block([
+      { stat: 'spreadRadius', kind: 'increased', value: 0.2 },
+      { stat: 'spreadRadius', kind: 'increased', value: 0.3 },
+      { stat: 'spreadRadius', kind: 'more', value: 0.5 },
+    ]);
+    expect(stats.values.spreadRadius).toBeCloseTo(2.25, 12);
+    expect(stats.scoped).toEqual([]);
+    const tagged = { stat: 'spreadRadius', kind: 'increased', value: 0.2, tags: ['area'] } as const;
+    expect(() => block([tagged])).toThrow(/Tags/);
+    const scoped = { stat: 'spreadRadius', kind: 'increased', value: 0.2, scope: 'hub' } as const;
+    expect(() => block([scoped])).toThrow(/Tags/);
   });
 
   it('passes the triggers and conversions through', () => {
