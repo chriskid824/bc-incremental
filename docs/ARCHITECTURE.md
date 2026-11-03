@@ -1,6 +1,6 @@
 # 架構文件
 
-> 狀態：草稿 v0.6（2026-10-22）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）；v0.5 加上 C4 的引擎（§4.7），改寫 §4.3 的 tick 順序與 §12 的效能閘門；v0.6 加上 C6 的天賦網內容管線。
+> 狀態：草稿 v0.7（2026-11-03）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）；v0.5 加上 C4 的引擎（§4.7），改寫 §4.3 的 tick 順序與 §12 的效能閘門；v0.6 加上 C6 的天賦網內容管線；v0.7 依 C9（Electron 與 steamworks.js 的技術檢查）改寫 §7 的平台介面，§8 加上 Steam 版的存檔檔案，重寫 §11（殼、bridge、overlay、Auto-Cloud 與 2026-11-03 Windows 的檢查結果），§14 加上 Steam 版的指令與 CI 的守門。
 
 ## 1. 技術選型
 
@@ -755,26 +755,40 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 
 ## 7. 平台抽象層
 
+C9 建好的形狀（`src/platform/`，C9 設計 §1.1）：
+
 ```ts
+// src/platform/platform.ts
+type PlatformId = 'web' | 'steam';
 interface Platform {
-  readonly id: 'web' | 'steam' | 'crazygames' | 'poki';
-  storage: SaveStorage;        // read(slot) / tryRead(slot) / write(slot, data)
-  achievements: Achievements;  // unlock(id) / isUnlocked(id)
-  analytics: Analytics;        // track(event) / flush() / exportLocal()
-  ads: Ads;                    // showRewarded() / showInterstitial()，非 portal 為 no-op
+  readonly id: PlatformId;
+  readonly storage: SaveStorage;        // read(slot) / tryRead(slot) / write(slot, text)（§8）
+  readonly achievements: Achievements;  // unlock(id) / isUnlocked(id)：回傳 boolean，不丟例外
+  readonly analytics: Analytics;        // track(type, fields) / flush() / exportLocal()（§9）
 }
+/** §9 的各 build 規則：可不可以送雲端，玩家選擇之前送不送。 */
+interface AnalyticsPolicy { readonly cloud: boolean; readonly sendByDefault: boolean }
+interface PlatformSetup {
+  readonly savePrefix?: string;                                // 網頁版槽位的 localStorage 前綴（`?hive`）；Steam 版的檔案不看它
+  readonly analytics: (policy: AnalyticsPolicy) => Analytics;  // src/app 依平台的 policy 建（Firestore 留在 src/app）
+}
+// src/platform/index.ts
+function createPlatform(setup: PlatformSetup): Platform;       // import.meta.env.MODE === 'steam' ? Steam 版 : 網頁版
 ```
 
-| 平台 | storage | achievements | analytics | ads |
-| --- | --- | --- | --- | --- |
-| web（itch.io、試玩） | localStorage | 本機記錄＋提示 | Firebase＋本機 | no-op |
-| steam demo（Electron） | 檔案（透過 preload IPC） | steamworks.js | Firebase＋本機（預設開，可在設定關閉） | no-op |
-| steam 正式版（Electron） | 檔案（透過 preload IPC） | steamworks.js | 本機（送雲端預設關閉，可在設定開啟） | no-op |
-| crazygames／poki | 平台 SDK 存檔 | 本機 | 平台 SDK | 平台 SDK |
+| 平台 | storage | achievements | analytics 的 policy |
+| --- | --- | --- | --- |
+| web（`src/platform/web.ts`；itch.io、試玩） | localStorage（`LocalSaveStorage`；localStorage 不能用時 `MemorySaveStorage`） | 本機記錄（`LocalAchievements`，key `bc-incremental.achievements`） | `{ cloud: true, sendByDefault: true }`（`WEB_ANALYTICS_POLICY`） |
+| steam（`src/platform/steam/`；C9 的檢查版） | 檔案（`BridgeSaveStorage`，經過 preload 的 bridge，§8、§11） | Steam 啟動成功時是 steamworks.js（`SteamAchievements`），沒有 Steam 時是本機記錄 | `{ cloud: false, sendByDefault: false }`（`STEAM_ANALYTICS_POLICY`）：只進本機記錄，檢查的執行不混進試玩數據 |
+| steam demo／正式版（M3） | 同上 | 同上 | M3 依 `VITE_FLAVOR` 套 §9 的表：demo 預設送、可關閉；正式版預設不送、可開啟 |
+| crazygames／poki | 還沒寫 | | |
 
-- 用 Vite 的 `mode` 在建置時選平台（`vite build --mode steam`），其他平台的實作會被 tree-shake 掉。
-- 另一個建置參數 `VITE_FLAVOR=demo|full` 決定 demo 或正式版：demo 內容上限、analytics 預設值、結束畫面的願望清單按鈕都看它。
-- portal 實作在有需要時才寫（不在 MVP 必做）。
+- 平台在 build 時選：`vite build`（`npm run build`）把網頁版 build 到 `dist/`，`vite build --mode steam` 把 Steam 版的頁面 build 到 `dist-steam/`。`import.meta.env.MODE` 在 build 之後是字面值，Rollup 會把另一個平台的模組整個丟掉；`src/platform/steam/` 的模組 import 時不執行任何東西。`src/platform/bundle.test.ts` 釘住兩個 bundle 的模組清單（網頁版沒有 `bcNative`，Steam 版沒有 `bc-incremental.save.`），`src/platform/imports.test.ts` 確認 `src/` 底下沒有任何檔案 import `electron`、`steamworks.js` 或根目錄的 `electron/`。
+- Steam 版的頁面只能在 Electron 殼裡跑：頁面上沒有 `bcNative`，或它的版本不是 `BRIDGE_VERSION`（2），`createSteamPlatform` 就丟 `MissingBridgeError`，由 `src/app/main.ts` 的 `showFatal` 顯示。
+- `src/app/main.ts` 呼叫 `createPlatform`，`savePrefix` 只在 `?hive` 時給；`openAnalytics` 只在 `policy.cloud` 時建 Firestore 的 sink，`defaultSending` 用 `policy.sendByDefault`，開發伺服器與 `?hive` 一樣不送（§9）。`openKeyValueStore` 與 `pageLocalStorage` 在 `src/platform/platform.ts`，兩個平台與 main.ts 的 analytics 共用。
+- 成就 ID 是 Steam 的 API 名稱（`ACHIEVEMENT_ID`，`/^[A-Za-z0-9_]{1,64}$/`），其他 ID 一律回 `false`。目前沒有遊戲程式解鎖任何成就，M3 才接上（§11.8）。
+- 沒有 `ads`（C9/F8）：portal 需要時再加回介面，`PlatformId` 也到時候才加 portal 的 ID。portal 實作在有需要時才寫（不在 MVP 必做）。
+- 另一個建置參數 `VITE_FLAVOR=demo|full` 決定 demo 或正式版：demo 內容上限、analytics 預設值、結束畫面的願望清單按鈕都看它。`src/platform/flavor.ts` 的 `parseFlavor` 把沒設、空字串與 `full` 讀成正式版，`demo` 讀成 demo，其他值在 `vite.config.ts` 載入時就讓 build 與開發伺服器失敗。目前還沒有程式讀 `FLAVOR`（B2、M3 才會）。
 
 ## 8. 存檔格式
 
@@ -795,7 +809,13 @@ interface Platform {
 - M1 進度的一次性匯入：兩個 v2 槽位都是空的時候，`ProfileStore` 先讀 M1 的 `main`，再讀 `backup`，第一份讀得出來的版本 1 存檔變成新的存檔，馬上寫進 v2 的 `main`：速度、遊戲時間與局數照舊，花掉與沒花的碎片、核心連同最遠波次變成帳號的待領取進度，給第一個選的角色。M1 的 key 只讀不寫，`?hive` 的 key 不讀；之後在 M1 頁面玩的進度不會再帶過來。Steam 版沒有 M1 的存檔，不匯入。
 - 設定頁提供匯出／匯入存檔字串（Base64），方便玩家回報問題（M3）。
 - 每個版本至少保留一份 fixture 存檔（`tests/fixtures/`），測試確保它能遷移到最新版並通過驗證：版本 1 是 `save-v1.json` 與約一小時 M1 試玩的 `save-v1-playtest.json`，版本 2 是 `save-v2.json`。後兩份由 `tools/save/playtestV1.ts` 與 `tools/save/fixtureV2.ts` 產生（`--write` 寫檔，`--check` 只比對），不要手改。`src/save/save.test.ts` 另外釘住一份每個欄位都有值的存檔的完整文字：格式一改就失敗，直到 `SAVE_VERSION` +1、寫好遷移、加上 fixture。
-- Steam 雲端存檔用 Steamworks 的 Auto-Cloud 同步存檔資料夾，不需要額外程式碼。
+- Steam 版的兩個槽位是檔案（`electron/saveFiles.ts`，C9 設計 §1.4）：userData 的 `saves/` 裡的 `main.json` 與 `backup.json`（Windows 是 `%APPDATA%\bc-incremental\saves`，各 OS 見 §11.4）。只有 main process 寫，頁面的 `BridgeSaveStorage` 透過 bridge 的同步 IPC（`bc:save:read`、`bc:save:write`，§11.1）讀寫，從不把存檔放進 localStorage，所以 `savePrefix` 在這裡沒有作用。
+  - 原子寫入：先寫 `<slot>.json.tmp`（`writeSync` 到每個 byte 都寫進去）→ `fsyncSync` → `closeSync` → `renameSync` 蓋過 `<slot>.json`，macOS 與 Linux 再盡量 fsync 資料夾，所以檔案只會是舊的或新的存檔，不會只寫了一半。Windows 的 rename 遇到 `EPERM`、`EACCES`、`EBUSY` 先重試 5 次（`BUSY_RETRY_MS`：10、20、40、80、160 ms，用 `Atomics.wait` 等），和讀取一樣。寫入失敗就刪掉暫存檔、留下舊檔，回 `{ ok: false, error }`，頁面警告「Save failed」，下一次自動存檔再試。打開存檔資料夾時先建立它，再刪掉當機留下的 `*.json.tmp`；暫存檔不是 `.json` 結尾，所以 Auto-Cloud 的 `*.json` 只看得到兩個槽位。
+  - 儲存層不輪替：輪替由呼叫端做（M1 頁面的 `save()` 先把 `main` 抄進 `backup`；`ProfileStore` 抄上一份讀進或寫出的文字，見上）。儲存層也輪替的話，`backup` 只會是 `main` 的複本。
+  - 只有一個寫入者：userData 的 single-instance lock，加上每個呼叫都是同步的。槽位只能是 `main` 或 `backup`，一次寫入最多 8 MiB（UTF-8，`MAX_SAVE_BYTES`）。
+  - `BridgeSaveStorage.read()` 保留 M1 的答案：空檔案（`''`，或只有 BOM）也讀成 `null`，所以 M1 的 `save()` 不會把空的 `main` 抄到好的 `backup` 上；`tryRead()` 照殼的答案，空檔案是 `''`。
+  - 2026-11-03 Windows 的檢查：進天賦網之後兩個檔案都寫出來（各 583 B），重開時讀回存檔、直接回到天賦網（§11.6）。
+- Steam 雲端存檔用 Steamworks 的 Auto-Cloud 同步 `saves/` 的 `*.json`，不需要額外程式碼；路徑在 M3 設定到 App ID 上（§11.4），App ID 480 上測不到（§11.7）。
 
 ## 9. 試玩數據
 
@@ -909,11 +929,99 @@ interface Platform {
 - **`?enemies`**（`src/app/enemies/`）：開發用頁面，`devFlags.ts` 讀 `?enemies`（有沒有值、有沒有 `?hive` 都一樣），`main.ts` 照 `?replay` 的做法 lazy import `./enemies/route`，是自己的 chunk，M1 頁面與 `?hive` 不會載入它（`?replay=` 同時存在時開回放）。它在 `characterGameData()` 上跑一局波次不出敵人的局（seed 1，特效的 `RenderRandom` 用 seed 2）：第一個 tick 在角色上方一排放每種 v3 敵人（照 `ENEMY_IDS` 的順序）、下方一排放每個詞綴各一隻六角菁英，中間是剩兩層與一層外殼的洋蔥、一對增殖子怪與三個詞綴的菁英；全部不動、不死，位置讓每個行為都看得到（衝刺者一開始就蓄力變紅、射手開火、召喚者叫出三角形、寶藏怪繞 8 秒後逃走、守護旁邊的菁英在環內）。角色用 M1 的基礎屬性，每 3 秒補一次 20% 的護盾。每 20 秒（`GRID_LOOP_SECONDS`）重開一局；橫幅每次載入頁面給一個新的空集合，重開不會再顯示。標籤是英文的開發用文字，不走 i18n（和 viewer.html 一樣），只有橫幅的 key 是真的。頁面不寫 storage、不送試玩事件、不呼叫平台 API（`src/app/enemies/isolation.test.ts` 檢查它載入的模組，`tools/sheets/enemiesSmoke.ts` 在頁面上檢查）。`&step=1` 把 `window.__enemies`（`canvas`、`tick`、`step(n)`）掛出來給擷取用，每格一個 tick、解析度 1。
 - **擷取**：`tools/sheets/capture.ts` 也拍 `?enemies`（`--only constructs|enemies` 只拍其中一個）：第 20、300、600 格的整個 arena（1:1，deviceScaleFactor 1）、第 300 格兩排的特寫，以及 `&lang=zh-TW` 的第一行橫幅；PNG 寫到 `--out`，二進位檔不進 git。
 
-## 11. Electron 與 Steam（M2 技術驗證）
+## 11. Electron 與 Steam（C9 的技術檢查）
 
-- `contextIsolation: true`，preload 只暴露最小 API（`storage`、`achievements`、`steamInfo`）。存檔的讀取以結果（`SaveReadResult`）傳回頁面，讀取失敗不會變成空槽位（bridge 版本 2）。
-- steamworks.js 在 main process 初始化；技術驗證先用測試 App ID 480（Spacewar），不必等 Steam 上架費。
-- Steam overlay 需要 steamworks.js 的 `electronEnableSteamOverlay()` 加上 Chromium 參數，這是 M2 最大的技術風險，第一週先驗證。
+Steam 版是同一份頁面（`vite build --mode steam` → `dist-steam/`，§7）加上 Electron 殼（`electron/`，由 `vite.electron.config.ts` build 成 `dist-electron/main.cjs` 與 `preload.cjs`），透過 steamworks.js 跟 Steam 溝通。C9 只從原始碼跑（`npm run electron`、`npm run steam:check`，§14），還沒打包；App ID 是 Steam 給所有人測試用的 480（Spacewar，`electron/steam.ts` 的 `SPACEWAR_APP_ID`），不必等 Steam 上架費。Electron 44.8.0 與 steamworks.js 0.4.0 都是 `package.json` 的 exact devDependencies。沒有 Steam 時遊戲照常玩：存檔照樣寫檔案，成就記在本機（`LocalAchievements`）。
+
+### 11.1 殼與 bridge
+
+- **視窗**：`webPreferences` 明確寫 `preload`（`dist-electron/preload.cjs`）、`contextIsolation: true`、`sandbox: true`、`nodeIntegration: false`；1280×800，選單列隱藏。`will-navigate` 一律擋下；`setWindowOpenHandler` 拒絕所有新視窗，`https:` 的網址改用瀏覽器開；權限只給 `clipboard-sanitized-write`（檢查模式的「Copy report」用）。
+- **preload**（`electron/preload.ts`，sandbox 裡的 CommonJS，只 `require('electron')`）在頁面之前跑，用 `contextBridge.exposeInMainWorld` 在頁面放一個凍結的 `bcNative`（`NativeBridge`，`src/platform/steam/bridge.ts`；頁面與 preload 共用這個只有型別與常數的模組）：`version`（`BRIDGE_VERSION`，2）、`steamInfo()`（`ShellInfo`）、`storage.read(slot)`／`write(slot, text)`、`achievements.unlock(id)`／`isUnlocked(id)`，只有 `--steam-check` 時多一個 `check`（§11.5）。這就是最小 API：`storage`、`achievements`、`steamInfo`。每個函式只把宣告的參數送到自己的 channel，頁面拿不到 `ipcRenderer`、可以指定 channel 的函式或監聽器。bridge 版本 2 把存檔的讀取以 `SaveReadResult` 傳回頁面（§8），讀取失敗不會變成空槽位。
+- **channel**（`electron/channels.ts`）全部用 `ipcRenderer.sendSync`：頁面的 `SaveStorage` 是同步的，而 `pagehide` 時只有同步呼叫做得完（C9/F16）。`bc:info`、`bc:save:read`、`bc:save:write`、`bc:ach:unlock`、`bc:ach:is-unlocked`；檢查模式另有 `bc:check:clear`、`bc:check:overlay`、`bc:check:saves`、`bc:check:show-saves`、`bc:check:report`、`bc:check:errors`。
+- **main process 這一半**（`electron/ipc.ts`）：`createHandlers` 是純函式；`registerSync` 在 `finally` 裡一定設定 `event.returnValue`，沒設的話頁面的 `sendSync` 會一直等下去。只信任遊戲視窗的 main frame，而且頁面要是 `dist-steam/` 裡的 `file:` 網址（`isGamePage`）。其他來源，或 handler 丟例外，拿到那個 channel 的 fallback（不信任的來源連 handler 都不跑）：`bc:info` 是 `null`；讀檔是讀取失敗 `{ ok: false, error: 'bc:save:read failed' }`，絕不是空槽位；寫檔是 `{ ok: false, error: 'bc:save:write failed' }`；成就是 `false`；清單是 `[]`；報告是 `{ ok: false, where: 'bc:check:report failed' }`。參數都先檢查：槽位只能是 `main`、`backup`，存檔 ≤ 8 MiB，成就 ID 要過 `isAchievementId`，overlay 的頁面只能是 `achievements`、`friends`，報告 ≤ 64 KiB；不在檢查模式時，`bc:check:*` 只回 fallback。
+- **Steam**（`electron/steam.ts`）：`startSteam` 載入 steamworks.js 並 `init(480)`。失敗是狀態（`SteamStatus` 的 `stage: 'load' | 'init'` 與錯誤），不是例外；每個成就呼叫先檢查 ID，丟例外當成 `false`。`init` 讓 steamworks.js 每秒跑 30 次 `runCallbacks`。
+- **錯誤**：渲染程序的錯誤（`console-message` 的 error、`preload-error`、`render-process-gone`、`did-fail-load`）進一個 50 筆的環狀緩衝（`RecentErrors`），同時以 JSON 字串印到終端機（`[renderer] …`）；檢查的報告只寫筆數。
+- **殼自己的參數**（`electron/args.ts`）：`--steam-check`（檢查模式）、`--bc-user-data-dir=<絕對路徑>`（冒煙測試的暫存 userData）、`--bc-overlay-switches`（沒有 Steam 也加上 overlay 的參數，給冒煙測試）、`--bc-replay=<spec>`（C10：頁面用 `?replay=<spec>` 開，spec 只能有英數字、`:` 與 `.`，`REPLAY_SPEC`）。其他 `--bc-*` 參數與不接受的值各在終端機印一行，然後忽略。
+
+### 11.2 啟動順序（`electron/main.ts`）
+
+app 準備好（`app.whenReady()`）之前：
+
+1. 讀殼的參數（`parseShellArgs`）。
+2. userData：appData ＋ `bc-incremental`（`APP_FOLDER`），或 `--bc-user-data-dir`。先建資料夾，再 `app.setPath('userData', …)`（資料夾不存在時 `setPath` 會丟例外）。
+3. `app.requestSingleInstanceLock()`：鎖在 userData 裡，拿不到就結束，所以存檔只有一個寫入者；第二個實例只會把第一個的視窗叫到前面。
+4. 在終端機印出被忽略的參數。
+5. Steam：從 app 的 `package.json` 延遲 `require('steamworks.js')`（失敗是 `stage: 'load'`），`init(480)`（失敗是 `stage: 'init'`；花的時間是 `initMs`），成功之後才呼叫 `electronEnableSteamOverlay()`（§11.3）。終端機印 `Steam: connected (app 480, <語言>, <n> ms)` 或 `Steam: NOT connected (<stage>): <錯誤>`。
+6. 打開存檔資料夾（`openSaveFiles`，§8），建錯誤的環狀緩衝，註冊每個 channel。`window-all-closed` 在每個 OS 都結束程式。
+
+準備好之後：設定兩個權限 handler；`dist-steam/index.html` 不存在就 `dialog.showErrorBox`，以 1 結束；建視窗，`loadFile(dist-steam/index.html)`（只有接受的 `--bc-replay` 會帶 `?replay=`）。
+
+從不呼叫 `restartAppIfNecessary`（這是從終端機跑的開發版）與 `disableHardwareAcceleration`（會讓 overlay 失效）。
+
+### 11.3 overlay 的兩個 Chromium 參數
+
+- steamworks.js 的 `electronEnableSteamOverlay()` 在 Chromium 的命令列加上 `in-process-gpu` 與 `disable-direct-composition`（`electron/steam.ts` 的 `OVERLAY_SWITCHES`），並在沒有在畫的視窗上每秒 `invalidate()` 60 次，讓 overlay 一直有畫面可以疊。這些參數只有在 app 準備好之前加才有效，Steam 的 `init` 也要在 GPU 裝置建立之前，overlay 才掛得上，所以兩件事都在 `app.whenReady()` 之前做。
+- 只在 `init` 成功之後加：沒有 Steam 的執行保留 Chromium 預設的 GPU 程序。少了 `disable-direct-composition`，Windows 的 overlay 會畫成白色；`in-process-gpu` 把 GPU 放進 main process，GPU 當掉會讓整個程式結束（C9 設計的 R-14）。
+- `ShellInfo.overlaySwitches` 列出實際加上的參數，報告的 `overlay_switches:` 印的就是它。
+- steamworks.js 0.4.0 沒有查詢 overlay 狀態的函式，也沒有 overlay 開關時的回呼，所以 overlay 只能用眼睛確認（§11.5 的檢查模式）。
+
+### 11.4 存檔資料夾與 Auto-Cloud
+
+存檔在 userData 的 `saves/`（§8）。檢查模式的報告在旁邊的 `steam-check/`（`report-<UTC 時間>.txt`），Chromium 自己的資料（localStorage、快取）也在 userData，所以只有 `saves/` 可以同步。`APP_FOLDER`（`bc-incremental`）會寫進 Auto-Cloud 的路徑和玩家電腦上的資料夾，第一個 Steam build 之後就不能改，名字由 M3 決定（C9/F14）。
+
+| OS | 實際的資料夾 | Auto-Cloud（M3 設定到 App ID 上；`electron/paths.ts` 的 `autoCloudRow()`） |
+| --- | --- | --- |
+| Windows | `%APPDATA%\bc-incremental\saves` | `WinAppDataRoaming`，子資料夾 `bc-incremental/saves`，`*.json`，跨平台，不遞迴 |
+| macOS | `~/Library/Application Support/bc-incremental/saves` | Root Override → `MacAppSupport`，子資料夾相同 |
+| Linux | `~/.config/bc-incremental/saves` | Root Override → `LinuxHome`，Replace Path `.config/bc-incremental/saves`（假設沒有設 `$XDG_CONFIG_HOME`）；或 M3 把 Linux 的存檔搬到 `LinuxXdgDataHome` |
+
+Auto-Cloud 的根目錄沒有 XDG 的設定目錄（`~/.config`），所以 Linux 用 `LinuxHome` 加上 Replace Path。報告的 `autocloud:` 印這台電腦那一列（2026-11-03 的 Windows：`WinAppDataRoaming bc-incremental/saves *.json`）。
+
+### 11.5 檢查模式（`npm run steam:check`）
+
+- 加上 `--steam-check` 時，頁面右上角多一個英文的檢查面板（`src/platform/steam/checkPanel.ts`，開發用，和 viewer.html 一樣不走 i18n），preload 多一個 `check`（`clearAchievement`、`openOverlay`、`listSaves`、`showSaves`、`saveReport`、`recentErrors`），main process 也才回應 `bc:check:*`。
+- 面板上有：Steam 的連線狀態；Spacewar 的成就 `ACH_WIN_ONE_GAME`（Winner）與「Unlock」「Clear」「Re-check」，每按一次都記下 Steam 的回答；只有人眼能回答的三題（開頭的 Shift+Tab 提示、解鎖通知、Shift+Tab 叫出 overlay）；「Open achievements overlay」（`overlay.activateDialog(6)`）與看到什麼（Overlay、Steam window、Nothing）；存檔資料夾、檔案清單與「Show folder」；「Copy report」。按鈕的 `tabIndex` 是 -1，按完就 blur：overlay 沒接到 Shift+Tab 時，焦點不會留在按鈕上，之後被開局的 Space 按到。
+- 報告（`src/platform/steam/report.ts` 的 `buildReport`）是 12 行固定順序的 `key: value`，第一行是 `bc-incremental steam check v1`。裡面沒有 Steam 名稱、帳號 ID 或絕對路徑：存檔資料夾用 `saveDirShown`（`%APPDATA%\…`、`~/…`），其他絕對路徑寫成 `<path>`；沒回答的題目是 `unknown`。「Copy report」把它放進剪貼簿、存成 `<userData>/steam-check/report-<UTC 時間>.txt`，也顯示在唯讀的文字框。
+- Hoshi 照 `docs/v3/steam-check-runbook.zh-TW.md` 做檢查，結果與報告原文記在那份手冊的第 9 節。
+- container 裡沒有 Steam：`npm run smoke:electron`（ESMOKE，`tools/electron/smoke.ts`，xvfb 加 SwiftShader）用暫存的 userData 跑殼的幾種執行：一般、檢查模式、壞掉與讀不到的 `main.json`、`--bc-overlay-switches`、`--bc-replay`。
+
+### 11.6 各 OS 的結果
+
+| 檢查 | Windows（2026-11-03） | macOS | container（ESMOKE） |
+| --- | --- | --- | --- |
+| 原生模組載入 | win32-x64：成功 | 還沒做 | linux-x64：成功（沒有 Steam，所以 `init` 在 `stage: 'init'` 失敗） |
+| `init(480)` | 成功，1,004 ms，`language=english` | 還沒做 | 沒有 Steam |
+| 成就的 Unlock、Clear、Re-check | Unlock 與 Clear 每次都回 `yes`，每次讀回的狀態都對：locked → unlocked → locked | 還沒做 | 沒有 Steam：Unlock 回 `no`，狀態 `unknown` |
+| 開頭的 Shift+Tab 提示、Shift+Tab、解鎖通知（都是 overlay 畫的） | 三項都有 | 預期沒有 | 測不到 |
+| `activateDialog`（「Open achievements overlay」） | 開的是 **Steam 主視窗**，不是遊戲裡的 overlay（下面） | 預期沒有 | 測不到 |
+| 存檔在真的位置 | `%APPDATA%\bc-incremental\saves`：`main.json`、`backup.json` 各 583 B；重開直接回到天賦網 | 還沒做（`~/Library/Application Support/bc-incremental/saves`） | 暫存的 userData |
+| 真的 GPU 加上兩個參數 | 兩個參數都在；GPU 合成、WebGL、WebGPU 都開著 | 還沒做 | SwiftShader，不是 GPU |
+| 系統視窗 | SmartScreen、Defender、防火牆都沒有出現 | 還沒做（Gatekeeper、鑰匙圈、資料夾權限，預期沒有） | 不適用 |
+
+- **Windows**：Windows 10（19045）x64，Steam 用戶端開著，build `0.0.1+abaec66`（C7b，含 C9.2b 與存檔讀取失敗的修正；之後殼與 `src/platform/` 都沒改過），Electron 44.8.0，steamworks.js 0.4.0；沒有東西卡住，`errors: 0`。C9 最大的風險（Windows 上 overlay 能不能用）已經回答：能用。報告原文與每一項的依據在手冊第 9 節。
+- **`activateDialog` 的發現**：overlay 本身能用（提示、Shift+Tab、解鎖通知都是 overlay 畫的，overlay 裡的成就頁也看得到解鎖的成就）；只有程式主動叫 overlay 開成就頁（`overlay.activateDialog(6)`）時，Steam 開的是 Steam 主視窗。原因還沒查。現在玩家看得到的介面都不呼叫它：整個程式只有檢查面板的「Open achievements overlay」會呼叫（`bc:check:overlay`，main process 只在 `--steam-check` 時回應），`friends`（0）沒有任何地方呼叫。M3 重測（§11.8）。
+- **macOS**：這次沒有 Mac，還沒做。Mac 能說明 Electron 44、steamworks.js 0.4.0 與殼在 Mac 上合得來、真的登入能 init 480、解鎖與清除到得了 Steam，以及 Mac 的存檔位置；overlay 在 Mac 的 Electron 上預期不會出現（steamworks.js #50、electron#42656），不影響 Windows 的結論。
+- **container**：只涵蓋 linux-x64 的模組載入、暫存資料夾裡的存檔與 SwiftShader。
+
+### 11.7 App ID 480 測不到的（M3 在 Hoshi 的 App ID 上測）
+
+- **Auto-Cloud**：要在自己的 App 的 Steamworks 後台（App Admin）設定路徑、用 `testappcloudpaths <AppId>`、從 Steam 啟動（同步在啟動與結束時跑）。報告的 `autocloud:` 只是殼算出來、M3 要設定的路徑。
+- **從 Steam 啟動的行為**：`restartAppIfNecessary`、啟動選項、macOS 與 Linux 的 overlay 注入，以及 `activateDialog` 在遊戲自己的 App ID 上開到哪裡。
+- **遊戲自己的成就**：圖示、名稱、在地化。
+- Steam 的 VC++ 可轉散發套件勾選、SteamPipe 的 depot、demo 的 App。
+
+### 11.8 M3 要做的
+
+- 存檔資料夾的名字（`APP_FOLDER`，C9/F14），在第一個 Steam build 之前定案。
+- 遊戲與 demo 各自的 App ID，拿掉 `SPACEWAR_APP_ID`。
+- 打包：asar，`steamworks.js` 放在 unpacked；`steam_api64.dll` 與 dylib 放在執行檔旁邊；打開 Steam 的 VC++ 可轉散發套件（Windows 的 `.node` 需要 `VCRUNTIME140.dll`）。
+- `app://` protocol 與 CSP（Electron 安全清單第 7 與 18 項；現在頁面透過 `file://` 讀得到使用者讀得到的任何檔案）。
+- 出貨用的 Electron 版本，重測一次。
+- 各 flavor 的 analytics（C9/F12）：Steam demo 與正式版套 §9 的表。
+- 開機時依存檔重新解鎖成就。
+- Linux 的存檔位置（`$XDG_CONFIG_HOME`，§11.4）。
+- **重測 `activateDialog`**（§11.6）：在遊戲自己的 App ID 上、從 Steam 啟動時，確認「Open achievements overlay」開的是遊戲裡的 overlay。目前玩家看得到的介面都不呼叫 `activateDialog`（§11.6）；要加開 overlay 的按鈕（例如成就頁）之前，先過這一項。
+- C9.2a、C9.2b 的驗證留下的安全項目：出貨的 build 拿掉預設選單（`Menu.setApplicationMenu(null)`，或沒有 View 的選單；現在隱藏的預設選單還能用 Ctrl+Shift+I 開 DevTools）；打包時設 Electron 的 fuses（清單第 19 項）；子框架的 `will-frame-navigate`；`saves/` 的強化（`read()` 用 `lstat`、`isFile` 與大小上限，`list()` 用 `lstat`，暫存檔用 `'wx'` 開）；剪貼簿權限只給遊戲視窗（`contents === game`，可選）。
 
 ## 12. 平衡模擬器
 
@@ -1011,9 +1119,19 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 ## 14. CI 與發布
 
-- GitHub Actions：`format:check` → `lint` → `typecheck` → `test` → `fuzz:web`（天賦網的 fuzz，§12）→ `bench -- --check`（模擬的效能，§12）→ `checks -- --summary "$GITHUB_STEP_SUMMARY"`（§4 平衡檢查的 PR 子集，`report.md` 寫進這次執行的摘要，有未接受的 FAIL 就失敗，§12）→ `vite build`，build 結果存成 artifact。這條 PR 流程是 `.github/workflows/ci.yml`，C10.4 沒有動它。
+- GitHub Actions：`format:check` → `lint` → `typecheck` → `test` → `fuzz:web`（天賦網的 fuzz，§12）→ `bench -- --check`（模擬的效能，§12）→ `checks -- --summary "$GITHUB_STEP_SUMMARY"`（§4 平衡檢查的 PR 子集，`report.md` 寫進這次執行的摘要，有未接受的 FAIL 就失敗，§12）→ `vite build` → `npm run build:electron`（Steam 版的頁面與 Electron 殼，不需要 Electron 的執行檔，§11），`dist/` 存成 artifact，最後一步是「No Electron binary downloaded」（`test ! -e node_modules/electron/dist`）。這條 PR 流程是 `.github/workflows/ci.yml`，C10.4 沒有動它。
+- **CI 不下載 Electron**（C9/F1）：Electron 42 起，`npm ci` 不再在 postinstall 下載 Electron 的執行檔（約 120 MB），`ELECTRON_SKIP_BINARY_DOWNLOAD` 也不再有作用；第一次執行 `electron`、`install-electron`，或從 Node `require('electron')` 時才下載。所以 CI 的 `npm ci` 不下載；有測試或 build 步驟真的載入了 Electron 的話，`node_modules/electron/dist` 會出現，最後一步就失敗。`electron` 與 `steamworks.js` 是 exact devDependencies；`package.json` 的 `overrides.electron` 讓 Electron 依賴的 `@types/node` 用根目錄那一份（`node_modules` 裡只有一份，型別檢查不會看到兩份 Node 的全域型別），並把 `@electron-internal/extract-zip` 釘在 1.0.5。
+- **Steam 版的指令**（`package.json`；`"main": "dist-electron/main.cjs"`，所以 `electron .` 跑的是殼）：
+  - `npm run build:electron`：`vite build --mode steam`（`dist-steam/`），再 `vite build --config vite.electron.config.ts --mode main`（`dist-electron/main.cjs`，先清空資料夾）與 `--mode preload`（旁邊的 `preload.cjs`）。兩個都是給 Node 22 的單一 CommonJS 檔，`electron`、`steamworks.js` 與 Node 內建模組留成 `require()`。
+  - `npm run build:steam`：`npm run typecheck` 再 `npm run build:electron`。
+  - `npm run electron:install`：`install-electron`，下載 Electron 的執行檔；第一次 `npm run electron` 之前跑。
+  - `npm run electron`：`npm run build:electron` 再 `electron .`（App ID 480，沒開 Steam 也能玩）。
+  - `npm run steam:check`：同上，加上 `--steam-check`（§11.5）。
+  - `npm run smoke:electron`：`npm run build:electron` 再 `tsx tools/electron/smoke.ts`，只在 container 跑：`xvfb-run -a -s "-screen 0 1280x800x24" npm run smoke:electron`，截圖寫到 `out/electron-smoke/`。
+  - `npm run fps:steam`（C10）：`npm run build:electron` 再 `electron . --bc-replay=renderStress`（§10.4）。
+  - npm 透過 cmd.exe 或 sh 跑這些指令，所以裡面的 `&&` 在 Windows 也能用；在 PowerShell 裡手打要寫 `npm.cmd`（手冊 §2.1）。
 - **夜間檢查**（`.github/workflows/nightly.yml`，C10.4，§12）：`schedule` 的 cron 是 `'17 19 * * *'`（UTC，等於台北 03:17；台灣沒有日光節約，所以不用 `timezone:` 這個鍵），也可以在 Actions 頁手動執行（`workflow_dispatch` 的 `ref` 預設空字串、`set` 在 `nightly` 與 `weekly` 之間選）。三個 job：`plan`（10 分鐘）算計畫並輸出分片矩陣與 `weekly`（手動選 `weekly`，或排程當天台北是星期三時是每週集合）；`shard`（120 分鐘、`fail-fast: false`）每個分片一個 job，輸出存成 `nightly-<分片>` artifact（保留 7 天）；`report`（15 分鐘，`needs.plan.result == 'success'` 時就算分片失敗也跑）下載全部分片合併，報告寫進這次執行的摘要，`nightly-report` artifact 保留 90 天。有未接受的 FAIL 或缺分片就讓這次執行失敗，GitHub 才會寄信（收信的是提交 cron 那一行的帳號，也就是 B1 合併的 Hoshi；要換人收信就到 Actions → Nightly → Disable 再 Enable，之後寄給重新啟用的人）。`inputs.*`、`vars.*`、矩陣與 job 輸出（`needs.*.outputs`）的值只透過 `env:` 進到 `run:` 的腳本（公開 repo，不讓 dispatch 的輸入注入腳本）；`ref` 運算式只用在 checkout 的 `ref:` 與 `concurrency.group`，每個 job 都 checkout 同一個。`NIGHTLY_REF` 這個 repository variable 留著但不設（等於 main）：批次分支要跑夜間檢查，等 nightly.yml 進 main 之後用 `workflow_dispatch` 帶 `ref` 跑，在那之前在本機跑 `npm run nightly`。
 - 試玩版發布到 itch.io（免費，可以設成限制存取的頁面）：`.github/workflows/itch.yml`，推 `playtest-v*` tag（或在 Actions 頁手動執行）時跑 `npm run check`、`npm run build`、刪掉 source map，再用 butler 推到 `ITCH_TARGET` 的 `html5` channel，userversion 是 `tag+sha`。需要 repo secret `BUTLER_API_KEY`（itch API key，只放 GitHub，不貼在任何地方）。第一次上傳後要在 itch 編輯頁勾「This file will be played in the browser」。
 - 試玩版從 tag 之後只修 bug：修好的 commit 打下一個 tag（`playtest-v2`…），CI 自動上傳。
-- Steam 版在本機用 `npm run build:steam` 產出，用 SteamPipe 上傳（M3）。
+- Steam 版目前只從原始碼跑（`npm run electron`）：`npm run build:steam` 產出 `dist-steam/` 與 `dist-electron/`，還不是打包好的程式。打包（§11.8）與用 SteamPipe 上傳是 M3 的事；`itch.yml` 只發網頁版。
 - **角色批次 PR 的附件**（C10 設計 §3.1，L9）：PR 附 `npm run gif -- --character <c>` 的 GIF 與 MP4、手工融合的 `npm run gif -- --fusion <c>.<o>` 和 `npm run clips -- --all` 的片段牆（§10.5）。這個專案的 session 沒有 `gh`，GitHub 也沒有上傳媒體的 REST API，所以 gif.ts 與 clips.ts 只寫檔：批次的 session 把 GIF、MP4 與片段牆複製到 `/mnt/project-files/v3/media/<batch>/`，附在它的 thread 回覆裡；PR 留言（GitHub MCP）放 `report.md` 的內容，並寫出這些檔名。GIF 照 9.5 MB 的階梯縮，二進位檔不進 git。
