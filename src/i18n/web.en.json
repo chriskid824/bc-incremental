@@ -70,6 +70,7 @@
   "web.toward.nearest": "at the nearest enemy",
   "web.toward.eventTarget": "at the target",
   "web.toward.along": "along the jump",
+  "web.toward.flight": "along its flight",
   "web.aim.target": "at the target",
   "web.aim.distinct": "one at each of the nearest enemies",
   "web.aim.radial": "all around",

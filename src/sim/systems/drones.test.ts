@@ -203,6 +203,8 @@ const PER_SLOT = [
   'spec',
   'depth',
   'origin',
+  'hx',
+  'hy',
 ] as const;
 /** The pool's per-emitter arrays, by name. */
 const PER_EMITTER = [

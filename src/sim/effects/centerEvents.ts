@@ -7,9 +7,11 @@
  * once src/sim/ailments/frost.ts's addFrost fills a meter), explode (each signature bomb's
  * landing, src/sim/emitters/lob.ts), chainJump (each jump hit of the signature arc,
  * raiseChainJump in src/sim/combat/policy.ts, with the jump's angle as its value) and
- * droneImpact (each signature drone impact, impactAt in src/sim/systems/drones.ts). Each calls
- * emitCenterEvent, which returns at once when no trigger and no onCenterEvent hook listens to
- * the event (RunContext.centerEvents).
+ * droneImpact (each signature drone impact, impactAt in src/sim/systems/drones.ts, with the
+ * drone's flight as its value: its heading's angle, else the angle away from the player). Each
+ * calls emitCenterEvent, which returns at once when no trigger and no onCenterEvent hook listens
+ * to the event (RunContext.centerEvents); the two with a value make its tests first, so they
+ * compute the angle only for an event that is raised.
  *
  * An event can carry a list of enemies (CenterEventScratch.list), which its producer fills right
  * before raising it: a freeze's is the frozen enemy and up to LIST_MAX − 1 others within
@@ -88,9 +90,9 @@ export function createCenterEventState(build: CompiledBuild): CenterEventState {
 /**
  * Center event `event` (its CENTER_EVENTS ordinal, which is its TRIGGER_EVENTS ordinal) at depth
  * `depth`, from damage of trigger `origin`, on `target` at (x, y) with `flags` and `value` (a
- * chainJump's angle): the triggers listening to it, then the onCenterEvent hooks. Its producer
- * has filled the scratch's list and radius (listCount 0 for none); the rest of the scratch is
- * written once something listens.
+ * chainJump's angle, a droneImpact's flight angle; ZERO for explode and freeze): the triggers
+ * listening to it, then the onCenterEvent hooks. Its producer has filled the scratch's list and
+ * radius (listCount 0 for none); the rest of the scratch is written once something listens.
  */
 export function emitCenterEvent(
   ctx: RunContext,

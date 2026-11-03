@@ -399,7 +399,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         length: finite,
         width: finite,
         damagePct: finite,
-        toward: z.enum(['outward', 'nearest', 'eventTarget', 'along']),
+        toward: z.enum(['outward', 'nearest', 'eventTarget', 'along', 'flight']),
         from: z.enum(['event', 'target']).exactOptional(),
         alwaysCrit: z.boolean().exactOptional(),
         critScale: finite.exactOptional(),

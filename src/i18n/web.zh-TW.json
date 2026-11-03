@@ -70,6 +70,7 @@
   "web.toward.nearest": "朝最近的敵人",
   "web.toward.eventTarget": "朝目標",
   "web.toward.along": "沿跳躍方向",
+  "web.toward.flight": "沿飛行方向",
   "web.aim.target": "朝目標",
   "web.aim.distinct": "分別朝最近的敵人",
   "web.aim.radial": "朝四周",

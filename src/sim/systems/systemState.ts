@@ -657,6 +657,9 @@ export interface DroneLayout {
   readonly y: readonly number[];
   /** Per row: the tick of its first pick, 1 + (10 × seat) mod PICK_TICKS, so launches stagger. */
   readonly firstPick: readonly number[];
+  /** Per row: its heading's x and y (DronePool.hx, hy), 0 for every row: none has flown yet. */
+  readonly hx: readonly number[];
+  readonly hy: readonly number[];
   /**
    * Per emitter index, one entry for each emitter once any of them is a drone emitter, whether
    * or not it placed a row, and none otherwise (0 for the other kinds): a drone's step a tick
@@ -732,6 +735,14 @@ export interface DronePool extends DroneViewState {
   readonly spec: Int32Array;
   readonly depth: Uint8Array;
   readonly origin: Int32Array;
+  /**
+   * A drone's heading, unnormalised: target centre minus slot, as its dash last saw it from
+   * outside the target's body (src/sim/systems/drones.ts dash), the way it last flew in; 0 and
+   * 0 from the fill and from its docking until then, and always for a turret or a timed row. Its
+   * signature impacts carry it as the droneImpact event's value (slashLine toward 'flight').
+   */
+  readonly hx: Float64Array;
+  readonly hy: Float64Array;
   /** Slots marked as leaving in the current stage, dropped at its end (0 outside the stage). */
   left: number;
   /** DroneLayout.spawnSpecs, with its own `live` counts; null in a build without spawnDrone. */
@@ -767,11 +778,11 @@ export const NEVER_LEAVES = 2147483647;
 
 /**
  * The pool of `layout`: every row placed, ids 1 .. rows in row order, each at its dock; drones
- * docked with no dock time left and a full sortie, turrets fixed; none leaves. Its arrays hold
- * the summon cap of slots in a build with a spawnDrone effect, the slots past the placed rows
- * empty until a spawn appends one, and exactly the placed rows otherwise. `shootable` stands for
- * RunContext.shootable, which the context is still being built for: the pool keeps it for its
- * turrets and does not call it here.
+ * docked with no dock time left, a full sortie and no heading, turrets fixed; none leaves. Its
+ * arrays hold the summon cap of slots in a build with a spawnDrone effect, the slots past the
+ * placed rows empty until a spawn appends one, and exactly the placed rows otherwise.
+ * `shootable` stands for RunContext.shootable, which the context is still being built for: the
+ * pool keeps it for its turrets and does not call it here.
  */
 export function createDronePool(
   layout: DroneLayout,
@@ -823,6 +834,8 @@ export function createDronePool(
     spec: new Int32Array(cap).fill(-1),
     depth: new Uint8Array(cap),
     origin: new Int32Array(cap).fill(-1),
+    hx: slots(Float64Array, layout.hx),
+    hy: slots(Float64Array, layout.hy),
     left: 0,
     specs: spawnSpecs === null ? null : { ...spawnSpecs, live: new Int32Array(spawnSpecs.live) },
     stepBase: Float64Array.from(layout.stepBase),

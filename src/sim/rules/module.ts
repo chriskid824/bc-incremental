@@ -209,7 +209,11 @@ export interface CenterEventScratch {
   /** A chainJump's start, the position of the enemy it jumped from; read it only on chainJump. */
   fromX: number;
   fromY: number;
-  /** The event's value: a chainJump's angle from (fromX, fromY) to its enemy; ZERO otherwise. */
+  /**
+   * The event's value: a chainJump's angle from (fromX, fromY) to its enemy; a droneImpact's
+   * flight angle, the drone's heading (the way it last flew in), else the angle from the player
+   * to its enemy; ZERO for explode and freeze.
+   */
   value: Num;
 }
 

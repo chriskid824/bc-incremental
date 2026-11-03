@@ -54,17 +54,24 @@ export const HAND_RANKS: FusionRanks = [
 /** r1–r3 of a template pair whose outer has no payload, while V12 reports it: no modifiers. */
 export const EMPTY_RANKS: FusionRanks = [fusionRank([], 3), fusionRank([], 3), fusionRank([], 3)];
 
-/** Where a slash runs on each center event (F11): droneImpact outward until drones fly a way. */
+/**
+ * Where a slash runs on each center event (F11): on droneImpact from the impact's point, the
+ * target's center, along the drone's flight, the way it flew in to its target, so an impact that
+ * kills its target cuts it too (FL, the lead's FL-R1).
+ */
 const SLASH_PLACEMENT: Readonly<
   Record<
     CenterEvent,
-    { readonly from: 'event' | 'target'; readonly toward: 'nearest' | 'outward' | 'along' }
+    {
+      readonly from: 'event' | 'target';
+      readonly toward: 'nearest' | 'outward' | 'along' | 'flight';
+    }
   >
 > = {
   explode: { from: 'event', toward: 'nearest' },
   freeze: { from: 'target', toward: 'outward' },
   chainJump: { from: 'target', toward: 'along' },
-  droneImpact: { from: 'target', toward: 'outward' },
+  droneImpact: { from: 'event', toward: 'flight' },
 };
 
 /**

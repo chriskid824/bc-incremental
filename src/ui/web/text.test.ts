@@ -468,10 +468,12 @@ function kitchenSink(): NodeEffects {
     { on: 'hit', when: [{ targetFrostAtLeast: 0.3 }], do: [heal] },
     { on: 'hit', when: [{ targetIs: 'highestHp' }], do: [heal] },
     ...TARGET_PICKS.map((pick): TriggerSpec => ({ on: 'hit', target: { pick }, do: [heal] })),
-    ...(['outward', 'nearest', 'eventTarget', 'along'] as const).map((toward): TriggerSpec => ({
-      on: 'hit',
-      do: [{ kind: 'slashLine', length: 100, width: 10, damagePct: 1, toward }],
-    })),
+    ...(['outward', 'nearest', 'eventTarget', 'along', 'flight'] as const).map(
+      (toward): TriggerSpec => ({
+        on: 'hit',
+        do: [{ kind: 'slashLine', length: 100, width: 10, damagePct: 1, toward }],
+      }),
+    ),
     ...(['target', 'distinct', 'radial', 'fan'] as const).map((aim): TriggerSpec => ({
       on: 'hit',
       do: [{ kind: 'projectiles', count: 1, aim, damagePct: 1 }],
@@ -888,6 +890,19 @@ describe('describeNode (§4.7)', () => {
     ]);
     expect(linesOf(fire, 'fusion.fire.crit.core', 'zh-TW')).toEqual([
       '每次爆炸，在落點：朝最近的敵人畫一條長 300、寬 24 的斬擊線，100% 傷害，必定暴擊，每 10% 暴擊率傷害 +10%',
+      '這條融合吃暴擊外盤的加成',
+    ]);
+  });
+
+  it("writes the hive crit core's slash along its flight, in both locales (FL, gd:643)", () => {
+    // Planted bug: web.toward.flight missing or wrong in either locale.
+    const summon = assembleWeb(content, 'summon', FULL_SCOPE);
+    expect(linesOf(summon, 'fusion.summon.crit.core', 'en')).toEqual([
+      'Each drone impact, at its target: a slash along its flight, 300 long and 24 wide, for 100% damage, always a crit, +10% damage per 10% crit chance',
+      "This fusion takes the Crit board's bonuses",
+    ]);
+    expect(linesOf(summon, 'fusion.summon.crit.core', 'zh-TW')).toEqual([
+      '每次撞擊，在目標：沿飛行方向畫一條長 300、寬 24 的斬擊線，100% 傷害，必定暴擊，每 10% 暴擊率傷害 +10%',
       '這條融合吃暴擊外盤的加成',
     ]);
   });

@@ -15,7 +15,8 @@
  * and cooldown do not. The turret shots' 加農砲 splash (sizeOf) and 特斯拉塔 jumps (countOf) are
  * read here too, once for every turret of the run (C5.9). A build with a spawnDrone effect also
  * gets the tables of its timed rows (C5.7, spawnSpecs), which the effects append at run time.
- * Draws nothing.
+ * Every row starts with no heading (hx, hy 0), which only a drone's dash writes (FL). Draws
+ * nothing.
  */
 
 import type { Rng } from '../../core/rng';
@@ -61,6 +62,8 @@ export function droneLayout(
   const x: number[] = [];
   const y: number[] = [];
   const firstPick: number[] = [];
+  const hx: number[] = [];
+  const hy: number[] = [];
   // Sized for every emitter once one is a drone emitter, so any emitter index reads an entry.
   const size = emitters.some((em) => em.spec.kind === 'drone') ? emitters.length : 0;
   const stepBase = new Array<number>(size).fill(0);
@@ -85,6 +88,9 @@ export function droneLayout(
     x.push(CENTER_X + radius * Math.cos(angle));
     y.push(CENTER_Y + radius * Math.sin(angle));
     firstPick.push(1 + ((10 * at) % PICK_TICKS));
+    // No heading until it flies (FL).
+    hx.push(0);
+    hy.push(0);
   };
   for (const em of emitters) {
     const spec = em.spec;
@@ -126,6 +132,8 @@ export function droneLayout(
     x,
     y,
     firstPick,
+    hx,
+    hy,
     stepBase,
     dockTicks,
     coolTicks,
