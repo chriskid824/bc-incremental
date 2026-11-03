@@ -7,6 +7,13 @@
  * 巨大化's sizeFactor, a number compileBuild computes once), so a build without either keeps every
  * radius as written, bit for bit. countOf halves only under 巨大化 (BuildFlags.halveCounts) and is
  * the identity otherwise.
+ *
+ * Spread distances (E3, 擴散距離) take the build's spread factor (BuildFlags.spreadFactor:
+ * spreadRadius, also computed once by compileBuild): a spread is an area too, so the effects that
+ * spread (every spreadAilment, and an applyAilment whose radius node data marks `spread`) are
+ * sized r × areaFactor × spreadFactor in the same sizedEffect pass, one product; a selector's
+ * range that node data marks is a reach, × spreadFactor alone (src/sim/effects/select.ts
+ * spreadSelector); and a rule module reads its own spread distances through spreadOf.
  */
 
 import type { CompiledBuild } from './compile';
@@ -14,6 +21,16 @@ import type { CompiledBuild } from './compile';
 /** The radius `r` of an area `build` creates, as the build sizes it: r × its area factor. */
 export function sizeOf(build: Pick<CompiledBuild, 'flags'>, r: number): number {
   return r * build.flags.areaFactor;
+}
+
+/**
+ * A rule module's own spread distance `r` (燎原's 「60 內」), as the build reaches it: r × its
+ * spread factor, read at use (in a hook: the factor is set once every module has compiled).
+ * Like a marked selector's range, it is a reach and takes no area factor; a module whose spread
+ * is an area sizes it as well (sizeOf).
+ */
+export function spreadOf(build: Pick<CompiledBuild, 'flags'>, r: number): number {
+  return r * build.flags.spreadFactor;
 }
 
 /**

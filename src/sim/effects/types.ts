@@ -321,16 +321,30 @@ export function shatterEffect(radius: number): CompiledEffect {
 }
 
 /**
- * `fx` with its radius × `factor`, the build's area factor (BuildFlags.areaFactor; docs/v3 C4
- * design D29): its radiusSq and a spreadAilment's spread, from its spec's radius. compileBuild
+ * The effect spreads (E3, 擴散距離): a spreadAilment always, and an applyAilment whose radius node
+ * data marks (spread: true; validation takes no other value).
+ */
+const spreads = (spec: CompiledEffectSpec): boolean =>
+  spec.kind === 'spreadAilment' || (spec.kind === 'applyAilment' && spec.spread === true);
+
+/**
+ * `fx` with its radius × its factor: the build's area factor (BuildFlags.areaFactor; docs/v3 C4
+ * design D29), × its spread factor (BuildFlags.spreadFactor, E3) when the effect spreads, one
+ * product for its radiusSq and a spreadAilment's spread, from its spec's radius. compileBuild
  * sizes every compiled effect this way once, after the modules have run, so the executors read
  * the sized radii as they are; groundZone's radiusSq, which nothing reads, follows too, while its
  * executor sizes the spec's radius for its zone (sizeOf). `fx` itself at factor 1, or without a
  * radius: the shatter's, sized as it is compiled (shatterEffect).
  */
-export function sizedEffect(fx: CompiledEffect, factor: number): CompiledEffect {
+export function sizedEffect(
+  fx: CompiledEffect,
+  areaFactor: number,
+  spreadFactor: number,
+): CompiledEffect {
   const spec = fx.spec;
-  if (factor === 1 || !('radius' in spec) || spec.radius === undefined) return fx;
+  if (!('radius' in spec) || spec.radius === undefined) return fx;
+  const factor = spreads(spec) ? areaFactor * spreadFactor : areaFactor;
+  if (factor === 1) return fx;
   const radius = spec.radius * factor;
   const spread = fx.spread === null ? null : { ...fx.spread, radius, radiusSq: radius ** 2 };
   return { ...fx, radiusSq: radius ** 2, spread };

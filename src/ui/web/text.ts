@@ -400,6 +400,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   barrageCount: 'number',
   areaSize: 'percent',
   bombRadius: 'percent',
+  spreadRadius: 'percent',
 };
 
 /**

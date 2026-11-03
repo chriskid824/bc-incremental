@@ -1207,6 +1207,61 @@ describe('trigger validation', () => {
     ).toEqual([`${at} do[0] toSplitChildren moves poison only`]);
   });
 
+  it('takes a spread mark only as true, on an applyAilment with a radius and a target with a range (E3)', () => {
+    const spark = {
+      kind: 'applyAilment',
+      ailment: 'burn',
+      radius: 90,
+      maxTargets: 2,
+      order: 'nearest',
+      spread: true,
+    } as const;
+    const shock = { kind: 'applyAilment', ailment: 'shock' } as const;
+    // 火星's form (gd:376) and a marked selector are valid.
+    expect(
+      triggerIssues(
+        { on: 'diedWithAilment', when: [{ victimHas: 'burn' }], do: [spark] },
+        { on: 'kill', target: { pick: 'farthest', range: 120, spread: true }, do: [shock] },
+      ),
+    ).toEqual([]);
+    // The schema takes `spread` on an applyAilment alone; data checked without it still gets
+    // the issue.
+    const unmarkable = (effect: object): TriggerSpec['do'][number] =>
+      effect as TriggerSpec['do'][number];
+    expect(
+      triggerIssues(
+        { on: 'hit', do: [{ kind: 'applyAilment', ailment: 'burn', spread: true }] },
+        { on: 'kill', do: [{ ...spark, spread: false }] },
+        { on: 'kill', target: { pick: 'farthest', spread: true }, do: [shock] },
+        { on: 'kill', target: { pick: 'farthest', range: 120, spread: false }, do: [shock] },
+        {
+          on: 'kill',
+          do: [unmarkable({ kind: 'spreadAilment', ailment: 'burn', radius: 250, spread: true })],
+        },
+        {
+          on: 'kill',
+          do: [unmarkable({ kind: 'explode', radius: 90, damagePct: 0.5, spread: true })],
+        },
+        {
+          on: 'kill',
+          do: [unmarkable({ kind: 'addFrost', amount: 0.2, radius: 60, spread: true })],
+        },
+      ),
+    ).toEqual([
+      `${at} do[0] spread needs a radius: it marks the radius as a spread distance (spreadRadius)`,
+      "talent 'vitality': triggers[1] do[0] spread must be true or left out (got false)",
+      "talent 'vitality': triggers[2] target.spread needs target.range: it marks the range as a " +
+        'spread distance (spreadRadius)',
+      "talent 'vitality': triggers[3] target.spread must be true or left out (got false)",
+      "talent 'vitality': triggers[4] do[0] spread is not needed: a spreadAilment always spreads, " +
+        'its radius × spreadRadius; leave it out',
+      "talent 'vitality': triggers[5] do[0] spread does not apply to explode: only an " +
+        "applyAilment's radius and a target's range take it",
+      "talent 'vitality': triggers[6] do[0] spread does not apply to addFrost: only an " +
+        "applyAilment's radius and a target's range take it",
+    ]);
+  });
+
   it('accepts target selectors with every pick where they can run', () => {
     expect(
       triggerIssues(
@@ -2610,6 +2665,10 @@ describe('emitter grant validation', () => {
           // A scanning pick is fine: a periodic event is not frequent.
           strike({ name: 'e', target: { pick: 'farthest' } }),
           strike({ name: 'f', target: { pick: 'mostStacks', ailment: 'shock' } }),
+          // E3: a marked range, and a mark without a range or not true.
+          strike({ name: 'g', target: { pick: 'farthest', range: 300, spread: true } }),
+          strike({ name: 'h', target: { pick: 'farthest', spread: true } }),
+          strike({ name: 'i', target: { pick: 'farthest', range: 300, spread: false } }),
         ],
       }),
     ).toEqual([
@@ -2619,6 +2678,9 @@ describe('emitter grant validation', () => {
       "talent 'outer.lightning.bolt': emitters[2] target.range must be > 0 (got 0)",
       "talent 'outer.lightning.bolt': emitters[3] target.excludeEventTarget needs the event's " +
         "enemy, which 'periodic' events have not",
+      "talent 'outer.lightning.bolt': emitters[7] target.spread needs target.range: it marks the " +
+        'range as a spread distance (spreadRadius)',
+      "talent 'outer.lightning.bolt': emitters[8] target.spread must be true or left out (got false)",
     ]);
   });
 

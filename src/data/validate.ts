@@ -992,7 +992,8 @@ function detonateIssues(trigger: TriggerSpec): string[] {
  * `atKill` (runsAtKill), and what it needs: no waveStart (nothing has spawned to pick when it
  * fires), no kill trigger that runs at the kill (its transfers act on the victim), no pick that
  * scans every enemy on events that come per hit, mostStacks with exactly its ailment, a range
- * above 0, and the event's enemy to exclude. A strike's target runs as a periodic trigger's.
+ * above 0, a spread mark only as true and with a range, and the event's enemy to exclude. A
+ * strike's target runs as a periodic trigger's.
  */
 function selectorIssues(on: TriggerEventId, atKill: boolean, target: TargetSelector): string[] {
   if (on === 'waveStart') {
@@ -1019,6 +1020,13 @@ function selectorIssues(on: TriggerEventId, atKill: boolean, target: TargetSelec
   }
   if (target.range !== undefined && !(target.range > 0)) {
     issues.push(`target.range must be > 0 (got ${target.range})`);
+  }
+  if (target.spread !== undefined && target.spread !== true) {
+    issues.push(`target.spread must be true or left out (got ${String(target.spread)})`);
+  } else if (target.spread === true && target.range === undefined) {
+    issues.push(
+      'target.spread needs target.range: it marks the range as a spread distance (spreadRadius)',
+    );
   }
   if (target.excludeEventTarget === true && ENEMYLESS_EVENTS.has(on)) {
     issues.push(`target.excludeEventTarget needs the event's enemy, which '${on}' events have not`);
@@ -1110,6 +1118,15 @@ function effectIssues(
   } else if (needsTarget && on === 'shatter') {
     issues.push(`${effect.kind} needs the event's enemy, which is gone when '${on}' triggers run`);
   }
+  // A spread mark (E3's 擴散距離) is an applyAilment's alone, which the schema holds to; data
+  // checked without it can carry one on any effect. A spreadAilment always spreads.
+  if (effect.kind !== 'applyAilment' && 'spread' in (effect as object)) {
+    issues.push(
+      effect.kind === 'spreadAilment'
+        ? 'spread is not needed: a spreadAilment always spreads, its radius × spreadRadius; leave it out'
+        : `spread does not apply to ${effect.kind}: only an applyAilment's radius and a target's range take it`,
+    );
+  }
   switch (effect.kind) {
     case 'applyAilment':
       count('stacks', effect.stacks);
@@ -1121,6 +1138,13 @@ function effectIssues(
       }
       if (effect.order !== undefined && effect.radius === undefined) {
         issues.push(orderIssue(effect.order));
+      }
+      if (effect.spread !== undefined && effect.spread !== true) {
+        issues.push(`spread must be true or left out (got ${String(effect.spread)})`);
+      } else if (effect.spread === true && effect.radius === undefined) {
+        issues.push(
+          'spread needs a radius: it marks the radius as a spread distance (spreadRadius)',
+        );
       }
       break;
     case 'spreadAilment':

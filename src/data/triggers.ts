@@ -331,7 +331,9 @@ export type SelectorOrigin = (typeof SELECTOR_ORIGINS)[number];
  * the alive enemies within `range` of `from` (unlimited without it), but the event's own enemy
  * with excludeEventTarget and bosses with excludeBoss. `from` is the event's point (its enemy's
  * position, a kill's victim's) by default and on events without one the player's; mostStacks
- * counts the stacks of `ailment`, which only it takes.
+ * counts the stacks of `ailment`, which only it takes. `spread` marks the range as a spread
+ * distance (擴散距離): the run reaches range × spreadRadius (src/sim/effects/select.ts
+ * spreadSelector), a reach that areaSize leaves as it is; it needs a range.
  */
 export interface TargetSelector {
   readonly pick: TargetPick;
@@ -340,6 +342,7 @@ export interface TargetSelector {
   readonly range?: number;
   readonly excludeEventTarget?: boolean;
   readonly excludeBoss?: boolean;
+  readonly spread?: boolean;
 }
 
 /**
@@ -613,9 +616,11 @@ export interface BuffSpec {
  *   `maxTargets` enemies within `radius` of the event (in `order`); each stack deals what a hit
  *   of damagePct (default 1) of the damage stat would apply. An enemy keeps only its strongest
  *   bleed, so more bleed stacks add nothing, except under 大出血's bleedRings (C7b), up to its
- *   cap; shock stacks only change how much damage the enemy takes.
+ *   cap; shock stacks only change how much damage the enemy takes. `spread` marks the radius as
+ *   a spread distance (火星's 「點燃 90 內最近的 2 隻」): × spreadRadius as well as × areaSize.
  * - spreadAilment: copies the event enemy's stacks of the ailment, at `effect` (default 1) of
  *   their damage, to every other enemy within `radius` of it. A transfer: it deals no damage.
+ *   Always a spread: its radius is × spreadRadius as well as × areaSize.
  *   Poison only: `stacks` is the fraction of the stacks each enemy gets (default 1, the
  *   longest-lasting first), and `maxTargets` caps how many enemies it reaches (in `order`).
  *   `toSplitChildren`, on a kill trigger that runs at the kill: each enemy the victim splits
@@ -657,6 +662,7 @@ export type EffectSpec =
       readonly radius?: number;
       readonly maxTargets?: number;
       readonly order?: TargetOrder;
+      readonly spread?: boolean;
     }
   | {
       readonly kind: 'spreadAilment';

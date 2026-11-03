@@ -32,6 +32,7 @@ import type { TagMask } from '../../data/tags';
 import { TRIGGER_EVENTS } from '../../data/triggers';
 import type { EffectSpec, TriggerSpec } from '../../data/triggers';
 import { BLEED_RING_MAX_STACKS } from '../ailments/rings';
+import { spreadSelector } from '../effects/select';
 import {
   compileEffect,
   compileTrigger,
@@ -179,6 +180,14 @@ export interface BuildFlags {
   poisonSlowStacks: number;
   poisonSlowPer: number;
   poisonSlowMax: number;
+  /**
+   * The spread factor (擴散距離, E3): max(0, values.spreadRadius), which compileBuild sets beside
+   * areaFactor. A spread's radius is × it as well as × areaFactor: every spreadAilment's and a
+   * marked applyAilment's (sizedEffect), and a marked selector's range × it alone
+   * (spreadSelector); a rule module's own spread distances read it through spreadOf
+   * (src/sim/build/size.ts). 1 for a build without spreadRadius.
+   */
+  spreadFactor: number;
 }
 
 /**
@@ -449,6 +458,7 @@ export function compileBuild(
     poisonSlowStacks: 0,
     poisonSlowPer: 0,
     poisonSlowMax: 0,
+    spreadFactor: 1,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -619,10 +629,20 @@ export function compileBuild(
   // The area factor (D29), now that every module has set its part: every effect's radius is
   // sized here once, the shatter's as it is compiled, and the executors read them as they are.
   // An areaSize below 0 is no area at all, never a negative radius whose square is positive.
+  // So too the spread factor (E3), which a spread's radius takes beside the area factor in the
+  // same pass, and a marked selector's range alone; a spreadRadius below 0 is no spread.
   flags.areaFactor = Math.max(0, values.areaSize) * flags.sizeFactor;
-  if (flags.areaFactor !== 1) {
+  flags.spreadFactor = Math.max(0, values.spreadRadius);
+  if (flags.areaFactor !== 1 || flags.spreadFactor !== 1) {
     for (let i = 0; i < effects.length; i++) {
-      effects[i] = sizedEffect(effects[i] as CompiledEffect, flags.areaFactor);
+      effects[i] = sizedEffect(effects[i] as CompiledEffect, flags.areaFactor, flags.spreadFactor);
+    }
+    if (flags.spreadFactor !== 1) {
+      for (let i = 0; i < triggers.length; i++) {
+        const t = triggers[i] as CompiledTrigger;
+        if (t.selector === null || t.selector.spreadRange < 0) continue;
+        triggers[i] = { ...t, selector: spreadSelector(t.selector, flags.spreadFactor) };
+      }
     }
   }
   if (canFreeze) {

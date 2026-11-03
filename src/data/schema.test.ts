@@ -729,6 +729,70 @@ describe('TriggerSpecSchema', () => {
   });
 });
 
+describe('the spread mark (E3)', () => {
+  it('takes `spread` as a boolean on an applyAilment and on a target selector, a strike’s too', () => {
+    const spark = {
+      kind: 'applyAilment',
+      ailment: 'burn',
+      radius: 90,
+      maxTargets: 2,
+      order: 'nearest',
+      spread: true,
+    };
+    expect(EffectSpecSchema.parse(spark)).toEqual(spark);
+    // false parses; validation refuses it (src/data/validate.ts).
+    expect(EffectSpecSchema.parse({ ...spark, spread: false })).toEqual({
+      ...spark,
+      spread: false,
+    });
+    const picked = {
+      on: 'kill',
+      target: { pick: 'farthest', range: 120, spread: true },
+      do: [{ kind: 'applyAilment', ailment: 'shock' }],
+    };
+    expect(TriggerSpecSchema.parse(picked)).toEqual(picked);
+    const strike = {
+      ...SAMPLE_GRANTS.strike,
+      target: { pick: 'farthest', range: 300, spread: true },
+    };
+    expect(EmitterGrantSchema.parse(strike)).toEqual(strike);
+  });
+
+  it.each<[string, unknown]>([
+    ['a spreadAilment burn', { kind: 'spreadAilment', ailment: 'burn', radius: 250, spread: true }],
+    [
+      'a spreadAilment poison',
+      { kind: 'spreadAilment', ailment: 'poison', radius: 90, spread: true },
+    ],
+    ['an explode', { kind: 'explode', radius: 90, damagePct: 0.5, spread: true }],
+    [
+      'a groundZone',
+      { kind: 'groundZone', radius: 40, durationSec: 1, damagePctPerSec: 0.2, spread: true },
+    ],
+    [
+      'an applyAilment, not a boolean',
+      { kind: 'applyAilment', ailment: 'burn', radius: 90, spread: 1 },
+    ],
+    [
+      'an applyAilment, a string',
+      { kind: 'applyAilment', ailment: 'burn', radius: 90, spread: 'true' },
+    ],
+  ])('rejects `spread` on %s', (_label, effect) => {
+    expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
+  });
+
+  it('rejects a target selector’s `spread` that is not a boolean', () => {
+    for (const spread of [1, 'true', null]) {
+      const trigger = {
+        on: 'kill',
+        target: { pick: 'farthest', range: 120, spread },
+        do: [{ kind: 'heal', lifePct: 0.05 }],
+      };
+      expect(TriggerSpecSchema.safeParse(trigger).success, String(spread)).toBe(false);
+    }
+  });
+});
+
 describe('ConversionSpecSchema', () => {
   it.each([
     ['to poison', { to: 'poison', fraction: 0.3 }],

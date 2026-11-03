@@ -37,7 +37,12 @@ import type { CenterEventState } from '../effects/centerEvents';
 import { REPEAT } from '../effects/flags';
 import { createEffectEntry, createEffectQueue } from '../effects/queue';
 import type { EffectEntry, EffectQueue, PendingKill, TriggerState } from '../effects/queue';
-import { compileSelector, createSelectionScratch, selectable } from '../effects/select';
+import {
+  compileSelector,
+  createSelectionScratch,
+  selectable,
+  spreadSelector,
+} from '../effects/select';
 import type { SelectionScratch } from '../effects/select';
 import { EVENT } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
@@ -865,10 +870,10 @@ export function createRunContext(
 
   // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
   // contact stage the thorns, the segment stage the segments and the drone stage the drones. A
-  // strike picks its target as a periodic trigger does, from the player; a fan's icicle cones
-  // (冰柱) and an aura's corona (日冕) take a payload of their own; an orbit's orbs, counted
-  // once for the run and none of 巨大化's four counts (not halved), each remember the enemies
-  // they hit.
+  // strike picks its target as a periodic trigger does, from the player, its range × the spread
+  // factor when node data marks it (spreadSelector, E3); a fan's icicle cones (冰柱) and an
+  // aura's corona (日冕) take a payload of their own; an orbit's orbs, counted once for the run
+  // and none of 巨大化's four counts (not halved), each remember the enemies they hit.
   const emitters = build.emitters.map((spec, index) => {
     const payload = emitterPayload(build, spec, combatRng, index === 0 ? policy : null);
     return createEmitterRuntime(
@@ -876,7 +881,9 @@ export function createRunContext(
       payload,
       index,
       emitterInterval(build, spec),
-      spec.kind === 'strike' ? compileSelector(spec.target, 'periodic') : null,
+      spec.kind === 'strike'
+        ? spreadSelector(compileSelector(spec.target, 'periodic'), build.flags.spreadFactor)
+        : null,
       spec.kind === 'fan'
         ? iciclePayload(build, payload)
         : spec.kind === 'aura'

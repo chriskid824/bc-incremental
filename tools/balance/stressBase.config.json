@@ -60,7 +60,8 @@
       "treasureRate": 1,
       "barrageCount": 0,
       "areaSize": 1,
-      "bombRadius": 1
+      "bombRadius": 1,
+      "spreadRadius": 1
     },
     "values": {
       "damage": 450.22067097931824,
@@ -121,7 +122,8 @@
       "treasureRate": 1,
       "barrageCount": 0,
       "areaSize": 1,
-      "bombRadius": 1
+      "bombRadius": 1,
+      "spreadRadius": 1
     },
     "scoped": [
       {

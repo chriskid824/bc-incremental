@@ -739,7 +739,8 @@ export interface EmitterRuntime {
   chainPayload: Payload | null;
   /**
    * A strike's target selector, compiled as a periodic trigger's (from the player) by
-   * createRunContext. Null for the other kinds.
+   * createRunContext, a marked range × the spread factor (spreadSelector, E3). Null for the
+   * other kinds.
    */
   selector: CompiledSelector | null;
   /**

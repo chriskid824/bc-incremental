@@ -13,6 +13,10 @@
  * select() leaves in ctx.selection, so a selection allocates nothing.
  *
  * orderNearest() is the 'nearest' order (TARGET_ORDERS) of the effects capped by maxTargets.
+ *
+ * A range that node data marks `spread` (擴散距離, E3) is reached × the build's spread factor
+ * (spreadSelector): compileBuild sizes a trigger's selector once the modules have run, and
+ * createRunContext a strike's. A range is a reach, so the area factor never reaches it.
  */
 
 import { gt } from '../../core/num';
@@ -36,6 +40,11 @@ export interface CompiledSelector {
   readonly fromPlayer: boolean;
   /** Its range squared; Infinity without one. */
   readonly rangeSq: number;
+  /**
+   * Its range as written when node data marks it a spread distance (spread: true, E3), which
+   * spreadSelector multiplies by the build's spread factor; −1 for any other selector.
+   */
+  readonly spreadRange: number;
   readonly excludeEventTarget: boolean;
   readonly excludeBoss: boolean;
 }
@@ -81,9 +90,21 @@ export function compileSelector(spec: TargetSelector, on: TriggerEventId): Compi
     ailment: spec.ailment === undefined ? -1 : STACK_AILMENTS.indexOf(spec.ailment),
     fromPlayer: spec.from === 'player' || TARGETLESS_EVENTS.has(on),
     rangeSq: spec.range === undefined ? Infinity : spec.range ** 2,
+    spreadRange: spec.spread === true && spec.range !== undefined ? spec.range : -1,
     excludeEventTarget: spec.excludeEventTarget === true,
     excludeBoss: spec.excludeBoss === true,
   };
+}
+
+/**
+ * `s` with its range × `factor`, the build's spread factor (BuildFlags.spreadFactor), when node
+ * data marks it a spread distance (spreadRange, from the range as written, so the product is
+ * formed once whoever calls); `s` itself for any other selector or at a factor of 1, so an
+ * unmarked range stays as written bit for bit.
+ */
+export function spreadSelector(s: CompiledSelector, factor: number): CompiledSelector {
+  if (s.spreadRange < 0 || factor === 1) return s;
+  return { ...s, rangeSq: (s.spreadRange * factor) ** 2 };
 }
 
 /**

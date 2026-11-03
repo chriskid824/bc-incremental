@@ -106,6 +106,7 @@ describe('compileBuild', () => {
       poisonSlowStacks: 0,
       poisonSlowPer: 0,
       poisonSlowMax: 0,
+      spreadFactor: 1,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

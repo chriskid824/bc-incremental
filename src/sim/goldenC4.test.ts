@@ -25,15 +25,18 @@ import type { EnemyId, GameData } from '../data/types';
 import { enemySlow, frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
 import { liveBleedStacks, livePoisonStacks } from './ailments/rings';
+import { spreadOf } from './build/size';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { KILLED, REPEAT } from './effects/flags';
+import { MAX_DEPTH } from './effects/types';
 import { enemiesInAura } from './emitters/aura';
 import { createPayload, ROWS } from './emitters/types';
 import type { EmitterRuntime, Payload, SegmentSpec } from './emitters/types';
+import { enqueueModuleEffect } from './rules';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
 import { BERSERK_MULT, MULTIPLY_COUNT, SWIFT_MULT, WARDED } from './systems/affixes';
-import type { RunContext } from './systems/context';
+import type { Enemy, RunContext } from './systems/context';
 import {
   ARMOURED,
   CHARGING,
@@ -2209,6 +2212,94 @@ const POISON_SLOW_STATS = makeStats(
   },
 );
 
+/**
+ * E3's spread distance (lead ruling S5) at spreadRadius 1.5 and areaSize 1.2, so that the
+ * product shows: 瘟疫's form (gd:62), a burning enemy's death passing 40% of its burn to every
+ * enemy within 250 × 1.2 × 1.5 = 450, where the area alone would reach 300; 火星's form (gd:376),
+ * a marked applyAilment igniting the 2 nearest within 90 × 1.8 = 162 of a burning enemy's death
+ * (108 by the area alone); a kill trigger's marked selector shocking the farthest enemy within
+ * 120 × 1.5 = 180 of the victim, a reach that areaSize leaves (216 if it did not); and 燎原's form
+ * (gd:379) as a test module reading spreadOf: every second, each burning enemy passes 1 burn
+ * stack to the nearest other enemy within 60 × 1.5 = 90.
+ */
+const SPREAD_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'center',
+    {
+      on: 'diedWithAilment',
+      when: [{ victimHas: 'burn' }],
+      do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 250, effect: 0.4 }],
+    },
+  ],
+  [
+    'outer.fire',
+    {
+      on: 'diedWithAilment',
+      when: [{ victimHas: 'burn' }],
+      do: [
+        {
+          kind: 'applyAilment',
+          ailment: 'burn',
+          radius: 90,
+          maxTargets: 2,
+          order: 'nearest',
+          spread: true,
+        },
+      ],
+    },
+  ],
+  [
+    'center',
+    {
+      on: 'kill',
+      target: { pick: 'farthest', range: 120, spread: true },
+      do: [{ kind: 'applyAilment', ailment: 'shock', stacks: 1 }],
+    },
+  ],
+];
+const SPREAD_STATS = makeStats(
+  {
+    damage: 14,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.35,
+    projectileCount: 2,
+    spreadRadius: 1.5,
+    areaSize: 1.2,
+  },
+  maskProbeMods(),
+  {
+    triggers: SPREAD_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
+/**
+ * 燎原's form (gd:379, 「燃燒中的敵人每秒把 1 層燃燒傳給 60 內最近的敵人」) as a test module: every
+ * 60 ticks, each burning enemy passes 1 burn stack to the nearest other alive enemy within
+ * spreadOf(60), read at use. `seen`, for the coverage test alone, gets each pass's distance.
+ */
+function wildfireModule(seen?: (distance: number) => void): TestModule {
+  return (b) => {
+    const fx = b.addEffect('outer.fire', { kind: 'applyAilment', ailment: 'burn', stacks: 1 });
+    const owner = b.instanceTrigger();
+    b.hook('tick', (ctx) => {
+      if (ctx.now % 60 !== 0) return;
+      const reach = spreadOf(ctx.build, 60);
+      for (const from of ctx.enemies) {
+        if (!from.alive || !holdsBurn(from, ctx.now)) continue;
+        const to = ctx.grid.nearest(from.x, from.y, reach * reach, (e) => e !== from && e.alive);
+        if (to === null) continue;
+        seen?.(Math.hypot(to.x - from.x, to.y - from.y));
+        const ev = { depth: 0, origin: -1, target: to, x: to.x, y: to.y, flags: 0 };
+        enqueueModuleEffect(ctx, owner, fx, ev);
+      }
+    });
+  };
+}
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2622,6 +2713,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     name: 'droneWeb',
     config: { stats: DRONE_WEB_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
     expected: ['11d62aceed10bd1a', '773be1decb5c6398'],
+  },
+  {
+    name: 'spread',
+    config: { stats: SPREAD_STATS, rules: [], startWave: 12 },
+    modules: () => [wildfireModule()],
+    expected: ['fb019c0af84ff0b5', 'd4f3333e8e4dd4a4'],
   },
 ];
 
@@ -3587,6 +3684,10 @@ describe('golden C4 runs', () => {
     });
   });
 
+  /** The squared distance between two points. */
+  const dist2 = (a: { x: number; y: number }, b: { x: number; y: number }): number =>
+    (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+
   /**
    * A run of `entry` at `seed` with the entry's modules and a hook that keeps the run's context:
    * `each` sees each tick's number, events and context once the tick is over.
@@ -4416,6 +4517,121 @@ describe('golden C4 runs', () => {
         hooked: 18,
         kills: 0,
         left: 0,
+      },
+    });
+  });
+
+  it('spreads 瘟疫 to 450, ignites 火星’s 2 nearest within 162, shocks the farthest within 180 and passes 燎原’s burn within 90 in spread (E3)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'spread') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    // 250, 90 and 120 by the area alone (× 1.2) or the spread alone (× 1.5), and as the rulings
+    // size them: the spreads × both, the selector × 1.5 and 燎原 × 1.5.
+    const R = { plague: 250 * (1.2 * 1.5), spark: 90 * (1.2 * 1.5), pick: 120 * 1.5 };
+    const AREA = { plague: 250 * 1.2, spark: 90 * 1.2, pick: 120, wildfire: 60 };
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each kill, seen by an onKill hook after its transfers: where, whether it burnt, and
+      // whether its depth leaves its queued triggers (火星's, the selector's) room to fire.
+      let kills: { x: number; y: number; burning: boolean; fires: boolean }[] = [];
+      const plague = { spreads: 0, targets: 0, atEdge: 0, reachedAtEdge: 0 };
+      const radii = new Set<number>();
+      const observer: TestModule = (b) =>
+        void b.hook('onKill', (ctx, victim, kill) => {
+          const burning = holdsBurn(victim, ctx.now);
+          kills.push({ x: victim.x, y: victim.y, burning, fires: kill.depth < MAX_DEPTH });
+          if (!burning) return;
+          // 瘟疫 has just spread: every other alive enemy within 450, past 300 at times.
+          const spread = ctx.events.at(-1);
+          expect(spread?.type).toBe('burnSpread');
+          if (spread?.type !== 'burnSpread') return;
+          const within = (r: number): number =>
+            ctx.enemies.filter((e) => e.alive && e !== victim && dist2(e, victim) <= r * r).length;
+          expect(spread.targets).toBe(within(R.plague));
+          radii.add(spread.radius);
+          plague.spreads++;
+          plague.targets += spread.targets;
+          const past = spread.targets - within(AREA.plague);
+          if (past > 0) plague.atEdge++;
+          plague.reachedAtEdge += past;
+        });
+      const wildfire = { passes: 0, atEdge: 0, farthest: 0 };
+      const passed = (d: number): void => {
+        wildfire.passes++;
+        if (d > AREA.wildfire) wildfire.atEdge++;
+        wildfire.farthest = Math.max(wildfire.farthest, d);
+      };
+      const spark = { firings: 0, picks: 0, atEdge: 0 };
+      const pick = { picks: 0, atEdge: 0 };
+      let capped = 0;
+      // Last tick's kills, whose 火星 effects run this tick where the enemies stand now, and the
+      // selector's picks, made at last tick's end, whose shocks land this tick.
+      let lastKills: typeof kills = [];
+      let picks: Enemy[] = [];
+      const watched = { ...entry, modules: () => [wildfireModule(passed), observer] };
+      watchRun(watched, seed, (_now, events, ctx) => {
+        const ignited = new Set(events.flatMap((e) => (e.type === 'ignite' ? [e.targetId] : [])));
+        const shocked = events.flatMap((e) =>
+          e.type === 'ailmentApplied' && e.ailment === 'shock' ? [e.targetId] : [],
+        );
+        const others = ctx.enemies.filter((e) => e.alive);
+        // 火星: the 2 nearest alive within 162 of each of last tick's burning deaths, burnt.
+        for (const kill of lastKills) {
+          if (!kill.fires || !kill.burning) continue;
+          const near = others
+            .filter((e) => dist2(e, kill) <= R.spark ** 2)
+            .sort((a, b) => dist2(a, kill) - dist2(b, kill) || a.id - b.id)
+            .slice(0, 2);
+          for (const e of near) expect(ignited.has(e.id), `${e.id}`).toBe(true);
+          spark.firings++;
+          spark.picks += near.length;
+          spark.atEdge += near.filter((e) => dist2(e, kill) > AREA.spark ** 2).length;
+        }
+        // The selector: its picks, alive still, shocked this tick, and nothing else shocked.
+        const alive = picks.filter((e) => e.alive).map((e) => e.id);
+        expect(shocked.sort((a, b) => a - b)).toEqual(alive.sort((a, b) => a - b));
+        // This tick's kills: the selector picks the farthest alive within 180 at the tick's end.
+        picks = [];
+        for (const kill of kills) {
+          if (!kill.fires) {
+            capped++;
+            continue;
+          }
+          let best: Enemy | null = null;
+          for (const e of others) {
+            if (
+              dist2(e, kill) <= R.pick ** 2 &&
+              (best === null || dist2(e, kill) > dist2(best, kill))
+            )
+              best = e;
+          }
+          if (best === null) continue;
+          pick.picks++;
+          if (dist2(best, kill) > AREA.pick ** 2) pick.atEdge++;
+          picks.push(best);
+        }
+        lastKills = kills;
+        kills = [];
+      });
+      bySeed[seed] = { plague, radii: [...radii], spark, pick, wildfire, capped };
+    }
+    // Every 瘟疫 at 450 (250 × 1.8, one product); each count past 300, 108, 120 or 60 is reached
+    // only by the spread factor. No kill met the depth cap.
+    const plagueRadii = [R.plague];
+    expect(bySeed).toEqual({
+      1: {
+        plague: { spreads: 69, targets: 257, atEdge: 49, reachedAtEdge: 113 },
+        radii: plagueRadii,
+        spark: { firings: 69, picks: 55, atEdge: 23 },
+        pick: { picks: 45, atEdge: 20 },
+        wildfire: { passes: 26, atEdge: 9, farthest: 86.59783423281007 },
+        capped: 0,
+      },
+      2: {
+        plague: { spreads: 47, targets: 169, atEdge: 29, reachedAtEdge: 70 },
+        radii: plagueRadii,
+        spark: { firings: 47, picks: 33, atEdge: 15 },
+        pick: { picks: 40, atEdge: 28 },
+        wildfire: { passes: 27, atEdge: 4, farthest: 84.33918221116593 },
+        capped: 0,
       },
     });
   });
