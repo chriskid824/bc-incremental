@@ -2461,6 +2461,80 @@ const fiveDrones = (): TestModule[] => [
   },
 ];
 
+/**
+ * E4's hive roles, seat and size (gd:184-192; lead rulings R1, R3, R4): the swarm's 3 drones and
+ * turret, with a test module standing in for B2's: ◆蜂后 on dock index 0 (damage ×2, size ×1.5,
+ * and × 1.2 on another drone's impact on its target), ◆重錘 on dock index 1 (damage ×5, speed
+ * ×0.4), ◆前哨's turret seat at 220 and ★巨像's size ×1.2. Over droneWeb's base (crits, ignites,
+ * maskProbeMods() and the swarm's poison on each impact) at projectileCount 3, so a firing of the
+ * turret is two shots; from wave 9 of the v3 fixture waves, whose elites and the onion boss of
+ * wave 10 draw the drones to one enemy, so that the queen's followers impact its target at both
+ * seeds (from wave 12 of the fixture waves, droneWeb's, they do twice at seed 1 and never at 2).
+ */
+const HIVE_ROLES_STATS = makeStats({ ...SWARM_VALUES, projectileCount: 3 }, maskProbeMods(), {
+  triggers: [{ source: 'center', spec: SWARM_POISON }],
+  conversions: [],
+  emitters: [],
+});
+/** B2's 蜂后, 重錘, 前哨 and 巨像 in one: what they write over the swarm's SwarmParams. */
+const hiveRolesModule = (): TestModule => (b) => {
+  const swarm = b.signature().swarm;
+  if (swarm === null) return;
+  swarm.roles.push(
+    { slot: 0, damageMult: 2, speedMult: 1, sizeMult: 1.5, followBonus: 0.2 },
+    { slot: 1, damageMult: 5, speedMult: 0.4, sizeMult: 1, followBonus: 0 },
+  );
+  swarm.turretRadius = 220;
+  swarm.sizeMult = 1.2;
+};
+
+/**
+ * E4's 集火指令 and 蜂王漿 (gd:187, :199; lead rulings R2, R5): a drone grant of 3 drones and 2
+ * turrets on outer.summon beside M1's volley, with a test module setting summonHighestHp, and
+ * every second attack spawning a 2 s spirit of 3 impacts at each aim at the player, at
+ * summonDuration 1.5, so each lives 180 ticks unless it is spent first; projectileCount 2, so a
+ * turret's firing is two shots, both at its pick. 集火指令's +25 % on the minions rides along as
+ * data. From wave 8 of the v3 fixture waves, as summonPolicies: elites from wave 9 and the onion
+ * boss of wave 10, whose hp the picks follow.
+ */
+const FOCUS_FIRE_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1,
+    attackSpeed: 6,
+    projectileCount: 2,
+    summonDuration: 1.5,
+  },
+  [{ stat: 'damage', kind: 'increased', value: 0.25, tags: ['minion'] }],
+  {
+    triggers: [
+      {
+        source: 'outer.summon',
+        spec: {
+          on: 'nthAttack',
+          every: 2,
+          target: { pick: 'player' },
+          do: (['outer', 'nearest'] as const).map((aim) => ({
+            kind: 'spawnDrone' as const,
+            lifeSec: 2,
+            damagePct: 0.5,
+            impacts: 3,
+            aim,
+          })),
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [{ source: 'outer.summon', grant: { kind: 'drone', drones: 3, turrets: 2 } }],
+  },
+);
+/** B2's 集火指令: the flag it sets. */
+const focusFireModule = (): TestModule => (b) => void (b.flags.summonHighestHp = true);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2905,6 +2979,20 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: fiveDrones,
     expected: ['6cf25678e219387e', 'd983258df11dc284'],
   },
+  {
+    name: 'hiveRoles',
+    config: { stats: HIVE_ROLES_STATS, rules: [], signature: { id: 'swarm' }, startWave: 9 },
+    data: () => v3TestData(),
+    modules: () => [hiveRolesModule()],
+    expected: ['8a792e3aa1a5fc39', '2c1139411aad3d8c'],
+  },
+  {
+    name: 'focusFire',
+    config: { stats: FOCUS_FIRE_STATS, rules: [], startWave: 8 },
+    data: () => v3TestData(),
+    modules: () => [focusFireModule()],
+    expected: ['13eb4c5d3f7085d2', 'd6f1fd704e524f17'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -3012,6 +3100,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
+    // The count docs/ARCHITECTURE.md gives: E4's hiveRoles and focusFire are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([60, 'hiveRoles', 'focusFire']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -5053,6 +5143,193 @@ describe('golden C4 runs', () => {
         atOutward: 0,
         quarters: [12, 11, 36, 24],
         first: [-1.422365095, -1.492312199, 0.107866274],
+      },
+    });
+  });
+
+  it('gives the queen and the hammer their factors and steps, the followers their bonus on the queen’s target, the turret its seat at 220 and the drones their sizes in hiveRoles (E4)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'hiveRoles') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const impacts: Record<number, number> = {};
+      const follows: Record<number, number> = {};
+      const steps: Record<number, Record<string, number>> = {};
+      const was = new Map<number, readonly [number, number]>();
+      const seats = new Set<number>();
+      const sizes = new Set<string>();
+      let fires = 0;
+      watchRun(entry, seed, (_now, events, ctx) => {
+        const ds = ctx.sys.drones;
+        const leader = ds.leader;
+        for (const event of events) {
+          if (event.type === 'impact' && event.droneId > 0) {
+            const id = event.droneId;
+            impacts[id] = (impacts[id] ?? 0) + 1;
+            // The leader steps first in the stage: its mode and target at the stage's end are
+            // those at a later drone's impact.
+            const led =
+              id !== (ds.id[leader] as number) &&
+              ds.mode[leader] === DRONE_DASH &&
+              ds.targetId[leader] === event.targetId;
+            if (led) follows[id] = (follows[id] ?? 0) + 1;
+          } else if (event.type === 'turretFire') {
+            fires++;
+            seats.add(
+              Math.round(Math.hypot(event.x - ARENA_WIDTH / 2, event.y - ARENA_HEIGHT / 2)),
+            );
+          }
+        }
+        for (let s = 0; s < ds.count; s++) {
+          if (ds.kind[s] !== DRONE_KIND_DRONE) continue;
+          const id = ds.id[s] as number;
+          const mode = ds.mode[s] as number;
+          const targetId = ds.targetId[s] as number;
+          const [lastMode, lastTarget] = was.get(id) ?? [-1, -1];
+          was.set(id, [mode, targetId]);
+          // A whole step: a dash on at the same target short of its center, or a flight home on
+          // short of the dock.
+          const t = ds.target[s] ?? null;
+          const x = ds.x[s] as number;
+          const y = ds.y[s] as number;
+          const dashOn = mode === DRONE_DASH && t !== null && (x !== t.x || y !== t.y);
+          if (mode !== lastMode || targetId !== lastTarget || !(dashOn || mode === DRONE_RETURN)) {
+            continue;
+          }
+          const step = Math.hypot(x - (ds.prevX[s] as number), y - (ds.prevY[s] as number));
+          const key = `${mode === DRONE_DASH ? 'dash' : 'home'} ${Math.round(step * 1e9) / 1e9}`;
+          const of = (steps[id] ??= {});
+          of[key] = (of[key] ?? 0) + 1;
+        }
+        sizes.add(JSON.stringify(Array.from(ds.size.subarray(0, ds.count))));
+      });
+      bySeed[seed] = { impacts, follows, steps, seats: [...seats], sizes: [...sizes], fires };
+    }
+    // Every drone impacts, the hammer (2) the least, and the hammer's and the third's on the
+    // queen's (1) live target among them; the hammer's whole steps, dashing and flying home,
+    // are 0.4 of the others' 10; the turret fires from 220; the sizes hold, 1 on the turret.
+    const SIZES = [JSON.stringify([1.2 * 1.5, 1.2, 1.2, 1])];
+    expect(bySeed).toEqual({
+      1: {
+        impacts: { 1: 16, 2: 8, 3: 18 },
+        follows: { 2: 2, 3: 4 },
+        steps: {
+          1: { 'dash 10': 546, 'home 10': 177 },
+          2: { 'dash 4': 839, 'home 4': 130 },
+          3: { 'dash 10': 422, 'home 10': 217 },
+        },
+        seats: [220],
+        sizes: SIZES,
+        fires: 40,
+      },
+      2: {
+        impacts: { 1: 17, 2: 5, 3: 17 },
+        follows: { 2: 2, 3: 2 },
+        steps: {
+          1: { 'dash 10': 455, 'home 10': 230 },
+          2: { 'dash 4': 770, 'home 4': 233 },
+          3: { 'dash 10': 419, 'home 10': 263 },
+        },
+        seats: [220],
+        sizes: SIZES,
+        fires: 40,
+      },
+    });
+  });
+
+  it('picks the enemy of the most hp for every summon in focusFire, its turrets’ shots all at it, its spirits living 180 ticks at summonDuration 1.5 (E4)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'focusFire') as GoldenC4Entry;
+    const inArena = (e: Enemy): boolean =>
+      e.x >= 0 && e.x <= ARENA_WIDTH && e.y >= 0 && e.y <= ARENA_HEIGHT;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const prev = new Map<number, number>();
+      const seen = new Set<number>();
+      const c = {
+        picks: 0,
+        topAtEnd: 0,
+        notFarthest: 0,
+        tough: 0,
+        shared: 0,
+        fires: 0,
+        firesAtTop: 0,
+        shotCounts: {} as Record<number, number>,
+        lives: {} as Record<number, number>,
+        expired: {} as Record<string, number>,
+      };
+      watchRun(entry, seed, (now, events, ctx) => {
+        const alive = ctx.enemies.filter((e) => e.alive && inArena(e));
+        const top = alive.reduce<Enemy | null>(
+          (b, e) => (b === null || toNumber(e.hp) > toNumber(b.hp) ? e : b),
+          null,
+        );
+        const farthest = alive.reduce<Enemy | null>(
+          (b, e) => (b === null || e.dist > b.dist ? e : b),
+          null,
+        );
+        const ds = ctx.sys.drones;
+        const dashedAt = new Map<number, number>();
+        for (let s = 0; s < ds.count; s++) {
+          const kind = ds.kind[s];
+          if (kind !== DRONE_KIND_DRONE && kind !== DRONE_KIND_SPIRIT) continue;
+          const id = ds.id[s] as number;
+          const target = ds.targetId[s] as number;
+          if (kind === DRONE_KIND_SPIRIT && !seen.has(id)) {
+            seen.add(id);
+            const life = (ds.until[s] as number) - now;
+            c.lives[life] = (c.lives[life] ?? 0) + 1;
+          }
+          if (target !== -1 && target !== (prev.get(id) ?? -1)) {
+            c.picks++;
+            if (target === top?.id) c.topAtEnd++;
+            if (target !== farthest?.id) c.notFarthest++;
+            if ((ds.target[s] as Enemy).tough) c.tough++;
+          }
+          if (ds.mode[s] === DRONE_DASH && target !== -1) {
+            dashedAt.set(target, (dashedAt.get(target) ?? 0) + 1);
+          }
+          prev.set(id, target);
+        }
+        for (const n of dashedAt.values()) if (n > 1) c.shared++;
+        for (const event of events) {
+          if (event.type === 'turretFire') {
+            c.fires++;
+            if (event.targetId === top?.id) c.firesAtTop++;
+            c.shotCounts[event.count] = (c.shotCounts[event.count] ?? 0) + 1;
+          } else if (event.type === 'droneExpire') {
+            c.expired[event.cause] = (c.expired[event.cause] ?? 0) + 1;
+          }
+        }
+      });
+      bySeed[seed] = c;
+    }
+    // Most picks are the enemy of the most hp as the tick ends (the rest of the tick's hits move
+    // it), more than half not the farthest enemy, tough ones among them; rows share their
+    // target; every firing is its two shots, most at the enemy of the most hp as the tick ends;
+    // every spirit's life is 180 ticks, and some are spent before.
+    expect(bySeed).toEqual({
+      1: {
+        picks: 401,
+        topAtEnd: 378,
+        notFarthest: 238,
+        tough: 47,
+        shared: 1868,
+        fires: 118,
+        firesAtTop: 110,
+        shotCounts: { 2: 118 },
+        lives: { 180: 120 },
+        expired: { spent: 67, time: 45 },
+      },
+      2: {
+        picks: 423,
+        topAtEnd: 408,
+        notFarthest: 231,
+        tough: 65,
+        shared: 1626,
+        fires: 120,
+        firesAtTop: 114,
+        shotCounts: { 2: 120 },
+        lives: { 180: 120 },
+        expired: { spent: 59, time: 47 },
       },
     });
   });

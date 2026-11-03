@@ -236,6 +236,16 @@ export interface BuildFlags {
    * stays 0 and nothing counts it.
    */
   minionCount: boolean;
+  /**
+   * 集火指令 (gd:187 「所有召喚物打生命最高的敵人」, E4): every summon's pick takes the alive enemy
+   * with the most hp whose center is in the arena, the lowest id on ties, whatever the slot's
+   * cooldown memory and the chase (src/sim/systems/drones.ts pickHighestHp): the drones' and the
+   * outer spirits' pickOuter, the nearest spirits' pickNearest, and a turret's firing, its first
+   * shot and every later one at it. Checked before summonEliteFirst, so it wins over 鎖定信標;
+   * the swarm repeat's pick is no summon's and stays. False: every pick as before. Its +25 % is
+   * data.
+   */
+  summonHighestHp: boolean;
 }
 
 /**
@@ -341,6 +351,50 @@ export interface SwarmParams {
   splash: number;
   /** A turret shot's base damage as a fraction of the damage stat. */
   turretDamagePct: number;
+  /**
+   * The roles of its drones (E4: 蜂后, 重錘), none as its module compiles: each the drone of one
+   * dock index among the drones the fill counts (src/sim/emitters/drone.ts); compileBuild throws
+   * unless the slots are whole numbers ≥ 0, no two alike, and at most one role leads.
+   */
+  roles: DroneRole[];
+  /**
+   * Its turrets' seats' radius around the player, at the same angles whatever it is: 90, as
+   * DRONE_DEFAULTS.turretRadius, which the granted turrets keep (gd:186 ◆前哨's 220, E4); finite
+   * and ≥ 0.
+   */
+  turretRadius: number;
+  /**
+   * Its drones' size as drawn (DroneViewState.size), × each one's role's sizeMult (gd:192
+   * ★巨像's 「變大」, E4), finite and above 0: render reads it, the sim never.
+   */
+  sizeMult: number;
+}
+
+/**
+ * The role of the swarm's drone of dock index `slot` (E4; gd:184 ◆蜂后 「1 架無人機變成蜂后：體型
+ * ×1.5、傷害 ×2；其他無人機打蜂后的目標時傷害 +20%」, gd:189 ◆重錘 「1 架無人機傷害 ×5、速度
+ * ×0.4」), which its module pushes onto SwarmParams.roles. A slot not below the drones the fill
+ * counts (× droneCountMult, then countOf) gives no row a role; no role reaches a turret, a
+ * granted drone or a timed row.
+ */
+export interface DroneRole {
+  /** The drone's dock index k (DroneViewState.seat), a whole number ≥ 0. */
+  slot: number;
+  /**
+   * Its impacts' hit scale (src/sim/systems/drones.ts impactAt), finite and above 0: × every hit
+   * of the impact, on every enemy it lists; never a chain jump's.
+   */
+  damageMult: number;
+  /** × its every step, dashing and flying home, finite and above 0; not its dock or cooldown. */
+  speedMult: number;
+  /** Its body's size as drawn, × SwarmParams.sizeMult (DroneViewState.size), finite and above 0. */
+  sizeMult: number;
+  /**
+   * 蜂后's 「其他無人機打蜂后的目標時傷害 +20%」, finite and ≥ 0: above 0 the drone leads, and an
+   * impact of another of the swarm's drones on the leader's live target, the enemy it dashes at,
+   * takes × (1 + followBonus) on top of its own damageMult. At most one role leads.
+   */
+  followBonus: number;
 }
 
 export interface CompiledBuild {
@@ -449,6 +503,51 @@ function grantEmitters(grants: readonly SourcedEmitter[]): EmitterSpec[] {
 }
 
 /**
+ * Throws, naming the field and its value, on the SwarmParams members only E4's modules write: a
+ * role whose slot is not a whole number ≥ 0 or is an earlier role's, whose damageMult, speedMult
+ * or sizeMult is not finite and above 0, or whose followBonus is not finite and ≥ 0; a second
+ * role that leads (followBonus above 0); a turretRadius that is not finite and ≥ 0; a sizeMult
+ * that is not finite and above 0.
+ */
+function checkSwarmParams(swarm: Readonly<SwarmParams>): void {
+  const roles = swarm.roles;
+  let leader = -1;
+  for (let i = 0; i < roles.length; i++) {
+    const role = roles[i] as DroneRole;
+    const at = `swarm.roles[${i}]`;
+    if (!(Number.isInteger(role.slot) && role.slot >= 0)) {
+      throw new Error(`${at}.slot: ${role.slot} must be a whole number >= 0`);
+    }
+    const first = roles.findIndex((other) => other.slot === role.slot);
+    if (first < i) throw new Error(`${at}.slot: ${role.slot} is swarm.roles[${first}]'s too`);
+    for (const field of ['damageMult', 'speedMult', 'sizeMult'] as const) {
+      const v = role[field];
+      if (!(Number.isFinite(v) && v > 0)) {
+        throw new Error(`${at}.${field}: ${v} must be finite and above 0`);
+      }
+    }
+    if (!(Number.isFinite(role.followBonus) && role.followBonus >= 0)) {
+      throw new Error(`${at}.followBonus: ${role.followBonus} must be finite and >= 0`);
+    }
+    if (role.followBonus > 0) {
+      if (leader >= 0) {
+        throw new Error(
+          `${at}.followBonus: ${role.followBonus}, but swarm.roles[${leader}] leads; ` +
+            'at most one role may',
+        );
+      }
+      leader = i;
+    }
+  }
+  if (!(Number.isFinite(swarm.turretRadius) && swarm.turretRadius >= 0)) {
+    throw new Error(`swarm.turretRadius: ${swarm.turretRadius} must be finite and >= 0`);
+  }
+  if (!(Number.isFinite(swarm.sizeMult) && swarm.sizeMult > 0)) {
+    throw new Error(`swarm.sizeMult: ${swarm.sizeMult} must be finite and above 0`);
+  }
+}
+
+/**
  * Compiles `stats` with `rules` and the `signature` attack for one run, an M1 run; with
  * `character`, a character run, whose rules are character.rules (`rules` is empty; validateConfig,
  * src/sim/simulation.ts). testModules are for tests only (TestModule); they compile after the
@@ -514,6 +613,7 @@ export function compileBuild(
     turretSplash: 0,
     turretChains: 0,
     minionCount: false,
+    summonHighestHp: false,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -670,6 +770,8 @@ export function compileBuild(
   if (swarm !== null && !(swarm.drones + swarm.turrets >= 1)) {
     throw new Error(`swarm: ${swarm.drones} drones and ${swarm.turrets} turrets; it needs one`);
   }
+  // So too its roles, turret seat and size (E4): the fill reads them as they are.
+  if (swarm !== null) checkSwarmParams(swarm);
   // Shatter listens to kills only when something can fill a chill meter: frost on hit, or an
   // addFrost effect or a groundZone with frost, a trigger's or one a module compiled.
   const scoped = [...stats.scoped, ...added];

@@ -19,7 +19,7 @@ import { TAG } from '../../data/tags';
 import type { SpawnDroneSpec, TriggerSpec } from '../../data/triggers';
 import type { EnemyId } from '../../data/types';
 import { compileBuild } from '../build/compile';
-import type { BuildFlags } from '../build/compile';
+import type { BuildFlags, SwarmParams } from '../build/compile';
 import { countOf, sizeOf } from '../build/size';
 import { DRONE_MEMORY, PICK_TICKS, SUMMON_CAP } from '../caps';
 import { runEffect } from '../effects/execute';
@@ -341,6 +341,27 @@ describe('the summon policies at their defaults (lead ruling P8)', () => {
       expect(digest(name, [policy(DEFAULTS)], { droneSpeed: 1 }).hash).toBe(base);
       // Coverage: the drones impact, the turrets fire and the spirits fly.
       expect([plain.impacts, plain.fires, plain.spirits]).toEqual(SEEN[name]);
+    },
+  );
+
+  it.each(Object.keys(CASES))(
+    'plays %s as the base did under a module writing E4’s defaults, summonDuration 1, and a role of factors 1 on every swarm drone (lead ruling R6)',
+    (name) => {
+      // Planted bugs: E4's terms read at their defaults as something else (a slot past the
+      // roles at factor 0, the swarm's turrets seated off 90, a life × summonDuration after its
+      // rounding, focus fire on at false).
+      const base = (CASES[name] as (typeof CASES)[string]).base;
+      const e4 =
+        (roles: SwarmParams['roles']): TestModule =>
+        (b) => {
+          b.flags.summonHighestHp = false;
+          const swarm = b.signature().swarm;
+          if (swarm !== null) Object.assign(swarm, { roles, turretRadius: 90, sizeMult: 1 });
+        };
+      expect(digest(name, [e4([])], { summonDuration: 1 }).hash).toBe(base);
+      const plainRole = { damageMult: 1, speedMult: 1, sizeMult: 1, followBonus: 0 };
+      const roles = [0, 1, 2].map((slot) => ({ slot, ...plainRole }));
+      expect(digest(name, [e4(roles)]).hash).toBe(base);
     },
   );
 });

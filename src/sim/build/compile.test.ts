@@ -114,6 +114,7 @@ describe('compileBuild', () => {
       turretSplash: 0,
       turretChains: 0,
       minionCount: false,
+      summonHighestHp: false,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

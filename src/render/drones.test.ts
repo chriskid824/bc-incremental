@@ -1,6 +1,6 @@
 import { Texture } from 'pixi.js';
 import type { Graphics, ParticleContainer, Renderer } from 'pixi.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DRONE_DASH,
   DRONE_DOCKED,
@@ -32,6 +32,7 @@ interface Slot {
   readonly prevX?: number;
   readonly prevY?: number;
   readonly targetId?: number;
+  readonly size?: number;
 }
 
 /** A drone pool holding `slots` in order, ids 1 up; unset fields as a docked drone at 0, 0. */
@@ -48,6 +49,7 @@ function pool(slots: readonly Slot[]): DroneViewState {
     targetId: new Int32Array(n),
     owner: new Int16Array(n),
     seat: new Int16Array(n),
+    size: new Float64Array(n),
   };
   slots.forEach((slot, s) => {
     ds.id[s] = s + 1;
@@ -59,6 +61,7 @@ function pool(slots: readonly Slot[]): DroneViewState {
     ds.prevY[s] = slot.prevY ?? slot.y ?? 0;
     ds.targetId[s] = slot.targetId ?? -1;
     ds.seat[s] = s;
+    ds.size[s] = slot.size ?? 1;
   });
   return ds;
 }
@@ -292,6 +295,32 @@ describe('DroneLayer', () => {
       expect(kite?.y).toBeCloseTo(540 - 10 * alpha, 9);
       expectAngle(kite?.rotation ?? NaN, -Math.PI / 4);
     }
+  });
+
+  it('draws each kite at its row size about its centre, its trail as wide, and uploads a changed size (E4)', () => {
+    const layer = new DroneLayer(renderer, Texture.WHITE);
+    const { trails, kites } = parts(layer);
+    const uploads = vi.spyOn(kites, 'update');
+    const big = { mode: DRONE_DASH, prevX: 1000, prevY: 540, x: 1010, y: 540, size: 1.8 };
+    const plain = { mode: DRONE_DASH, prevX: 900, prevY: 540, x: 910, y: 540 };
+    layer.update(sim(1, [big, plain]), 0.5, noEnemies);
+    const [a, b] = kites.particleChildren;
+    expect([a?.scaleX, a?.scaleY, b?.scaleX, b?.scaleY]).toEqual([1.8, 1.8, 1, 1]);
+    // Its anchor, the kite's centre, stays where it is drawn: the size grows the kite about it.
+    expect([a?.x, a?.y, a?.anchorX, a?.anchorY]).toEqual([1005, 540, b?.anchorX, b?.anchorY]);
+    expect(trails.particleChildren.map((streak) => streak.scaleY)).toEqual([7 / 16, 7 / 16]);
+    // The same sizes a tick on upload nothing; the kites swapped, each sprite's size changes.
+    uploads.mockClear();
+    const on = (slot: typeof big | typeof plain): Slot => ({
+      ...slot,
+      prevX: slot.x,
+      x: slot.x + 10,
+    });
+    layer.update(sim(2, [on(big), on(plain)]), 0.5, noEnemies);
+    expect(uploads).not.toHaveBeenCalled();
+    layer.update(sim(3, [plain, big]), 0.5, noEnemies);
+    expect(uploads).toHaveBeenCalledTimes(1);
+    expect(kites.particleChildren.map((kite) => kite.scaleX)).toEqual([1, 1.8]);
   });
 
   it('points docked kites outward, draws no turret among the kites, and drops the kite of a drone gone', () => {

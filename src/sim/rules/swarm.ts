@@ -9,7 +9,8 @@
  * at the nearest enemies: a firing is one attack and each of its shots one shot for steadyAim,
  * and each shot's arrival is a primary hit, whose chain follows. The run reads its drones' and
  * turret's numbers from its SwarmParams (CompiledBuild.signature.swarm), which its rules change,
- * never from its emitter's spec.
+ * never from its emitter's spec: E4's roles of single drones (蜂后, 重錘), its turret's seat 90
+ * from the player (前哨's 220) and its drones' drawn size (巨像) among them.
  */
 
 import type { SignatureSpec } from '../../data/rules';
@@ -44,6 +45,10 @@ export const swarm: SignatureModule<Extract<SignatureSpec, { id: 'swarm' }>> = {
       impacts: 3,
       splash: 40,
       turretDamagePct: 0.8,
+      // No role, the turret's seat and the drones' size as ever: E4's modules change them.
+      roles: [],
+      turretRadius: 90,
+      sizeMult: 1,
     };
   },
 };

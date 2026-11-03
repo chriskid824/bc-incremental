@@ -223,9 +223,8 @@ describe('computeStatBlock', () => {
     expect(() => block([scoped])).toThrow(/Tags/);
   });
 
-  it("appends C5.9's droneSpeed: last of 61, base 1, an unscoped multiplier that increased raises and more multiplies", () => {
-    expect(STAT_IDS).toHaveLength(61);
-    expect(STAT_IDS.slice(-2)).toEqual(['spreadRadius', 'droneSpeed']);
+  it("appends C5.9's droneSpeed after spreadRadius: base 1, an unscoped multiplier that increased raises and more multiplies", () => {
+    expect(STAT_IDS.slice(59, 61)).toEqual(['spreadRadius', 'droneSpeed']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.droneSpeed).toBe(1);
     expect(isScopedStat('droneSpeed')).toBe(false);
@@ -248,6 +247,43 @@ describe('computeStatBlock', () => {
     expect(() => block([scoped])).toThrow(/Tags/);
     const when = {
       stat: 'droneSpeed',
+      kind: 'increased',
+      value: 0.2,
+      when: [{ targetKind: 'elite' }],
+    } as const;
+    expect(() => block([when])).toThrow(/Tags/);
+  });
+
+  it("appends E4's summonDuration: last of 62, base 1, an unscoped multiplier that increased raises and more multiplies", () => {
+    expect(STAT_IDS).toHaveLength(62);
+    expect(STAT_IDS.slice(-2)).toEqual(['droneSpeed', 'summonDuration']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.summonDuration).toBe(1);
+    expect(isScopedStat('summonDuration')).toBe(false);
+    expect(block([]).values.summonDuration).toBe(1);
+    // (1 + 0.25 + 0.25) × 1.2: ◆蜂王漿's +50% is increased, and other sources may be more.
+    const stats = block([
+      { stat: 'summonDuration', kind: 'increased', value: 0.25 },
+      { stat: 'summonDuration', kind: 'increased', value: 0.25 },
+      { stat: 'summonDuration', kind: 'more', value: 0.2 },
+    ]);
+    expect(stats.values.summonDuration).toBeCloseTo(1.8, 12);
+    expect(stats.scoped).toEqual([]);
+    // A penalty may take it below 0; the spawn specs' fill clamps it there (drone.ts).
+    expect(
+      block([{ stat: 'summonDuration', kind: 'increased', value: -1.5 }]).values.summonDuration,
+    ).toBeCloseTo(-0.5, 12);
+    const tagged = {
+      stat: 'summonDuration',
+      kind: 'increased',
+      value: 0.2,
+      tags: ['minion'],
+    } as const;
+    expect(() => block([tagged])).toThrow(/Tags/);
+    const scoped = { stat: 'summonDuration', kind: 'increased', value: 0.2, scope: 'hub' } as const;
+    expect(() => block([scoped])).toThrow(/Tags/);
+    const when = {
+      stat: 'summonDuration',
       kind: 'increased',
       value: 0.2,
       when: [{ targetKind: 'elite' }],

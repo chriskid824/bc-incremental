@@ -196,6 +196,7 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'bombRadius',
       'spreadRadius',
       'droneSpeed',
+      'summonDuration',
     ]);
   });
 
@@ -1390,6 +1391,25 @@ describe('C5.9: droneSpeed and minionCount (lead rulings P6, P7)', () => {
         '傷害總增 10%（隨場上的臨時召喚物數成長，越來越慢（log₁₀））',
       ],
     );
+  });
+});
+
+describe('E4: summonDuration (lead ruling R5)', () => {
+  it('writes 召喚物存在時間 as a percentage in both locales', () => {
+    const lines = (mod: Modifier): string[] =>
+      LOCALES.map((locale) => modifierLine(mod, lookups[locale]));
+    expect(LOCALES.map((locale) => MESSAGES[locale]['stat.summonDuration'])).toEqual([
+      'Summon duration',
+      '召喚物存在時間',
+    ]);
+    expect(lines(inc('summonDuration', 0.5))).toEqual([
+      '50% increased Summon duration',
+      '召喚物存在時間提高 50%',
+    ]);
+    expect(lines(more('summonDuration', 0.2))).toEqual([
+      '20% more Summon duration',
+      '召喚物存在時間總增 20%',
+    ]);
   });
 });
 

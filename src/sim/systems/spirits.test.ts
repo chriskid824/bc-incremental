@@ -236,6 +236,7 @@ const PER_SLOT = [
   'targetId',
   'owner',
   'seat',
+  'size',
   'dockX',
   'dockY',
   'target',
@@ -247,6 +248,8 @@ const PER_SLOT = [
   'spec',
   'depth',
   'origin',
+  'roleDamage',
+  'roleSpeed',
 ] as const;
 const MEMORY = ['memId', 'memUntil'] as const;
 
@@ -405,6 +408,7 @@ describe('timed rows: spawning (K2, K4)', () => {
         targetId: -1,
         owner: -1,
         seat: -1,
+        size: 1,
         dockX: 1234,
         dockY: 321,
         target: null,
@@ -416,6 +420,8 @@ describe('timed rows: spawning (K2, K4)', () => {
         spec: f,
         depth: 2,
         origin: 5,
+        roleDamage: 1,
+        roleSpeed: 1,
         memId: [-1, -1, -1, -1],
         memUntil: [0, 0, 0, 0],
       });
@@ -428,7 +434,7 @@ describe('timed rows: spawning (K2, K4)', () => {
     expect(ds.nextId).toBe(8);
   });
 
-  it('wipes the memory, target and clocks a slot held before, whatever row it was', () => {
+  it('wipes the memory, target, clocks and role columns a slot held before, whatever row it was', () => {
     const ctx = fixture([nearR(0, 0)], { spawns: [{ lifeSec: 1 / 60 }] });
     const ds = ctx.sys.drones;
     spawn(ctx);
@@ -438,6 +444,10 @@ describe('timed rows: spawning (K2, K4)', () => {
     ds.impactsLeft[0] = 5;
     ds.acc[0] = 3;
     ds.dockLeft[0] = 2;
+    // E4: a role's columns too, as a moved swarm drone's would be (none moves today).
+    ds.roleDamage[0] = 5;
+    ds.roleSpeed[0] = 0.4;
+    ds.size[0] = 1.5;
     next(ctx);
     expect(ds.count).toBe(0);
     spawn(ctx, 0, PLAYER, 1, 4);
@@ -454,6 +464,9 @@ describe('timed rows: spawning (K2, K4)', () => {
       memUntil: [0, 0, 0, 0],
       until: ctx.now + 1,
       origin: 4,
+      roleDamage: 1,
+      roleSpeed: 1,
+      size: 1,
     });
   });
 
@@ -1331,6 +1344,9 @@ describe('timed rows: compaction (K7)', () => {
       ds.impactsLeft[s] = 40 + k;
       ds.dockLeft[s] = 0.5 * k;
       ds.acc[s] = 0.25 * k;
+      ds.roleDamage[s] = 2 + k;
+      ds.roleSpeed[s] = 0.5 * k;
+      ds.size[s] = 1 + 0.25 * k;
       for (let j = 0; j < DRONE_MEMORY; j++) {
         ds.memId[s * DRONE_MEMORY + j] = 10 * k + j;
         ds.memUntil[s * DRONE_MEMORY + j] = 1000 * k + j;
