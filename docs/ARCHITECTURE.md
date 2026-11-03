@@ -1,6 +1,6 @@
 # 架構文件
 
-> 狀態：草稿 v0.6（2026-10-22）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）；v0.5 加上 C4 的引擎（§4.7），改寫 §4.3 的 tick 順序與 §12 的效能閘門；v0.6 加上 C6 的天賦網內容管線。
+> 狀態：草稿 v0.7（2026-11-03）。v0.2（2026-10-12）依 Hoshi 第一輪審查修改；v0.3 把 §4.3、§4.4 換成 v3 引擎 C3 步驟的傷害引擎，§12、§14 加上模擬的行為與效能檢查；v0.4 加上 C5 的無人機與砲台（§4.6）；v0.5 加上 C4 的引擎（§4.7），改寫 §4.3 的 tick 順序與 §12 的效能閘門；v0.6 加上 C6 的天賦網內容管線；v0.7 依 C9（Electron 與 steamworks.js 的技術檢查）改寫 §7 的平台介面，§8 加上 Steam 版的存檔檔案，重寫 §11（殼、bridge、overlay、Auto-Cloud 與 2026-11-03 Windows 的檢查結果），§14 加上 Steam 版的指令與 CI 的守門。
 
 ## 1. 技術選型
 
@@ -395,7 +395,7 @@ v3 引擎 C5 步驟的召喚物（`docs/v3/implementation-plan-v3.md` §2.9，C5
 
 #### 4.6.1 池、排位與上限
 
-- **池**（`ctx.sys.drones`，`DronePool`，`src/sim/systems/systemState.ts`）：所有無人機與砲台放在同一個 structure-of-arrays 的池，一格（slot）一列：位置與上一 tick 的位置、停靠點（砲台是砲座）、種類、模式、目標、下次能找目標的 tick、這趟剩下的撞擊次數、停靠剩下的時間、砲台的累加器，以及同一隻敵人的冷卻記憶（每格 `DRONE_MEMORY` = 4 筆，敵人 ID 與到期 tick）。每個發射器另有一份數字：`stepBase`、`dockTicks`、`coolTicks`、`impacts`、`splashSq`、`turretPayload`；整個池另有兩個 C5.9 的數字：`turretSplashSq`（加農砲的爆炸半徑平方）與 `turretJumps`（特斯拉塔的跳數，§4.6.9）。`createRunContext` 先用 `droneLayout`（`src/sim/emitters/drone.ts`）排好每一列，再用 `createDronePool` 建池，每局都是新的陣列。`SimState.drones` 共用這些陣列、`droneCount` 是格數（和投射物池、地面區域的檢視一樣），所以停靠中的無人機從 tick 0 就看得到。M1 沒有無人機發射器，每個陣列長度都是 0。C5.7 每格多記 `until`、`spec`、`depth`、`origin`（§4.6.8）；建置有 `spawnDrone` 效果時，每格陣列配到這局的上限格數，否則正好是排好的列數。
+- **池**（`ctx.sys.drones`，`DronePool`，`src/sim/systems/systemState.ts`）：所有無人機與砲台放在同一個 structure-of-arrays 的池，一格（slot）一列：位置與上一 tick 的位置、停靠點（砲台是砲座）、種類、模式、目標、下次能找目標的 tick、這趟剩下的撞擊次數、停靠剩下的時間、砲台的累加器，以及同一隻敵人的冷卻記憶（每格 `DRONE_MEMORY` = 4 筆，敵人 ID 與到期 tick）。每個發射器另有一份數字：`stepBase`、`dockTicks`、`coolTicks`、`impacts`、`splashSq`、`turretPayload`；整個池另有兩個 C5.9 的數字：`turretSplashSq`（加農砲的爆炸半徑平方）與 `turretJumps`（特斯拉塔的跳數，§4.6.9）。`createRunContext` 先用 `droneLayout`（`src/sim/emitters/drone.ts`）排好每一列，再用 `createDronePool` 建池，每局都是新的陣列。`SimState.drones` 共用這些陣列、`droneCount` 是格數（和投射物池、地面區域的檢視一樣），所以停靠中的無人機從 tick 0 就看得到。M1 沒有無人機發射器，每個陣列長度都是 0。C5.7 每格多記 `until`、`spec`、`depth`、`origin`（§4.6.8），FL 再多記飛行方向 `hx`、`hy`（§4.6.10）；建置有 `spawnDrone` 效果時，每格陣列配到這局的上限格數，否則正好是排好的列數。
 - **排位**：依發射器順序，每個發射器先排無人機、再排砲台；ID 從 1 起依列的順序編；局中只有 `spawnDrone` 會新增列（C5.7），接在最後、ID 繼續往上，離開的列在階段結束時穩定壓縮掉（§4.6.8），所以格的順序一直是 ID 順序。第 k 架無人機（共 D 架）停在角色周圍半徑 43、角度 2πk/D，第一次找目標在 tick `1 + (10k mod 30)`，所以起飛錯開。第 j 座砲台（共 T 座）坐在半徑 90 的砲座：同一個發射器有無人機時角度是 π/D + 2πj/T（D 是 T 的倍數時，每座砲台的角度都在兩架無人機正中間，例如 swarm 的 3＋1 與 `hive` 的 20＋4），只有砲台時是 2πj/T（D = 0 時 π/D 是 Infinity，位置會變成 NaN）。位置只在開局算一次，每 tick 不跑三角函數。
 - **數字從哪來**：招牌攻擊（第 0 個發射器）的數量、速度、停靠、冷卻、每趟撞擊次數、濺射半徑與砲台的傷害比例全部讀 `SwarmParams`（`CompiledBuild.signature.swarm`，規則模組可以就地改），這些不讀發射器 spec；授予的讀 `DRONE_DEFAULTS` 加上授予自己的數量與傷害比例。撞擊的傷害比例兩者都是發射器 spec 的 `damagePct`，和其他發射器一樣由 `emitterPayload` 讀（swarm 的寫在 `src/sim/rules/swarm.ts`，授予沒寫時用 `DRONE_DEFAULTS` 的）；停靠點與砲座的半徑、砲台的射速（`TURRET_RATE`）兩者都讀 `DRONE_DEFAULTS`。濺射半徑經過 `sizeOf`（範圍與巨大化的 ×2）；每個發射器的無人機數在排位時先乘 `BuildFlags.droneCountMult`（蟲海，C5.9）、再經過 `countOf` 一次（巨大化減半），砲台數兩者都不乘；步長乘 `droneSpeed`（§4.6.9）。
 - **上限**：`SUMMON_CAP` = 24（`src/sim/caps.ts`）算所有的格，無人機與砲台都算（C5.7 的臨時列也算，§4.6.8）。排位到上限就拒絕之後的列，記在計數器 `summonCapped`。單一授予超過 24 格是資料驗證的錯誤；`compileBuild` 在 swarm 的 drones + turrets < 1 時丟錯（只有規則模組或 TestModule 寫得出來）。唯一能改上限的是測試用的 `TestModule.summonCap`：一局取 24 與各 TestModule 的最大值，所以只能調高；`RunConfig` 沒有這個欄位，內容碰不到。
@@ -410,7 +410,7 @@ v3 引擎 C5 步驟的召喚物（`docs/v3/implementation-plan-v3.md` §2.9，C5
 - **冷卻記憶**：一筆在 `memUntil > now` 時有效。冷卻是 `clamp(ceil(coolTicks / m), 1, 90)` tick。寫入時覆蓋同一隻敵人的那筆，否則覆蓋到期最早的那筆，不是 FIFO：90 tick 內一格最多撞到 4 隻不同的敵人（目標只在找目標時換，30 tick 才找一次），所以 4 筆一定夠，被覆蓋的那筆一定已經到期，不管 m 中途怎麼變。
 - **找目標**（`pickOuter`）：從 `ctx.enemies` 尾端往前掃一次，取離角色最遠（`Enemy.dist`）、中心在場地內、不在自己冷卻記憶裡、沒有其他無人機在追的活敵人，同距離取 ID 小的；距離比目前最好的近就先跳過，其他檢查只在可能更好的候選上做。一個都沒有時，才從其他衝刺中的無人機的目標（最多 `SUMMON_CAP` − 1 個，同樣跳過死的、中心在場地外的與自己冷卻記憶裡的）裡挑最遠的。不看 `doomed`、不讀寫 `Enemy.inbound`，追擊的標記是池自己的 `mode` 與 `target`。
 - **和 impl §2.3 的不同**：impl §2.3 把「無人機找目標」列為空間格的使用者，但「離角色最遠」不是格子能回答的半徑查詢，所以 `pickOuter` 是線性掃描，和遠投的 `aimFar` 一樣。砲台找目標、撞擊的濺射仍然查格子。
-- **撞擊**（`impactAt`）是一次攻擊，順序照熔岩彈落地：招牌攻擊先 `countAttack` 與 `nextShotSteady` → `beginAttack` → 用 `grid.within` 列出目標中心濺射半徑內的活敵人（先列再打，所以擊殺分裂出來的子怪不在清單裡）→ 依 ID 順序各打一次，目標是主要命中（招牌攻擊才帶 `PRIMARY`）並計入這次攻擊的連鎖預算 → 招牌攻擊的連鎖 → `impact` 事件 → `droneImpact` 中心事件（沒有清單）→ `endAttack` → 招牌攻擊後面等著的重複攻擊。
+- **撞擊**（`impactAt`）是一次攻擊，順序照熔岩彈落地：招牌攻擊先 `countAttack` 與 `nextShotSteady` → `beginAttack` → 用 `grid.within` 列出目標中心濺射半徑內的活敵人（先列再打，所以擊殺分裂出來的子怪不在清單裡）→ 依 ID 順序各打一次，目標是主要命中（招牌攻擊才帶 `PRIMARY`）並計入這次攻擊的連鎖預算 → 招牌攻擊的連鎖 → `impact` 事件 → `droneImpact` 中心事件（沒有清單，值是飛行方向的角度，§4.6.10）→ `endAttack` → 招牌攻擊後面等著的重複攻擊。
 
 #### 4.6.3 砲台
 
@@ -427,7 +427,7 @@ C5 設計 D11。砲台是 `DRONE_KIND_TURRET`、模式 FIXED 的格，坐在砲�
 
 - **一次攻擊**（C5 設計 D12）：招牌攻擊的每次撞擊是一次攻擊、一發；每次砲台開火是一次攻擊，每顆子彈一發（被上限拒絕的也算）。攻擊序號在第 0 個發射器的無人機與砲台之間共用，所以 `steadyAim` 的節奏、nthAttack 與重複攻擊看到的是同一串攻擊。授予的無人機與砲台不計數。
 - **第 7 條**：swarm 的重複攻擊（`REPEAT_STEPS.swarm = swarmRepeat`）是一次沒有無人機的撞擊：從角色找最遠的敵人（`pickOuterFromCenter`，`pickOuter` 少了記憶與追擊的判斷），用重複攻擊的酬載（`REPEAT`）跑 `impactAt`，不計攻擊、不算一發，`impact` 事件的 `droneId` 是 −1。砲台開火後等著的重複攻擊也是這樣的撞擊，不是第二次開火。
-- **第 8 條**：`droneImpact` 只在招牌攻擊自己的撞擊派發；授予（旗標 0）與重複攻擊（`REPEAT`）的撞擊在 `emitCenterEvent` 的檢查就擋掉，`impactAt` 不用分支。
+- **第 8 條**：`droneImpact` 只在招牌攻擊自己的撞擊派發；授予（旗標 0）與重複攻擊（`REPEAT`）的撞擊不派發：FL 起 `impact` 在呼叫 `emitCenterEvent` 之前自己做它開頭同樣的檢查（加上有沒有觸發或 hook 在聽），擋掉的撞擊不呼叫、也不算飛行方向的角度（§4.6.10）。
 - **Stream**：排位、移動、找目標與濺射查詢都不擲骰。擊中照酬載的 stream 擲：撞擊、濺射、連鎖與砲台子彈是 `combat`，重複攻擊是 `effects`；砲台的數量也擲在酬載的 `combat`。
 
 #### 4.6.5 暫存緩衝的擁有者
@@ -440,7 +440,7 @@ C4 設計 §4.0 的規則不變，C5 加了這幾列（C5 設計 §4.0）。效�
 | `ctx.sys.drones.picked`、`pickedCount` | `turretStep`：每次開火歸零，每顆子彈一筆 | `pickTargetInGrid` 裡的 `turretAccept`（這次開火之後幾發的目標） | 沒有。迴圈裡只跑 `nextShotSteady`、`spawnShot`（不打任何東西）與找目標；`countAttack` 在迴圈前，重複攻擊的 drain 在迴圈後 |
 | `ctx.centerScratch.list` | 多了 `impactAt`：擊中迴圈之後、`emitCenterEvent` 之前設 `listCount = 0`；不寫 `radius`（只有帶清單時才讀） | 同 C4 | 同 C4 |
 
-冷卻記憶（`memId`、`memUntil`）與追擊標記（`mode`、`target`）不是緩衝，是每格自己的狀態，只有那一格自己的步驟會寫；`pickOuter` 與 `pickOuterFromCenter` 不寫 `ctx.enemies`。
+冷卻記憶（`memId`、`memUntil`）、追擊標記（`mode`、`target`）與飛行方向（`hx`、`hy`，§4.6.10）不是緩衝，是每格自己的狀態，只有那一格自己的步驟會寫（壓縮時的 `moveRow` 與 `spawnRows` 接上新列除外）；`pickOuter` 與 `pickOuterFromCenter` 不寫 `ctx.enemies`。
 
 **依賴：敵人物件從不重用。** 一格的 `target[s]` 會跨 tick 留著（衝刺中、坐在冷卻中的目標上，或回程中，回到停靠點才清掉），同一個 tick 前面的格也可能殺死後面那格的目標。這只靠一件事保證安全：`addEnemy`（`src/sim/systems/spawn.ts`）每次生怪（含分裂子怪）都建新物件，`compact`（`src/sim/systems/death.ts`）只依 `alive` 過濾，所以留著的目標不是活的，就是讀到 `alive === false`；投射物池的追蹤子彈也靠同一件事。**之後如果把敵人改成物件池，無人機也要一起改。**
 
@@ -488,9 +488,22 @@ C5 設計 §8.2 的 C5.9，gd:193、:476-481、:572，lead 的 P1–P10。使用
 - **特斯拉塔**（`turretChains`，≥ 0 的整數，初始值 0）：每發砲台子彈抵達時多的連鎖跳數，排位時經過 `countOf` 一次（巨大化減半），存成池的 `turretJumps`。招牌砲台的 `chainAttack` 跳 `ctx.chainCount + turretJumps`；授予砲台在跳數 > 0 時，一般擊中變成自己的一次攻擊（`beginAttack`、擊中並計入連鎖預算、`chainFrom` 跳 `turretJumps`、`endAttack`），不管酬載的 `chains`。加農砲的其他擊中從不連鎖；連鎖在爆炸之前跑，所以跳到清單裡的敵人之後還會吃一次爆炸的擊中。`compileBuild` 擋下不是 ≥ 0 整數的 `turretChains`。
 - **`droneSpeed`**（§4.4.5 的範圍與數量）：排位時讀一次 `max(0, droneSpeed)`，乘每個無人機發射器與每個 `spawnDrone` 效果的 `stepBase`。速度 0 時：無人機照樣起飛進 DASH 但不動，只有邊緣碰到它的敵人（距離 ≤ 敵人半徑）才算抵達，貼到牠的中心撞擊；回程中離停靠點有距離的回不了家，在停靠點上的立刻停靠。臨時列在生成的位置懸停或衝刺但不動，只撞走到它身上的敵人，時間到照舊離開。
 - **`minionCount`**（§4.4.8 的每 tick 變數）：:572 的「場上每有 1 架小無人機，中心傷害 +4%（最多 +20%）」可以照現有的縮放詞彙寫成資料：`{form: 'scaling', kind: 'increased', value: 0.04, scaling: {per: 'minionCount', cap: 0.2}}` 的融合加成，產生 `scope: 'center'` 的傷害修正。融合係數 k 乘 `value`，不乘 `cap`。
-- **飛行方向延後**：C5 設計 §8.2 的飛行方向（`toward: 'flight'`、池的 hx/hy 與中心事件的值）不在 C5.9，延到內容批次 B2 之前的 commit，第一個使用者是 B2 的刃翼（gd:643）。§8.2 的 `size`（巨大化）E1 已經做了；`impacts: 0` 的寫法由 `dronesStay` 取代；超頻是 C6b 的增益；雙機與機隊的傷害是資料（無人機授予與 `minion` 標籤的修正）。
+- **飛行方向**：C5 設計 §8.2 的飛行方向（`toward: 'flight'`、池的 hx/hy 與中心事件的值）不在 C5.9，由內容批次 B2 之前的 FL 做了（§4.6.10），第一個使用者是 B2 的刃翼（gd:643）。§8.2 的 `size`（巨大化）E1 已經做了；`impacts: 0` 的寫法由 `dronesStay` 取代；超頻是 C6b 的增益；雙機與機隊的傷害是資料（無人機授予與 `minion` 標籤的修正）。
 - **形狀**：`BuildFlags` 多 7 個，`STAT_IDS` 多 1 個（61），`SCALING_VARS` 多 1 個（11），`EvalInput` 多 1 個（10），`DronePool` 多 2 個、`DroneLayout` 多 2 個；`RunContext` 的自有屬性（125）、`COUNTER_IDS`（19）、`Enemy` 的鍵、`CompiledBuild` 的成員與 `SimEvent` 的聯集都不變。
 - **GOLDEN-C4**：`summonPolicies`（M1 的齊射加 6 架無人機＋2 座砲台的授予與每次攻擊生出 2 隻臨時列的觸發，TestModule 設全部六個旗標：鎖定信標、蟲海 ×2 與留場、加農砲 1/3 與 60、特斯拉塔 2，`droneSpeed` 1.5，加上 +30% 與 ×4 兩份資料；v3 fixture 的第 8 波起，第 9 波起有菁英、第 10 波有洋蔥 Boss）與 `minionScaling`（M1 的齊射加 2 架無人機＋1 座砲台，每第 2 次攻擊生出 2.5 秒的臨時列、最多 8 隻，:572 的修正）。兩個案例的覆蓋（每個 seed 的 tough 優先、上限的拒絕、留場與回家、砲台開火、爆炸與清單數、砲台的跳數；`minionCount` 出現過的值與每個值的倍率）由同一檔的兩個測試釘住。
+
+#### 4.6.10 飛行方向（FL）
+
+C5.9 延後的 C5 設計 §8.2 飛行方向，lead 的 F1–F8，加上後來的 FL-R1、FL-R2。第一個使用者是內容批次 B2 的刃翼（gd:643，暴擊召喚，模板融合）：「撞擊時沿飛行方向畫一條必定暴擊的斬擊線」。
+
+- **飛行方向**（`DronePool.hx`、`hy`，`DroneLayout` 的同名兩列，Float64）：排位（`droneLayout`）與 `spawnRows` 接上的每一列都是 0，臨時列離開、池壓縮時 `moveRow` 一起搬。只有無人機（swarm 的與授予的，同一條路徑）在 `dash` 裡寫：一個 tick 開頭離目標中心的距離大於目標半徑時（`dist > t.radius`，dist 與 (dx, dy) 是 `dash` 在 tick 開頭算的：目標中心減這一格的位置），把 (dx, dy) 原樣（不正規化）寫進 hx、hy。所以朝目標走的每一步、從外面貼進目標的抵達 tick 都會寫；開頭已經在目標半徑內的 tick（冷卻記憶期間騎在目標身上，或蟲海的 `dronesStay` 再撞同一隻）不動它，飛行方向一直是這架最後一次從外面飛進目標的方向。停靠（`flyHome` 抵達）把它清成 0，新的一趟不會帶著上一趟的方向。砲台從不寫，臨時列什麼都不寫（它們的撞擊不發中心事件）。`droneSpeed` 0（§4.6.9）時無人機不動，但敵人在半徑外的每個 tick 照樣寫「敵人中心減無人機」（lead 的 FL-R2：F2 舉的速度 0 的例子只在敵人沿無人機自己的射線走來時成立，那時這正好是往外的角度）。
+- **droneImpact 的值**（`flightAngle`）：`impact` 傳給 droneImpact 中心事件的值是飛行方向的角度 `atan2(hy, hx)`。沒有格（s = −1，重複攻擊的撞擊）或方向是 (0, 0) 時（停靠後還沒從外面飛進過目標，例如起飛時目標已經碰到它），改用從角色往外的角度 `atan2(target.y − player.y, target.x − player.x)`，和 `slashLine` 的 `'outward'` 用同一個 `ctx.player`，目標在角色身上時是 0，所以值不會是舊的，也不會是 NaN。角度只在事件會派發時才算：`impact` 先做 `emitCenterEvent` 開頭的檢查（旗標帶 `SIGNATURE` 不帶 `REPEAT`，而且有 droneImpact 的觸發或 `onCenterEvent` hook），和 `raiseChainJump` 的做法一樣，擋掉的撞擊不跑 `atan2`；`emitCenterEvent` 的簽名不變。實際上只有 swarm 自己的無人機撞擊會派發（授予與臨時列的酬載不帶 `SIGNATURE`，重複攻擊帶 `REPEAT`），所以值就是 swarm 無人機的飛行方向。
+- **成本**：M1 沒有無人機，什麼都不多付。沒有 `'flight'` 斬擊的無人機局只多付 `dash` 裡每個 tick 一次比較、在目標外的 tick 兩次寫入，以及停靠時的兩次寫入；排位時每列兩次寫 0、`spawnRows` 接上一列時兩次寫 0、`moveRow` 搬一列時兩次複製，都不在每個 tick 的路徑上。沒有觸發或 hook 在聽 droneImpact 時不算角度。
+- **限制（`detonate`）**：`detonate` 的目標已經死了時，把事件的值當成死掉目標剩下的異常量（C4.20 起 chainJump 就是這樣）。droneImpact 的值是飛行方向的角度，所以 droneImpact（和 chainJump）的觸發不要接 `detonate`：撞死目標時它會拿角度當剩餘量去打附近的敵人。目前登記的內容與 fixture 都沒有這種組合；之後由驗證擋掉。
+- **`slashLine` 的 `toward: 'flight'`**：執行器和 `'along'` 一樣把事件的值當角度（dx = cos、dy = sin），所以一定有方向。zod schema 接受 `'flight'`（`'player'` 照舊擋掉）；`validate.ts` 只在 droneImpact 的觸發接受它，其他事件報「toward 'flight' follows a drone's flight, which only 'droneImpact' events have」（取代原本的「…which the simulation adds in C5」）；`'along'` 照舊只在 chainJump。C4 設計 §10.2 的訊息表不改。
+- **產生器**：`SLASH_PLACEMENT.droneImpact` 是 `{ from: 'event', toward: 'flight' }`（§6 的 `place`；lead 的 FL-R1），所以帶斬擊線酬載的外盤（暴擊）接到蜂巢的模板融合時，斬擊從撞擊點（`impact` 傳的事件點，就是目標中心）沿無人機的飛行方向畫，撞死目標的撞擊也照畫（gd:643「撞擊時」）；`from: 'target'` 要目標還活著，撞死就不畫。斬擊線的文字不讀 `from`，落點的說法來自中心事件。文字是 `web.toward.flight`：en「along its flight」、zh-TW「沿飛行方向」，例如「每次撞擊，在目標：沿飛行方向畫一條長 300、寬 24 的斬擊線，100% 傷害，必定暴擊…」。
+- **形狀**：`DronePool` 多 2 個（40 → 42，含 `DroneViewState` 的 10 個）、`DroneLayout` 多 2 個（18 → 20）；`web.en.json` 與 `web.zh-TW.json` 各多 1 個 key（357 → 358），M1 的 `en.json`、`zh-TW.json` 不變；`BuildFlags`、`RunContext` 的自有屬性、`COUNTER_IDS`、`CenterEventScratch` 與 `SimEvent` 的聯集都不變。
+- **GOLDEN-C4**：`flightSlash`（蜂巢角色局，swarm 5 架無人機、沒有砲台，fixture 的第 12 波起；每次撞擊的 droneImpact 觸發是 `fusion.summon.crit` 的斬擊線，`from: 'event'`、`toward: 'flight'`、長 300、寬 24、必定暴擊，係數 1）。它的覆蓋（每個 seed 的撞擊數與其中撞死目標的、斬擊數（每次撞擊一條，撞死目標的也有）、斬擊的擊中與暴擊、偏離往外方向的斬擊、四個象限的分布與前三條斬擊的角度）由同一檔的一個測試釘住。
 
 ### 4.7 C4 的引擎：攻擊、投射物、區域與授予
 
@@ -643,7 +656,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - `groundZone`：在事件位置（或選擇器選到的敵人）加一個效果區域（§4.7.6）。
 - `spawnDrone`（C5.7）：在事件位置把臨時列接進無人機池（§4.6.8）。
 - `projectiles`：在投射物池產生小投射物（`spawnShot`，受 `PROJECTILE_CAP` 限制），從事件位置或角色出發；`target`、`distinct` 追蹤，`radial`、`fan` 直線（§4.7.3）。帶 `countStat: 'barrageCount'`（C6b.1，彈幕的 `inPayload` 加成）時，數量在編譯時連到小彈數量：`compileEffect` 讀 `compileBuild` 從 StatBlock 的 `values.barrageCount` 取一次的值（資料的觸發、規則模組的 `addTrigger` 與 `addEffect` 都用它；規則模組的 `scaleStat`、`offsetStat` 不影響連結），`count` 換成 `min(64, count + max(0, floor(barrageCount) − 2))`（2 是彈幕外盤入口給的發數，`BARRAGE_ENTRY_SHOTS`），記在 `CompiledEffect.spec.count`，不乘係數；執行器照舊讀 `spec.count`。`barrageCount` 是不分範圍的屬性，基礎 0、格式 number。
-- `slashLine`：一條線，依 ID 各打一次線寬一半加上自身半徑內的敵人（`grid.inSegmentBox` 加大型敵人的補查）；`'along'` 只用在 chainJump，沿著那一跳的角度。`slash` 事件在擊中之前。
+- `slashLine`：一條線，依 ID 各打一次線寬一半加上自身半徑內的敵人（`grid.inSegmentBox` 加大型敵人的補查）；`'along'` 只用在 chainJump，沿著那一跳的角度；`'flight'`（FL）只用在 droneImpact，沿著無人機的飛行方向，讀事件的值（§4.6.10）。`slash` 事件在擊中之前。
 - `coinHit`：對目標一擊，`coin` 事件在前；酬載帶 `bypass` 位元，給 C7 的護盾與堅甲，由 `bypassOf` 讀。
 - `chainBolt`：自己的一次攻擊，第一下算預算 1，然後正好 `jumps` 跳（一般路徑、沒有策略，整數跳數不擲骰），每一下沒被全部擋下也沒殺死就加 `shockStacks` 層感電（§4.3 的 R1）；不發 chainJump。
 
@@ -738,7 +751,7 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 - 招牌攻擊與規則的表在 `src/data/rules.ts`：`CHARACTER_SIGNATURE`（角色 → 招牌攻擊）、`SIGNATURE_EVENT`（招牌攻擊 → 中心事件）、`SIGNATURE_FORMS`（每種招牌攻擊能接的形態規則）；`RULE_COEF_FIELDS` 列出融合係數要縮放的規則欄位，`scaleRuleSpec` 照這張表縮放一個 spec（`pct`、`mult` 乘上係數，`chance` 乘完夾到 1）；`POLICY_RULES` 是 ◆ 可以帶的連鎖政策規則，`NOTABLE_RULES` 是 ◆ 可以帶的其他規則（E2 起有 `poisonSlow`）。每個規則模組上線時在用得到的表加上自己那一筆；`RULE_COEF_FIELDS` 與 `POLICY_RULES` 目前還是空的。
 - v3 的內容檔：每個角色一個檔，放在 `src/data/characters/`，四個角色從 C6.3 起都登記在 `CHARACTERS`（`src/data/characters/index.ts`，選角畫面的「第一次玩推薦」是 `FIRST_PICK = 'fire'`），各帶 `docs/v3/game-design-v3.md` 的選角卡資料（主色、難度、構造體、推薦外盤、第 15 波揭露的外盤、敵人對照列）；`center` 與 `ascendancies` 在該批內容寫好前是 `null`，選角畫面顯示「製作中」。外盤一塊一個檔，登記在 `OUTERS`（`src/data/outer/index.ts`）；樞紐環是 `src/data/hub.ts` 的 `HUB`。兩者在 B1 前都是空的。內容檔只 import `src/data/templates.ts` 與型別。
 - `src/data/templates.ts` 是寫內容用的函式：修正（`flat`、`inc`、`more`）、節點模板（`ranked`、`rankedMods`、`notable`、`keystone`、`threshold`、`entry`、`mastery`、`might`、`signatureNode`、`ascNode`、`ascFinal`、`answers`、`fusionRank`）與建盤函式（`centerBranch`、`outerBranch`、`ascendancy`、`defineCharacter`、`defineOuter`、`defineHub`）。作者只填槽，替 ◆、★ 與分支取 slug；建盤函式照 ID 文法替每個節點命名、放進它的槽，再加上盤的固定連線：中心盤 40 個節點、45 條邊，接口 c1–c6 在 1、3、5、7、9、11 點鐘；外盤 18 個節點、20 條邊；樞紐環 24 個節點照固定表放：12 個連成一圈，每個再向內接出一個；昇華 3 個節點。作者不寫 ID、連線或座標。`defineCharacter` 從角色 ID 推出 `archetype`、`arena`、名稱與介紹的 i18n key、招牌攻擊和它的中心事件。沒寫目標的精通由建盤函式依盤補上：中心盤是 `scope 'center'`，外盤是該流派的標籤（連擊、彈幕、貪婪沒有標籤，改成 `scope 'outer.<外盤>'`），融合是 `scope 'fusion.<角色>.<外盤>'`。`rankedMods` 的發射器只在第 1 級給一次，不會每級重複。建盤函式不丟例外：槽裡放錯模板就照寫的記下來，漏寫的槽就少那個節點，都留給驗證回報。
-- 融合盤由產生器生成，作者不寫：`src/data/fusion/generate.ts` 的 `generate(角色, 外盤, 覆寫, coef)` 產生一條融合的 5 個節點，核心（1 級）、`r1`–`r3` 與精通，ID 是 `fusion.<角色>.<外盤>.<槽>`，連成核心–r1–r2–r3–精通一直線。角色接另一個流派角色的外盤是手工融合（`HAND_PAIRS`，12 條），核心是覆寫給的規則；其他 32 條是模板融合，核心是外盤酬載放到角色中心事件上的一個觸發，加上酬載的加成。產生器不看酬載是哪一種，只補中心事件決定的落點（`place`）：斬擊線在爆炸時從爆炸點朝最近的敵人，在凍結與無人機撞擊時從目標往外，在連鎖跳躍時順著跳的方向；子彈從事件點出發；新星以事件點為中心；上狀態的效果不帶半徑，爆炸與凍結時由引擎分給事件名單上的每隻敵人。加成（`bonusModifiers`）都是 `scope 'center'` 的傷害修正：`status` 是目標帶著該狀態時、`inZone` 是目標站在這條融合自己的區域裡時增加傷害，`scaling` 是縮放的修正；`inPayload` 與 `null` 不加修正。`r1`–`r3` 用覆寫的等級，沒有就用手工融合的預設 `HAND_RANKS`（3 個節點，各 3 級、每級 +10% 增加傷害）或酬載的等級；寫成 `scope 'fusion'` 的修正收窄成這條融合，所以一個外盤檔可以給它的 3–4 條融合共用。精通每級 `more 0.04` 傷害，只算這條融合。產生器不丟例外：缺覆寫的手工融合拿到空核心與 `HAND_RANKS`，沒有酬載的模板融合拿到空核心與 `EMPTY_RANKS`，都留給驗證回報。
+- 融合盤由產生器生成，作者不寫：`src/data/fusion/generate.ts` 的 `generate(角色, 外盤, 覆寫, coef)` 產生一條融合的 5 個節點，核心（1 級）、`r1`–`r3` 與精通，ID 是 `fusion.<角色>.<外盤>.<槽>`，連成核心–r1–r2–r3–精通一直線。角色接另一個流派角色的外盤是手工融合（`HAND_PAIRS`，12 條），核心是覆寫給的規則；其他 32 條是模板融合，核心是外盤酬載放到角色中心事件上的一個觸發，加上酬載的加成。產生器不看酬載是哪一種，只補中心事件決定的落點（`place`）：斬擊線在爆炸時從爆炸點朝最近的敵人，在凍結時從目標往外，在連鎖跳躍時順著跳的方向，在無人機撞擊時從撞擊點（目標中心）沿無人機的飛行方向（FL，§4.6.10）；子彈從事件點出發；新星以事件點為中心；上狀態的效果不帶半徑，爆炸與凍結時由引擎分給事件名單上的每隻敵人。加成（`bonusModifiers`）都是 `scope 'center'` 的傷害修正：`status` 是目標帶著該狀態時、`inZone` 是目標站在這條融合自己的區域裡時增加傷害，`scaling` 是縮放的修正；`inPayload` 與 `null` 不加修正。`r1`–`r3` 用覆寫的等級，沒有就用手工融合的預設 `HAND_RANKS`（3 個節點，各 3 級、每級 +10% 增加傷害）或酬載的等級；寫成 `scope 'fusion'` 的修正收窄成這條融合，所以一個外盤檔可以給它的 3–4 條融合共用。精通每級 `more 0.04` 傷害，只算這條融合。產生器不丟例外：缺覆寫的手工融合拿到空核心與 `HAND_RANKS`，沒有酬載的模板融合拿到空核心與 `EMPTY_RANKS`，都留給驗證回報。
 - 覆寫在 `src/data/fusion/overrides.ts`，B1 前是空的。`OVERRIDES` 依融合逐條覆寫，套用順序是：`triggers` 取代模板的觸發，`addTriggers` 接在後面（火毒的瘟疫爆彈就是一條），`bonus` 取代酬載的加成（`null` 是拿掉），`modifiers` 接在加成的修正後面，手工融合的 `rule` 或模板融合的 `addRules` 放進規則，`ranks` 取代預設的等級，`skin` 蓋在外盤的外觀上。只有冰光與雷光（`TEMPLATE_RULE_OVERRIDES`）可以加規則。`ACCEPTED_FAILS` 記校準 FAIL 但接受的融合與理由。
 - 融合係數 `coef` 在產生器裡不縮放觸發與規則（那是編譯時的事），只在模板融合的酬載標了 `coefScalesBonus`（沒有可縮放傷害的連擊、不造成傷害的光環）時乘上加成與 `r3`，`FusionDef.coefScalesBonus` 記下這件事；`r1`、`r2` 與精通從不縮放。係數的範圍是 `COEF_MIN` 0.1 到 `COEF_MAX` 10（`src/data/triggers.ts`）。`coefRange(fusion)`（`src/data/fusion/sensitivity.ts`）從核心的觸發與規則算出校準與 fuzz 用的區間：有值大於 0 的 COEF 欄位（沒寫的算 1；地面區域的 `ailmentDamagePct` 要有 `ailment` 才算）或 `pct`、`mult` 規則欄位時是 [0.1, 10]，每個效果 e 的轉移把上限壓到 0.99 / e（瘟疫爆彈的 0.5 → 1.98）；不然有機率 p < 1（機率條件、chainJump 的 0.3）或規則的 `chance` 欄位時是 [0.1, 1 / p]，p 取最大的；再不然有 `coefScalesBonus` 時是 [0.1, 10]；都沒有就是 `null`，係數什麼都不動，校準記為 insensitive。區間不會超出 [`COEF_MIN`, `COEF_MAX`]。
 - 校準結果是 `src/data/fusion/calibrated.ts` 的 `CALIBRATED`，由校準工具寫入（檔頭註明是產生的檔案，不要手改），B1 前是空的。每條融合帶一個摘要（`fusionDigest`），涵蓋中心事件、模板、覆寫、照寫的等級與 `coefScalesBonus`，不含 coef，所以看得出哪條校準紀錄過期；中心、外盤的其他節點與引擎改變強度時摘要不動，留給 C10 的夜間檢查。摘要用 `src/core/digest.ts` 的 `digest(value)`：鍵排序後的標準 JSON，兩條 32 位元 FNV-1a，16 個十六進位數字；不用 `node:crypto`，維持純 TS。
@@ -755,26 +768,40 @@ v3 引擎 C4 步驟（`docs/v3/implementation-plan-v3.md` §2.2、§2.4、§2.6�
 
 ## 7. 平台抽象層
 
+C9 建好的形狀（`src/platform/`，C9 設計 §1.1）：
+
 ```ts
+// src/platform/platform.ts
+type PlatformId = 'web' | 'steam';
 interface Platform {
-  readonly id: 'web' | 'steam' | 'crazygames' | 'poki';
-  storage: SaveStorage;        // read(slot) / tryRead(slot) / write(slot, data)
-  achievements: Achievements;  // unlock(id) / isUnlocked(id)
-  analytics: Analytics;        // track(event) / flush() / exportLocal()
-  ads: Ads;                    // showRewarded() / showInterstitial()，非 portal 為 no-op
+  readonly id: PlatformId;
+  readonly storage: SaveStorage;        // read(slot) / tryRead(slot) / write(slot, text)（§8）
+  readonly achievements: Achievements;  // unlock(id) / isUnlocked(id)：回傳 boolean，不丟例外
+  readonly analytics: Analytics;        // track(type, fields) / flush() / exportLocal()（§9）
 }
+/** §9 的各 build 規則：可不可以送雲端，玩家選擇之前送不送。 */
+interface AnalyticsPolicy { readonly cloud: boolean; readonly sendByDefault: boolean }
+interface PlatformSetup {
+  readonly savePrefix?: string;                                // 網頁版槽位的 localStorage 前綴（`?hive`）；Steam 版的檔案不看它
+  readonly analytics: (policy: AnalyticsPolicy) => Analytics;  // src/app 依平台的 policy 建（Firestore 留在 src/app）
+}
+// src/platform/index.ts
+function createPlatform(setup: PlatformSetup): Platform;       // import.meta.env.MODE === 'steam' ? Steam 版 : 網頁版
 ```
 
-| 平台 | storage | achievements | analytics | ads |
-| --- | --- | --- | --- | --- |
-| web（itch.io、試玩） | localStorage | 本機記錄＋提示 | Firebase＋本機 | no-op |
-| steam demo（Electron） | 檔案（透過 preload IPC） | steamworks.js | Firebase＋本機（預設開，可在設定關閉） | no-op |
-| steam 正式版（Electron） | 檔案（透過 preload IPC） | steamworks.js | 本機（送雲端預設關閉，可在設定開啟） | no-op |
-| crazygames／poki | 平台 SDK 存檔 | 本機 | 平台 SDK | 平台 SDK |
+| 平台 | storage | achievements | analytics 的 policy |
+| --- | --- | --- | --- |
+| web（`src/platform/web.ts`；itch.io、試玩） | localStorage（`LocalSaveStorage`；localStorage 不能用時 `MemorySaveStorage`） | 本機記錄（`LocalAchievements`，key `bc-incremental.achievements`） | `{ cloud: true, sendByDefault: true }`（`WEB_ANALYTICS_POLICY`） |
+| steam（`src/platform/steam/`；C9 的檢查版） | 檔案（`BridgeSaveStorage`，經過 preload 的 bridge，§8、§11） | Steam 啟動成功時是 steamworks.js（`SteamAchievements`），沒有 Steam 時是本機記錄 | `{ cloud: false, sendByDefault: false }`（`STEAM_ANALYTICS_POLICY`）：只進本機記錄，檢查的執行不混進試玩數據 |
+| steam demo／正式版（M3） | 同上 | 同上 | M3 依 `VITE_FLAVOR` 套 §9 的表：demo 預設送、可關閉；正式版預設不送、可開啟 |
+| crazygames／poki | 還沒寫 | | |
 
-- 用 Vite 的 `mode` 在建置時選平台（`vite build --mode steam`），其他平台的實作會被 tree-shake 掉。
-- 另一個建置參數 `VITE_FLAVOR=demo|full` 決定 demo 或正式版：demo 內容上限、analytics 預設值、結束畫面的願望清單按鈕都看它。
-- portal 實作在有需要時才寫（不在 MVP 必做）。
+- 平台在 build 時選：`vite build`（`npm run build`）把網頁版 build 到 `dist/`，`vite build --mode steam` 把 Steam 版的頁面 build 到 `dist-steam/`。`import.meta.env.MODE` 在 build 之後是字面值，Rollup 會把另一個平台的模組整個丟掉；`src/platform/steam/` 的模組 import 時不執行任何東西。`src/platform/bundle.test.ts` 釘住兩個 bundle 的模組清單（網頁版沒有 `bcNative`，Steam 版沒有 `bc-incremental.save.`），`src/platform/imports.test.ts` 確認 `src/` 底下沒有任何檔案 import `electron`、`steamworks.js` 或根目錄的 `electron/`。
+- Steam 版的頁面只能在 Electron 殼裡跑：頁面上沒有 `bcNative`，或它的版本不是 `BRIDGE_VERSION`（2），`createSteamPlatform` 就丟 `MissingBridgeError`，由 `src/app/main.ts` 的 `showFatal` 顯示。
+- `src/app/main.ts` 呼叫 `createPlatform`，`savePrefix` 只在 `?hive` 時給；`openAnalytics` 只在 `policy.cloud` 時建 Firestore 的 sink，`defaultSending` 用 `policy.sendByDefault`，開發伺服器與 `?hive` 一樣不送（§9）。`openKeyValueStore` 與 `pageLocalStorage` 在 `src/platform/platform.ts`，兩個平台與 main.ts 的 analytics 共用。
+- 成就 ID 是 Steam 的 API 名稱（`ACHIEVEMENT_ID`，`/^[A-Za-z0-9_]{1,64}$/`），其他 ID 一律回 `false`。目前沒有遊戲程式解鎖任何成就，M3 才接上（§11.8）。
+- 沒有 `ads`（C9/F8）：portal 需要時再加回介面，`PlatformId` 也到時候才加 portal 的 ID。portal 實作在有需要時才寫（不在 MVP 必做）。
+- 另一個建置參數 `VITE_FLAVOR=demo|full` 決定 demo 或正式版：demo 內容上限、analytics 預設值、結束畫面的願望清單按鈕都看它。`src/platform/flavor.ts` 的 `parseFlavor` 把沒設、空字串與 `full` 讀成正式版，`demo` 讀成 demo，其他值在 `vite.config.ts` 載入時就讓 build 與開發伺服器失敗。目前還沒有程式讀 `FLAVOR`（B2、M3 才會）。
 
 ## 8. 存檔格式
 
@@ -795,7 +822,13 @@ interface Platform {
 - M1 進度的一次性匯入：兩個 v2 槽位都是空的時候，`ProfileStore` 先讀 M1 的 `main`，再讀 `backup`，第一份讀得出來的版本 1 存檔變成新的存檔，馬上寫進 v2 的 `main`：速度、遊戲時間與局數照舊，花掉與沒花的碎片、核心連同最遠波次變成帳號的待領取進度，給第一個選的角色。M1 的 key 只讀不寫，`?hive` 的 key 不讀；之後在 M1 頁面玩的進度不會再帶過來。Steam 版沒有 M1 的存檔，不匯入。
 - 設定頁提供匯出／匯入存檔字串（Base64），方便玩家回報問題（M3）。
 - 每個版本至少保留一份 fixture 存檔（`tests/fixtures/`），測試確保它能遷移到最新版並通過驗證：版本 1 是 `save-v1.json` 與約一小時 M1 試玩的 `save-v1-playtest.json`，版本 2 是 `save-v2.json`。後兩份由 `tools/save/playtestV1.ts` 與 `tools/save/fixtureV2.ts` 產生（`--write` 寫檔，`--check` 只比對），不要手改。`src/save/save.test.ts` 另外釘住一份每個欄位都有值的存檔的完整文字：格式一改就失敗，直到 `SAVE_VERSION` +1、寫好遷移、加上 fixture。
-- Steam 雲端存檔用 Steamworks 的 Auto-Cloud 同步存檔資料夾，不需要額外程式碼。
+- Steam 版的兩個槽位是檔案（`electron/saveFiles.ts`，C9 設計 §1.4）：userData 的 `saves/` 裡的 `main.json` 與 `backup.json`（Windows 是 `%APPDATA%\bc-incremental\saves`，各 OS 見 §11.4）。只有 main process 寫，頁面的 `BridgeSaveStorage` 透過 bridge 的同步 IPC（`bc:save:read`、`bc:save:write`，§11.1）讀寫，從不把存檔放進 localStorage，所以 `savePrefix` 在這裡沒有作用。
+  - 原子寫入：先寫 `<slot>.json.tmp`（`writeSync` 到每個 byte 都寫進去）→ `fsyncSync` → `closeSync` → `renameSync` 蓋過 `<slot>.json`，macOS 與 Linux 再盡量 fsync 資料夾，所以檔案只會是舊的或新的存檔，不會只寫了一半。Windows 的 rename 遇到 `EPERM`、`EACCES`、`EBUSY` 先重試 5 次（`BUSY_RETRY_MS`：10、20、40、80、160 ms，用 `Atomics.wait` 等），和讀取一樣。寫入失敗就刪掉暫存檔、留下舊檔，回 `{ ok: false, error }`，頁面警告「Save failed」，下一次自動存檔再試。打開存檔資料夾時先建立它，再刪掉當機留下的 `*.json.tmp`；暫存檔不是 `.json` 結尾，所以 Auto-Cloud 的 `*.json` 只看得到兩個槽位。
+  - 儲存層不輪替：輪替由呼叫端做（M1 頁面的 `save()` 先把 `main` 抄進 `backup`；`ProfileStore` 抄上一份讀進或寫出的文字，見上）。儲存層也輪替的話，`backup` 只會是 `main` 的複本。
+  - 只有一個寫入者：userData 的 single-instance lock，加上每個呼叫都是同步的。槽位只能是 `main` 或 `backup`，一次寫入最多 8 MiB（UTF-8，`MAX_SAVE_BYTES`）。
+  - `BridgeSaveStorage.read()` 保留 M1 的答案：空檔案（`''`，或只有 BOM）也讀成 `null`，所以 M1 的 `save()` 不會把空的 `main` 抄到好的 `backup` 上；`tryRead()` 照殼的答案，空檔案是 `''`。
+  - 2026-11-03 Windows 的檢查：進天賦網之後兩個檔案都寫出來（各 583 B），重開時讀回存檔、直接回到天賦網（§11.6）。
+- Steam 雲端存檔用 Steamworks 的 Auto-Cloud 同步 `saves/` 的 `*.json`，不需要額外程式碼；路徑在 M3 設定到 App ID 上（§11.4），App ID 480 上測不到（§11.7）。
 
 ## 9. 試玩數據
 
@@ -909,11 +942,99 @@ interface Platform {
 - **`?enemies`**（`src/app/enemies/`）：開發用頁面，`devFlags.ts` 讀 `?enemies`（有沒有值、有沒有 `?hive` 都一樣），`main.ts` 照 `?replay` 的做法 lazy import `./enemies/route`，是自己的 chunk，M1 頁面與 `?hive` 不會載入它（`?replay=` 同時存在時開回放）。它在 `characterGameData()` 上跑一局波次不出敵人的局（seed 1，特效的 `RenderRandom` 用 seed 2）：第一個 tick 在角色上方一排放每種 v3 敵人（照 `ENEMY_IDS` 的順序）、下方一排放每個詞綴各一隻六角菁英，中間是剩兩層與一層外殼的洋蔥、一對增殖子怪與三個詞綴的菁英；全部不動、不死，位置讓每個行為都看得到（衝刺者一開始就蓄力變紅、射手開火、召喚者叫出三角形、寶藏怪繞 8 秒後逃走、守護旁邊的菁英在環內）。角色用 M1 的基礎屬性，每 3 秒補一次 20% 的護盾。每 20 秒（`GRID_LOOP_SECONDS`）重開一局；橫幅每次載入頁面給一個新的空集合，重開不會再顯示。標籤是英文的開發用文字，不走 i18n（和 viewer.html 一樣），只有橫幅的 key 是真的。頁面不寫 storage、不送試玩事件、不呼叫平台 API（`src/app/enemies/isolation.test.ts` 檢查它載入的模組，`tools/sheets/enemiesSmoke.ts` 在頁面上檢查）。`&step=1` 把 `window.__enemies`（`canvas`、`tick`、`step(n)`）掛出來給擷取用，每格一個 tick、解析度 1。
 - **擷取**：`tools/sheets/capture.ts` 也拍 `?enemies`（`--only constructs|enemies` 只拍其中一個）：第 20、300、600 格的整個 arena（1:1，deviceScaleFactor 1）、第 300 格兩排的特寫，以及 `&lang=zh-TW` 的第一行橫幅；PNG 寫到 `--out`，二進位檔不進 git。
 
-## 11. Electron 與 Steam（M2 技術驗證）
+## 11. Electron 與 Steam（C9 的技術檢查）
 
-- `contextIsolation: true`，preload 只暴露最小 API（`storage`、`achievements`、`steamInfo`）。存檔的讀取以結果（`SaveReadResult`）傳回頁面，讀取失敗不會變成空槽位（bridge 版本 2）。
-- steamworks.js 在 main process 初始化；技術驗證先用測試 App ID 480（Spacewar），不必等 Steam 上架費。
-- Steam overlay 需要 steamworks.js 的 `electronEnableSteamOverlay()` 加上 Chromium 參數，這是 M2 最大的技術風險，第一週先驗證。
+Steam 版是同一份頁面（`vite build --mode steam` → `dist-steam/`，§7）加上 Electron 殼（`electron/`，由 `vite.electron.config.ts` build 成 `dist-electron/main.cjs` 與 `preload.cjs`），透過 steamworks.js 跟 Steam 溝通。C9 只從原始碼跑（`npm run electron`、`npm run steam:check`，§14），還沒打包；App ID 是 Steam 給所有人測試用的 480（Spacewar，`electron/steam.ts` 的 `SPACEWAR_APP_ID`），不必等 Steam 上架費。Electron 44.8.0 與 steamworks.js 0.4.0 都是 `package.json` 的 exact devDependencies。沒有 Steam 時遊戲照常玩：存檔照樣寫檔案，成就記在本機（`LocalAchievements`）。
+
+### 11.1 殼與 bridge
+
+- **視窗**：`webPreferences` 明確寫 `preload`（`dist-electron/preload.cjs`）、`contextIsolation: true`、`sandbox: true`、`nodeIntegration: false`；1280×800，選單列隱藏。`will-navigate` 一律擋下；`setWindowOpenHandler` 拒絕所有新視窗，`https:` 的網址改用瀏覽器開；權限只給 `clipboard-sanitized-write`（檢查模式的「Copy report」用）。
+- **preload**（`electron/preload.ts`，sandbox 裡的 CommonJS，只 `require('electron')`）在頁面之前跑，用 `contextBridge.exposeInMainWorld` 在頁面放一個凍結的 `bcNative`（`NativeBridge`，`src/platform/steam/bridge.ts`；頁面與 preload 共用這個只有型別與常數的模組）：`version`（`BRIDGE_VERSION`，2）、`steamInfo()`（`ShellInfo`）、`storage.read(slot)`／`write(slot, text)`、`achievements.unlock(id)`／`isUnlocked(id)`，只有 `--steam-check` 時多一個 `check`（§11.5）。這就是最小 API：`storage`、`achievements`、`steamInfo`。每個函式只把宣告的參數送到自己的 channel，頁面拿不到 `ipcRenderer`、可以指定 channel 的函式或監聽器。bridge 版本 2 把存檔的讀取以 `SaveReadResult` 傳回頁面（§8），讀取失敗不會變成空槽位。
+- **channel**（`electron/channels.ts`）全部用 `ipcRenderer.sendSync`：頁面的 `SaveStorage` 是同步的，而 `pagehide` 時只有同步呼叫做得完（C9/F16）。`bc:info`、`bc:save:read`、`bc:save:write`、`bc:ach:unlock`、`bc:ach:is-unlocked`；檢查模式另有 `bc:check:clear`、`bc:check:overlay`、`bc:check:saves`、`bc:check:show-saves`、`bc:check:report`、`bc:check:errors`。
+- **main process 這一半**（`electron/ipc.ts`）：`createHandlers` 是純函式；`registerSync` 在 `finally` 裡一定設定 `event.returnValue`，沒設的話頁面的 `sendSync` 會一直等下去。只信任遊戲視窗的 main frame，而且頁面要是 `dist-steam/` 裡的 `file:` 網址（`isGamePage`）。其他來源，或 handler 丟例外，拿到那個 channel 的 fallback（不信任的來源連 handler 都不跑）：`bc:info` 是 `null`；讀檔是讀取失敗 `{ ok: false, error: 'bc:save:read failed' }`，絕不是空槽位；寫檔是 `{ ok: false, error: 'bc:save:write failed' }`；成就是 `false`；清單是 `[]`；報告是 `{ ok: false, where: 'bc:check:report failed' }`。參數都先檢查：槽位只能是 `main`、`backup`，存檔 ≤ 8 MiB，成就 ID 要過 `isAchievementId`，overlay 的頁面只能是 `achievements`、`friends`，報告 ≤ 64 KiB；不在檢查模式時，`bc:check:*` 只回 fallback。
+- **Steam**（`electron/steam.ts`）：`startSteam` 載入 steamworks.js 並 `init(480)`。失敗是狀態（`SteamStatus` 的 `stage: 'load' | 'init'` 與錯誤），不是例外；每個成就呼叫先檢查 ID，丟例外當成 `false`。`init` 讓 steamworks.js 每秒跑 30 次 `runCallbacks`。
+- **錯誤**：渲染程序的錯誤（`console-message` 的 error、`preload-error`、`render-process-gone`、`did-fail-load`）進一個 50 筆的環狀緩衝（`RecentErrors`），同時以 JSON 字串印到終端機（`[renderer] …`）；檢查的報告只寫筆數。
+- **殼自己的參數**（`electron/args.ts`）：`--steam-check`（檢查模式）、`--bc-user-data-dir=<絕對路徑>`（冒煙測試的暫存 userData）、`--bc-overlay-switches`（沒有 Steam 也加上 overlay 的參數，給冒煙測試）、`--bc-replay=<spec>`（C10：頁面用 `?replay=<spec>` 開，spec 只能有英數字、`:` 與 `.`，`REPLAY_SPEC`）。其他 `--bc-*` 參數與不接受的值各在終端機印一行，然後忽略。
+
+### 11.2 啟動順序（`electron/main.ts`）
+
+app 準備好（`app.whenReady()`）之前：
+
+1. 讀殼的參數（`parseShellArgs`）。
+2. userData：appData ＋ `bc-incremental`（`APP_FOLDER`），或 `--bc-user-data-dir`。先建資料夾，再 `app.setPath('userData', …)`（資料夾不存在時 `setPath` 會丟例外）。
+3. `app.requestSingleInstanceLock()`：鎖在 userData 裡，拿不到就結束，所以存檔只有一個寫入者；第二個實例只會把第一個的視窗叫到前面。
+4. 在終端機印出被忽略的參數。
+5. Steam：從 app 的 `package.json` 延遲 `require('steamworks.js')`（失敗是 `stage: 'load'`），`init(480)`（失敗是 `stage: 'init'`；花的時間是 `initMs`），成功之後才呼叫 `electronEnableSteamOverlay()`（§11.3）。終端機印 `Steam: connected (app 480, <語言>, <n> ms)` 或 `Steam: NOT connected (<stage>): <錯誤>`。
+6. 打開存檔資料夾（`openSaveFiles`，§8），建錯誤的環狀緩衝，註冊每個 channel。`window-all-closed` 在每個 OS 都結束程式。
+
+準備好之後：設定兩個權限 handler；`dist-steam/index.html` 不存在就 `dialog.showErrorBox`，以 1 結束；建視窗，`loadFile(dist-steam/index.html)`（只有接受的 `--bc-replay` 會帶 `?replay=`）。
+
+從不呼叫 `restartAppIfNecessary`（這是從終端機跑的開發版）與 `disableHardwareAcceleration`（會讓 overlay 失效）。
+
+### 11.3 overlay 的兩個 Chromium 參數
+
+- steamworks.js 的 `electronEnableSteamOverlay()` 在 Chromium 的命令列加上 `in-process-gpu` 與 `disable-direct-composition`（`electron/steam.ts` 的 `OVERLAY_SWITCHES`），並在沒有在畫的視窗上每秒 `invalidate()` 60 次，讓 overlay 一直有畫面可以疊。這些參數只有在 app 準備好之前加才有效，Steam 的 `init` 也要在 GPU 裝置建立之前，overlay 才掛得上，所以兩件事都在 `app.whenReady()` 之前做。
+- 只在 `init` 成功之後加：沒有 Steam 的執行保留 Chromium 預設的 GPU 程序。少了 `disable-direct-composition`，Windows 的 overlay 會畫成白色；`in-process-gpu` 把 GPU 放進 main process，GPU 當掉會讓整個程式結束（C9 設計的 R-14）。
+- `ShellInfo.overlaySwitches` 列出實際加上的參數，報告的 `overlay_switches:` 印的就是它。
+- steamworks.js 0.4.0 沒有查詢 overlay 狀態的函式，也沒有 overlay 開關時的回呼，所以 overlay 只能用眼睛確認（§11.5 的檢查模式）。
+
+### 11.4 存檔資料夾與 Auto-Cloud
+
+存檔在 userData 的 `saves/`（§8）。檢查模式的報告在旁邊的 `steam-check/`（`report-<UTC 時間>.txt`），Chromium 自己的資料（localStorage、快取）也在 userData，所以只有 `saves/` 可以同步。`APP_FOLDER`（`bc-incremental`）會寫進 Auto-Cloud 的路徑和玩家電腦上的資料夾，第一個 Steam build 之後就不能改，名字由 M3 決定（C9/F14）。
+
+| OS | 實際的資料夾 | Auto-Cloud（M3 設定到 App ID 上；`electron/paths.ts` 的 `autoCloudRow()`） |
+| --- | --- | --- |
+| Windows | `%APPDATA%\bc-incremental\saves` | `WinAppDataRoaming`，子資料夾 `bc-incremental/saves`，`*.json`，跨平台，不遞迴 |
+| macOS | `~/Library/Application Support/bc-incremental/saves` | Root Override → `MacAppSupport`，子資料夾相同 |
+| Linux | `~/.config/bc-incremental/saves` | Root Override → `LinuxHome`，Replace Path `.config/bc-incremental/saves`（假設沒有設 `$XDG_CONFIG_HOME`）；或 M3 把 Linux 的存檔搬到 `LinuxXdgDataHome` |
+
+Auto-Cloud 的根目錄沒有 XDG 的設定目錄（`~/.config`），所以 Linux 用 `LinuxHome` 加上 Replace Path。報告的 `autocloud:` 印這台電腦那一列（2026-11-03 的 Windows：`WinAppDataRoaming bc-incremental/saves *.json`）。
+
+### 11.5 檢查模式（`npm run steam:check`）
+
+- 加上 `--steam-check` 時，頁面右上角多一個英文的檢查面板（`src/platform/steam/checkPanel.ts`，開發用，和 viewer.html 一樣不走 i18n），preload 多一個 `check`（`clearAchievement`、`openOverlay`、`listSaves`、`showSaves`、`saveReport`、`recentErrors`），main process 也才回應 `bc:check:*`。
+- 面板上有：Steam 的連線狀態；Spacewar 的成就 `ACH_WIN_ONE_GAME`（Winner）與「Unlock」「Clear」「Re-check」，每按一次都記下 Steam 的回答；只有人眼能回答的三題（開頭的 Shift+Tab 提示、解鎖通知、Shift+Tab 叫出 overlay）；「Open achievements overlay」（`overlay.activateDialog(6)`）與看到什麼（Overlay、Steam window、Nothing）；存檔資料夾、檔案清單與「Show folder」；「Copy report」。按鈕的 `tabIndex` 是 -1，按完就 blur：overlay 沒接到 Shift+Tab 時，焦點不會留在按鈕上，之後被開局的 Space 按到。
+- 報告（`src/platform/steam/report.ts` 的 `buildReport`）是 12 行固定順序的 `key: value`，第一行是 `bc-incremental steam check v1`。裡面沒有 Steam 名稱、帳號 ID 或絕對路徑：存檔資料夾用 `saveDirShown`（`%APPDATA%\…`、`~/…`），其他絕對路徑寫成 `<path>`；沒回答的題目是 `unknown`。「Copy report」把它放進剪貼簿、存成 `<userData>/steam-check/report-<UTC 時間>.txt`，也顯示在唯讀的文字框。
+- Hoshi 照 `docs/v3/steam-check-runbook.zh-TW.md` 做檢查，結果與報告原文記在那份手冊的第 9 節。
+- container 裡沒有 Steam：`npm run smoke:electron`（ESMOKE，`tools/electron/smoke.ts`，xvfb 加 SwiftShader）用暫存的 userData 跑殼的幾種執行：一般、檢查模式、壞掉與讀不到的 `main.json`、`--bc-overlay-switches`、`--bc-replay`。
+
+### 11.6 各 OS 的結果
+
+| 檢查 | Windows（2026-11-03） | macOS | container（ESMOKE） |
+| --- | --- | --- | --- |
+| 原生模組載入 | win32-x64：成功 | 還沒做 | linux-x64：成功（沒有 Steam，所以 `init` 在 `stage: 'init'` 失敗） |
+| `init(480)` | 成功，1,004 ms，`language=english` | 還沒做 | 沒有 Steam |
+| 成就的 Unlock、Clear、Re-check | Unlock 與 Clear 每次都回 `yes`，每次讀回的狀態都對：locked → unlocked → locked | 還沒做 | 沒有 Steam：Unlock 回 `no`，狀態 `unknown` |
+| 開頭的 Shift+Tab 提示、Shift+Tab、解鎖通知（都是 overlay 畫的） | 三項都有 | 預期沒有 | 測不到 |
+| `activateDialog`（「Open achievements overlay」） | 開的是 **Steam 主視窗**，不是遊戲裡的 overlay（下面） | 預期沒有 | 測不到 |
+| 存檔在真的位置 | `%APPDATA%\bc-incremental\saves`：`main.json`、`backup.json` 各 583 B；重開直接回到天賦網 | 還沒做（`~/Library/Application Support/bc-incremental/saves`） | 暫存的 userData |
+| 真的 GPU 加上兩個參數 | 兩個參數都在；GPU 合成、WebGL、WebGPU 都開著 | 還沒做 | SwiftShader，不是 GPU |
+| 系統視窗 | SmartScreen、Defender、防火牆都沒有出現 | 還沒做（Gatekeeper、鑰匙圈、資料夾權限，預期沒有） | 不適用 |
+
+- **Windows**：Windows 10（19045）x64，Steam 用戶端開著，build `0.0.1+abaec66`（C7b，含 C9.2b 與存檔讀取失敗的修正；之後殼與 `src/platform/` 都沒改過），Electron 44.8.0，steamworks.js 0.4.0；沒有東西卡住，`errors: 0`。C9 最大的風險（Windows 上 overlay 能不能用）已經回答：能用。報告原文與每一項的依據在手冊第 9 節。
+- **`activateDialog` 的發現**：overlay 本身能用（提示、Shift+Tab、解鎖通知都是 overlay 畫的，overlay 裡的成就頁也看得到解鎖的成就）；只有程式主動叫 overlay 開成就頁（`overlay.activateDialog(6)`）時，Steam 開的是 Steam 主視窗。原因還沒查。現在玩家看得到的介面都不呼叫它：整個程式只有檢查面板的「Open achievements overlay」會呼叫（`bc:check:overlay`，main process 只在 `--steam-check` 時回應），`friends`（0）沒有任何地方呼叫。M3 重測（§11.8）。
+- **macOS**：這次沒有 Mac，還沒做。Mac 能說明 Electron 44、steamworks.js 0.4.0 與殼在 Mac 上合得來、真的登入能 init 480、解鎖與清除到得了 Steam，以及 Mac 的存檔位置；overlay 在 Mac 的 Electron 上預期不會出現（steamworks.js #50、electron#42656），不影響 Windows 的結論。
+- **container**：只涵蓋 linux-x64 的模組載入、暫存資料夾裡的存檔與 SwiftShader。
+
+### 11.7 App ID 480 測不到的（M3 在 Hoshi 的 App ID 上測）
+
+- **Auto-Cloud**：要在自己的 App 的 Steamworks 後台（App Admin）設定路徑、用 `testappcloudpaths <AppId>`、從 Steam 啟動（同步在啟動與結束時跑）。報告的 `autocloud:` 只是殼算出來、M3 要設定的路徑。
+- **從 Steam 啟動的行為**：`restartAppIfNecessary`、啟動選項、macOS 與 Linux 的 overlay 注入，以及 `activateDialog` 在遊戲自己的 App ID 上開到哪裡。
+- **遊戲自己的成就**：圖示、名稱、在地化。
+- Steam 的 VC++ 可轉散發套件勾選、SteamPipe 的 depot、demo 的 App。
+
+### 11.8 M3 要做的
+
+- 存檔資料夾的名字（`APP_FOLDER`，C9/F14），在第一個 Steam build 之前定案。
+- 遊戲與 demo 各自的 App ID，拿掉 `SPACEWAR_APP_ID`。
+- 打包：asar，`steamworks.js` 放在 unpacked；`steam_api64.dll` 與 dylib 放在執行檔旁邊；打開 Steam 的 VC++ 可轉散發套件（Windows 的 `.node` 需要 `VCRUNTIME140.dll`）。
+- `app://` protocol 與 CSP（Electron 安全清單第 7 與 18 項；現在頁面透過 `file://` 讀得到使用者讀得到的任何檔案）。
+- 出貨用的 Electron 版本，重測一次。
+- 各 flavor 的 analytics（C9/F12）：Steam demo 與正式版套 §9 的表。
+- 開機時依存檔重新解鎖成就。
+- Linux 的存檔位置（`$XDG_CONFIG_HOME`，§11.4）。
+- **重測 `activateDialog`**（§11.6）：在遊戲自己的 App ID 上、從 Steam 啟動時，確認「Open achievements overlay」開的是遊戲裡的 overlay。目前玩家看得到的介面都不呼叫 `activateDialog`（§11.6）；要加開 overlay 的按鈕（例如成就頁）之前，先過這一項。
+- C9.2a、C9.2b 的驗證留下的安全項目：出貨的 build 拿掉預設選單（`Menu.setApplicationMenu(null)`，或沒有 View 的選單；現在隱藏的預設選單還能用 Ctrl+Shift+I 開 DevTools）；打包時設 Electron 的 fuses（清單第 19 項）；子框架的 `will-frame-navigate`；`saves/` 的強化（`read()` 用 `lstat`、`isFile` 與大小上限，`list()` 用 `lstat`，暫存檔用 `'wx'` 開）；剪貼簿權限只給遊戲視窗（`contents === game`，可選）。
 
 ## 12. 平衡模擬器
 
@@ -970,7 +1091,7 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 - `npm run fingerprint`（`tools/balance/fingerprint.ts`）：1,032 個案例（972 個合成 build＋60 個真實天賦 build）跑完，把每個 tick 的事件（投影到 M1 的欄位）與結果做雜湊，一個案例一行。`-- --check` 和 `tools/balance/fingerprint.baseline.txt` 逐行比對，重構必須完全相同；`-- --compare-results` 列出每個變動案例的波次、擊殺、漏怪、傷害與燃燒差多少；`-- --write` 重寫基準，只有量過、說明過的行為修改可以用。
 - `src/sim/golden.test.ts`：24 個案例 × 1,200 tick 的事件雜湊，跟著 `npm test` 跑。
-- `src/sim/goldenC4.test.ts`（GOLDEN-C4，也跟著 `npm test` 跑）：C4、C5、C6b、C7、C7b、E1、E2、E3 的機制與 C6 角色局的 57 個 fixture（C4 的 21 個、C5 的 12 個（C5.7 的 `spirits` 與 `temporaries`、C5.8 的 `fence` 與 `droneWeb`、C5.9 的 `summonPolicies` 與 `minionScaling` 在內）、C6 的 4 個、C6b 的 3 個（C6b.2 的 `combo`、C6b.3 的 `greed` 與 C6b.4 的 `afterimage`）、C7 的 7 個：C7.2 的 `playerDefences`、C7.5 的 `enemyCap`、C7.3 的 `enemyDefences`、C7.4a 的 `regenDasherTreasure`、C7.4b 的 `shooterSummoner`、C7.6 的 `affixes` 與 C7.7 的 `onion`；C7b 的 5 個：`bleedRings`、`contactHooks`、`bulletHooks/dodgeBlock`、`bulletHooks/reflect` 與 `shieldPool`，子彈掛鉤拆成兩個，因為反射在閃避之前轉回每一顆到角色的子彈，同一個 build 看不到閃避；E1 的 2 個：`areaSize` 與 `gigantism`，後者是熔岩彈與 swarm 兩局雜湊成一個（`GoldenC4Entry.also`，第二局接在第一局的結果之後進同一個雜湊）；E2 的 2 個：`highestHp`（◆鎖定：對生命最高的敵人暴擊率 +25%，加上一個帶 `targetIs` 的感電觸發）與 `poisonSlow`（神經毒：毒層過 5 層也過 100 層，減速的每一級與上限都出現）；E3 的 1 個：`spread`），每個在 seed 1 與 2 各跑 1,200 tick。雜湊是 sha256 的前 16 個十六進位數字，算的是每個 tick 原樣的事件（不投影到 M1 的欄位），再加上 `projectResult`、`damageBySource` 與不為 0 的計數器（依 `COUNTER_IDS` 順序）；每個案例跑兩次，兩次要相同。落地一個機制的 commit 附上它的 fixture 與當時的雜湊；之後的 commit 不動已記錄的雜湊，除非 commit message 寫明重記哪些、為什麼。到 fa8a663 為止重記過：C4.7 的 `burst` 事件重記了用到 explode 或 nova 的 `thorns`、`selector`、`freezeList`、`zones`；`zones` 另外在 C4.6c、C4.6d、C4.7b 依 Q4 重記；C5.R 調 swarm 的數字時重記了 `swarm`、`swarmRepeat`、`swarmTurret`。後加的計數器在之前的 fixture 都是 0，不會動到雜湊。
+- `src/sim/goldenC4.test.ts`（GOLDEN-C4，也跟著 `npm test` 跑）：C4、C5、C6b、C7、C7b、E1、E2、E3 的機制與 C6 角色局的 58 個 fixture（C4 的 21 個、C5 的 13 個（C5.7 的 `spirits` 與 `temporaries`、C5.8 的 `fence` 與 `droneWeb`、C5.9 的 `summonPolicies` 與 `minionScaling`、FL 的 `flightSlash` 在內）、C6 的 4 個、C6b 的 3 個（C6b.2 的 `combo`、C6b.3 的 `greed` 與 C6b.4 的 `afterimage`）、C7 的 7 個：C7.2 的 `playerDefences`、C7.5 的 `enemyCap`、C7.3 的 `enemyDefences`、C7.4a 的 `regenDasherTreasure`、C7.4b 的 `shooterSummoner`、C7.6 的 `affixes` 與 C7.7 的 `onion`；C7b 的 5 個：`bleedRings`、`contactHooks`、`bulletHooks/dodgeBlock`、`bulletHooks/reflect` 與 `shieldPool`，子彈掛鉤拆成兩個，因為反射在閃避之前轉回每一顆到角色的子彈，同一個 build 看不到閃避；E1 的 2 個：`areaSize` 與 `gigantism`，後者是熔岩彈與 swarm 兩局雜湊成一個（`GoldenC4Entry.also`，第二局接在第一局的結果之後進同一個雜湊）；E2 的 2 個：`highestHp`（◆鎖定：對生命最高的敵人暴擊率 +25%，加上一個帶 `targetIs` 的感電觸發）與 `poisonSlow`（神經毒：毒層過 5 層也過 100 層，減速的每一級與上限都出現）；E3 的 1 個：`spread`），每個在 seed 1 與 2 各跑 1,200 tick。雜湊是 sha256 的前 16 個十六進位數字，算的是每個 tick 原樣的事件（不投影到 M1 的欄位），再加上 `projectResult`、`damageBySource` 與不為 0 的計數器（依 `COUNTER_IDS` 順序）；每個案例跑兩次，兩次要相同。落地一個機制的 commit 附上它的 fixture 與當時的雜湊；之後的 commit 不動已記錄的雜湊，除非 commit message 寫明重記哪些、為什麼。到 fa8a663 為止重記過：C4.7 的 `burst` 事件重記了用到 explode 或 nova 的 `thorns`、`selector`、`freezeList`、`zones`；`zones` 另外在 C4.6c、C4.6d、C4.7b 依 Q4 重記；C5.R 調 swarm 的數字時重記了 `swarm`、`swarmRepeat`、`swarmTurret`。後加的計數器在之前的 fixture 都是 0，不會動到雜湊。
 - `npx tsx tools/balance/probe.ts --json <檔案>` 與 `tools/balance/probeDiff.ts <前> <後>`：比兩次平衡探針（各策略的前線 F@10/20/40/60、到第 20／30 波的分鐘在 ±5% 內，T1–T8 通過）。夜間檢查比的參考檔 `tools/balance/probe.baseline.json`（探針用預設參數寫出來的）跟著 `fingerprint.baseline.txt` 與 `bench.baseline.json` 一起進 git；`out/` 還是不進 git。
 - `npm run bench -- --scenario normal|hits|ailments|effects|poisonBoss|v3fire|enemies`：一般一局、擊中路徑、異常狀態壓力（瘟疫＋無盡烈焰，第 30 波）、效果佇列、Boss 身上約 500 層毒（和 5 層比，持續傷害每一步的成本要和層數無關，比值 < 1.3）、熔核的角色局（C6.6：GOLDEN-C4 的 `v3fire`，測試資料從第 12 波跑 20 秒，不看 `--start-wave`；不是壓力家族，沒有存活數區間，§4.8）、滿場的 v3 敵人（C7.6：`v3StressData` 配 `stressStats()`，從 `STRESS_START_WAVE` 跑 30 秒，每波八種敵人共 32 隻（13 三角、8 方塊、3 五邊形，盾兵、再生者、衝刺者各 2，射手、召喚者各 1）與一隻帶兩個詞綴的菁英，tick 301 起約 300–400 隻活著；也不是壓力家族，沒有存活數區間與閘門，只有 `--check` 記比值，中位數對 impl §6 的 50 ms 與工作量都只印出來）。
 - C4 加的場景（`--scenario` 也接受這些 id）都是**壓力家族**，C5 的 `stressBase` 也是（`hive` 不是，見 §4.6.7）：用壓力 fixture（`src/sim/testing.ts` 的 `stressData`、`stressStats`）從第 30 波跑 30 秒（3 次暖身、20 次計時），tick 300 起約 300 隻活著，不看 `--start-wave`。`--check` 另外要求 seed 1 那一局在 tick 301–1800 的平均存活數在 280–320（釘住工作量），並印出一行壓力報告：中位數、比值、一起計時的 `normal` 的中位數與工作量（存活數、峰值與計數器；`stress` 另有區域、熔岩彈與線段的工作量）。閘門欄的 CI 是下一點的 `--check`（比值與存活數區間）。
@@ -1011,9 +1132,19 @@ npm run balance -- --strategy crit-greedy --sessions 20 --minutes 60 --seed 1 --
 
 ## 14. CI 與發布
 
-- GitHub Actions：`format:check` → `lint` → `typecheck` → `test` → `fuzz:web`（天賦網的 fuzz，§12）→ `bench -- --check`（模擬的效能，§12）→ `checks -- --summary "$GITHUB_STEP_SUMMARY"`（§4 平衡檢查的 PR 子集，`report.md` 寫進這次執行的摘要，有未接受的 FAIL 就失敗，§12）→ `vite build`，build 結果存成 artifact。這條 PR 流程是 `.github/workflows/ci.yml`，C10.4 沒有動它。
+- GitHub Actions：`format:check` → `lint` → `typecheck` → `test` → `fuzz:web`（天賦網的 fuzz，§12）→ `bench -- --check`（模擬的效能，§12）→ `checks -- --summary "$GITHUB_STEP_SUMMARY"`（§4 平衡檢查的 PR 子集，`report.md` 寫進這次執行的摘要，有未接受的 FAIL 就失敗，§12）→ `vite build` → `npm run build:electron`（Steam 版的頁面與 Electron 殼，不需要 Electron 的執行檔，§11），`dist/` 存成 artifact，最後一步是「No Electron binary downloaded」（`test ! -e node_modules/electron/dist`）。這條 PR 流程是 `.github/workflows/ci.yml`，C10.4 沒有動它。
+- **CI 不下載 Electron**（C9/F1）：Electron 42 起，`npm ci` 不再在 postinstall 下載 Electron 的執行檔（約 120 MB），`ELECTRON_SKIP_BINARY_DOWNLOAD` 也不再有作用；第一次執行 `electron`、`install-electron`，或從 Node `require('electron')` 時才下載。所以 CI 的 `npm ci` 不下載；有測試或 build 步驟真的載入了 Electron 的話，`node_modules/electron/dist` 會出現，最後一步就失敗。`electron` 與 `steamworks.js` 是 exact devDependencies；`package.json` 的 `overrides.electron` 讓 Electron 依賴的 `@types/node` 用根目錄那一份（`node_modules` 裡只有一份，型別檢查不會看到兩份 Node 的全域型別），並把 `@electron-internal/extract-zip` 釘在 1.0.5。
+- **Steam 版的指令**（`package.json`；`"main": "dist-electron/main.cjs"`，所以 `electron .` 跑的是殼）：
+  - `npm run build:electron`：`vite build --mode steam`（`dist-steam/`），再 `vite build --config vite.electron.config.ts --mode main`（`dist-electron/main.cjs`，先清空資料夾）與 `--mode preload`（旁邊的 `preload.cjs`）。兩個都是給 Node 22 的單一 CommonJS 檔，`electron`、`steamworks.js` 與 Node 內建模組留成 `require()`。
+  - `npm run build:steam`：`npm run typecheck` 再 `npm run build:electron`。
+  - `npm run electron:install`：`install-electron`，下載 Electron 的執行檔；第一次 `npm run electron` 之前跑。
+  - `npm run electron`：`npm run build:electron` 再 `electron .`（App ID 480，沒開 Steam 也能玩）。
+  - `npm run steam:check`：同上，加上 `--steam-check`（§11.5）。
+  - `npm run smoke:electron`：`npm run build:electron` 再 `tsx tools/electron/smoke.ts`，只在 container 跑：`xvfb-run -a -s "-screen 0 1280x800x24" npm run smoke:electron`，截圖寫到 `out/electron-smoke/`。
+  - `npm run fps:steam`（C10）：`npm run build:electron` 再 `electron . --bc-replay=renderStress`（§10.4）。
+  - npm 透過 cmd.exe 或 sh 跑這些指令，所以裡面的 `&&` 在 Windows 也能用；在 PowerShell 裡手打要寫 `npm.cmd`（手冊 §2.1）。
 - **夜間檢查**（`.github/workflows/nightly.yml`，C10.4，§12）：`schedule` 的 cron 是 `'17 19 * * *'`（UTC，等於台北 03:17；台灣沒有日光節約，所以不用 `timezone:` 這個鍵），也可以在 Actions 頁手動執行（`workflow_dispatch` 的 `ref` 預設空字串、`set` 在 `nightly` 與 `weekly` 之間選）。三個 job：`plan`（10 分鐘）算計畫並輸出分片矩陣與 `weekly`（手動選 `weekly`，或排程當天台北是星期三時是每週集合）；`shard`（120 分鐘、`fail-fast: false`）每個分片一個 job，輸出存成 `nightly-<分片>` artifact（保留 7 天）；`report`（15 分鐘，`needs.plan.result == 'success'` 時就算分片失敗也跑）下載全部分片合併，報告寫進這次執行的摘要，`nightly-report` artifact 保留 90 天。有未接受的 FAIL 或缺分片就讓這次執行失敗，GitHub 才會寄信（收信的是提交 cron 那一行的帳號，也就是 B1 合併的 Hoshi；要換人收信就到 Actions → Nightly → Disable 再 Enable，之後寄給重新啟用的人）。`inputs.*`、`vars.*`、矩陣與 job 輸出（`needs.*.outputs`）的值只透過 `env:` 進到 `run:` 的腳本（公開 repo，不讓 dispatch 的輸入注入腳本）；`ref` 運算式只用在 checkout 的 `ref:` 與 `concurrency.group`，每個 job 都 checkout 同一個。`NIGHTLY_REF` 這個 repository variable 留著但不設（等於 main）：批次分支要跑夜間檢查，等 nightly.yml 進 main 之後用 `workflow_dispatch` 帶 `ref` 跑，在那之前在本機跑 `npm run nightly`。
 - 試玩版發布到 itch.io（免費，可以設成限制存取的頁面）：`.github/workflows/itch.yml`，推 `playtest-v*` tag（或在 Actions 頁手動執行）時跑 `npm run check`、`npm run build`、刪掉 source map，再用 butler 推到 `ITCH_TARGET` 的 `html5` channel，userversion 是 `tag+sha`。需要 repo secret `BUTLER_API_KEY`（itch API key，只放 GitHub，不貼在任何地方）。第一次上傳後要在 itch 編輯頁勾「This file will be played in the browser」。
 - 試玩版從 tag 之後只修 bug：修好的 commit 打下一個 tag（`playtest-v2`…），CI 自動上傳。
-- Steam 版在本機用 `npm run build:steam` 產出，用 SteamPipe 上傳（M3）。
+- Steam 版目前只從原始碼跑（`npm run electron`）：`npm run build:steam` 產出 `dist-steam/` 與 `dist-electron/`，還不是打包好的程式。打包（§11.8）與用 SteamPipe 上傳是 M3 的事；`itch.yml` 只發網頁版。
 - **角色批次 PR 的附件**（C10 設計 §3.1，L9）：PR 附 `npm run gif -- --character <c>` 的 GIF 與 MP4、手工融合的 `npm run gif -- --fusion <c>.<o>` 和 `npm run clips -- --all` 的片段牆（§10.5）。這個專案的 session 沒有 `gh`，GitHub 也沒有上傳媒體的 REST API，所以 gif.ts 與 clips.ts 只寫檔：批次的 session 把 GIF、MP4 與片段牆複製到 `/mnt/project-files/v3/media/<batch>/`，附在它的 thread 回覆裡；PR 留言（GitHub MCP）放 `report.md` 的內容，並寫出這些檔名。GIF 照 9.5 MB 的階梯縮，二進位檔不進 git。

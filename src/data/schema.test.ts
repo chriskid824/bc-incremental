@@ -478,6 +478,8 @@ describe('EffectSpecSchema', () => {
     { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5, toward: 'outward' },
     { kind: 'slashLine', length: 200, width: 30, damagePct: 1, toward: 'nearest', from: 'event' },
     { kind: 'slashLine', length: 250, width: 20, damagePct: 0.3, toward: 'along' },
+    // FL: along a drone's flight.
+    { kind: 'slashLine', length: 300, width: 24, damagePct: 1, toward: 'flight', from: 'target' },
     {
       kind: 'slashLine',
       length: 400,
@@ -616,10 +618,10 @@ describe('EffectSpecSchema', () => {
       'countStat on a chainBolt (C6b.1)',
       { kind: 'chainBolt', jumps: 2, damagePct: 0.5, countStat: 'barrageCount' },
     ],
-    ...(['flight', 'player'] as const).map((toward): [string, unknown] => [
-      `slashLine toward '${toward}'`,
-      { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5, toward },
-    ]),
+    [
+      "slashLine toward 'player'",
+      { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5, toward: 'player' },
+    ],
     ['slashLine without toward', { kind: 'slashLine', length: 300, width: 24, damagePct: 0.5 }],
     [
       'slashLine without length',

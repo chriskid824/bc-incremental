@@ -13,7 +13,9 @@
  * living target and impacts it again when its cooldown ends, until its sortie's impacts are
  * spent; then it flies home and docks again. A target that dies or is pushed out of the arena
  * is lost: the drone picks again when its clock allows, hovering where it is until then, and
- * flies home when a pick finds nothing.
+ * flies home when a pick finds nothing. Each dash tick that starts outside the target's body
+ * writes the drone's heading (DronePool.hx, hy: the target's center minus the drone), so it holds
+ * the way the drone last flew in, through the ticks it rides its target, until it docks (FL).
  *
  * Its attack frequency m = attackSpeed / BASE_ATTACK_SPEED × its emitter's cadence, read every
  * tick, multiplies its speed and divides its dock time and cooldown; at m ≤ 0, or NaN, the drone
@@ -21,10 +23,11 @@
  * their payload's stream: combat for impacts, effects for repeats. An impact of the signature's
  * drones (the swarm's, emitter 0) is one attack and one shot of the signature: counted
  * (steadyAim, nthAttack), its target its primary hit, whose chain follows, and the droneImpact
- * center event, then the repeats waiting for it. A granted drone's impact is an attack of its
- * own, not the signature's: no PRIMARY, no counted attack, no center event, no repeat. A repeat
- * of the swarm is an impact of no drone at the enemy farthest from the player (swarmRepeat), on
- * the repeat's payload.
+ * center event, whose value is the drone's heading as an angle (slashLine toward 'flight'), then
+ * the repeats waiting for it. A granted drone's impact is an attack of its own, not the
+ * signature's: no PRIMARY, no counted attack, no center event, no repeat. A repeat of the swarm
+ * is an impact of no drone at the enemy farthest from the player (swarmRepeat), on the repeat's
+ * payload.
  *
  * A turret stays in its seat and fires as the volley does, from the seat instead of the player
  * (turretStep): on its emitter's accumulator and interval, projectileCount homing shots of the
@@ -47,13 +50,13 @@
  * its target, at most once every PICK_TICKS: the enemy nearest to it (pickNearest) or the drones'
  * pick (pickOuter), by its aim. It dashes at once at what it found (from the next tick when the
  * pick follows a lost target) and hovers where it is while it finds nothing. It steps, arrives and
- * keeps its cooldown memory as a drone does, and its impact is a granted drone's at its own splash
- * and damagePct, followed by its ailment term on each enemy the impact listed that is still alive.
- * Every row first checks its time (DronePool.until, which a fixed row's never reaches): a timed row
- * leaves when its time is up, mid-dash too, or at once when its impacts are spent, and raises
- * droneExpire, with no target, at its position. The rows that left are dropped at the stage's end,
- * the others keeping their order. A spawn past the summon cap, fixed and timed rows together, or
- * past its effect's maxLive is refused and counted (summonCapped).
+ * keeps its cooldown memory as a drone does, with no heading, and its impact is a granted drone's
+ * at its own splash and damagePct, followed by its ailment term on each enemy the impact listed
+ * that is still alive. Every row first checks its time (DronePool.until, which a fixed row's never
+ * reaches): a timed row leaves when its time is up, mid-dash too, or at once when its impacts are
+ * spent, and raises droneExpire, with no target, at its position. The rows that left are dropped
+ * at the stage's end, the others keeping their order. A spawn past the summon cap, fixed and timed
+ * rows together, or past its effect's maxLive is refused and counted (summonCapped).
  *
  * The summon policies (C5.9) are BuildFlags that B1's rule modules set: 鎖定信標
  * (summonEliteFirst) runs pickOuter's and pickNearest's tiers over the elites and bosses first
@@ -68,7 +71,7 @@
  * target a slot keeps from an earlier tick is alive or reads dead.
  */
 
-import { mul, ZERO } from '../../core/num';
+import { mul, num, ZERO } from '../../core/num';
 import { APPLIED_AILMENTS } from '../../data/triggers';
 import type { AppliedAilment } from '../../data/triggers';
 import { DRONE_COOLDOWN_MAX, DRONE_MEMORY, PICK_TICKS, SMALL_PROJECTILE_TICKS } from '../caps';
@@ -77,7 +80,7 @@ import { hitWithPayload } from '../combat/hit';
 import { emitCenterEvent } from '../effects/centerEvents';
 import { fire } from '../effects/dispatch';
 import { applyStacks, drainRepeatCharges, durationOf } from '../effects/execute';
-import { PRIMARY } from '../effects/flags';
+import { PRIMARY, REPEAT } from '../effects/flags';
 import { EVENT } from '../effects/types';
 import { BASE_ATTACK_SPEED, nextShotSteady, SIGNATURE } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
@@ -185,7 +188,9 @@ function docked(
  * on it until the entry expires. Its sortie's last impact sends it home, or under 蟲海
  * (BuildFlags.dronesStay) refills its impacts, and the slot picks the next target as one that
  * lost its target does, at once when its clock allows and hovering until then, but keeps this
- * one for a pick that finds nothing (repick).
+ * one for a pick that finds nothing (repick). A tick that starts outside the target's body
+ * writes the heading (hx, hy), the target's center minus the slot, before the step or the snap;
+ * one that starts within it, riding the target or ramming it again, leaves it as it was (FL).
  */
 function dash(
   ctx: RunContext,
@@ -205,6 +210,11 @@ function dash(
   const dx = t.x - x;
   const dy = t.y - y;
   const dist = Math.sqrt(dx * dx + dy * dy);
+  // Flying in from outside its body, the arrival's snap included: the way it last flew in.
+  if (dist > t.radius) {
+    ds.hx[s] = dx;
+    ds.hy[s] = dy;
+  }
   const step = (ds.stepBase[em.index] as number) * m;
   if (dist - step <= t.radius) {
     ds.x[s] = t.x;
@@ -275,7 +285,8 @@ function engage(ds: DronePool, s: number, t: Enemy): void {
 
 /**
  * A slot flying home steps towards its dock; arriving, it docks there with its dock time to run
- * down and a full sortie, and no target.
+ * down and a full sortie, and no target or heading, so its next sortie's impacts never carry
+ * this one's.
  */
 function flyHome(ds: DronePool, s: number, em: EmitterRuntime, m: number): void {
   const x = ds.x[s] as number;
@@ -295,6 +306,8 @@ function flyHome(ds: DronePool, s: number, em: EmitterRuntime, m: number): void 
     ds.impactsLeft[s] = ds.impacts[i] as number;
     ds.target[s] = null;
     ds.targetId[s] = -1;
+    ds.hx[s] = 0;
+    ds.hy[s] = 0;
   } else {
     const k = step / dist;
     ds.x[s] = x + dx * k;
@@ -330,7 +343,8 @@ function spiritPick(ctx: RunContext, ds: DronePool, s: number, now: number): boo
  * A dashing spirit, as a drone's dash with its effect's step, splash and cooldown: a target that
  * died or was pushed out of the arena is lost (spiritLose); arriving, it snaps to the target's
  * center and impacts (spiritImpact) unless the target is in its cooldown memory. Its last impact
- * makes it leave at once ('spent'); a target its impact killed is lost.
+ * makes it leave at once ('spent'); a target its impact killed is lost. It writes no heading:
+ * its impacts raise no center event.
  */
 function spiritDash(ctx: RunContext, ds: DronePool, s: number, m: number, now: number): void {
   const t = ds.target[s] as Enemy;
@@ -655,8 +669,9 @@ function pickNearestTough(ctx: RunContext, s: number): Enemy | null {
  * attack's budget and, when `p` is the signature's (a repeat's too), the primary hit. Then come
  * the chain from the target when `p` chains, which passes over the enemies the impact hit; the
  * impact event; and the droneImpact center event at the target, without a list, which rule 8
- * raises for the signature's own impacts alone. The repeats waiting for a counted impact follow
- * it. `depth` and `origin` are the hits' trigger depth and origin (0 and −1 for a drone).
+ * raises for the signature's own impacts alone, its value the flight's angle (flightAngle). The
+ * repeats waiting for a counted impact follow it. `depth` and `origin` are the hits' trigger
+ * depth and origin (0 and −1 for a drone).
  */
 export function impactAt(
   ctx: RunContext,
@@ -723,10 +738,38 @@ function impact(
   });
   // No list, so a hook never reads an earlier event's; the radius goes only with a list.
   ctx.centerScratch.listCount = 0;
-  emitCenterEvent(ctx, DRONE_IMPACT, depth, origin, target, target.x, target.y, p.flags);
+  // emitCenterEvent's first tests, rule 8 and a listener, made here as raiseChainJump makes them,
+  // so an impact whose event is not raised computes no angle.
+  const flags = p.flags;
+  const center = ctx.centerEvents;
+  if (
+    (flags & (SIGNATURE | REPEAT)) === SIGNATURE &&
+    (center.listeners[DRONE_IMPACT] !== 0 || center.hooks !== 0)
+  ) {
+    const angle = num(flightAngle(ctx, s, target));
+    emitCenterEvent(ctx, DRONE_IMPACT, depth, origin, target, target.x, target.y, flags, angle);
+  }
   endAttack(ctx);
   if (counted !== null) drainRepeatCharges(ctx, counted);
   return n;
+}
+
+/**
+ * The droneImpact event's value at `target` (FL): drone slot s's heading as an angle,
+ * atan2(hy, hx), the way it last flew in; for a slot without one, or no slot (s = −1, a repeat's
+ * impact), the angle away from the player, as slashLine's 'outward' runs, 0 on the player.
+ * Only the swarm's own drones raise the event today, so the outward angle is a drone's that has
+ * not flown in from outside its target since it docked.
+ */
+function flightAngle(ctx: RunContext, s: number, target: Enemy): number {
+  if (s >= 0) {
+    const ds = ctx.sys.drones;
+    const hx = ds.hx[s] as number;
+    const hy = ds.hy[s] as number;
+    if (hx !== 0 || hy !== 0) return Math.atan2(hy, hx);
+  }
+  const player = ctx.player;
+  return Math.atan2(target.y - player.y, target.x - player.x);
 }
 
 /**
@@ -835,12 +878,12 @@ export function swarmRepeat(
 
 /**
  * Appends `count` timed rows (spirits) of spawnDrone effect `f` at (x, y) (K2, K4): each at slot
- * `count` with the next id, in id order, hovering with no target and a pick due at once, its
- * memory empty, its impacts its effect's, leaving `lifeTicks` ticks from now, and keeping `f`,
- * `depth` and `origin`. A row is refused while the pool holds its summon cap of live rows, fixed
- * and timed together, or `f` its maxLive, and each refused row adds 1 to summonCapped. Only a
- * build with a spawnDrone effect runs it (DronePool.specs). The rows first step in the next
- * tick's drone stage.
+ * `count` with the next id, in id order, hovering with no target or heading and a pick due at
+ * once, its memory empty, its impacts its effect's, leaving `lifeTicks` ticks from now, and
+ * keeping `f`, `depth` and `origin`. A row is refused while the pool holds its summon cap of live
+ * rows, fixed and timed together, or `f` its maxLive, and each refused row adds 1 to
+ * summonCapped. Only a build with a spawnDrone effect runs it (DronePool.specs). The rows first
+ * step in the next tick's drone stage.
  */
 export function spawnRows(
   ctx: RunContext,
@@ -890,6 +933,8 @@ export function spawnRows(
     ds.spec[s] = f;
     ds.depth[s] = depth;
     ds.origin[s] = origin;
+    ds.hx[s] = 0;
+    ds.hy[s] = 0;
   }
   live[f] = (live[f] as number) + placed;
   ctx.state.droneCount = ds.count;
@@ -967,4 +1012,6 @@ function moveRow(ds: DronePool, from: number, to: number): void {
   ds.spec[to] = ds.spec[from] as number;
   ds.depth[to] = ds.depth[from] as number;
   ds.origin[to] = ds.origin[from] as number;
+  ds.hx[to] = ds.hx[from] as number;
+  ds.hy[to] = ds.hy[from] as number;
 }
