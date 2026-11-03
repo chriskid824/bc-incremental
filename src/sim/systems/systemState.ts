@@ -27,7 +27,7 @@ import { MAX_SOURCES } from '../build/sources';
 import type { CompiledEffect } from '../effects/types';
 import type { EmitterRuntime, Payload, SegmentSpec } from '../emitters/types';
 import type { GridPoint, SpatialGrid } from '../grid';
-import { DRONE_DOCKED, DRONE_FIXED, DRONE_KIND_TURRET, DT, TICK_RATE } from '../types';
+import { DRONE_DOCKED, DRONE_FIXED, DRONE_GUARD, DRONE_KIND_TURRET, DT, TICK_RATE } from '../types';
 import type {
   BulletViewState,
   DroneViewState,
@@ -657,7 +657,7 @@ export interface DroneLayout {
   readonly kind: readonly number[];
   readonly owner: readonly number[];
   readonly seat: readonly number[];
-  /** Per row: its dock, where it starts. */
+  /** Per row: its dock, where it starts; a guard's orbit point of tick 0 (E5). */
   readonly x: readonly number[];
   readonly y: readonly number[];
   /** Per row: the tick of its first pick, 1 + (10 × seat) mod PICK_TICKS, so launches stagger. */
@@ -699,6 +699,45 @@ export interface DroneLayout {
    */
   readonly leader: number;
   readonly followMult: number;
+  /**
+   * 自爆協議 (SwarmParams.lastImpact, E5): the explosion's radius squared (sizeOf) and its hits'
+   * scale, its damagePct over the swarm payload's share of the damage stat (its emitter's
+   * damagePct); both 0 without it, and under 蟲海 (BuildFlags.dronesStay), whose sorties never
+   * end.
+   */
+  readonly lastImpactSq: number;
+  readonly lastImpactScale: number;
+  /**
+   * 攔截守衛 (SwarmParams.guards, E5): the guards are the rows guardFirst .. guardEnd − 1, the
+   * swarm's last drones, which orbit the player at guardRadius; both 0 without a guard.
+   */
+  readonly guardFirst: number;
+  readonly guardEnd: number;
+  readonly guardRadius: number;
+  /**
+   * Guard g's orbit angle at the fill, 2πg/G over the G guards placed, where its row's x and y
+   * are; one entry per guard, none without one (lead ruling K2-R1).
+   */
+  readonly guardAngle: readonly number[];
+  /**
+   * 蜂潮 (SwarmParams.surge, E5): ticks between two surges (periodTicks(1 / periodSec)) and the
+   * factor on a surging row's next impact; null without it.
+   */
+  readonly surge: { readonly period: number; readonly damageMult: number } | null;
+}
+
+/**
+ * 蜂潮's state in the drone pool (DronePool.surge, E5): DroneLayout's numbers, the tick the next
+ * surge is due on, and the last surge's target, which the rows it sent are marked for
+ * (DronePool.surging).
+ */
+export interface DroneSurge {
+  readonly period: number;
+  readonly damageMult: number;
+  /** The first surge is due a period into the run, each later one a period after the last. */
+  due: number;
+  /** Null before the first surge. */
+  target: Enemy | null;
 }
 
 /**
@@ -719,7 +758,11 @@ export interface DronePool extends DroneViewState {
   readonly rows: number;
   /** The id the next slot would take. */
   nextId: number;
-  /** Each slot's dock, or a turret's seat. */
+  /**
+   * Each slot's dock, or a turret's seat; a guard's orbit point, which the drone stage's start
+   * moves while the guard is on its orbit and leaves where the guard left it while it is away
+   * (E5, lead ruling K2-R1).
+   */
   readonly dockX: Float64Array;
   readonly dockY: Float64Array;
   /**
@@ -767,6 +810,11 @@ export interface DronePool extends DroneViewState {
    */
   readonly roleDamage: Float64Array;
   readonly roleSpeed: Float64Array;
+  /**
+   * 蜂潮 (E5): 1 while a swarm drone a surge sent still dashes at that surge's target, its next
+   * impact on it × DroneSurge.damageMult; 0 otherwise (at the fill, for every appended row).
+   */
+  readonly surging: Uint8Array;
   /** Slots marked as leaving in the current stage, dropped at its end (0 outside the stage). */
   left: number;
   /** DroneLayout.spawnSpecs, with its own `live` counts; null in a build without spawnDrone. */
@@ -802,6 +850,26 @@ export interface DronePool extends DroneViewState {
   readonly followMult: number;
   /** A turret firing's later picks: shootable, and not one of the firing's targets yet (C5.4). */
   readonly turretAccept: (enemy: Enemy) => boolean;
+  /** DroneLayout's 自爆協議 numbers (E5). */
+  readonly lastImpactSq: number;
+  readonly lastImpactScale: number;
+  /**
+   * The swarm's impacts read 自爆協議 or 蜂潮 (lastImpactScale above 0, or a surge): the one test
+   * an impact of a run without them pays (E5).
+   */
+  readonly impactRules: boolean;
+  /** DroneLayout's guard rows and radius (E5). */
+  readonly guardFirst: number;
+  readonly guardEnd: number;
+  readonly guardRadius: number;
+  /**
+   * Each guard's own orbit angle, guard s − guardFirst's, from DroneLayout's: the drone stage's
+   * start advances it while the guard is on its orbit (DRONE_GUARD) and keeps it while the guard
+   * is away (lead ruling K2-R1). Guards are fixed rows, which no spawn or move touches.
+   */
+  readonly guardAngle: Float64Array;
+  /** 蜂潮's clock and target; null without it (E5). */
+  readonly surge: DroneSurge | null;
 }
 
 /** DronePool.until of a fixed row: no tick reaches it. */
@@ -809,9 +877,11 @@ export const NEVER_LEAVES = 2147483647;
 
 /**
  * The pool of `layout`: every row placed, ids 1 .. rows in row order, each at its dock; drones
- * docked with no dock time left, a full sortie and no heading, turrets fixed; none leaves. Its
- * arrays hold the summon cap of slots in a build with a spawnDrone effect, the slots past the
- * placed rows empty until a spawn appends one, and exactly the placed rows otherwise.
+ * docked with no dock time left, a full sortie and no heading, guards orbiting (DRONE_GUARD) at
+ * the fill's angles and points likewise, turrets fixed; none leaves and none surges, the first
+ * surge due a period in (E5). Its arrays hold the summon cap of slots in a build with a
+ * spawnDrone effect, the slots past the placed rows empty until a spawn appends one, and exactly
+ * the placed rows otherwise.
  * `shootable` stands for RunContext.shootable, which the context is still being built for: the
  * pool keeps it for its turrets and does not call it here.
  */
@@ -837,7 +907,13 @@ export function createDronePool(
     kind: slots(Uint8Array, layout.kind),
     mode: slots(
       Uint8Array,
-      layout.kind.map((k) => (k === DRONE_KIND_TURRET ? DRONE_FIXED : DRONE_DOCKED)),
+      layout.kind.map((k, s) =>
+        k === DRONE_KIND_TURRET
+          ? DRONE_FIXED
+          : s >= layout.guardFirst && s < layout.guardEnd
+            ? DRONE_GUARD
+            : DRONE_DOCKED,
+      ),
     ),
     x: slots(Float64Array, layout.x),
     y: slots(Float64Array, layout.y),
@@ -870,6 +946,7 @@ export function createDronePool(
     roleDamage: slots(Float64Array, layout.roleDamage),
     roleSpeed: slots(Float64Array, layout.roleSpeed),
     size: slots(Float64Array, layout.size),
+    surging: new Uint8Array(cap),
     left: 0,
     specs: spawnSpecs === null ? null : { ...spawnSpecs, live: new Int32Array(spawnSpecs.live) },
     stepBase: Float64Array.from(layout.stepBase),
@@ -886,6 +963,15 @@ export function createDronePool(
     leader: layout.leader,
     followMult: layout.followMult,
     turretAccept: (enemy) => shootable(enemy) && !isPicked(pool, enemy),
+    lastImpactSq: layout.lastImpactSq,
+    lastImpactScale: layout.lastImpactScale,
+    impactRules: layout.lastImpactScale > 0 || layout.surge !== null,
+    guardFirst: layout.guardFirst,
+    guardEnd: layout.guardEnd,
+    guardRadius: layout.guardRadius,
+    guardAngle: Float64Array.from(layout.guardAngle),
+    surge:
+      layout.surge === null ? null : { ...layout.surge, due: layout.surge.period, target: null },
   };
   return pool;
 }

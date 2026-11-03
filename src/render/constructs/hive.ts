@@ -4,7 +4,8 @@
  * Attack: the docked drone nearest the target leaves the nest toward it, its dock shows a dashed
  * outline and its comb cell empties, so the middle hollows out as drones go; it docks again
  * after a sortie. With `simDrones` the run's drones (src/render/drones.ts) replace these: the
- * view draws the comb only, and its cells follow the share of them docked (setDocked).
+ * view draws the comb only, and its cells follow the share of them docked (setDocked); a guard on
+ * its orbit (攔截守衛) is drawn by the drone layer at its position and counts as out.
  */
 
 import { Container, Graphics } from 'pixi.js';

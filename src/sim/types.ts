@@ -221,13 +221,16 @@ export const DRONE_KIND_SPIRIT = 2;
 /**
  * DroneViewState.mode: a drone docked at its dock, dashing at its target, hovering where it lost
  * its target, or under 蟲海 where its spent sortie ended, until it may pick again, or flying home
- * to dock; a turret fixed in its seat. A spirit only dashes or hovers.
+ * to dock; a turret fixed in its seat; a guard (攔截守衛, E5) orbiting the player on its orbit
+ * point, its docked state, which it enters again where it left its orbit. A spirit only dashes or
+ * hovers.
  */
 export const DRONE_DOCKED = 0;
 export const DRONE_DASH = 1;
 export const DRONE_HOVER = 2;
 export const DRONE_RETURN = 3;
 export const DRONE_FIXED = 4;
+export const DRONE_GUARD = 5;
 
 /**
  * The drone pool (src/sim/systems/drones.ts) as render and tools read it: the summons of every
@@ -539,6 +542,17 @@ export type SimEvent =
       readonly x: number;
       readonly y: number;
       readonly cause: 'time' | 'spent';
+    }
+  /**
+   * 蜂潮 (SwarmParams.surge, E5): `count` swarm drones were sent at once at enemy `targetId` at
+   * (x, y), its center, the densest enemy, their next impact on it × the surge's damageMult.
+   */
+  | {
+      readonly type: 'droneSurge';
+      readonly x: number;
+      readonly y: number;
+      readonly targetId: number;
+      readonly count: number;
     }
   | {
       readonly type: 'enemyKilled';

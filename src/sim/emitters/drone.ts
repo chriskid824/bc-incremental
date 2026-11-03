@@ -6,21 +6,25 @@
  * src/sim/caps.ts); the rows past it are refused and counted. Drone k of an emitter's D docks at
  * angle 2πk/D around the player, at the dock radius, and picks first on tick 1 + (10k mod
  * PICK_TICKS), so the launches stagger. Turret j of its T sits in a seat at the turret radius
- * (DRONE_DEFAULTS', or the swarm's SwarmParams.turretRadius: 前哨, E4), at angle π/D + 2πj/T,
- * between the drones, or 2πj/T when the emitter has no drone; a turret never picks, so its row's
- * first pick, by the same rule from j, is never read. An emitter's turrets fire its turret
- * payload (turretPayload, src/sim/emitters/types.ts). An emitter's drones are counted here, once
- * for the run: × 蟲海's droneCountMult, then through countOf (halved under 巨大化); its turrets
- * are neither. Its splash is sized (sizeOf) and its drones' step takes the droneSpeed stat, read
- * once as max(0, droneSpeed), as every timed row's does; their dock time and cooldown do not.
- * The turret shots' 加農砲 splash (sizeOf) and 特斯拉塔 jumps (countOf) are read here too, once
- * for every turret of the run (C5.9). The swarm's roles (E4, SwarmParams.roles) go to its counted
- * drones by dock index, a role's slot past them to none: each such row's damage and speed
- * factors, its size (SwarmParams.sizeMult × the role's) and the leader (蜂后); every other row's
- * factors and size are 1. A build with a spawnDrone effect also gets the tables of its timed rows
- * (C5.7, spawnSpecs), which the effects append at run time, their lives × summonDuration (E4).
- * Every row starts with no heading (hx, hy 0), which only a drone's dash writes (FL). Draws
- * nothing.
+ * (DRONE_DEFAULTS', or the swarm's SwarmParams.turretRadius: 前哨, E4), at angle π/D + 2πj/T, between
+ * the drones, or 2πj/T when the emitter has no drone; a turret never picks, so its row's first
+ * pick, by the same rule from j, is never read. An emitter's turrets fire its turret payload
+ * (turretPayload, src/sim/emitters/types.ts). An emitter's drones are counted here, once for the
+ * run: × 蟲海's droneCountMult, then through countOf (halved under 巨大化); its turrets are neither. Its
+ * splash is sized (sizeOf) and its drones' step takes the droneSpeed stat, read once as max(0,
+ * droneSpeed), as every timed row's does; their dock time and cooldown do not. The turret shots'
+ * 加農砲 splash (sizeOf) and 特斯拉塔 jumps (countOf) are read here too, once for every turret of the run
+ * (C5.9). The swarm's roles (E4, SwarmParams.roles) go to its counted drones by dock index, a
+ * role's slot past them to none: each such row's damage and speed factors, its size
+ * (SwarmParams.sizeMult × the role's) and the leader (蜂后); every other row's factors and size are
+ * 1. A build with a spawnDrone effect also gets the tables of its timed rows (C5.7, spawnSpecs),
+ * which the effects append at run time, their lives × summonDuration (E4). Every row starts with no
+ * heading (hx, hy 0), which only a drone's dash writes (FL). The swarm's E5 parts are read here
+ * once too: 自爆協議's explosion, sized, and its hit scale (lastImpact); 攔截守衛's guards, its last
+ * `count` drones by dock index, guard g of the G placed at angle 2πg/G on the guards' ring instead
+ * of at a dock, that angle its own orbit angle's start (DroneLayout.guardAngle, lead ruling K2-R1),
+ * each with its dock index's role and size as any drone (E4), the other drones and the turrets
+ * keeping theirs (guards); and 蜂潮's period and factor (surge). Draws nothing.
  */
 
 import type { Rng } from '../../core/rng';
@@ -38,7 +42,7 @@ import {
   DRONE_KIND_TURRET,
   TICK_RATE,
 } from '../types';
-import { turretPayload } from './types';
+import { periodTicks, turretPayload } from './types';
 import type { EmitterRuntime, Payload } from './types';
 
 /** The player's position, which the docks are around (createRunContext). */
@@ -85,6 +89,14 @@ export function droneLayout(
   const countMult = build.flags.droneCountMult;
   const speed = Math.max(0, build.values.droneSpeed);
   let refused = 0;
+  // The swarm's E5 parts (SwarmParams.lastImpact, guards, surge); none without the swarm.
+  let lastImpactSq = 0;
+  let lastImpactScale = 0;
+  let guardFirst = 0;
+  let guardEnd = 0;
+  let guardRadius = 0;
+  const guardAngle: number[] = [];
+  let surge: DroneLayout['surge'] = null;
   /**
    * Emitter `i`'s row of `rowKind`, seat `at`, at `angle` and `radius` around the player, with
    * its role's factors and its size (1 without a role); its row, or −1 when it is refused.
@@ -127,16 +139,37 @@ export function droneLayout(
     // neither touches the turrets.
     const drones = countOf(build, (swarm === null ? spec.drones : swarm.drones) * countMult);
     const turrets = swarm === null ? spec.turrets : swarm.turrets;
+    // 攔截守衛: the dock indices from `first` on are guards, all of them when count ≥ drones;
+    // the G of them the cap lets in share the ring, by dock index.
+    const guards = swarm === null ? null : swarm.guards;
+    const first = guards === null ? drones : Math.max(0, drones - guards.count);
+    const ring = guards === null ? 0 : guards.radius;
+    const start = kind.length;
+    const placed = Math.max(0, Math.min(drones, summonCap - start) - first);
     for (let k = 0; k < drones; k++) {
-      // The swarm's drone of dock index k takes the role of slot k (E4), and its size.
+      // The swarm's drone of dock index k takes the role of slot k (E4), and its size, a guard
+      // (攔截守衛, E5) too.
       const role = swarm === null ? null : (swarm.roles.find((r) => r.slot === k) ?? null);
-      const angle = (2 * Math.PI * k) / drones;
       const sizeMult = swarm === null ? 1 : swarm.sizeMult;
-      const row = place(DRONE_KIND_DRONE, i, k, angle, DRONE_DEFAULTS.dockRadius, role, sizeMult);
+      let row: number;
+      if (k < first) {
+        const angle = (2 * Math.PI * k) / drones;
+        row = place(DRONE_KIND_DRONE, i, k, angle, DRONE_DEFAULTS.dockRadius, role, sizeMult);
+      } else {
+        // A guard's angle is its orbit angle's start, for the G the cap lets in.
+        const angle = (2 * Math.PI * (k - first)) / placed;
+        if (k - first < placed) guardAngle.push(angle);
+        row = place(DRONE_KIND_DRONE, i, k, angle, ring, role, sizeMult);
+      }
       if (role !== null && role.followBonus > 0 && row >= 0) {
         leader = row;
         followMult = 1 + role.followBonus;
       }
+    }
+    if (placed > 0) {
+      guardFirst = start + first;
+      guardEnd = guardFirst + placed;
+      guardRadius = ring;
     }
     // Between the drones; evenly from angle 0 without one, where π/D would be Infinity.
     const between = drones >= 1 ? Math.PI / drones : 0;
@@ -152,6 +185,21 @@ export function droneLayout(
     splashSq[i] = splash * splash;
     const share = swarm === null ? spec.turretDamagePct : swarm.turretDamagePct;
     turretPayloads[i] = turretPayload(build, spec, share, rng, i === 0 ? policy : null);
+    if (swarm === null) continue;
+    // 自爆協議: its damagePct of the damage stat where an impact deals the payload's share, the
+    // emitter's damagePct (emitterPayload's baseDamage); none under 蟲海, whose sorties never end.
+    const blast = swarm.lastImpact;
+    if (blast !== null && !build.flags.dronesStay) {
+      const radius = sizeOf(build, blast.radius);
+      lastImpactSq = radius * radius;
+      lastImpactScale = blast.damagePct / spec.damagePct;
+    }
+    if (swarm.surge !== null) {
+      surge = {
+        period: periodTicks(1 / swarm.surge.periodSec),
+        damageMult: swarm.surge.damageMult,
+      };
+    }
   }
   const turretSplash = sizeOf(build, build.flags.turretSplash);
   return {
@@ -180,6 +228,13 @@ export function droneLayout(
     size: rowSize,
     leader,
     followMult,
+    lastImpactSq,
+    lastImpactScale,
+    guardFirst,
+    guardEnd,
+    guardRadius,
+    guardAngle,
+    surge,
   };
 }
 
