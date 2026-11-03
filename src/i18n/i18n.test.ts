@@ -89,6 +89,8 @@ describe('messages', () => {
         'summoner',
         'treasure',
         'onion',
+        'brood',
+        'prism',
       ]);
       expect(BANNER_KEYS).toEqual(
         Object.fromEntries(fresh.map((enemy) => [enemy, `banner.enemy.${enemy}`])),

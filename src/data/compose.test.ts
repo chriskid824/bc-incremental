@@ -140,20 +140,36 @@ describe('composeWave: v3 waves (docs/v3 C7 design §1.2)', () => {
   });
 
   it('ends a boss wave with the rotation’s boss', () => {
-    for (const wave of [10, 20, 100]) {
+    for (const [wave, boss] of [
+      [10, 'onion'],
+      [20, 'brood'],
+      [30, 'prism'],
+      [100, 'onion'],
+    ] as const) {
       const entries = composeWave(wave, V3_WAVES);
-      expect(entries.at(-1)).toEqual({ enemy: 'onion', count: 1 });
+      expect(entries.at(-1), String(wave)).toEqual({ enemy: boss, count: 1 });
       expect(countOf(entries, 'hexagon')).toBe(0);
     }
   });
 });
 
 describe('bossOf', () => {
-  it('names M1’s boss on M1 boss waves and the onion on v3 ones', () => {
-    for (const wave of [10, 20, 30]) {
-      expect(bossOf(wave, WAVES)).toBe('boss');
-      expect(bossOf(wave, V3_WAVES)).toBe('onion');
-    }
+  it('names M1’s boss on M1 boss waves and game-design-v3 §6.3’s on v3 ones: the onion at 10, 40, 70, 母巢 at 20, 50, 80, 稜鏡 at 30, 60, 90', () => {
+    const waves = [10, 20, 30, 40, 50, 60, 70, 80, 90];
+    for (const wave of waves) expect(bossOf(wave, WAVES)).toBe('boss');
+    expect(waves.map((wave) => bossOf(wave, V3_WAVES))).toEqual([
+      'onion',
+      'brood',
+      'prism',
+      'onion',
+      'brood',
+      'prism',
+      'onion',
+      'brood',
+      'prism',
+    ]);
+    // Wave 100 takes the rotation's turn until 奇點 (B5) has its own boss.
+    expect(bossOf(100, V3_WAVES)).toBe('onion');
   });
 
   it('takes the rotation in turn from the first boss wave', () => {
@@ -204,6 +220,8 @@ describe('reachableEnemies', () => {
       'summoner',
       'treasure',
       'onion',
+      'brood',
+      'prism',
     ]);
   });
 
@@ -225,6 +243,8 @@ describe('reachableEnemies', () => {
       waves: {
         ...V3_WAVES,
         rules: [{ enemy: 'summoner', fromWave: 1, base: 1, perWave: 0, maxCount: 1 }],
+        // The onion alone: 母巢's triangles would be reached too.
+        v3: { ...V3_WAVES.v3, bossRotation: ['onion'] },
       },
       talents: TALENTS,
     };

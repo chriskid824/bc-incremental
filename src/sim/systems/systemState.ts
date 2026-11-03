@@ -888,6 +888,11 @@ export interface EnemyAiState {
   readonly dashRepel: number;
   readonly holdTicks: number;
   readonly poolTicks: number;
+  /**
+   * The hits 稜鏡 reflected onto the player and their damage, by the reflecting enemy's type,
+   * every type present (src/sim/systems/prism.ts; RunResult.reflectTakenBy is a copy).
+   */
+  readonly reflectTakenBy: Record<EnemyId, { hits: number; damage: number }>;
 }
 
 /** round(sec × TICK_RATE) ticks for `sec` above 0, else −1: a C7b hook that is off. */
@@ -897,7 +902,8 @@ const hookTicks = (sec: number): number => (sec > 0 ? Math.round(sec * TICK_RATE
  * The state of a run that is a v3 run when `enabled`, holding at most `cap` enemies alive, whose
  * enemies read enemyRegen on row `regenRow` and drop × `toughDropMult` when tough, whose
  * treasures come at `treasureRate` × the schedule's rate, and whose build's 拒馬, 荊棘纏繞 and
- * 集火 are `dashRepel`, `bossHoldSec` and `shieldPoolSec` (values').
+ * 集火 are `dashRepel`, `bossHoldSec` and `shieldPoolSec` (values'), with a reflect tally for
+ * each type of `ids` (ENEMY_IDS, passed in).
  */
 export function createEnemyAiState(
   enabled: boolean,
@@ -908,7 +914,10 @@ export function createEnemyAiState(
   dashRepel: number,
   bossHoldSec: number,
   shieldPoolSec: number,
+  ids: readonly EnemyId[] = [],
 ): EnemyAiState {
+  const reflectTakenBy = {} as Record<EnemyId, { hits: number; damage: number }>;
+  for (const id of ids) reflectTakenBy[id] = { hits: 0, damage: 0 };
   return {
     enabled,
     cap,
@@ -921,6 +930,7 @@ export function createEnemyAiState(
     dashRepel,
     holdTicks: hookTicks(bossHoldSec),
     poolTicks: hookTicks(shieldPoolSec),
+    reflectTakenBy,
   };
 }
 

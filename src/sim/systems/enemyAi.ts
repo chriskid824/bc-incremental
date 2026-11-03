@@ -20,7 +20,12 @@
  *   and stands there (STOPPED), and every periodSec of unfrozen time from one period after it
  *   first got there, the shooter fires a bullet at the player (src/sim/systems/bullets.ts) and
  *   the summoner summons its children around itself (summon); pushed out past STOP_SLACK, it
- *   walks back in, its timer counting on, and acts on arrival if due.
+ *   walks back in, its timer counting on, and acts on arrival if due. 母巢 (a summon with
+ *   keepWalking) never stands: its timer is armed a period ahead once it is at its stopDist or
+ *   closer, and it summons every period from then on as it walks in (stepWalkingSummoner);
+ * - 稜鏡 (its reflect behaviour, src/sim/systems/prism.ts): every periodSec of unfrozen time from
+ *   its first step it reflects (REFLECTING) for activeSec of unfrozen time, walking in all along
+ *   (stepReflect); a frozen prism that is reflecting stays so until its window's end, pushed back.
  * A boss that 荊棘纏繞 holds at the player (ENTANGLED, src/sim/systems/contact.ts) joined the list
  * at its touch; the step runs its hold (stepHold) in place of its behaviour, and its frozen ticks
  * push the hold's end back as they push every timer here.
@@ -54,6 +59,7 @@ import type { Enemy, RunContext } from './context';
 import { removeEnemy } from './death';
 import {
   AI_DASH,
+  AI_REFLECT,
   AI_SHOOT,
   AI_SUMMON,
   AI_TREASURE,
@@ -64,13 +70,22 @@ import {
   FLEEING,
   ORBITING,
   orbitTurn,
+  REFLECTING,
   STOPPED,
 } from './enemyRecord';
 import type { EnemyV3 } from './enemyRecord';
 import { spawnOrSkip } from './spawn';
 import type { EnemyAiState } from './systemState';
 
-export { CHARGING, DASHING, ENTANGLED, FLEEING, ORBITING, STOPPED } from './enemyRecord';
+export {
+  CHARGING,
+  DASHING,
+  ENTANGLED,
+  FLEEING,
+  ORBITING,
+  REFLECTING,
+  STOPPED,
+} from './enemyRecord';
 
 /**
  * How far past its post a standing enemy may be pushed before it walks back: an orbiting
@@ -86,6 +101,7 @@ const ENEMY_REGEN = SCOPED_INDEX.enemyRegen;
 const TAU = Math.PI * 2;
 
 type DashBehaviour = Extract<EnemyBehaviour, { readonly kind: 'dash' }>;
+type ReflectBehaviour = Extract<EnemyBehaviour, { readonly kind: 'reflect' }>;
 type ShootBehaviour = Extract<EnemyBehaviour, { readonly kind: 'shoot' }>;
 type SummonBehaviour = Extract<EnemyBehaviour, { readonly kind: 'summon' }>;
 type TreasureBehaviour = Extract<EnemyBehaviour, { readonly kind: 'treasure' }>;
@@ -138,11 +154,18 @@ export function stepEnemyAi(ctx: RunContext): void {
         stepDasher(ctx, ai, enemy, v, now);
         break;
       case AI_SHOOT:
-      case AI_SUMMON:
         stepPost(ctx, enemy, v, now);
+        break;
+      case AI_SUMMON:
+        if ((enemy.def.behaviour as SummonBehaviour).keepWalking === true) {
+          stepWalkingSummoner(ctx, enemy, v, now);
+        } else stepPost(ctx, enemy, v, now);
         break;
       case AI_TREASURE:
         stepTreasure(ctx, enemy, v, now);
+        break;
+      case AI_REFLECT:
+        stepReflect(ctx, enemy, v, now);
         break;
     }
   }
@@ -241,6 +264,49 @@ function stepPost(ctx: RunContext, enemy: Enemy, v: EnemyV3, now: number): void 
   const period = periodTicks(1 / behaviour.periodSec);
   v.nextAct += period;
   if (v.nextAct <= now) v.nextAct = now + period;
+}
+
+/**
+ * 母巢, a summoner that keeps walking (keepWalking): it never stands or leaves its walk step. At
+ * its stopDist or closer its timer is armed, a period ahead, once; from then on it summons once
+ * whenever the timer is due, wherever it is, a push included, and the timer moves a period on as
+ * stepPost's does.
+ */
+function stepWalkingSummoner(ctx: RunContext, enemy: Enemy, v: EnemyV3, now: number): void {
+  const behaviour = enemy.def.behaviour as SummonBehaviour;
+  const period = periodTicks(1 / behaviour.periodSec);
+  if (v.nextAct === Infinity) {
+    if (enemy.dist > behaviour.stopDist) return;
+    v.nextAct = now + period;
+  }
+  if (now < v.nextAct) return;
+  summon(ctx, enemy);
+  v.nextAct += period;
+  if (v.nextAct <= now) v.nextAct = now + period;
+}
+
+/**
+ * 稜鏡's windows: its timer armed a period ahead on its first step; once due it reflects
+ * (REFLECTING, its budget's second starting now) until stateUntil, activeSec later, and the
+ * timer moves a period on. The window ends before a new one may start, so activeSec below
+ * periodSec (src/data/validate.ts) leaves a gap between windows. It walks in throughout.
+ */
+function stepReflect(ctx: RunContext, enemy: Enemy, v: EnemyV3, now: number): void {
+  const behaviour = enemy.def.behaviour as ReflectBehaviour;
+  const period = periodTicks(1 / behaviour.periodSec);
+  if (v.nextAct === Infinity) v.nextAct = now + period;
+  if ((v.state & REFLECTING) !== 0 && now >= v.stateUntil) {
+    v.state &= ~REFLECTING;
+    ctx.events.push({ type: 'reflectEnded', enemyId: enemy.id });
+  }
+  if (now < v.nextAct) return;
+  v.state |= REFLECTING;
+  v.stateUntil = now + Math.round(behaviour.activeSec * TICK_RATE);
+  v.reflectSecStart = now;
+  v.reflectSecSum = 0;
+  v.nextAct += period;
+  if (v.nextAct <= now) v.nextAct = now + period;
+  ctx.events.push({ type: 'reflectStarted', enemyId: enemy.id });
 }
 
 /**

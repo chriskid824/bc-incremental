@@ -10,8 +10,8 @@ import type { RuleSpec } from './rules';
 import type { ConversionSpec, TriggerSpec } from './triggers';
 
 /**
- * M1's six types, then v3's (docs/v3 C7 design §1.2): ROW_ENEMIES' six spellings and the onion,
- * the v3 boss. Appended, so M1's order (mainThreat's ties, RunResult.damageTakenBy) stays.
+ * M1's six types, then v3's (docs/v3 C7 design §1.2): ROW_ENEMIES' six spellings, then the v3
+ * bosses, the onion, 母巢 (brood) and 稜鏡 (prism). Appended, so M1's order (mainThreat's ties, RunResult.damageTakenBy) stays.
  */
 export const ENEMY_IDS = [
   'triangle',
@@ -27,6 +27,8 @@ export const ENEMY_IDS = [
   'summoner',
   'treasure',
   'onion',
+  'brood',
+  'prism',
 ] as const;
 /** `shard` is the small triangle a pentagon splits into; `boss` is M1's octagon. */
 export type EnemyId = (typeof ENEMY_IDS)[number];
@@ -43,7 +45,9 @@ export type EnemyShape =
   | 'trapezoid'
   | 'ring'
   | 'diamond'
-  | 'onion';
+  | 'onion'
+  | 'brood'
+  | 'prism';
 
 /**
  * What a v3 type does beyond walking in (docs/v3 C7 design §1.2). Data only: each kind's numbers
@@ -70,13 +74,17 @@ export type EnemyBehaviour =
       readonly bulletSpeed: number;
       readonly bulletDamage: number;
     }
-  /** Stops at stopDist and spawns `count` of `enemy` around itself every periodSec (召喚者). */
+  /**
+   * Stops at stopDist and spawns `count` of `enemy` around itself every periodSec (召喚者). With
+   * `keepWalking` (母巢) it never stops: it starts its timer at stopDist and summons as it walks on.
+   */
   | {
       readonly kind: 'summon';
       readonly stopDist: number;
       readonly periodSec: number;
       readonly enemy: EnemyId;
       readonly count: number;
+      readonly keepWalking?: boolean;
     }
   /** Circles at orbitDist for orbitSec, then flees at fleeMult × its speed (寶藏怪). */
   | {
@@ -90,6 +98,18 @@ export type EnemyBehaviour =
       readonly kind: 'layers';
       readonly layers: number;
       readonly burst: { readonly enemy: EnemyId; readonly count: number };
+    }
+  /**
+   * Every periodSec it reflects for activeSec (稜鏡): each hit it takes meanwhile deals the player
+   * lifePctPerHit of the player's max life, at most maxLifePctPerSec of it in any second of a
+   * window; ailment ticks are never reflected.
+   */
+  | {
+      readonly kind: 'reflect';
+      readonly periodSec: number;
+      readonly activeSec: number;
+      readonly lifePctPerHit: number;
+      readonly maxLifePctPerSec: number;
     };
 
 export interface EnemyDef {

@@ -748,6 +748,37 @@ describe('validateGameData: v3 enemies and waves (docs/v3 C7 design §1.2)', () 
     ).toEqual(['enemies.shielder: behaviour.blockBelowPct must be in (0, 1) (got 0)']);
   });
 
+  it('rejects a reflect window that is not shorter than its period, and shares of life outside (0, 1]', () => {
+    const issues = v3IssuesAfter((d) => {
+      d.enemies.prism.behaviour = {
+        kind: 'reflect',
+        periodSec: 2,
+        activeSec: 2,
+        lifePctPerHit: 0,
+        maxLifePctPerSec: 1.5,
+      };
+    });
+    expect(issues).toEqual([
+      'enemies.prism: behaviour.activeSec must be below periodSec (got 2 of 2)',
+      'enemies.prism: behaviour.lifePctPerHit must be in (0, 1] (got 0)',
+      'enemies.prism: behaviour.maxLifePctPerSec must be in (0, 1] (got 1.5)',
+    ]);
+    expect(
+      v3IssuesAfter((d) => {
+        d.enemies.prism.behaviour = {
+          kind: 'reflect',
+          periodSec: 0,
+          activeSec: -1,
+          lifePctPerHit: 1,
+          maxLifePctPerSec: 1,
+        };
+      }),
+    ).toEqual([
+      'enemies.prism: behaviour.periodSec must be > 0 (got 0)',
+      'enemies.prism: behaviour.activeSec must be > 0 (got -1)',
+    ]);
+  });
+
   it('rejects summons and bursts of a tough, boss, behaving or unknown type, so that spawns never recurse', () => {
     const issues = v3IssuesAfter((d) => {
       Reflect.deleteProperty(d.enemies, 'shard');

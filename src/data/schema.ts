@@ -88,6 +88,8 @@ export const ENEMY_SHAPES = [
   'ring',
   'diamond',
   'onion',
+  'brood',
+  'prism',
 ] as const satisfies EnemyShape[];
 export const TALENT_KINDS = [
   'start',
@@ -675,6 +677,7 @@ export const EnemyBehaviourSchema = exact<EnemyBehaviour>()(
         periodSec: finite,
         enemy: z.enum(ENEMY_IDS),
         count: finite,
+        keepWalking: z.boolean().exactOptional(),
       })
       .readonly(),
     z
@@ -690,6 +693,15 @@ export const EnemyBehaviourSchema = exact<EnemyBehaviour>()(
         kind: z.literal('layers'),
         layers: finite,
         burst: z.strictObject({ enemy: z.enum(ENEMY_IDS), count: finite }).readonly(),
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal('reflect'),
+        periodSec: finite,
+        activeSec: finite,
+        lifePctPerHit: finite,
+        maxLifePctPerSec: finite,
       })
       .readonly(),
   ]),

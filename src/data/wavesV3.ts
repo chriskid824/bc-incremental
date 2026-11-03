@@ -22,8 +22,12 @@ export const V3_WAVES = {
   v3: {
     /** game-design-v3 §6.1's 400 at once. */
     enemyCap: 400,
-    /** The onion alone until 母巢 and 稜鏡 join it (game-design-v3 §6.3). */
-    bossRotation: ['onion'],
+    /**
+     * game-design-v3 §6.3: with bossEvery 10, the onion at 10, 40, 70, 母巢 at 20, 50, 80 and 稜鏡
+     * at 30, 60, 90 (bossOf, src/data/compose.ts). Wave 100 takes the rotation's onion until 奇點
+     * (B5) has its own boss.
+     */
+    bossRotation: ['onion', 'brood', 'prism'],
     /** game-design-v3 §6.2: one affix from wave 5, two from 25, three from 60. */
     affixes: [
       { fromWave: 5, count: 1 },

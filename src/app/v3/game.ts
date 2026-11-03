@@ -374,6 +374,8 @@ export class GamePage {
       bulletTakenBy: result.bulletTakenBy,
       killedBy: result.killedBy,
       killedByBullet: finished.killedByBullet,
+      reflectTakenBy: result.reflectTakenBy,
+      killedByReflect: finished.killedByReflect,
       kills: result.kills,
       averageDps: seconds > 0 ? div(totalDamage(result), seconds) : ZERO,
       shardsFromRun: settlement.shardsFromRun,

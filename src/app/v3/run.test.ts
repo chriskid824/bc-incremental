@@ -50,6 +50,9 @@ describe('CharacterRunState', () => {
     expect(finished.killedByBullet).toBe(
       finished.result.endReason === 'death' && run.fatalBlow === 'bullet',
     );
+    expect(finished.killedByReflect).toBe(
+      finished.result.endReason === 'death' && run.fatalBlow === 'reflect',
+    );
     if (finished.result.endReason === 'death') expect(run.fatalBlow).not.toBeNull();
   }, 30_000);
 });

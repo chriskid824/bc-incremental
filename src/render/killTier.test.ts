@@ -30,6 +30,8 @@ const TIERS: Readonly<Record<EnemyId, number>> = {
   summoner: TIER_NORMAL,
   treasure: TIER_NORMAL,
   onion: TIER_BOSS,
+  brood: TIER_BOSS,
+  prism: TIER_BOSS,
 };
 
 describe('killTier (C7.1’s hand-off, the lead’s ruling P4)', () => {

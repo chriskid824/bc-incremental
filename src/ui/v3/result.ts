@@ -90,6 +90,9 @@ export class V3ResultPanel {
     if (text.bullets !== null) {
       cause.append(el(doc, 'div', 'bc-result-cause-leaks bc-game-result-bullets', text.bullets));
     }
+    if (text.reflected !== null) {
+      cause.append(el(doc, 'div', 'bc-result-cause-leaks bc-game-result-bullets', text.reflected));
+    }
 
     const rows = el(doc, 'dl', 'bc-result-rows');
     const row = (label: string, value: string): void => {

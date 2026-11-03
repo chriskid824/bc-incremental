@@ -533,6 +533,8 @@ describe('damage taken', () => {
       summoner: { hits: 0, damage: 0 },
       treasure: { hits: 0, damage: 0 },
       onion: { hits: 0, damage: 0 },
+      brood: { hits: 0, damage: 0 },
+      prism: { hits: 0, damage: 0 },
     });
     expect(eventsOf(ticks, 'playerHit').map((hit) => hit.damage)).toEqual([8, 8, 15]);
   });

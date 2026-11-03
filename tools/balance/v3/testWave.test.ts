@@ -58,8 +58,9 @@ describe('test wave data', () => {
     expect(data.waves.rules).toEqual([]);
     expect(data.waves.bossEvery).toBe(base.waves.bossEvery);
     expect(ENEMY_ROW_WAVE % base.waves.bossEvery).toBe(0);
-    expect(bossOf(ENEMY_ROW_WAVE, base.waves)).toBe('onion');
-    expect(composeWave(ENEMY_ROW_WAVE, data.waves)).toEqual([{ enemy: 'onion', count: 1 }]);
+    // Wave 20's boss is 母巢 (game-design-v3 §6.3).
+    expect(bossOf(ENEMY_ROW_WAVE, base.waves)).toBe('brood');
+    expect(composeWave(ENEMY_ROW_WAVE, data.waves)).toEqual([{ enemy: 'brood', count: 1 }]);
     expect(data.waves.eliteEvery).toBe(1000);
     expect(data.waves.v3?.affixes).toEqual([]);
     expect(data.waves.v3?.treasure.fromWave).toBe(999);
@@ -218,8 +219,11 @@ describe('test wave runs', () => {
       rowSeed('boss', 0),
       (enemy) => spawned.push(enemy.type),
     );
-    expect(spawned).toEqual(['onion']);
-    // At auditStart the onion reaches the player: its hit and damage are the Boss column's.
+    // 母巢 and the triangles it hatches on its way in, which count in the triangle column.
+    expect(spawned[0]).toBe('brood');
+    expect(spawned.length).toBeGreaterThan(1);
+    expect(spawned.slice(1).every((type) => type === 'triangle')).toBe(true);
+    // At auditStart the boss reaches the player: its hit and damage are the Boss column's.
     expect(reading).toMatchObject({ count: 1, leaks: 1 });
     expect(reading.contact).toBeGreaterThan(0);
   });
@@ -252,7 +256,7 @@ describe('test wave runs', () => {
 
   it('refuses a table whose test wave holds more than one type', () => {
     expect(() => testWaveRun(web, progress, base, 1)).toThrow(
-      /A test wave holds one type; wave 20 holds .*, onion/,
+      /A test wave holds one type; wave 20 holds .*, brood/,
     );
   });
 });

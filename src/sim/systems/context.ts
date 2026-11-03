@@ -1186,6 +1186,7 @@ export function createRunContext(
         values.dashRepel,
         values.bossHoldSec,
         values.shieldPoolSec,
+        ENEMY_IDS,
       ),
       defence: createPlayerDefence(
         values,
