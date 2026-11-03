@@ -103,5 +103,53 @@ describe('describeV3RunEnd', () => {
     const text = describeV3RunEnd(facts({ endReason: 'timeout' }), ENEMIES);
     expect(text.tip).toBeNull();
     expect(text.bullets).toBeNull();
+    expect(text.reflected).toBeNull();
+  });
+
+  it('says a death to 稜鏡’s reflection in its own line, counts the reflected hits and points at damage over time', () => {
+    const text = describeV3RunEnd(
+      facts(
+        {
+          killedBy: 'prism',
+          killedByReflect: true,
+          reflectTakenBy: tallies({ prism: [40, 100] }),
+        },
+        { triangle: [2, 20] },
+      ),
+      ENEMIES,
+    );
+    expect(text.cause).toBe("Cut down by a Prism's reflection");
+    expect(text.leaks).toBe('2 enemies reached you for 20 damage');
+    expect(text.bullets).toBeNull();
+    expect(text.reflected).toBe('40 hits were reflected back at you for 100 damage');
+    expect(text.tip).toContain('Prisms reflected your hits');
+    expect(text.tip).toContain('Burn, poison and bleed are never reflected');
+  });
+
+  it('writes the reflection lines in zh-TW', () => {
+    setLocale('zh-TW');
+    const text = describeV3RunEnd(
+      facts({
+        killedBy: 'prism',
+        killedByReflect: true,
+        reflectTakenBy: tallies({ prism: [1, 100] }),
+      }),
+      ENEMIES,
+    );
+    expect(text.cause).toBe('被稜鏡反射的傷害擊倒');
+    expect(text.reflected).toBe('1 次擊中被反彈回來，造成 100 點傷害');
+    expect(text.tip).toContain('燃燒、中毒、流血不會被反彈');
+  });
+
+  it('keeps the contact line for a prism that reached the player', () => {
+    const text = describeV3RunEnd(
+      facts(
+        { killedBy: 'prism', killedByReflect: false, reflectTakenBy: tallies({ prism: [3, 3] }) },
+        { prism: [1, 100] },
+      ),
+      ENEMIES,
+    );
+    expect(text.cause).toBe('Killed by a Prism');
+    expect(text.tip).not.toContain('reflected your hits');
   });
 });

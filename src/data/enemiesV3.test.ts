@@ -92,7 +92,7 @@ const M1_DEFS: Readonly<Partial<Record<EnemyId, EnemyDef>>> = {
 
 const M1_IDS = ['triangle', 'square', 'pentagon', 'shard', 'hexagon', 'boss'] as const;
 
-/** The seven v3 defs as the C7 design's §1.2 table and colours give them, every field. */
+/** The nine v3 defs as the C7 design's §1.2 table and colours give them, every field. */
 const V3_DEFS: Readonly<Partial<Record<EnemyId, EnemyDef>>> = {
   shielder: {
     id: 'shielder',
@@ -192,10 +192,54 @@ const V3_DEFS: Readonly<Partial<Record<EnemyId, EnemyDef>>> = {
     boss: true,
     behaviour: { kind: 'layers', layers: 3, burst: { enemy: 'triangle', count: 12 } },
   },
+  brood: {
+    id: 'brood',
+    shape: 'brood',
+    hpMult: 28,
+    speed: 40,
+    radius: 64,
+    contactDamage: 100,
+    dropMult: 16,
+    cores: 3,
+    color: 0xe8ecf2,
+    tough: true,
+    boss: true,
+    behaviour: {
+      kind: 'summon',
+      stopDist: 520,
+      periodSec: 3,
+      enemy: 'triangle',
+      count: 4,
+      keepWalking: true,
+    },
+  },
+  prism: {
+    id: 'prism',
+    shape: 'prism',
+    hpMult: 28,
+    speed: 45,
+    radius: 60,
+    contactDamage: 100,
+    dropMult: 16,
+    cores: 3,
+    color: 0xe8ecf2,
+    tough: true,
+    boss: true,
+    behaviour: {
+      kind: 'reflect',
+      periodSec: 5,
+      activeSec: 2,
+      lifePctPerHit: 0.01,
+      maxLifePctPerSec: 0.1,
+    },
+  },
 };
 
+/** The v3 bosses (the v3 block's bossRotation). */
+const V3_BOSSES: readonly EnemyId[] = ['onion', 'brood', 'prism'];
+
 describe('the enemy roster (docs/v3 C7 design §1.2)', () => {
-  it('appends the seven v3 ids to M1’s six, which keep their order', () => {
+  it('appends the nine v3 ids to M1’s six, which keep their order', () => {
     expect(ENEMY_IDS).toEqual([
       ...M1_IDS,
       'shielder',
@@ -205,6 +249,8 @@ describe('the enemy roster (docs/v3 C7 design §1.2)', () => {
       'summoner',
       'treasure',
       'onion',
+      'brood',
+      'prism',
     ]);
   });
 
@@ -215,7 +261,7 @@ describe('the enemy roster (docs/v3 C7 design §1.2)', () => {
     }
   });
 
-  it('defines the seven v3 types as the design’s table gives them, every field', () => {
+  it('defines the nine v3 types as the design’s table gives them, every field', () => {
     expect(Object.keys(V3_ENEMIES)).toEqual(Object.keys(V3_DEFS));
     for (const id of Object.keys(V3_DEFS) as EnemyId[]) {
       expect(V3_ENEMIES[id as keyof typeof V3_ENEMIES], id).toEqual(V3_DEFS[id]);
@@ -231,12 +277,12 @@ describe('the enemy roster (docs/v3 C7 design §1.2)', () => {
         if ((M1_IDS as readonly EnemyId[]).includes(id)) {
           expect(def.tough, id).toBe(id === 'hexagon' || id === 'boss');
         }
-        expect(def.boss, id).toBe(id === 'boss' || id === 'onion');
+        expect(def.boss, id).toBe(id === 'boss' || V3_BOSSES.includes(id));
         if (def.boss) expect(def.tough, id).toBe(true);
       }
     }
-    // The v3 types other than the onion are neither.
-    for (const def of Object.values(V3_ENEMIES)) expect(def.tough).toBe(def.id === 'onion');
+    // The v3 types other than the bosses are neither.
+    for (const def of Object.values(V3_ENEMIES)) expect(def.tough).toBe(V3_BOSSES.includes(def.id));
   });
 
   it('gives each v3 type its behaviour and keeps every non-tough radius within 22 (shotPad)', () => {
@@ -251,6 +297,8 @@ describe('the enemy roster (docs/v3 C7 design §1.2)', () => {
       summoner: 'summon',
       treasure: 'treasure',
       onion: 'layers',
+      brood: 'summon',
+      prism: 'reflect',
     });
     for (const def of Object.values(loadGameData().enemies)) {
       if (!def.tough) expect(def.radius, def.id).toBeLessThanOrEqual(22);
@@ -265,7 +313,7 @@ describe('characterGameData (docs/v3 C7 design §1.1)', () => {
     expect(characterGameData().waves.v3).toEqual(V3_WAVES.v3);
     expect(characterGameData().waves.v3).toEqual({
       enemyCap: 400,
-      bossRotation: ['onion'],
+      bossRotation: ['onion', 'brood', 'prism'],
       affixes: [
         { fromWave: 5, count: 1 },
         { fromWave: 25, count: 2 },

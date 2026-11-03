@@ -21,6 +21,8 @@ const SPEEDS: EnemySpeeds = {
   summoner: { speed: 90 },
   treasure: { speed: 150 },
   onion: { speed: 45 },
+  brood: { speed: 40 },
+  prism: { speed: 45 },
 };
 
 function tallies(hits: Partial<Record<EnemyId, readonly [number, number]>> = {}) {

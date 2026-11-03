@@ -141,7 +141,8 @@ function validateEnemies(data: GameData): string[] {
 
 /**
  * Issues of a v3 type's behaviour (docs/v3 C7 design §1.2): its numbers > 0, the shield's
- * fraction below 1, layers and counts whole, and what it spawns a plain type, neither tough nor
+ * fraction below 1, a reflect window shorter than its period and its shares of life at most 1,
+ * layers and counts whole, and what it spawns a plain type, neither tough nor
  * a boss and with no behaviour of its own, so that spawns never recurse.
  */
 function behaviourIssues(
@@ -201,6 +202,21 @@ function behaviourIssues(
       whole('layers', behaviour.layers);
       plain('burst.enemy', behaviour.burst.enemy);
       whole('burst.count', behaviour.burst.count);
+      break;
+    case 'reflect':
+      positive('periodSec', behaviour.periodSec);
+      positive('activeSec', behaviour.activeSec);
+      if (!(behaviour.activeSec < behaviour.periodSec)) {
+        issues.push(
+          `behaviour.activeSec must be below periodSec (got ${behaviour.activeSec} of ${behaviour.periodSec})`,
+        );
+      }
+      for (const name of ['lifePctPerHit', 'maxLifePctPerSec'] as const) {
+        const value = behaviour[name];
+        if (!(value > 0 && value <= 1)) {
+          issues.push(`behaviour.${name} must be in (0, 1] (got ${value})`);
+        }
+      }
       break;
   }
   return issues;

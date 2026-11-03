@@ -117,6 +117,8 @@ export const FIXTURE_ENEMIES: Readonly<Record<EnemyId, EnemyDef>> = {
   summoner: enemy('summoner', 3, 0),
   treasure: enemy('treasure', 20, 1),
   onion: enemy('onion', 16, 3, { tough: true, boss: true }),
+  brood: enemy('brood', 16, 3, { tough: true, boss: true }),
+  prism: enemy('prism', 16, 3, { tough: true, boss: true }),
 };
 
 export function fixtureData(overrides: Partial<GameData> = {}): GameData {

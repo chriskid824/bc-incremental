@@ -12,7 +12,7 @@ import { ENEMY_IDS } from '../../data/types';
 import { TICK_RATE } from '../../sim';
 import type { SimEvent } from '../../sim';
 import { MULTIPLY_RADIUS } from '../../sim/systems/affixes';
-import { CHARGING, FLEEING, ORBITING, WARDED } from '../../sim/systems/enemyRecord';
+import { CHARGING, FLEEING, ORBITING, REFLECTING, WARDED } from '../../sim/systems/enemyRecord';
 import { EnemyBanner } from '../../ui/banner';
 import { EnemyGrid, GRID_LOOP_SECONDS, gridData, gridSpots } from './grid';
 
@@ -43,7 +43,8 @@ describe('the ?enemies grid (§2.9, the lead’s ruling P7)', () => {
   it('stands every v3 type in roster order and an elite of each affix, all standing still', () => {
     const data = gridData();
     const spots = gridSpots(data);
-    const types = ENEMY_IDS.filter((id) => Object.hasOwn(V3_ENEMIES, id));
+    const later = ['brood', 'prism'];
+    const types = ENEMY_IDS.filter((id) => Object.hasOwn(V3_ENEMIES, id) && !later.includes(id));
     expect(types).toEqual([
       'shielder',
       'regenerator',
@@ -64,6 +65,8 @@ describe('the ?enemies grid (§2.9, the lead’s ruling P7)', () => {
       'multiply child',
       'multiply child',
       'swift + armoured + ward',
+      'brood',
+      'prism',
     ]);
     expect(spots.every((spot) => spot.def.speed === 0)).toBe(true);
     // Every spot its own place.
@@ -98,7 +101,7 @@ describe('the ?enemies grid (§2.9, the lead’s ruling P7)', () => {
     );
   });
 
-  it('brings every behaviour round within a run: the charge, bullets, orbit, flight, shield', () => {
+  it('brings every behaviour round within a run: the charge, bullets, orbit, flight, shield, reflection', () => {
     const { grid, ticks } = recorded();
     const seen = new Set<string>();
     for (let tick = 0; tick < GRID_LOOP_SECONDS * TICK_RATE; tick++) {
@@ -108,6 +111,7 @@ describe('the ?enemies grid (§2.9, the lead’s ruling P7)', () => {
         const flags = enemy.v3?.state ?? 0;
         if (enemy.type === 'dasher' && (flags & CHARGING) !== 0) seen.add('charging');
         if (enemy.type === 'treasure' && (flags & ORBITING) !== 0) seen.add('orbiting');
+        if (enemy.type === 'prism' && (flags & REFLECTING) !== 0) seen.add('reflecting');
         if (enemy.type === 'treasure' && (flags & FLEEING) !== 0 && seen.has('orbiting')) {
           seen.add('fleeing after orbiting');
         }
@@ -125,14 +129,15 @@ describe('the ?enemies grid (§2.9, the lead’s ruling P7)', () => {
       'charging',
       'fleeing after orbiting',
       'orbiting',
+      'reflecting',
       'shield',
       'shieldAbsorbed',
       'summoned',
     ]);
     // Immortal: none of the grid's own died.
-    expect(events.filter((event) => event.type === 'enemyKilled' && event.enemyId <= 25)).toEqual(
-      [],
-    );
+    expect(
+      events.filter((event) => event.type === 'enemyKilled' && event.enemyId <= grid.spots.length),
+    ).toEqual([]);
   });
 
   it('starts again every GRID_LOOP_SECONDS, and the view starts a run each time', () => {

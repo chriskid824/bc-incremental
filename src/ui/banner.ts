@@ -35,6 +35,8 @@ export const BANNER_KEYS: Readonly<Partial<Record<EnemyId, MessageKey>>> = {
   summoner: 'banner.enemy.summoner',
   treasure: 'banner.enemy.treasure',
   onion: 'banner.enemy.onion',
+  brood: 'banner.enemy.brood',
+  prism: 'banner.enemy.prism',
 };
 
 /** Where the banner shows its line: src/ui/bannerView.ts, or a stub in the tests. */
@@ -65,6 +67,12 @@ function valuesOf(def: EnemyDef): MessageValues {
       return { sec: decimal(b.orbitSec), mult: decimal(def.dropMult) };
     case 'layers':
       return { layers: b.layers, enemies: enemyPlural(b.burst.enemy) };
+    case 'reflect':
+      return {
+        period: decimal(b.periodSec),
+        sec: decimal(b.activeSec),
+        pct: percent(b.lifePctPerHit),
+      };
     case undefined:
       return {};
   }

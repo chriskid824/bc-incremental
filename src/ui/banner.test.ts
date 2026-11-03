@@ -185,7 +185,7 @@ describe('EnemyBanner (§2.9 with the lead’s rulings L7 and P5)', () => {
     );
     const loop = new GameLoop(grid);
     loop.tick(TICK_MS);
-    // The first tick stands every v3 type: 盾兵's line shows, the six others queue.
+    // The first tick stands every v3 type: 盾兵's line shows, the eight others queue.
     expect(banner.showing).toBe('shielder');
     const first = grid.state.tick;
     for (let f = 0; f < 60; f++) loop.tick(TICK_MS);
@@ -203,12 +203,26 @@ describe('EnemyBanner (§2.9 with the lead’s rulings L7 and P5)', () => {
       'treasure',
       'onion',
       'hexagon',
+      'brood',
+      'prism',
     ]);
     while (grid.started < 2) loop.tick(TICK_MS);
     for (let f = 0; f < 60; f++) loop.tick(TICK_MS);
     expect(sightings).toEqual([...told, 'triangle']);
+    // Nine lines outlast a run: the last ones show after the restart.
+    for (let f = 0; f < 8 * 60; f++) loop.tick(TICK_MS);
     expect(lines.log.filter((line) => line !== 'hide')).toEqual(
-      shown('shielder', 'regenerator', 'dasher', 'shooter', 'summoner', 'treasure', 'onion'),
+      shown(
+        'shielder',
+        'regenerator',
+        'dasher',
+        'shooter',
+        'summoner',
+        'treasure',
+        'onion',
+        'brood',
+        'prism',
+      ),
     );
   });
 

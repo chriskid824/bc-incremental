@@ -2,7 +2,7 @@
  * One run of a character on the v3 game page (docs/v3/game-design-v3.md §1, §7): the web's build
  * compiled (webBuild), its config (webRunConfig) from the chosen start wave, the simulation on the
  * v3 game data, and on its last tick the settlement (settleWebRun). It also notes whether the
- * blow that ended a death was a shooter's bullet or a contact, which RunResult.killedBy does not
+ * blow that ended a death was a shooter's bullet, 稜鏡's reflection or a contact, which RunResult.killedBy does not
  * say and the result screen's cause line does (Q11). DOM-free, so the tests reach it.
  */
 
@@ -17,7 +17,7 @@ import type { RunConfig, RunResult, SimEvent, Simulation } from '../../sim';
 import { typicalHitOf } from '../typicalHit';
 
 /** How the last life-ending hit landed; null before one, or after an extra life revived. */
-export type FatalBlow = 'contact' | 'bullet' | null;
+export type FatalBlow = 'contact' | 'bullet' | 'reflect' | null;
 
 export interface FinishedRun {
   readonly result: RunResult;
@@ -26,6 +26,8 @@ export interface FinishedRun {
   readonly progress: CharacterProgress;
   /** The run ended in a death whose last blow was a shooter's bullet. */
   readonly killedByBullet: boolean;
+  /** The run ended in a death whose last blow was a hit 稜鏡 reflected. */
+  readonly killedByReflect: boolean;
 }
 
 /**
@@ -111,6 +113,7 @@ export class CharacterRunState {
       const event = events[i] as SimEvent;
       if (event.type === 'playerHit' && event.lifeLeft <= 0) this.fatal = 'contact';
       else if (event.type === 'bulletHit' && event.lifeLeft <= 0) this.fatal = 'bullet';
+      else if (event.type === 'reflectHit' && event.lifeLeft <= 0) this.fatal = 'reflect';
       else if (event.type === 'revive') this.fatal = null;
     }
     return events;
@@ -126,6 +129,7 @@ export class CharacterRunState {
       settlement: settled.settlement,
       progress: settled.progress,
       killedByBullet: result.endReason === 'death' && this.fatal === 'bullet',
+      killedByReflect: result.endReason === 'death' && this.fatal === 'reflect',
     };
   }
 }

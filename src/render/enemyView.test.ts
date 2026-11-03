@@ -27,6 +27,7 @@ import {
   DASHING,
   FLEEING,
   ORBITING,
+  REFLECTING,
   SHIELDED,
   STOPPED,
   WARDED,
@@ -42,7 +43,13 @@ import {
   SYMBOL_SIZE,
   symbolRow,
 } from './enemyShapes';
-import { EnemyView, GLOW_FLEE_ALPHA, GLOW_REST_ALPHA, PULSE_AMPLITUDE } from './enemyView';
+import {
+  EnemyView,
+  GLOW_FLEE_ALPHA,
+  GLOW_REST_ALPHA,
+  MIRROR_PULSE,
+  PULSE_AMPLITUDE,
+} from './enemyView';
 import { COLORS } from './palette';
 
 interface EnemiesModule {
@@ -365,6 +372,42 @@ describe('what an enemy view reads (docs/v3 C7 design §1.7, §2.9)', () => {
       expect(view.hull.scale.x, `${left} left`).toBe(backing);
     }
     expect(view.body.children.find((child) => child.label === 'core')?.visible).toBe(true);
+  });
+
+  it('gives 母巢 and 稜鏡 hulls of their own, with no polygon boss ring', () => {
+    for (const def of [V3.brood, V3.prism]) {
+      const view = new EnemyView(def);
+      expect(view.inner, def.id).toBeNull();
+      expect(drawn(view.hull).length, def.id).toBeGreaterThan(0);
+      expect(colors(view.hull).every((c) => c === 0xffffff || c === 0x000000)).toBe(true);
+    }
+    expect(drawn(HULLS.brood(64, true))).not.toEqual(drawn(HULLS.triangle(64, true)));
+    expect(new EnemyView(V3.brood).mirror).toBeNull();
+  });
+
+  it('shows 稜鏡’s mirrored outline while REFLECTING, pulsing, and hides it between windows', () => {
+    const def = V3.prism;
+    const view = new EnemyView(def);
+    const mirror = view.mirror as Graphics;
+    expect(mirror.label).toBe('mirror');
+    expect(mirror.parent).toBe(view.body);
+    expect(colors(mirror)).toEqual([0xffffff, 0xffffff]);
+    expect(mirror.blendMode).toBe('add');
+    expect(mirror.visible).toBe(false);
+    shown(enemyOf(def, { state: REFLECTING }), 0.1, view);
+    expect(mirror.visible).toBe(true);
+    const alphas = [0, 0.05, 0.1, 0.15, 0.2].map((seconds) => {
+      shown(enemyOf(def, { state: REFLECTING }), seconds, view);
+      return mirror.alpha;
+    });
+    expect(Math.max(...alphas)).toBeLessThanOrEqual(1);
+    expect(Math.min(...alphas)).toBeGreaterThanOrEqual(1 - MIRROR_PULSE);
+    expect(new Set(alphas).size).toBeGreaterThan(1);
+    shown(enemyOf(def, { state: 0 }), 1, view);
+    expect(mirror.visible).toBe(false);
+    // An M1 run's enemy (no record) never shows it.
+    shown(enemyOf(def, null), 1, view);
+    expect(mirror.visible).toBe(false);
   });
 
   it('reads each affix’s symbol from its own bit, in AFFIX_IDS order, and rebuilds them as they change', () => {

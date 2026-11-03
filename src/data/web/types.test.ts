@@ -18,6 +18,8 @@ describe('rowEnemyOf (docs/v3 C7 design §1.7)', () => {
       ['summoner', 'summoner'],
       ['treasure', 'treasure'],
       ['onion', 'boss'],
+      ['brood', 'boss'],
+      ['prism', 'boss'],
     ]);
   });
 

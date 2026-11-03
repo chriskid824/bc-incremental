@@ -380,6 +380,9 @@ function runResult(overrides: Partial<RunResult> = {}): RunResult {
     bulletTakenBy: Object.fromEntries(
       ENEMY_IDS.map((id) => [id, { hits: 0, damage: 0 }]),
     ) as RunResult['bulletTakenBy'],
+    reflectTakenBy: Object.fromEntries(
+      ENEMY_IDS.map((id) => [id, { hits: 0, damage: 0 }]),
+    ) as RunResult['reflectTakenBy'],
     killedBy: null,
     ...overrides,
   };

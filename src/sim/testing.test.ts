@@ -201,14 +201,14 @@ describe('stress fixture', () => {
 });
 
 describe('fixture enemies and v3 waves (docs/v3 C7 design §1.2)', () => {
-  it('parses M1, v3 and test data, each with a def for every one of the 13 ids', () => {
+  it('parses M1, v3 and test data, each with a def for every one of the 15 ids', () => {
     const datas = {
       m1: loadGameData(),
       v3: characterGameData(),
       test: parseGameData({ ...makeTestData(), talents: TALENTS }),
       v3Test: parseGameData({ ...v3TestData(), talents: TALENTS }),
     };
-    expect(ENEMY_IDS).toHaveLength(13);
+    expect(ENEMY_IDS).toHaveLength(15);
     for (const [name, data] of Object.entries(datas)) {
       expect(Object.keys(data.enemies).sort(), name).toEqual([...ENEMY_IDS].sort());
       for (const id of ENEMY_IDS) expect(data.enemies[id].id, `${name} ${id}`).toBe(id);
@@ -237,7 +237,8 @@ describe('fixture enemies and v3 waves (docs/v3 C7 design §1.2)', () => {
     const { rules, v3, ...settings } = TEST_V3_WAVES;
     const { rules: m1Rules, ...m1Settings } = TEST_WAVES;
     expect([rules.length - m1Rules.length, settings]).toEqual([5, m1Settings]);
-    expect(v3).toEqual(V3_WAVES.v3);
+    // The fixture keeps the onion alone, so that the content's rotation moves no fixture.
+    expect(v3).toEqual({ ...V3_WAVES.v3, bossRotation: ['onion'] });
   });
 
   it('merges v3TestData’s overrides into TEST_V3_WAVES, and leaves makeTestData an M1 table', () => {
