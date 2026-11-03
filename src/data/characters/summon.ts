@@ -63,7 +63,7 @@ const DEFAULT_ORDER: readonly string[] = [
   ...ranks(`${C}engineer.r3`, 3),
   ...ranks(`${C}main.c3`, 3),
   ...ranks('hub.economy.r1', 5),
-  ...ranks('hub.might.might', 2),
+  ...ranks('hub.might.might', 6),
   'outer.fire.main.entry',
   ...ranks('outer.fire.blaze.r1', 4),
   ...ranks('outer.fire.blaze.r2', 4),
@@ -71,6 +71,7 @@ const DEFAULT_ORDER: readonly string[] = [
   ...ranks('outer.fire.blaze.r3', 2),
   ...ranks('outer.fire.blaze.r4', 2),
   ...ranks(`${C}swarm.r4`, 3),
+  `${C}swarm.self-destruct`,
   `${C}guard.interceptor`,
   ...ranks(`${C}guard.r5`, 2),
   ...ranks(`${C}guard.r6`, 2),
@@ -80,8 +81,7 @@ const DEFAULT_ORDER: readonly string[] = [
   'fusion.summon.fire.core',
   ...ranks('hub.defense.r2', 3),
   ...ranks(`${C}swarm.r5`, 3),
-  `${C}swarm.self-destruct`,
-  ...ranks('hub.might.might', 3),
+  ...ranks('hub.might.might', 8),
   'outer.crit.main.entry',
   ...ranks('outer.crit.precision.r1', 4),
   ...ranks('outer.crit.heavy.r1', 4),
@@ -98,7 +98,7 @@ const DEFAULT_ORDER: readonly string[] = [
   ...ranks(`${C}swarm.r6`, 3),
   `${C}swarm.queen`,
   `${C}main.threshold`,
-  ...ranks('hub.might.might', 3),
+  ...ranks('hub.might.might', 8),
 ];
 
 export const SUMMON = defineCharacter({
@@ -109,14 +109,14 @@ export const SUMMON = defineCharacter({
     branches: [
       // 蜂群: drone damage and speed.
       centerBranch('swarm', {
-        r1: ranked('damage', 0.15, 4, 'increased', DRONE),
-        r2: ranked('droneSpeed', 0.1, 4),
+        r1: ranked('damage', 0.3, 4, 'increased', DRONE),
+        r2: ranked('droneSpeed', 0.4, 4),
         // 分巢: every 5 kills spawn a temporary drone for 6 s.
         a: notable('split', {
           rules: [{ id: 'hiveSplit', every: 5, lifeSec: 6, damagePct: 2, maxLive: 8 }],
         }),
-        r3: ranked('damage', 0.15, 3, 'increased', DRONE),
-        r4: ranked('droneSpeed', 0.1, 3),
+        r3: ranked('damage', 0.3, 3, 'increased', DRONE),
+        r4: ranked('droneSpeed', 0.4, 3),
         // 自爆協議: a drone's last impact before it flies home explodes (radius 80, 150%).
         // Interim until the engine's lastImpact (P1): a third of the impacts explode.
         b: notable('self-destruct', {
@@ -128,8 +128,8 @@ export const SUMMON = defineCharacter({
             },
           ],
         }),
-        r5: ranked('damage', 0.15, 3, 'increased', DRONE),
-        r6: ranked('droneSpeed', 0.1, 3),
+        r5: ranked('damage', 0.3, 3, 'increased', DRONE),
+        r6: ranked('droneSpeed', 0.4, 3),
         // 蜂后: one drone becomes the queen (×1.5 size, ×2 damage); the others deal +20% to its
         // target. Interim until the engine's per-drone roles (P2): the swarm's average, +40%.
         c: notable('queen', { modifiers: [more('damage', 0.4, DRONE)] }),
@@ -137,19 +137,19 @@ export const SUMMON = defineCharacter({
       }),
       // 工兵: turret damage and attack speed.
       centerBranch('engineer', {
-        r1: ranked('damage', 0.15, 4, 'increased', TURRET),
+        r1: ranked('damage', 0.3, 4, 'increased', TURRET),
         r2: ranked('attackSpeed', 0.06, 4, 'more', TURRET),
         // 量產: +2 turrets, each −20% damage.
         a: notable('mass-production', {
           modifiers: [more('damage', -0.2, TURRET)],
           rules: [{ id: 'swarmTune', turrets: 2, dockSecMult: 1 }],
         }),
-        r3: ranked('damage', 0.15, 3, 'increased', TURRET),
+        r3: ranked('damage', 0.3, 3, 'increased', TURRET),
         r4: ranked('attackSpeed', 0.06, 3, 'more', TURRET),
         // 前哨: the turrets sit at radius 220, reaching farther. Interim until the engine's turret
         // radius (P4): +25% turret damage.
         b: notable('outpost', { modifiers: [inc('damage', 0.25, TURRET)] }),
-        r5: ranked('damage', 0.15, 3, 'increased', TURRET),
+        r5: ranked('damage', 0.3, 3, 'increased', TURRET),
         r6: ranked('attackSpeed', 0.06, 3, 'more', TURRET),
         // 集火指令: every summon goes for the enemy with the most hp, +25% damage (答案：Boss).
         // Interim until the engine's highest-hp pick (P3): elites and bosses first (鎖定信標's
