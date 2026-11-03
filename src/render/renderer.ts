@@ -5,7 +5,9 @@
  *
  * Feel (docs/GDD.md §1, §3): kills explode in the enemy's color, crits flare and pop numbers
  * (a few big pops at a time), burning enemies glow and shed flames behind their outlines,
- * pandemic spreads as a fire nova, chains arc as flickering lightning. Shake and hit-stop are
+ * pandemic spreads as a fire nova, chains arc as flickering lightning. Poison and bleed ticks
+ * (dotTick) pop their own green and red numbers, tallied as burn's; poisoned, chilled and frozen
+ * enemies take a cast (src/render/enemies.ts); a freeze and a shatter burst in ice. Shake and hit-stop are
  * budgeted so they punch instead of jitter, and every effect pool is capped so a crowded screen
  * sheds detail instead of frame rate. docs/ARCHITECTURE.md §10 lists the layers and budgets.
  *
@@ -162,6 +164,9 @@ export class Renderer {
   private readonly shards: ShardParticles;
   private readonly numbers: DamageNumbers;
   private readonly burnTally = new BurnTally();
+  /** Poison and bleed ticks (dotTick) are tallied as burn's, each into its own numbers. */
+  private readonly poisonTally = new BurnTally();
+  private readonly bleedTally = new BurnTally();
   private readonly shake: ScreenShake;
   private readonly hitStop: (ms: number) => void;
   private readonly critStop = new CritStopGate();
@@ -177,6 +182,12 @@ export class Renderer {
   private readonly onResize = (): void => this.fit();
   private readonly showBurn = (amount: Num, x: number, y: number, enemyId: number): void => {
     this.numbers.spawn('burn', amount, x, y, enemyId);
+  };
+  private readonly showPoison = (amount: Num, x: number, y: number, enemyId: number): void => {
+    this.numbers.spawn('poison', amount, x, y, enemyId);
+  };
+  private readonly showBleed = (amount: Num, x: number, y: number, enemyId: number): void => {
+    this.numbers.spawn('bleed', amount, x, y, enemyId);
   };
   private readonly flamePuff = (x: number, y: number): void => this.bursts.flamePuff(x, y);
 
@@ -281,6 +292,8 @@ export class Renderer {
     this.shards.clear();
     this.numbers.clear();
     this.burnTally.clear();
+    this.poisonTally.clear();
+    this.bleedTally.clear();
     this.core.reset();
     this.drones?.reset();
     this.poolShots?.reset();
@@ -323,6 +336,20 @@ export class Renderer {
           break;
         case 'burnTick':
           this.burnTally.add(event.targetId, event.amount, event.x, event.y);
+          break;
+        case 'dotTick':
+          (event.ailment === 'poison' ? this.poisonTally : this.bleedTally).add(
+            event.targetId,
+            event.amount,
+            event.x,
+            event.y,
+          );
+          break;
+        case 'freeze':
+          if (!event.boss) this.onFrozen(event.targetId);
+          break;
+        case 'shatter':
+          this.bursts.shatter(event.x, event.y, event.radius);
           break;
         case 'enemyKilled':
           this.onKill(event);
@@ -439,6 +466,8 @@ export class Renderer {
     const absorbed = this.shards.update(dt, state.player.x, state.player.y, PLAYER_RADIUS * 1.5);
     if (absorbed > 0) this.core.pulse();
     this.burnTally.update(dt, this.showBurn);
+    this.poisonTally.update(dt, this.showPoison);
+    this.bleedTally.update(dt, this.showBleed);
     this.numbers.update(dt);
     this.killsThisFrame = 0;
   }
@@ -489,6 +518,8 @@ export class Renderer {
 
   private onKill(event: Extract<SimEvent, { type: 'enemyKilled' }>): void {
     this.burnTally.flush(event.enemyId, this.showBurn);
+    this.poisonTally.flush(event.enemyId, this.showPoison);
+    this.bleedTally.flush(event.enemyId, this.showBleed);
     const def = this.data.enemies[event.enemy];
     const tier = killTier(def);
     this.killsThisFrame++;
@@ -526,6 +557,12 @@ export class Renderer {
       magma.thresholdNova(event.x, event.y, event.radius);
     }
     this.bursts.nova(event.x, event.y, event.radius);
+  }
+
+  /** An enemy froze: an ice burst where it is drawn. */
+  private onFrozen(enemyId: number): void {
+    const spot = this.enemies.positionOf(enemyId);
+    if (spot !== null) this.bursts.freeze(spot.x, spot.y, spot.radius);
   }
 
   /** An enemy was poisoned: where it is drawn, for the poisoned-explosion check (瘟爆). */

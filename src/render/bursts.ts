@@ -1,6 +1,6 @@
 /**
  * Composite effects built from FX particles and rings: kill explosions, hit sparks, crit
- * flares, chain sparks, flames and the pandemic fire nova. Sizes are in arena units; every
+ * flares, chain sparks, flames, the pandemic fire nova, and freeze and shatter ice bursts. Sizes are in arena units; every
  * spawn goes through the capped pools, so these can be called for every event. Flames licking
  * off burning enemies and the puffs of landed embers go to a separate layer under the crowd,
  * so each burning enemy's own outline stays on top of its fire.
@@ -40,6 +40,9 @@ const BLOCKED_ALPHA = 0.75;
 const BLOCKED_MS = 90;
 const BLOCKED_SPARKS = 4;
 const BLOCKED_POWER = 0.7;
+
+/** Ice shards a shatter throws. */
+const SHATTER_SHARDS = 10;
 
 export class Bursts {
   /** `fx` draws above the crowd; `under` (enemy flames and ember puffs) draws below it. */
@@ -193,6 +196,39 @@ export class Bursts {
       p.color1 = COLORS.burnDeep;
       p.alpha0 = 0.65;
       p.fadeFrom = 0.5;
+    }
+  }
+
+  /**
+   * An enemy of `radius` froze (the freeze event): a pale flash, a thin frost ring just outside
+   * it and a few ice glints.
+   */
+  freeze(x: number, y: number, radius: number): void {
+    this.glow(FX_FLASH, x, y, radius * 4, 0xffffff, COLORS.chill, 0.6, 200);
+    this.rings.shock(x, y, radius * 2.4, COLORS.frozen, 3, 260);
+    this.sparks(x, y, 0, 0, 4, 0xffffff, COLORS.chill, 0.6);
+  }
+
+  /** A frozen enemy died and shattered over `radius`: an ice flash, a ring and flying shards. */
+  shatter(x: number, y: number, radius: number): void {
+    this.glow(FX_FLASH, x, y, Math.max(60, radius * 1.4), 0xffffff, COLORS.chill, 0.75, 220);
+    this.rings.shock(x, y, radius, COLORS.frozen, 5, 300);
+    for (let i = 0; i < SHATTER_SHARDS; i++) {
+      const p = this.fx.spawn(FX_DEBRIS, this.tex.shard, x, y, this.rand(320, 520));
+      if (p === null) break;
+      const angle = (i / SHATTER_SHARDS) * TAU + this.rand(-0.25, 0.25);
+      const speed = this.rand(260, 520);
+      p.vx = Math.cos(angle) * speed;
+      p.vy = Math.sin(angle) * speed;
+      p.drag = 4;
+      p.spin = this.rand(-10, 10);
+      p.sprite.rotation = angle;
+      const s = this.rand(0.45, 0.8);
+      p.scale0 = s;
+      p.scale1 = s * 0.4;
+      p.color0 = 0xffffff;
+      p.color1 = COLORS.chill;
+      p.fadeFrom = 0.4;
     }
   }
 
