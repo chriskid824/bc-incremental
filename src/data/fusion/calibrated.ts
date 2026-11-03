@@ -50,12 +50,12 @@ export const CALIBRATED: Readonly<Partial<Record<FusionKey, CalibrationEntry>>> 
   'summon.crit': {
     coef: 1,
     status: 'insensitive',
-    median: 1.0076,
-    min: 0.9822,
-    max: 1.2304,
+    median: 1.0351,
+    min: 0.9965,
+    max: 1.2073,
     seeds: 8,
     startWave: 1,
-    digest: '6d31d0ffb982b316',
+    digest: '4df272b47c4dfe1d',
   },
   'summon.fire': {
     coef: 1,
