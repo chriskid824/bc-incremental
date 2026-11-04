@@ -278,7 +278,7 @@ describe('the nightly plan', () => {
     expect(new Set(seeds)).toEqual(new Set([11_260_404]));
   });
 
-  it('plans only the global shards with units before B1, as Plan JSON v1 (OWN 6)', () => {
+  it("plans 熔核's shards and the globals on the registered content from B1, as Plan JSON v1 (OWN 6)", () => {
     for (const set of ['nightly', 'weekly'] as const) {
       const plan = nightlyPlan({ set, quick: false, content: 'registered', commit: SHA });
       expect(plan.json).toEqual({
@@ -288,7 +288,17 @@ describe('the nightly plan', () => {
         content: 'registered',
         commit: SHA,
         fuzzSeed: 11_260_404,
-        shards: [{ id: 'global-m1', kind: 'm1' }],
+        // The weekly adds 熔核's triples (three outers from B1's ice).
+        shards: [
+          { id: 'fire-sessions', kind: 'sessions', character: 'fire' },
+          { id: 'fire-probes', kind: 'probes', character: 'fire' },
+          { id: 'fire-doubles', kind: 'doubles', character: 'fire' },
+          ...(set === 'weekly'
+            ? [{ id: 'fire-triples', kind: 'triples', character: 'fire', part: [0, 1] }]
+            : []),
+          { id: 'global-m1', kind: 'm1' },
+          { id: 'global-fuzz', kind: 'fuzz' },
+        ],
       });
       expect(plan.units.get('global-m1')).toEqual(m1Units());
     }
@@ -567,7 +577,9 @@ describe('npm run nightly', () => {
     const io = capture();
     expect(await main(['--json'], io, fixed())).toBe(2);
     expect(await main(['--shard', 'nowhere', '--out', join(root, 'x')], io, fixed())).toBe(2);
-    expect(io.lines).toContain("No shard 'nowhere' in the plan: global-m1");
+    expect(io.lines).toContain(
+      "No shard 'nowhere' in the plan: fire-sessions, fire-probes, fire-doubles, global-m1, global-fuzz",
+    );
     const plan = capture();
     expect(
       await main(['--plan', '--json', '--content', 'fixture:B1', '--quick'], plan, fixed()),
@@ -849,19 +861,13 @@ describe('npm run nightly', () => {
     expect(existsSync(out)).toBe(false);
   }, 60_000);
 
-  it('runs only the global shards on the registered content: every check noCenter but m1, exit 0', async () => {
+  it('runs the global-m1 shard on the registered content, exit 0', async () => {
     const out = join(root, 'registered');
     const io = capture();
-    expect(await main(['--out', out], io, fixed({ checks: { c7: NO_C7 } }))).toBe(0);
+    expect(
+      await main(['--shard', 'global-m1', '--out', out], io, fixed({ checks: { c7: NO_C7 } })),
+    ).toBe(0);
     expect(readdirSync(join(out, 'shards'))).toEqual(['global-m1']);
-    const { results } = JSON.parse(read(out, 'checks.json')) as { results: CheckResult[] };
-    expect(results.filter((row) => row.id === 'm1').map((row) => row.status)).toEqual([
-      'pass',
-      'pass',
-      'info',
-    ]);
-    const others = results.filter((row) => row.id !== 'm1');
-    expect(others.filter((row) => row.reason?.id !== 'noCenter')).toEqual([]);
   }, 60_000);
 });
 

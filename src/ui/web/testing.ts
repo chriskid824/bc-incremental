@@ -212,9 +212,21 @@ function contentKeys(): Readonly<Record<Locale, Record<string, string>>> {
 export function fixtureMessages(): Record<Locale, Record<string, string>> {
   const keys = contentKeys();
   return {
-    en: { ...MESSAGES.en, ...keys.en },
-    'zh-TW': { ...MESSAGES['zh-TW'], ...keys['zh-TW'] },
+    en: { ...shippedMessages('en'), ...keys.en },
+    'zh-TW': { ...shippedMessages('zh-TW'), ...keys['zh-TW'] },
   };
+}
+
+/**
+ * A shipped key that names registered content (from B1): a node, branch or fusion key, or a
+ * character's intro. The fixture writes its own in their place.
+ */
+export const isContentKey = (key: string): boolean =>
+  /^web\.(node|branch|fusion)\./.test(key) || /^web\.char\.[a-z]+\.intro$/.test(key);
+
+/** The locale's shipped messages without the registered content's keys (isContentKey). */
+export function shippedMessages(locale: Locale): Record<string, string> {
+  return Object.fromEntries(Object.entries(MESSAGES[locale]).filter(([key]) => !isContentKey(key)));
 }
 
 /** One lookup per locale over `messages` (default: fixtureMessages()). */

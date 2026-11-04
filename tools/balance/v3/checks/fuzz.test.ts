@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { characterGameData } from '../../../../src/data';
 import { fixtureContent } from '../../../../src/data/web/testing';
 import {
+  FIXED_WEB_CASES,
   runWebFuzz,
   WEB_FUZZ_BUILDS,
   WEB_FUZZ_SEED,
@@ -69,8 +70,10 @@ describe('fuzz (the nightly web fuzz)', () => {
         },
       })),
     );
-    // No web on the registered content before B1: no unit.
-    expect(fuzzUnits(resolveContent('registered'), 'registered', SEED)).toEqual([]);
+    // From B1, the registered content deals its builds over 熔核's webs, then its fixed cases.
+    const registered = fuzzUnits(resolveContent('registered'), 'registered', SEED);
+    expect(registered).toHaveLength(WEB_FUZZ_BUILDS + FIXED_WEB_CASES.length);
+    expect(registered.every((unit) => unit.id.startsWith('measure:fuzz:fire'))).toBe(true);
     // The pr set points at ci.yml's step instead.
     const pr = checkSet('pr', fixtureContent('B1'), B1, { c7: NO_C7 });
     expect(

@@ -47,8 +47,23 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   icicle: { id: 'icicle', every: 4, damagePct: 4 },
   prism: { id: 'prism', perPierce: 0.2, maxBonus: 2 },
   sixCoils: { id: 'sixCoils', coils: 6, targets: 2, damageMult: 0.55 },
+  frostflame: { id: 'frostflame', frostPct: 0.3, burnCapBonus: 3, zoneSlow: 0.3 },
+  absoluteZero: { id: 'absoluteZero', globalSlow: 0.3, bossGapSec: 1, attackSpeedMore: -0.25 },
   gigantism: { id: 'gigantism', sizeMult: 2 },
+  blastSpirit: {
+    id: 'blastSpirit',
+    every: 4,
+    lifeSec: 4,
+    damagePct: 1,
+    burnStacks: 3,
+    burnDamagePct: 1,
+    maxLive: 6,
+  },
   poisonSlow: { id: 'poisonSlow', stacksPer: 5, slowPer: 0.02, max: 0.4 },
+  lockBeacon: { id: 'lockBeacon' },
+  cannon: { id: 'cannon', rateMult: 1 / 3, splash: 60 },
+  teslaTower: { id: 'teslaTower', chains: 2 },
+  bugSea: { id: 'bugSea', countMult: 2 },
 };
 
 describe('ModifierSchema', () => {

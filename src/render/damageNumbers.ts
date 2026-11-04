@@ -3,8 +3,8 @@
  * installed fonts, sized by log10 of the amount relative to the run's typical hit, with a low
  * ceiling (src/render/numberLayout.ts) so a big crit never covers the crowd.
  * Crits pop on a bold glowing font on their own top layer, but only a few at a time; past that
- * budget a crit shows as a normal-size number in the crit color. Hit, chain, burn and small crit
- * numbers share a second pool with a cap per style. Numbers for the same enemy and kind within
+ * budget a crit shows as a normal-size number in the crit color. Hit, chain, burn, poison, bleed
+ * and small crit numbers share a second pool with a cap per style. Numbers for the same enemy and kind within
  * a short window merge into one growing number; a new number steps aside from those already on
  * screen or is dropped, and none floats under the DOM HUD. Busy pools shorten new lifetimes.
  */
@@ -28,7 +28,7 @@ import { defaultRandom } from './random';
 import type { RenderRandom } from './random';
 import { ageStep } from './timing';
 
-export type DamageKind = 'hit' | 'crit' | 'burn' | 'chain';
+export type DamageKind = 'hit' | 'crit' | 'burn' | 'poison' | 'bleed' | 'chain';
 
 /**
  * What spawn() did: dropped to stay under the caps, shown as a normal number (small crits
@@ -50,6 +50,8 @@ const STYLE_CAP: Readonly<Record<Exclude<NumberStyle, 'crit'>, number>> = {
   hit: 40,
   chain: 30,
   burn: 30,
+  poison: 24,
+  bleed: 16,
   critSmall: 18,
 };
 
@@ -69,6 +71,8 @@ const LOOKS: Readonly<Record<NumberStyle, Look>> = {
   hit: { color: COLORS.damageHit, lifeMs: 650, pop: 0.3 },
   chain: { color: COLORS.damageChain, lifeMs: 650, pop: 0.3 },
   burn: { color: COLORS.damageBurn, lifeMs: 600, pop: 0.2 },
+  poison: { color: COLORS.damagePoison, lifeMs: 640, pop: 0.2 },
+  bleed: { color: COLORS.damageBleed, lifeMs: 600, pop: 0.2 },
   crit: { color: COLORS.damageCrit, lifeMs: 760, pop: 0 },
   critSmall: { color: COLORS.damageCrit, lifeMs: 560, pop: 0.4 },
 };
@@ -270,6 +274,8 @@ export class DamageNumbers {
     hit: 0,
     crit: 0,
     burn: 0,
+    poison: 0,
+    bleed: 0,
     chain: 0,
     critSmall: 0,
   };
@@ -279,6 +285,8 @@ export class DamageNumbers {
   private readonly spot: Point = { x: 0, y: 0 };
   private area: SafeArea = { width: ARENA_WIDTH, height: ARENA_HEIGHT, zones: [] };
   private typicalHit = 1;
+  /** The hit numbers' colour: a v3 character's (setHitColor), or null for LOOKS.hit's. */
+  private hitColor: number | null = null;
 
   constructor(private readonly random: RenderRandom = defaultRandom) {
     installFonts();
@@ -289,6 +297,14 @@ export class DamageNumbers {
   /** Reference amount for sizing; numbers at this amount get the base size. */
   setTypicalHit(amount: number): void {
     this.typicalHit = amount > 0 && Number.isFinite(amount) ? amount : 1;
+  }
+
+  /**
+   * Hit numbers in `color` (0xRRGGBB): a v3 character run's colour (gd §11.6, impl §7 item 3);
+   * null for M1's white. Crit, burn, poison, bleed and chain numbers keep their own colours.
+   */
+  setHitColor(color: number | null): void {
+    this.hitColor = color;
   }
 
   /** Where numbers may float: the arena minus the HUD (numberLayout.hudSafeArea). */
@@ -340,7 +356,7 @@ export class DamageNumbers {
 
     const text = slot.text;
     text.text = label;
-    text.tint = tintOf(style, this.decades(amount));
+    text.tint = this.tint(style, this.decades(amount));
     text.alpha = 1;
     text.rotation = style === 'crit' ? (this.random() * 2 - 1) * 0.06 : 0;
     slot.style = style;
@@ -384,6 +400,10 @@ export class DamageNumbers {
     for (const slot of this.crits.live) place(slot);
   }
 
+  private tint(style: NumberStyle, decades: number): number {
+    return style === 'hit' && this.hitColor !== null ? this.hitColor : tintOf(style, decades);
+  }
+
   /** Adds `amount` to a young number of `kind` for `targetId`; false when there is none. */
   private merge(kind: DamageKind, amount: Num, targetId: number): boolean {
     const slot =
@@ -395,7 +415,7 @@ export class DamageNumbers {
     const decades = this.decades(slot.amount);
     const size = numberSize(slot.style, decades);
     slot.text.text = label;
-    slot.text.tint = tintOf(slot.style, decades);
+    slot.text.tint = this.tint(slot.style, decades);
     slot.scale = size / FONT_SIZE;
     slot.halfW = halfWidth(label.length, size);
     slot.halfH = halfHeight(size);

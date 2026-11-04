@@ -67,7 +67,7 @@ describe('fusionTitle and nodeName', () => {
   it("reads a fusion's title, the bare key while it is missing", () => {
     expect(fusionTitle('fire.poison', lookups['zh-TW'])).toBe('瘟爆');
     expect(fusionTitle('fire.poison', lookups.en)).toBe('Plague Bomb');
-    expect(fusionTitle('fire.poison')).toBe('web.fusion.fire.poison.title');
+    expect(fusionTitle('fire.bleed')).toBe('web.fusion.fire.bleed.title');
   });
 
   it('names a node by its kind', () => {

@@ -66,10 +66,14 @@ const escape = (text: string): string =>
 /** A coordinate with at most one decimal and no negative zero. */
 const n = (value: number): string => String(Math.round(value * 10) / 10 || 0);
 
-const polygon = (points: readonly (readonly [number, number])[], fill: string): string =>
-  `<polygon points="${points.map(([x, y]) => `${n(x)},${n(y)}`).join(' ')}" fill="${fill}" stroke="${STROKE}" stroke-width="3"/>`;
+const polygon = (
+  points: readonly (readonly [number, number])[],
+  fill: string,
+  stroke: string,
+): string =>
+  `<polygon points="${points.map(([x, y]) => `${n(x)},${n(y)}`).join(' ')}" fill="${fill}" stroke="${stroke}" stroke-width="3"/>`;
 
-const diamond = (r: number, fill: string): string =>
+const diamond = (r: number, fill: string, stroke: string): string =>
   polygon(
     [
       [0, -r],
@@ -78,9 +82,16 @@ const diamond = (r: number, fill: string): string =>
       [-r, 0],
     ],
     fill,
+    stroke,
   );
 
-const regular = (corners: number, r: number, inner: number | null, fill: string): string => {
+const regular = (
+  corners: number,
+  r: number,
+  inner: number | null,
+  fill: string,
+  stroke: string,
+): string => {
   const points: [number, number][] = [];
   const steps = inner === null ? corners : corners * 2;
   for (let i = 0; i < steps; i++) {
@@ -88,35 +99,43 @@ const regular = (corners: number, r: number, inner: number | null, fill: string)
     const angle = (Math.PI * 2 * i) / steps - Math.PI / 2;
     points.push([radius * Math.cos(angle), radius * Math.sin(angle)]);
   }
-  return polygon(points, fill);
+  return polygon(points, fill, stroke);
 };
 
-const circle = (r: number, fill: string): string =>
-  `<circle r="${n(r)}" fill="${fill}" stroke="${STROKE}" stroke-width="3"/>`;
+const circle = (r: number, fill: string, stroke: string): string =>
+  `<circle r="${n(r)}" fill="${fill}" stroke="${stroke}" stroke-width="3"/>`;
 
-/** A node's shape centred on its position, `color` its board's fill. */
-function shape(kind: NodeShape, color: string): string {
+/**
+ * A node's shape centred on its position, `color` its fill and `stroke` its outline; a ringed or
+ * double circle's outer ring and a mastery's hexagon take `blank` (B1's web panel reuses it).
+ */
+export function shapeSvg(
+  kind: NodeShape,
+  color: string,
+  stroke: string = STROKE,
+  blank = '#ffffff',
+): string {
   switch (kind) {
     case 'circle':
-      return circle(16, color);
+      return circle(16, color, stroke);
     case 'largeCircle':
-      return circle(32, color);
+      return circle(32, color, stroke);
     case 'ringedCircle':
-      return circle(24, '#ffffff') + circle(13, color);
+      return circle(24, blank, stroke) + circle(13, color, stroke);
     case 'doubleCircle':
-      return circle(26, '#ffffff') + circle(15, color);
+      return circle(26, blank, stroke) + circle(15, color, stroke);
     case 'diamond':
-      return diamond(22, color);
+      return diamond(22, color, stroke);
     case 'largeDiamond':
-      return diamond(34, color);
+      return diamond(34, color, stroke);
     case 'star':
-      return regular(5, 28, 12, color);
+      return regular(5, 28, 12, color, stroke);
     case 'square':
-      return `<rect x="-17" y="-17" width="34" height="34" fill="${color}" stroke="${STROKE}" stroke-width="3"/>`;
+      return `<rect x="-17" y="-17" width="34" height="34" fill="${color}" stroke="${stroke}" stroke-width="3"/>`;
     case 'hexagon':
-      return regular(6, 24, null, '#ffffff');
+      return regular(6, 24, null, blank, stroke);
     case 'filledHexagon':
-      return regular(6, 24, null, color);
+      return regular(6, 24, null, color, stroke);
   }
 }
 
@@ -221,7 +240,7 @@ export function webSvg(
       : '';
     parts.push(
       `<g class="node" data-id="${escape(node.id)}" data-kind="${node.kind}" data-shape="${SHAPE_OF[node.kind]}"${hand ? ' data-hand="true"' : ''} transform="translate(${n(position.x)} ${n(position.y)})">` +
-        `<title>${escape(nodeName(web, node.id, lookup))}</title>${frame}${shape(SHAPE_OF[node.kind], boardColor(web, board))}</g>`,
+        `<title>${escape(nodeName(web, node.id, lookup))}</title>${frame}${shapeSvg(SHAPE_OF[node.kind], boardColor(web, board))}</g>`,
     );
   }
 

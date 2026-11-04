@@ -179,13 +179,13 @@ describe('the investment (deadBoards)', () => {
   });
 
   it('buys fewer on a board the wallet cannot pay for, and reports the rest unpaid (OWN 5)', () => {
-    // 30 % of 2,000 shards earned pays for the route's first two ranks (180 and 235.8), not its
-    // third, whatever the bank holds.
+    // 30 % of 15 shards earned (4.5) pays for the route's first two ranks (2 and 2.2), not its
+    // third (2.42), whatever the bank holds.
     const snapshot = {
       ...auditStart(web, false),
       wallet: { shards: num(1e6), cores: 100, resonance: 0 },
     };
-    const poor = deadBoardBase(web, snapshot, { shards: 2_000, cores: 100 });
+    const poor = deadBoardBase(web, snapshot, { shards: 15, cores: 100 });
     const invested = boardInvestment(web, poor, FRESH_ACCOUNT, DEFAULT_WEB_ECONOMY, 'poison');
     expect(invested.bought).toEqual(ROUTE.slice(0, 2));
     expect(invested.unpaid).toEqual([...ROUTE.slice(2), ...POISON]);
@@ -194,7 +194,7 @@ describe('the investment (deadBoards)', () => {
     const owned = { ...snapshot, ranks: { 'fire.center.alpha.r1': 1 } };
     const kept = boardInvestment(
       web,
-      deadBoardBase(web, owned, { shards: 2_000, cores: 100 }),
+      deadBoardBase(web, owned, { shards: 15, cores: 100 }),
       FRESH_ACCOUNT,
       DEFAULT_WEB_ECONOMY,
       'poison',

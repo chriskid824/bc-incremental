@@ -112,7 +112,26 @@ export interface WebFuzzCase {
 }
 
 /** Fixed cases, from B1: 「熔核：瘟疫＋無盡烈焰＋悶燒，第 30 波清怪」 (S373). */
-export const FIXED_WEB_CASES: readonly WebFuzzCase[] = [];
+export const FIXED_WEB_CASES: readonly WebFuzzCase[] = [
+  {
+    name: 'fire-pandemic-wave30',
+    character: 'fire',
+    order: [
+      'fire.center.stoke.r1',
+      'fire.center.stoke.r2',
+      'fire.center.stoke.kindle',
+      'fire.center.stoke.r3',
+      'fire.center.stoke.r4',
+      'fire.center.stoke.smoulder',
+      'fire.center.main.c1',
+      'fire.center.main.eternal-flame',
+      'fire.center.spread.r1',
+      'fire.center.spread.r2',
+      'fire.center.spread.pandemic',
+    ],
+    startWave: 30,
+  },
+];
 
 /** What a build is: its web and progress and how it runs. */
 export interface WebFuzzDraw {

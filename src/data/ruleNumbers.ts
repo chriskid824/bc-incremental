@@ -49,12 +49,37 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
         [String(rule.targets)],
         [signedPercent(rule.damageMult - 1), percent(rule.damageMult), `×${rule.damageMult}`],
       ];
+    case 'frostflame':
+      return [[percent(rule.frostPct)], [`+${rule.burnCapBonus}`], [percent(rule.zoneSlow)]];
+    case 'absoluteZero':
+      return [
+        [percent(rule.globalSlow)],
+        [String(rule.bossGapSec)],
+        [signedPercent(rule.attackSpeedMore)],
+      ];
     case 'gigantism':
       // gd:268's 「大小 ×2」; the halving is words.
       return [[`×${rule.sizeMult}`]];
+    case 'blastSpirit':
+      // gd:525's 「每第 4 發…1 隻 4 秒的火靈…點燃 3 層（最多 6 隻）」.
+      return [
+        [String(rule.every)],
+        [String(rule.lifeSec)],
+        [String(rule.burnStacks)],
+        [String(rule.maxLive)],
+      ];
     case 'poisonSlow':
       // gd:389 words it as 每 5 層毒減速 2%，最多 40%.
       return [[String(rule.stacksPer)], [percent(rule.slowPer)], [percent(rule.max)]];
+    case 'lockBeacon':
+      return [];
+    case 'cannon':
+      // gd's 「攻擊頻率 ÷3」; the splash radius is words.
+      return [[`÷${Math.round(1 / rule.rateMult)}`, percent(rule.rateMult)]];
+    case 'teslaTower':
+      return [[String(rule.chains)]];
+    case 'bugSea':
+      return [[`×${rule.countMult}`]];
   }
 }
 

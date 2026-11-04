@@ -1,6 +1,6 @@
 /**
  * Effect sprite sheet, drawn once on a 2D canvas: a soft glow, a debris shard, a spark streak,
- * a four-point star and a flame tongue. Everything is white so particles get their color from the tint, and
+ * a four-point star, a flame tongue and a bubble (毒's shape, gd §11.6). Everything is white so particles get their color from the tint, and
  * the frames share one texture source so a single ParticleContainer draws them in one batch.
  */
 
@@ -17,10 +17,16 @@ export interface FxTextures {
   readonly shard: Texture;
   /** 40×60 flame tongue pointing up (-y), soft-edged. */
   readonly flame: Texture;
+  /** 32×32 hollow ring with a glint: 毒's bubble (the poison skin's shape 'bubble'). */
+  readonly bubble: Texture;
 }
 
 const CELL = 64;
 const GAP = 2;
+/** The bubble's frame: BUBBLE px square at (BUBBLE_X, BUBBLE_Y) in the shard's cell. */
+const BUBBLE = 32;
+const BUBBLE_X = 28;
+const BUBBLE_Y = 30;
 
 export function createFxTextures(): FxTextures {
   const canvas = document.createElement('canvas');
@@ -29,7 +35,14 @@ export function createFxTextures(): FxTextures {
   const ctx = canvas.getContext('2d');
   if (ctx === null) {
     const empty = Texture.WHITE;
-    return { glow: empty, star: empty, streak: empty, shard: empty, flame: empty };
+    return {
+      glow: empty,
+      star: empty,
+      streak: empty,
+      shard: empty,
+      flame: empty,
+      bubble: empty,
+    };
   }
 
   // Glow: steep core, long soft tail.
@@ -116,6 +129,24 @@ export function createFxTextures(): FxTextures {
   ctx.fill();
   ctx.restore();
 
+  // Bubble: a thin bright shell around a faint fill, with a glint up and to the left. In the
+  // shard's cell, below and right of the shard, so the sheet keeps its size and every other
+  // frame its UVs (the M1 page draws as before).
+  const bx = dx + BUBBLE_X;
+  const by = BUBBLE_Y;
+  const br = BUBBLE / 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.beginPath();
+  ctx.arc(bx + br, by + br, br - 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,1)';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.beginPath();
+  ctx.arc(bx + br - 5, by + br - 5, 3, 0, Math.PI * 2);
+  ctx.fill();
+
   const base = Texture.from(canvas);
   const frame = (x: number, y: number, w: number, h: number): Texture =>
     new Texture({ source: base.source, frame: new Rectangle(x, y, w, h) });
@@ -125,5 +156,6 @@ export function createFxTextures(): FxTextures {
     streak: frame(tx, 0, CELL, 16),
     shard: frame(dx, 0, 16, 28),
     flame: frame(fx, 0, 40, 60),
+    bubble: frame(bx, by, BUBBLE, BUBBLE),
   };
 }

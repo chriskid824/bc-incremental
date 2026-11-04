@@ -519,7 +519,34 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         damageMult: finite,
       })
       .readonly(),
+    z
+      .strictObject({
+        id: z.literal('frostflame'),
+        frostPct: finite,
+        burnCapBonus: finite,
+        zoneSlow: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('absoluteZero'),
+        globalSlow: finite,
+        bossGapSec: finite,
+        attackSpeedMore: finite,
+      })
+      .readonly(),
     z.strictObject({ id: z.literal('gigantism'), sizeMult: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('blastSpirit'),
+        every: finite,
+        lifeSec: finite,
+        damagePct: finite,
+        burnStacks: finite,
+        burnDamagePct: finite,
+        maxLive: finite,
+      })
+      .readonly(),
     z
       .strictObject({
         id: z.literal('poisonSlow'),
@@ -528,6 +555,10 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         max: finite,
       })
       .readonly(),
+    z.strictObject({ id: z.literal('lockBeacon') }).readonly(),
+    z.strictObject({ id: z.literal('cannon'), rateMult: finite, splash: finite }).readonly(),
+    z.strictObject({ id: z.literal('teslaTower'), chains: finite }).readonly(),
+    z.strictObject({ id: z.literal('bugSea'), countMult: finite }).readonly(),
   ]),
 );
 

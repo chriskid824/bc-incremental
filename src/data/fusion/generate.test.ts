@@ -31,7 +31,7 @@ import {
   place,
   templateOf,
 } from './generate';
-import { ACCEPTED_FAILS, OVERRIDES, TEMPLATE_RULE_OVERRIDES } from './overrides';
+import { OVERRIDES, TEMPLATE_RULE_OVERRIDES } from './overrides';
 
 const content = fixtureContent();
 
@@ -122,10 +122,9 @@ describe('registries', () => {
     ]);
   });
 
-  it('OVERRIDES, ACCEPTED_FAILS and CALIBRATED start empty; 冰光 and 雷光 may add rules', () => {
-    expect(OVERRIDES).toEqual({});
-    expect(ACCEPTED_FAILS).toEqual({});
-    expect(CALIBRATED).toEqual({});
+  it('OVERRIDES and CALIBRATED hold only B1 pairs so far; 冰光 and 雷光 may add rules', () => {
+    for (const key of Object.keys(OVERRIDES)) expect(key.startsWith('fire.')).toBe(true);
+    for (const key of Object.keys(CALIBRATED)) expect(key.startsWith('fire.')).toBe(true);
     expect(TEMPLATE_RULE_OVERRIDES).toEqual(['ice.aura', 'lightning.aura']);
     for (const key of TEMPLATE_RULE_OVERRIDES) expect(HAND_PAIRS.has(key)).toBe(false);
   });

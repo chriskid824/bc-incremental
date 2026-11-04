@@ -732,10 +732,49 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`sixCoils.damageMult must be > 0 (got ${rule.damageMult})`);
       }
       break;
+    case 'frostflame':
+      chance('frostflame.frostPct', rule.frostPct);
+      if (!(Number.isInteger(rule.burnCapBonus) && rule.burnCapBonus >= 0)) {
+        issues.push(
+          `frostflame.burnCapBonus must be a non-negative integer (got ${rule.burnCapBonus})`,
+        );
+      }
+      chance('frostflame.zoneSlow', rule.zoneSlow);
+      break;
+    case 'absoluteZero':
+      chance('absoluteZero.globalSlow', rule.globalSlow);
+      if (!(rule.bossGapSec >= 0)) {
+        issues.push(`absoluteZero.bossGapSec must be >= 0 (got ${rule.bossGapSec})`);
+      }
+      more('absoluteZero.attackSpeedMore', rule.attackSpeedMore);
+      break;
     case 'gigantism':
       // A giant never shrinks: its factor keeps every radius it scales at its size or larger.
       if (!(rule.sizeMult >= 1)) {
         issues.push(`gigantism.sizeMult must be >= 1 (got ${rule.sizeMult})`);
+      }
+      break;
+    case 'blastSpirit':
+      if (!isPositiveInt(rule.every)) {
+        issues.push(`blastSpirit.every must be a positive integer (got ${rule.every})`);
+      }
+      if (!(rule.lifeSec > 0)) {
+        issues.push(`blastSpirit.lifeSec must be > 0 (got ${rule.lifeSec})`);
+      }
+      if (!(rule.damagePct >= 0)) {
+        issues.push(`blastSpirit.damagePct must be >= 0 (got ${rule.damagePct})`);
+      }
+      if (!isPositiveInt(rule.burnStacks)) {
+        issues.push(`blastSpirit.burnStacks must be a positive integer (got ${rule.burnStacks})`);
+      }
+      if (!(rule.burnDamagePct > 0)) {
+        issues.push(`blastSpirit.burnDamagePct must be > 0 (got ${rule.burnDamagePct})`);
+      }
+      // A spirit is a summon: one instance's live ones fit in the run's cap.
+      if (!(isPositiveInt(rule.maxLive) && rule.maxLive <= SUMMON_SLOTS_MAX)) {
+        issues.push(
+          `blastSpirit.maxLive must be an integer in [1, ${SUMMON_SLOTS_MAX}] (got ${rule.maxLive})`,
+        );
       }
       break;
     case 'poisonSlow':
@@ -748,6 +787,27 @@ function ruleIssues(rule: RuleSpec): string[] {
       }
       if (!(rule.max > 0 && rule.max <= 1)) {
         issues.push(`poisonSlow.max must be in (0, 1] (got ${rule.max})`);
+      }
+      break;
+    case 'lockBeacon':
+      break;
+    case 'cannon':
+      // The engine refuses a turret rate factor that is not finite and above 0, and a negative splash.
+      if (!(Number.isFinite(rule.rateMult) && rule.rateMult > 0)) {
+        issues.push(`cannon.rateMult must be finite and > 0 (got ${rule.rateMult})`);
+      }
+      if (!(rule.splash >= 0)) {
+        issues.push(`cannon.splash must be >= 0 (got ${rule.splash})`);
+      }
+      break;
+    case 'teslaTower':
+      if (!(Number.isInteger(rule.chains) && rule.chains >= 0)) {
+        issues.push(`teslaTower.chains must be a non-negative integer (got ${rule.chains})`);
+      }
+      break;
+    case 'bugSea':
+      if (!(Number.isInteger(rule.countMult) && rule.countMult >= 1)) {
+        issues.push(`bugSea.countMult must be an integer >= 1 (got ${rule.countMult})`);
       }
       break;
   }
@@ -1516,8 +1576,15 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'icicle':
     case 'prism':
     case 'sixCoils':
+    case 'frostflame':
+    case 'absoluteZero':
     case 'gigantism':
+    case 'blastSpirit':
     case 'poisonSlow':
+    case 'lockBeacon':
+    case 'cannon':
+    case 'teslaTower':
+    case 'bugSea':
       return [];
   }
 }

@@ -5,7 +5,9 @@
  *
  * Feel (docs/GDD.md §1, §3): kills explode in the enemy's color, crits flare and pop numbers
  * (a few big pops at a time), burning enemies glow and shed flames behind their outlines,
- * pandemic spreads as a fire nova, chains arc as flickering lightning. Shake and hit-stop are
+ * pandemic spreads as a fire nova, chains arc as flickering lightning. Poison and bleed ticks
+ * (dotTick) pop their own green and red numbers, tallied as burn's; poisoned, chilled and frozen
+ * enemies take a cast (src/render/enemies.ts); a freeze and a shatter burst in ice. Shake and hit-stop are
  * budgeted so they punch instead of jitter, and every effect pool is capped so a crowded screen
  * sheds detail instead of frame rate. docs/ARCHITECTURE.md §10 lists the layers and budgets.
  *
@@ -15,6 +17,12 @@
  * the rest from the record. The kill tier reads the def's flags (killTier), and the core does not
  * flash on a hit the shield took whole (CoreHitFilter). An M1 run has none of their inputs: the
  * bullet and shield layers are not made, and its frames are as before.
+ *
+ * A v3 character run (RendererOptions.character, B1) draws the character's construct and arena
+ * in place of M1's hexagon and floor, its hit numbers in the character colour, the crit slash
+ * lines ('slash'), and for 熔核 its attack language (src/render/magma.ts): the bombs, explosions,
+ * fire zones and scorch marks, the 火環 nova and the fusion looks (霜焰, 瘟爆, 爆靈). Without it
+ * (the M1 page, `?hive`) none of those layers is made and none of those events is drawn.
  *
  * A build with a segment emitter (any construct) also draws its links (src/render/
  * segmentLines.ts, V1): the layer is made the first time render() sees a state with a segment
@@ -31,21 +39,24 @@ import type { GameData } from '../data/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, PLAYER_RADIUS } from '../sim';
 import type { SimEvent, SimState } from '../sim';
 import { ArcLayer } from './arcs';
-import { createBackdrop } from './backdrop';
+import { createArenaBackdrop, createBackdrop } from './backdrop';
 import { BurnTally } from './burnTally';
 import { Bursts } from './bursts';
 import { BulletLayer } from './bullets';
-import { HiveCoreView } from './core';
+import { fusionSkin, hitNumberColor } from './characterLook';
+import type { CharacterLook } from './characterLook';
+import { ConstructCoreView, HiveCoreView } from './core';
 import type { CoreView } from './core';
 import { CritStopGate } from './critStop';
 import { DamageNumbers } from './damageNumbers';
-import { DroneLayer } from './drones';
-import { EnemyLayer, HIT_PUNCH } from './enemies';
+import { BLAST_SPIRIT_SKIN, DroneLayer, HIVE_DRONE_SKIN } from './drones';
+import { EnemyLayer } from './enemies';
 import { FxParticles } from './fx';
 import { createFxTextures } from './fxTextures';
 import { killTier, TIER_BOSS, TIER_ELITE } from './killTier';
+import { DEFAULT_MAGMA_LOOKS, MagmaLayer } from './magma';
 import { hudSafeArea } from './numberLayout';
-import { COLORS } from './palette';
+import { COLORS, MAGMA_COLORS } from './palette';
 import { ShardParticles } from './particles';
 import { PlayerView } from './player';
 import { CoreHitFilter } from './playerHits';
@@ -56,7 +67,10 @@ import type { RenderRandom } from './random';
 import { RingLayer } from './rings';
 import { SegmentLineLayer } from './segmentLines';
 import { ScreenShake } from './shake';
+import { CRIT_PUNCH, HIT_PUNCH_STRONG, ImpactShakes } from './impact';
+import type { ShakeKick } from './impact';
 import { PlayerShield } from './shieldArc';
+import { SlashLayer } from './slashes';
 
 export interface RendererOptions {
   /** Disables screen shake (settings toggle later, docs/ARCHITECTURE.md §10). */
@@ -69,6 +83,12 @@ export interface RendererOptions {
    * center is M1's hexagon and none of them is drawn.
    */
   readonly construct?: 'hive';
+  /**
+   * A v3 character run's looks (src/render/characterLook.ts): its construct at the center, its
+   * arena, its hit-number colour and its attack language. A 'hive' construct takes the `?hive`
+   * path above. Left out on the M1 page and `?hive`, whose frames stay as they were.
+   */
+  readonly character?: CharacterLook;
   /**
    * Where the effects draw their randomness (src/render/random.ts). The M1 page passes none, so
    * they draw Math.random; a replay (src/app/replay) passes a seeded one for repeatable frames.
@@ -128,6 +148,12 @@ export class Renderer {
   private readonly bullets: BulletLayer | null;
   /** The player's shield arc; only on v3 data. */
   private readonly playerShield: PlayerShield | null;
+  /** A non-hive character's construct (the attack pose); null otherwise. */
+  private readonly construct: ConstructCoreView | null;
+  /** 熔核's bombs, explosions, fire zones and scorch marks; only on a magmaCore run. */
+  private readonly magma: MagmaLayer | null;
+  /** The crit slash lines; only on a character run. */
+  private readonly slashes: SlashLayer | null;
   /**
    * The segment emitters' links, under the enemies; made by the first render() of a state with
    * a segment emitter (a non-empty SimState.segments.lines), null until then.
@@ -138,10 +164,14 @@ export class Renderer {
   private readonly shards: ShardParticles;
   private readonly numbers: DamageNumbers;
   private readonly burnTally = new BurnTally();
+  /** Poison and bleed ticks (dotTick) are tallied as burn's, each into its own numbers. */
+  private readonly poisonTally = new BurnTally();
+  private readonly bleedTally = new BurnTally();
   private readonly shake: ScreenShake;
   private readonly hitStop: (ms: number) => void;
   private readonly critStop = new CritStopGate();
   private critShakeCooldownMs = 0;
+  private readonly impactShakes = new ImpactShakes();
   private killsThisFrame = 0;
   /** pandemic spreads waiting for render() to aim their embers: x, y, radius triples. */
   private readonly pendingNovas = new Float64Array(MAX_PENDING_NOVAS * 3);
@@ -152,6 +182,12 @@ export class Renderer {
   private readonly onResize = (): void => this.fit();
   private readonly showBurn = (amount: Num, x: number, y: number, enemyId: number): void => {
     this.numbers.spawn('burn', amount, x, y, enemyId);
+  };
+  private readonly showPoison = (amount: Num, x: number, y: number, enemyId: number): void => {
+    this.numbers.spawn('poison', amount, x, y, enemyId);
+  };
+  private readonly showBleed = (amount: Num, x: number, y: number, enemyId: number): void => {
+    this.numbers.spawn('bleed', amount, x, y, enemyId);
   };
   private readonly flamePuff = (x: number, y: number): void => this.bursts.flamePuff(x, y);
 
@@ -170,10 +206,46 @@ export class Renderer {
     this.flames = new FxParticles(textures);
     this.bursts = new Bursts(this.fx, this.flames, textures, this.rings, random);
     this.shards = new ShardParticles(app.renderer, random);
-    this.drones =
-      options.construct === 'hive' ? new DroneLayer(app.renderer, textures.streak) : null;
-    this.poolShots = this.drones === null ? null : new PoolShotLayer(textures);
-    this.core = this.drones === null ? new PlayerView() : new HiveCoreView(this.drones);
+    const look = options.character ?? null;
+    const hive = options.construct === 'hive' || look?.construct === 'hive';
+    const spirits = look !== null && !hive && fusionSkin(look, 'summon') !== null;
+    // The summon outer's drones and turrets on another construct; one skin for every row, so a
+    // build with 火靈's spirits draws its drones in the spirits' colours too.
+    const summons = look !== null && !hive && look.summons;
+    this.drones = hive
+      ? new DroneLayer(app.renderer, textures.streak)
+      : spirits || summons
+        ? new DroneLayer(
+            app.renderer,
+            textures.streak,
+            spirits && look.construct === 'magmaCore' ? BLAST_SPIRIT_SKIN : HIVE_DRONE_SKIN,
+          )
+        : null;
+    this.poolShots = hive || summons ? new PoolShotLayer(textures) : null;
+    this.construct =
+      look !== null && look.construct !== 'hive' ? new ConstructCoreView(look.construct) : null;
+    this.core =
+      this.construct ??
+      (hive && this.drones !== null ? new HiveCoreView(this.drones) : null) ??
+      new PlayerView();
+    this.magma =
+      look?.construct === 'magmaCore'
+        ? new MagmaLayer(
+            textures,
+            this.fx,
+            this.rings,
+            {
+              frost: fusionSkin(look, 'ice') !== null,
+              poison: fusionSkin(look, 'poison')?.accent ?? DEFAULT_MAGMA_LOOKS.poison,
+            },
+            random,
+          )
+        : null;
+    this.slashes =
+      look === null
+        ? null
+        : new SlashLayer(textures.streak, fusionSkin(look, 'crit')?.accent ?? MAGMA_COLORS.slash);
+    if (look !== null) this.numbers.setHitColor(hitNumberColor(look));
     // An M1 run has no bullet and no shield: on M1 data neither layer exists.
     const v3 = data.waves.v3 !== undefined;
     this.bullets = v3 ? new BulletLayer(textures) : null;
@@ -181,10 +253,12 @@ export class Renderer {
     this.shake = new ScreenShake(options.reducedMotion, random);
     this.hitStop = options.hitStop ?? ((): void => undefined);
     // Static: one cached quad instead of grid lines, light pool and vignette every frame.
-    const backdrop = createBackdrop();
+    const backdrop = look === null ? createBackdrop() : createArenaBackdrop(look.arena);
     backdrop.cacheAsTexture({ resolution: Math.min(2, app.renderer.resolution), antialias: true });
     this.world.addChild(
       backdrop,
+      // The floor's scorch marks, fire zones and the bombs' shadows, under the crowd.
+      ...(this.magma === null ? [] : this.magma.groundViews),
       this.enemies.burnGlow,
       this.flames.view,
       this.enemies.view,
@@ -196,6 +270,8 @@ export class Renderer {
       this.projectiles.view,
       ...(this.poolShots === null ? [] : [this.poolShots.view]),
       ...(this.bullets === null ? [] : [this.bullets.view]),
+      ...(this.magma === null ? [] : [this.magma.airView]),
+      ...(this.slashes === null ? [] : [this.slashes.view]),
       this.arcs.view,
       this.fx.view,
       this.shards.view,
@@ -216,16 +292,21 @@ export class Renderer {
     this.shards.clear();
     this.numbers.clear();
     this.burnTally.clear();
+    this.poisonTally.clear();
+    this.bleedTally.clear();
     this.core.reset();
     this.drones?.reset();
     this.poolShots?.reset();
     this.bullets?.clear();
     this.playerShield?.reset();
+    this.magma?.reset();
+    this.slashes?.clear();
     this.segmentLines?.clear();
     this.coreHits.reset();
     this.shake.reset();
     this.critStop.reset();
     this.critShakeCooldownMs = 0;
+    this.impactShakes.reset();
     this.killsThisFrame = 0;
     this.pendingNovaCount = 0;
     this.numbers.setTypicalHit(typicalHit);
@@ -240,6 +321,7 @@ export class Renderer {
   restart(typicalHit: number): void {
     this.beginRun(typicalHit);
     this.core.rewind();
+    this.magma?.rewind();
     this.enemies.rewind();
     this.numbers.rewind();
   }
@@ -254,6 +336,20 @@ export class Renderer {
           break;
         case 'burnTick':
           this.burnTally.add(event.targetId, event.amount, event.x, event.y);
+          break;
+        case 'dotTick':
+          (event.ailment === 'poison' ? this.poisonTally : this.bleedTally).add(
+            event.targetId,
+            event.amount,
+            event.x,
+            event.y,
+          );
+          break;
+        case 'freeze':
+          if (!event.boss) this.onFrozen(event.targetId);
+          break;
+        case 'shatter':
+          this.bursts.shatter(event.x, event.y, event.radius);
           break;
         case 'enemyKilled':
           this.onKill(event);
@@ -277,7 +373,10 @@ export class Renderer {
           break;
         case 'playerHit':
         case 'bulletHit':
-          if (this.coreHits.flashes(event)) this.core.hit();
+          if (this.coreHits.flashes(event)) {
+            this.core.hit();
+            this.kick(this.impactShakes.playerHit());
+          }
           break;
         case 'shieldAbsorbed':
           this.coreHits.flashes(event);
@@ -292,16 +391,44 @@ export class Renderer {
         case 'onionLayer':
           this.onShellBroken(event.enemyId, event.x, event.y);
           break;
+        // A character run's events; on the M1 page and `?hive` their layers are null.
+        case 'lob':
+          this.construct?.attack(Math.atan2(event.y - event.fromY, event.x - event.fromX));
+          break;
+        case 'explosion':
+          this.magma?.explosion(event.x, event.y, event.radius);
+          this.kick(this.impactShakes.blast(event.radius));
+          break;
+        case 'burst':
+          if (this.magma !== null) this.onBurst(event);
+          break;
+        case 'slash':
+          this.slashes?.add(event.x1, event.y1, event.x2, event.y2, event.width);
+          break;
+        case 'pulse':
+          if (event.kind === 'zone' && event.hits > 0) this.magma?.zonePulse(event.id);
+          break;
+        case 'ailmentApplied':
+          if (this.magma !== null && event.ailment === 'poison') this.onPoisoned(event.targetId);
+          break;
+        case 'ailmentSpread':
+          this.magma?.poisonSpread(event.x, event.y, event.radius, event.targets);
+          break;
+        case 'waveCleared':
+          this.magma?.waveCleared();
+          break;
         default:
           break;
       }
     }
+    this.magma?.flushTick();
   }
 
   /** Draws the state, interpolating positions by `alpha` between the last two ticks. */
   render(state: Readonly<SimState>, alpha: number, frameMs: number): void {
     const dt = Math.min(Math.max(0, frameMs), MAX_EFFECT_DT_MS);
     this.critShakeCooldownMs = Math.max(0, this.critShakeCooldownMs - dt);
+    this.impactShakes.update(dt);
     this.critStop.update(dt);
     this.shake.update(dt);
     this.world.position.set(
@@ -319,6 +446,16 @@ export class Renderer {
     this.projectiles.update(state.projectiles, alpha);
     this.poolShots?.update(state.shots, state.shotCount, state.tick, alpha);
     this.bullets?.update(state.bullets, state.bulletCount, alpha);
+    this.magma?.update(
+      state.shots,
+      state.shotCount,
+      state.zones,
+      state.zoneCount,
+      state.tick,
+      alpha,
+      dt,
+    );
+    this.slashes?.update(dt);
     this.arcs.update(dt);
     this.rings.update(dt);
     this.flames.update(dt);
@@ -329,6 +466,8 @@ export class Renderer {
     const absorbed = this.shards.update(dt, state.player.x, state.player.y, PLAYER_RADIUS * 1.5);
     if (absorbed > 0) this.core.pulse();
     this.burnTally.update(dt, this.showBurn);
+    this.poisonTally.update(dt, this.showPoison);
+    this.bleedTally.update(dt, this.showBleed);
     this.numbers.update(dt);
     this.killsThisFrame = 0;
   }
@@ -353,7 +492,7 @@ export class Renderer {
   private onHit(event: Extract<SimEvent, { type: 'hit' }>): void {
     const { x, y, crit } = event;
     const chain = event.chainIndex > 0;
-    this.enemies.flash(event.targetId, crit ? HIT_PUNCH * 1.8 : HIT_PUNCH);
+    this.enemies.flash(event.targetId, crit ? CRIT_PUNCH : HIT_PUNCH_STRONG);
     if (chain && event.fromX !== null && event.fromY !== null) {
       this.arcs.add(event.fromX, event.fromY, x, y, event.chainIndex);
       this.bursts.chain(x, y);
@@ -379,9 +518,12 @@ export class Renderer {
 
   private onKill(event: Extract<SimEvent, { type: 'enemyKilled' }>): void {
     this.burnTally.flush(event.enemyId, this.showBurn);
+    this.poisonTally.flush(event.enemyId, this.showPoison);
+    this.bleedTally.flush(event.enemyId, this.showBleed);
     const def = this.data.enemies[event.enemy];
     const tier = killTier(def);
     this.killsThisFrame++;
+    this.kick(this.impactShakes.kills(this.killsThisFrame));
     const crowd = 1 / (1 + Math.max(0, this.killsThisFrame - 1) / CROWD_KILLS);
     this.bursts.kill(event.x, event.y, def.color, def.radius, tier, crowd);
     const count = Math.max(3, Math.round(def.radius / 3.5));
@@ -393,6 +535,40 @@ export class Renderer {
       this.shake.add(ELITE_SHAKE, ELITE_SHAKE_CEILING);
       this.hitStop(ELITE_HIT_STOP_MS);
     }
+  }
+
+  /** Adds an impact shake (src/render/impact.ts), if its cooldown let one through. */
+  private kick(kick: ShakeKick | null): void {
+    if (kick !== null) this.shake.add(kick.amount, kick.ceiling);
+  }
+
+  /**
+   * An explode or nova effect on 熔核's run: a nova at the player is 火環's (the threshold's ring
+   * of fire, gd §1.2), any other nova a fire nova where it went off, an explode a small blast.
+   */
+  private onBurst(event: Extract<SimEvent, { type: 'burst' }>): void {
+    const magma = this.magma;
+    if (magma === null) return;
+    if (event.kind === 'explode') {
+      magma.smallBlast(event.x, event.y, event.radius);
+      return;
+    }
+    if (Math.abs(event.x - CENTER_X) < 1 && Math.abs(event.y - CENTER_Y) < 1) {
+      magma.thresholdNova(event.x, event.y, event.radius);
+    }
+    this.bursts.nova(event.x, event.y, event.radius);
+  }
+
+  /** An enemy froze: an ice burst where it is drawn. */
+  private onFrozen(enemyId: number): void {
+    const spot = this.enemies.positionOf(enemyId);
+    if (spot !== null) this.bursts.freeze(spot.x, spot.y, spot.radius);
+  }
+
+  /** An enemy was poisoned: where it is drawn, for the poisoned-explosion check (瘟爆). */
+  private onPoisoned(enemyId: number): void {
+    const spot = this.enemies.positionOf(enemyId);
+    if (spot !== null) this.magma?.poisoned(spot.x, spot.y);
   }
 
   /** An elite's ward broke: a white ring pops off where it was drawn, if it has a view. */

@@ -90,12 +90,51 @@ export type RuleSpec =
       readonly damageMult: number;
     }
   /**
+   * 霜焰 (magmaBomb, 火冰's hand core): each bomb explosion adds frostPct chill to the enemies it
+   * hits; an enemy holding frost carries burnCapBonus more burn stacks; the fire zones slow the
+   * enemies in them by zoneSlow. Frost and the cap bonus add up over instances, the slow takes
+   * the largest.
+   */
+  | {
+      readonly id: 'frostflame';
+      readonly frostPct: number;
+      readonly burnCapBonus: number;
+      readonly zoneSlow: number;
+    }
+  /**
+   * 絕對零度 (the ice outer's ★ and 霜晶's): every enemy always carries globalSlow, a freeze leaves
+   * no immunity, a boss's freeze events stay at least bossGapSec apart, and attack speed gets
+   * (1 + attackSpeedMore). The largest slow and gap; the attack speed factors multiply.
+   */
+  | {
+      readonly id: 'absoluteZero';
+      readonly globalSlow: number;
+      readonly bossGapSec: number;
+      readonly attackSpeedMore: number;
+    }
+  /**
    * 巨大化 (gd:268): every area radius the build creates, the bomb's included, and the projectiles'
    * hit radius × sizeMult; the four counts (projectiles, ice cones, chain jumps, drones) halved,
    * rounded down, at least 1 (src/sim/rules/gigantism.ts, src/sim/build/size.ts). The first
    * instance's.
    */
   | { readonly id: 'gigantism'; readonly sizeMult: number }
+  /**
+   * 爆靈 (magmaBomb, 火靈's hand core; gd:525): every `every`-th bomb explosion spawns a timed
+   * spirit (spawnDrone) at the explosion that lives lifeSec, dashes at the nearest enemy and
+   * impacts it once for damagePct of the damage stat, igniting burnStacks burn stacks on the
+   * enemies in its splash, each as a hit of burnDamagePct of the damage stat would ignite it; at
+   * most maxLive of one instance's spirits at once. Each instance counts its own bombs.
+   */
+  | {
+      readonly id: 'blastSpirit';
+      readonly every: number;
+      readonly lifeSec: number;
+      readonly damagePct: number;
+      readonly burnStacks: number;
+      readonly burnDamagePct: number;
+      readonly maxLive: number;
+    }
   /**
    * 神經毒 (gd:389 「每 5 層毒減速 2%，最多 40%」): an enemy is slowed by slowPer for every
    * stacksPer of its live poison stacks, at most max, as one more source of enemySlow
@@ -106,7 +145,25 @@ export type RuleSpec =
       readonly stacksPer: number;
       readonly slowPer: number;
       readonly max: number;
-    };
+    }
+  /**
+   * 鎖定信標 (the summon outer's answer, gd §4.10): drones and spirits take elites and bosses
+   * first once they are in the arena, turrets at any distance (BuildFlags.summonEliteFirst).
+   */
+  | { readonly id: 'lockBeacon' }
+  /**
+   * 加農砲 (gd §4.10): turrets fire rateMult as often (BuildFlags.turretRateMult) and their shots
+   * hit every enemy within splash of the target (turretSplash). Rates multiply, the largest splash.
+   */
+  | { readonly id: 'cannon'; readonly rateMult: number; readonly splash: number }
+  /** 特斯拉塔 (gd §4.10): a turret's shot chains `chains` times (turretChains); they add up. */
+  | { readonly id: 'teslaTower'; readonly chains: number }
+  /**
+   * 蟲海 (the summon outer's ★, shared with 蜂巢; gd:193): grant and swarm drones × countMult
+   * (droneCountMult) and drones that ran out of impacts pick again instead of flying home
+   * (dronesStay). The largest countMult.
+   */
+  | { readonly id: 'bugSea'; readonly countMult: number };
 
 export type RuleId = RuleSpec['id'];
 
@@ -121,8 +178,15 @@ export const RULE_IDS: readonly RuleId[] = [
   'icicle',
   'prism',
   'sixCoils',
+  'frostflame',
+  'absoluteZero',
   'gigantism',
+  'blastSpirit',
   'poisonSlow',
+  'lockBeacon',
+  'cannon',
+  'teslaTower',
+  'bugSea',
 ];
 
 /**
@@ -201,7 +265,10 @@ export const RULE_COEF_FIELDS: {
   readonly [K in RuleId]?: Readonly<
     Partial<Record<keyof Extract<RuleSpec, { id: K }> & string, CoefFieldKind>>
   >;
-} = {};
+} = {
+  // 霜焰: the chill and the zone's slow scale; the burn cap bonus is a whole stack count.
+  frostflame: { frostPct: 'chance', zoneSlow: 'chance' },
+};
 
 /**
  * `spec` with the fields its `fields` entry lists scaled by `coef`: pct and mult × coef, chance
@@ -237,4 +304,9 @@ export const POLICY_RULES: readonly RuleId[] = [];
  * member can write, only its rule module, as 神經毒's poison-stack slow (gd:389). Each such module
  * adds its id when it lands.
  */
-export const NOTABLE_RULES: readonly RuleId[] = ['poisonSlow'];
+export const NOTABLE_RULES: readonly RuleId[] = [
+  'poisonSlow',
+  'lockBeacon',
+  'cannon',
+  'teslaTower',
+];

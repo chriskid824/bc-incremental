@@ -5,15 +5,16 @@
  * on rAF through FixedStepClock (src/app/loop.ts), its effects aged by wall-clock time; step mode
  * draws a frame only on step(), frameTicks ticks and frameMsOf(frameTicks) of effect time each,
  * at alpha 1, so a frame depends only on the spec (build.ts). Hit-stop is a no-op in both, and
- * frame 1 waits for document.fonts.ready. The renderer draws M1's center until B1 wires the
- * constructs; the summons, orbs and aura are counted, not drawn.
+ * frame 1 waits for document.fonts.ready. A character build is drawn with its character's looks
+ * (characterLookOf: construct, arena, colour, fusion skins), a preset with M1's center; the
+ * orbs and aura are counted, not drawn.
  */
 
 import { Application } from 'pixi.js';
 import { Renderer } from '../../render';
 import { COLORS } from '../../render/palette';
 import { FixedStepClock } from '../loop';
-import { rendererView, ReplayRun, resolveSpec } from './build';
+import { characterLookOf, rendererView, ReplayRun, resolveSpec } from './build';
 import { FrameTimer, fpsBlock, measuringText, pageOf, watchRestarts } from './readout';
 import type { FrameStats, ReplayOptions, ReplaySpec } from './types';
 
@@ -99,7 +100,9 @@ export async function createReplay(
   spec: ReplaySpec,
   options: ReplayOptions,
 ): Promise<ReplayHandle> {
-  const { run: setup } = resolveSpec(spec);
+  const resolved = resolveSpec(spec);
+  const setup = resolved.run;
+  const character = characterLookOf(resolved);
   const stepMode = options.mode === 'step';
   const frameTicks = options.frameTicks ?? 1;
   await document.fonts.ready;
@@ -119,7 +122,12 @@ export async function createReplay(
   host.appendChild(app.canvas);
   // One renderer for the replay's life, its effects on the replay's own RenderRandom (build.ts).
   const view = rendererView(
-    (random) => new Renderer(app, setup.data, { reducedMotion: false, random }),
+    (random) =>
+      new Renderer(app, setup.data, {
+        reducedMotion: false,
+        random,
+        ...(character === null ? {} : { character }),
+      }),
   );
   const run = new ReplayRun(spec, setup, view, options.onLoop);
   app.render();

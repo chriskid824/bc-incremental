@@ -56,12 +56,12 @@ function owning(targets: readonly string[]): CharacterProgress {
 function visitOf(
   id: WebStrategyId,
   progress: CharacterProgress,
-  { seed = 1, weights = new Map<string, number>() } = {},
+  { seed = 1, weights = new Map<string, number>(), economy = DEFAULT_WEB_ECONOMY } = {},
 ) {
   const visit = openVisit({
     web,
     account: ACCOUNT,
-    economy: DEFAULT_WEB_ECONOMY,
+    economy,
     data: characterGameData(),
     rng: createRng(seed),
     minutes: 0,
@@ -78,6 +78,14 @@ function visitOf(
 }
 
 const C = 'fire.center.';
+
+/** The pre-B1 prices (M1's 180 × 1.31 steps, 300 × 1.4 might), which the greedy tests' wallets read. */
+const M1_PRICES = {
+  ...DEFAULT_WEB_ECONOMY,
+  step: { base: 180, growth: 1.31 },
+  mastery: { base: 300, growth: 1.4 },
+  might: { base: 300, growth: 1.4 },
+};
 
 describe('web strategy ids', () => {
   it('parses focus:<o> against OUTER_IDS', () => {
@@ -203,6 +211,7 @@ describe('greedy', () => {
       withWallet(owning(['hub.might.might']), 1e6),
       {
         weights,
+        economy: M1_PRICES,
       },
     );
     // Might's 420 shards against the step nodes' 910: the lower gain first.
@@ -224,7 +233,9 @@ describe('greedy', () => {
     });
     expect([...ratios].sort((a, b) => b - a)).toEqual(ratios);
 
-    const flat = visitOf('greedy', withWallet(owning(['hub.might.might']), 1e6));
+    const flat = visitOf('greedy', withWallet(owning(['hub.might.might']), 1e6), {
+      economy: M1_PRICES,
+    });
     expect(flat.evaluations.length).toBeGreaterThan(0);
     expect(flat.bought).toEqual([]);
   });
@@ -259,7 +270,7 @@ describe('greedy', () => {
     const { bought, evaluations } = visitOf(
       'greedy',
       withWallet(owning(['hub.might.might']), 500, 3),
-      { weights },
+      { weights, economy: M1_PRICES },
     );
     expect(evaluations.map((e) => e.node).sort()).toEqual(
       [`${C}main.star-one`, 'hub.might.might', 'hub.rules.rule-one'].sort(),

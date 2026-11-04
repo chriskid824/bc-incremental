@@ -11,7 +11,6 @@ import { DEMO_SESSION_MINUTES, PRE_PRESTIGE_MINUTES } from '../session';
 import { webStrategiesFor } from '../strategies';
 import { DOUBLE_SEEDS, strengthUnitId, TRIPLE_SEEDS } from './fusions';
 import { KEYSTONE_SEEDS } from './keystones';
-import { m1Units } from './m1';
 import {
   checkSet,
   derivedUnits,
@@ -23,7 +22,6 @@ import {
   PR_SESSIONS,
   runPlan,
   SET_CHECKS,
-  standardOf,
 } from './run';
 import type { RunJobs } from './run';
 import { centerShareCsv } from './sessions';
@@ -493,45 +491,15 @@ describe('the exit code', () => {
   });
 });
 
-describe('registered content before B1', () => {
+describe('registered content from B1', () => {
   const registered = resolveContent('registered');
 
-  it('is noCenter in every check of every set but m1, with what unlocks it, and exits 0', async () => {
+  it('plans 熔核 in every set, and no check is noCenter', () => {
     for (const set of SETS) {
       const plan = checkSet(set, registered, 'registered');
-      expect([plan.characters, plan.keystones]).toEqual([[], []]);
-      // The M1 diffs alone, which need no center (lead ruling U15); the pr set has none.
-      expect(plan.units).toEqual(set === 'pr' ? [] : m1Units());
-      // The pr set's two groups, unfilled; the nightly's every fusion, none.
-      expect(plan.strength.map(({ group, key }) => [group, key])).toEqual(
-        set === 'pr'
-          ? [
-              ['hand', null],
-              ['template', null],
-            ]
-          : [],
-      );
-      if (set === 'pr') expect(await runPlan(plan, 2)).toEqual({ results: {}, modes: [] });
+      expect(plan.characters).toEqual(['fire']);
       const rows = evaluate(plan, {});
-      expect(rows.filter((row) => row.id !== 'm1')).toEqual(
-        plan.checks
-          .filter((id) => id !== 'm1')
-          .map((id) =>
-            naRow(
-              id,
-              set,
-              'all',
-              standardOf(set, id),
-              'noCenter',
-              'no character has a center in the registered content',
-            ),
-          ),
-      );
-      // Unread here: m1's rows are noData, never noCenter (checks/m1.test.ts reads them).
-      expect(rows.filter((row) => row.id === 'm1').map((row) => row.reason?.id)).toEqual(
-        set === 'pr' ? [] : ['noData', 'noData'],
-      );
-      expect(exitCodeOf(rows)).toBe(0);
+      expect(rows.filter((row) => row.reason?.id === 'noCenter')).toEqual([]);
     }
     expect(NA_UNLOCKS.noCenter).toBe('B1 registers 熔核, the first character with a center');
   });

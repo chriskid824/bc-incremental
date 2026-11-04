@@ -18,7 +18,9 @@ import type { Texture } from 'pixi.js';
 import { div, toNumber } from '../core/num';
 import type { EnemyId, GameData } from '../data/types';
 import type { EnemyState } from '../sim';
+import { frostMeter, holdsFrozen } from '../sim/ailments/frost';
 import { liveBurnStacks } from '../sim/ailments/records';
+import { livePoisonStacks } from '../sim/ailments/rings';
 import type { Enemy } from '../sim/systems/context';
 import type { Bursts } from './bursts';
 import type { EnemySpot } from './drones';
@@ -42,6 +44,20 @@ const FLAME_BUDGET = 650;
 const BURN_TINT = 0.06;
 const BURN_TINT_HEAT = 0.08;
 const BURN_TINT_FLICKER = 0.06;
+/** Poison visuals stop growing at this many stacks. */
+const POISON_VISUAL_STACKS = 6;
+/** How far a poisoned enemy's tint leans toward the poison green: base, at full stacks, pulse. */
+const POISON_TINT = 0.2;
+const POISON_TINT_STACKS = 0.14;
+const POISON_TINT_PULSE = 0.08;
+/**
+ * How far a chilled enemy's tint leans toward the chill blue: any chill, and more up to a full
+ * meter, so a light chill still shows.
+ */
+const CHILL_TINT = 0.15;
+const CHILL_TINT_METER = 0.4;
+/** How far a frozen enemy's tint leans toward the frozen ice-blue: most of the way. */
+const FROZEN_TINT = 0.8;
 /** Glow texture diameter in pixels (src/render/fxTextures.ts). */
 const GLOW_SIZE = 64;
 
@@ -148,10 +164,21 @@ export class EnemyLayer {
       view.draw(enemy, seconds);
 
       let tint = view.tintOf(enemy);
+      const record = enemy as Enemy;
+      const poison = livePoisonStacks(record, tick);
+      if (poison > 0) {
+        const pulse = 0.5 + 0.5 * Math.sin(seconds * 5 + enemy.id * 1.3);
+        const k = Math.min(poison, POISON_VISUAL_STACKS) / POISON_VISUAL_STACKS;
+        tint = mixColor(
+          tint,
+          COLORS.poison,
+          POISON_TINT + POISON_TINT_STACKS * k + POISON_TINT_PULSE * pulse,
+        );
+      }
       // SimState.enemies are the run's Enemy records (src/sim/systems/context.ts). One scan of its
       // burn records, at most RunContext.burnCap of them; none under eternalFlame, whose burns are
       // rings.
-      const stacks = liveBurnStacks(enemy as Enemy, tick);
+      const stacks = liveBurnStacks(record, tick);
       if (stacks > 0) {
         const heat = Math.min(stacks, BURN_VISUAL_STACKS) / BURN_VISUAL_STACKS;
         const flicker = 0.5 + 0.5 * Math.sin(seconds * 23 + enemy.id * 1.7);
@@ -189,6 +216,14 @@ export class EnemyLayer {
         }
       } else {
         view.flameDebt = 0;
+      }
+      // Frost last, over both casts: a frozen enemy reads as ice whatever else it holds.
+      if (holdsFrozen(record, tick)) tint = mixColor(tint, COLORS.frozen, FROZEN_TINT);
+      else {
+        const chill = frostMeter(record, tick);
+        if (chill > 0) {
+          tint = mixColor(tint, COLORS.chill, CHILL_TINT + CHILL_TINT_METER * Math.min(1, chill));
+        }
       }
       const flash = view.flashMs / FLASH_MS;
       if (flash > 0) tint = mixColor(tint, COLORS.hitFlash, flash);

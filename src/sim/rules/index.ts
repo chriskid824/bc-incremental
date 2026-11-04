@@ -5,8 +5,11 @@
  */
 
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
+import { absoluteZero } from './absoluteZero';
+import { blastSpirit } from './blastSpirit';
 import { eternalFlame } from './eternalFlame';
 import { icicle, prism } from './fanForms';
+import { frostflame } from './frostflame';
 import { gigantism } from './gigantism';
 import { glassCannon } from './glassCannon';
 import { iceFan } from './iceFan';
@@ -19,6 +22,7 @@ import { poisonSlow } from './poisonSlow';
 import { sixCoils } from './sixCoils';
 import { steadyAim } from './steadyAim';
 import { swarm } from './swarm';
+import { bugSea, cannon, lockBeacon, teslaTower } from './summonPolicies';
 import { triphaseArc } from './triphaseArc';
 
 export type {
@@ -49,8 +53,15 @@ export const RULE_MODULES: {
   icicle,
   prism,
   sixCoils,
+  frostflame,
+  absoluteZero,
   gigantism,
+  blastSpirit,
   poisonSlow,
+  lockBeacon,
+  cannon,
+  teslaTower,
+  bugSea,
 };
 
 export const SIGNATURES: {

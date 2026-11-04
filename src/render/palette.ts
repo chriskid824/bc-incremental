@@ -1,6 +1,6 @@
 /**
  * Render colors. Effect colors follow the archetype palette reserved in src/data/enemies.ts:
- * crit yellow/white, burn orange-red, chain cyan.
+ * crit yellow/white, burn orange-red, chain cyan, poison green, frost icy blue.
  */
 
 export const COLORS = {
@@ -24,12 +24,23 @@ export const COLORS = {
   burnHot: 0xffc44a,
   burnDeep: 0xe0301a,
   chain: 0x5ff4ff,
+  /**
+   * Poisoned enemies' cast (src/render/enemies.ts): 熔核's 瘟爆 green (DEFAULT_MAGMA_LOOKS.poison),
+   * bluer than 蜂巢's lime so a poisoned enemy does not read as the hive's colour.
+   */
+  poison: 0x3fd08a,
+  /** Chilled enemies lean toward `chill` with the meter; frozen ones toward the paler `frozen`. */
+  chill: 0x7fd4ff,
+  frozen: 0xaee9ff,
   hpBack: 0x05060a,
   hpFill: 0xff6b81,
   damageHit: 0xeef2ff,
   damageCrit: 0xffe066,
   damageBurn: 0xff8a3d,
   damageChain: 0x7ff6ff,
+  /** Poison ticks: a mint green, apart from 蜂巢's lime hit numbers (hitNumberColor). */
+  damagePoison: 0x5ef2a6,
+  damageBleed: 0xff5068,
   /** A hit the enemy's defences took in full (hitBlocked): steel, apart from a landed hit's white. */
   blocked: 0x9aa6bd,
   /** 衝刺者 while it charges its dash (gd A.5 「衝刺前變紅 0.6 秒」). */
@@ -44,6 +55,42 @@ export const COLORS = {
    * the chain cyan of shocked links, so a laser fence reads apart from 雷網.
    */
   droneLink: 0x86a8ff,
+} as const;
+
+/**
+ * 熔核's attack language and fusions (docs/v3/game-design-v3.md §11.4, §11.6, §5.2): the bomb and
+ * its explosion share the character orange (CONSTRUCT_COLORS.magmaCore.main); these are the rest.
+ */
+export const MAGMA_COLORS = {
+  /** The bomb's white-hot heart and its explosion's flash. */
+  bombHot: 0xfff1c9,
+  /** Its shadow on the floor and the scorch marks: near black, drawn with normal blending. */
+  shadow: 0x050201,
+  /** 火地: deep ember red under the orange, so a patch glows instead of flattening to a disc. */
+  zoneDeep: 0xc2340f,
+  /** 霜焰 (火冰): the white-blue frost ring outside the explosion and on a fire zone's edge. */
+  frostRim: 0xe4f7ff,
+  frost: 0x8fe3ff,
+  /** 斬擊線: 暴擊's low-chroma white light (gd §4.6, #FFF4D6), the crit skin's accent. */
+  slash: 0xfff4d6,
+} as const;
+
+/**
+ * The arenas (docs/v3/game-design-v3.md §11.5), by CharacterDef.arena. Only 熔核's is drawn so far;
+ * the others fall back to M1's backdrop until their batches.
+ */
+export const ARENA_COLORS = {
+  fire: {
+    /** Charcoal with a warm cast. */
+    floor: 0x110c0a,
+    /** The forge grate: concentric rings and spokes from the center. */
+    grate: 0x3b2417,
+    /** Every third ring, a little hotter. */
+    grateHot: 0x5c3018,
+    edge: 0x4a2a19,
+    /** A faint heat under the grate's center, far dimmer than M1's light pool. */
+    heat: 0x7a2e10,
+  },
 } as const;
 
 /** Linear blend of two 0xRRGGBB colors; t = 0 gives a, t = 1 gives b. */

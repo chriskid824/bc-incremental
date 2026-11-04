@@ -17,9 +17,11 @@ export const FX_SPARK = 1;
 export const FX_FLASH = 2;
 export const FX_FLAME = 3;
 export const FX_EMBER = 4;
-export type FxGroup = 0 | 1 | 2 | 3 | 4;
+/** 毒's bubbles (a fire run's poisoned explosions, src/render/magma.ts). */
+export const FX_BUBBLE = 5;
+export type FxGroup = 0 | 1 | 2 | 3 | 4 | 5;
 
-export const FX_CAPS: readonly number[] = [420, 360, 110, 520, 64];
+export const FX_CAPS: readonly number[] = [420, 360, 110, 520, 64, 72];
 
 /** What happens when a particle expires. */
 export const THEN_NONE = 0;
@@ -68,7 +70,7 @@ export class FxParticles {
   readonly view: ParticleContainer;
   private readonly live: FxParticle[] = [];
   private readonly pool: FxParticle[] = [];
-  private readonly counts = [0, 0, 0, 0, 0];
+  private readonly counts = [0, 0, 0, 0, 0, 0];
   /** Expiry follow-ups queued during update (x, y pairs), run after the sweep. */
   private readonly followUps = new Float64Array(MAX_FOLLOW_UPS * 2);
   private followUpCount = 0;
