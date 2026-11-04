@@ -9,6 +9,7 @@ import { absoluteZero } from './absoluteZero';
 import { blastSpirit } from './blastSpirit';
 import { eternalFlame } from './eternalFlame';
 import { icicle, prism } from './fanForms';
+import { pyreChain, zoneTune } from './fireAscendancy';
 import { frostflame } from './frostflame';
 import { gigantism } from './gigantism';
 import { glassCannon } from './glassCannon';
@@ -22,6 +23,24 @@ import { poisonSlow } from './poisonSlow';
 import { sixCoils } from './sixCoils';
 import { steadyAim } from './steadyAim';
 import { swarm } from './swarm';
+import {
+  breed,
+  colossus,
+  hiveBuild,
+  queenRole,
+  hammerRole,
+  focusFire,
+  outpost,
+  selfDestruct,
+  interceptors,
+  swarmSurge,
+  hiveExpand,
+  hiveSplit,
+  motherFactory,
+  royalJelly,
+  swarmTune,
+} from './hive';
+import { flameBee, frostBee } from './hiveFusions';
 import { bugSea, cannon, lockBeacon, teslaTower } from './summonPolicies';
 import { triphaseArc } from './triphaseArc';
 
@@ -62,6 +81,25 @@ export const RULE_MODULES: {
   cannon,
   teslaTower,
   bugSea,
+  hiveSplit,
+  swarmTune,
+  colossus,
+  hiveExpand,
+  hiveBuild,
+  queenRole,
+  hammerRole,
+  focusFire,
+  outpost,
+  selfDestruct,
+  interceptors,
+  swarmSurge,
+  royalJelly,
+  breed,
+  motherFactory,
+  pyreChain,
+  zoneTune,
+  flameBee,
+  frostBee,
 };
 
 export const SIGNATURES: {

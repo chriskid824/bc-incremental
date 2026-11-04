@@ -28,7 +28,9 @@ function flashed(events: readonly SimEvent[], filter = new CoreHitFilter()): [st
   const out: [string, number][] = [];
   for (const event of events) {
     if (!filter.flashes(event)) continue;
-    if (event.type !== 'playerHit' && event.type !== 'bulletHit') throw new Error(event.type);
+    if (event.type !== 'playerHit' && event.type !== 'bulletHit' && event.type !== 'reflectHit') {
+      throw new Error(event.type);
+    }
     out.push([event.type, event.damage]);
   }
   return out;
@@ -50,6 +52,14 @@ const bullet = (damage: number, enemyId = 1): SimEvent => ({
   bulletId: 1,
   enemyId,
   enemy: 'shooter',
+  damage,
+  lifeLeft: 100 - damage,
+});
+
+const reflected = (damage: number, enemyId = 1): SimEvent => ({
+  type: 'reflectHit',
+  enemyId,
+  enemy: 'prism',
   damage,
   lifeLeft: 100 - damage,
 });
@@ -93,6 +103,10 @@ describe('CoreHitFilter (C7.2’s hand-off, the lead’s ruling P4)', () => {
     ]);
   });
 
+  it('reads 稜鏡’s reflected hit as a contact: no flash when the shield took it whole', () => {
+    expect(flashed([absorbed(1), reflected(0), reflected(1)])).toEqual([['reflectHit', 1]]);
+  });
+
   it('never flashes on the shieldAbsorbed itself, and takes it for the next hit only', () => {
     const filter = new CoreHitFilter();
     expect(filter.flashes(absorbed(15))).toBe(false);
@@ -105,13 +119,13 @@ describe('CoreHitFilter (C7.2’s hand-off, the lead’s ruling P4)', () => {
     expect(filter.flashes(contact(0))).toBe(true);
   });
 
-  it('is the only way the renderer flashes the core, for contacts, bullets and the shield', () => {
+  it('is the only way the renderer flashes the core, for contacts, bullets, reflections and the shield', () => {
     const source = readFileSync(new URL('renderer.ts', import.meta.url), 'utf8');
     const calls = source.match(/\bcore\.hit\(\)/g) ?? [];
     expect(calls).toHaveLength(1);
     expect(source).toMatch(
       // The flash brings the core-hit shake (src/render/impact.ts) with it.
-      /case 'playerHit':\s*case 'bulletHit':\s*if \(this\.coreHits\.flashes\(event\)\) \{\s*this\.core\.hit\(\);\s*this\.kick\(this\.impactShakes\.playerHit\(\)\);\s*\}\s*break;/,
+      /case 'playerHit':\s*case 'bulletHit':\s*case 'reflectHit':\s*if \(this\.coreHits\.flashes\(event\)\) \{\s*this\.core\.hit\(\);\s*this\.kick\(this\.impactShakes\.playerHit\(\)\);\s*\}\s*break;/,
     );
     expect(source).toMatch(/case 'shieldAbsorbed':\s*this\.coreHits\.flashes\(event\);/);
     // A new run forgets a shieldAbsorbed left over.

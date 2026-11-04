@@ -75,6 +75,8 @@ const NAMES: Readonly<Record<EnemyId, { readonly one: MessageKey; readonly many:
   summoner: { one: 'enemy.summoner.name', many: 'enemy.summoner.plural' },
   treasure: { one: 'enemy.treasure.name', many: 'enemy.treasure.plural' },
   onion: { one: 'enemy.onion.name', many: 'enemy.onion.plural' },
+  brood: { one: 'enemy.brood.name', many: 'enemy.brood.plural' },
+  prism: { one: 'enemy.prism.name', many: 'enemy.prism.plural' },
 };
 
 export const enemyName = (id: EnemyId): string => t(NAMES[id].one);

@@ -63,6 +63,14 @@ const ETERNAL_FLAME: RuleSpec = { id: 'eternalFlame', durationMore: -0.5 };
 const STEADY_AIM = (fire.byId.get('fusion.fire.ice.core') as WebNode).effects.rules[0] as RuleSpec;
 
 describe('webBuild (§5.1)', () => {
+  it('keeps the base 10% ignite on 熔核 only; elsewhere a burn needs the fire outer', () => {
+    const summon = assembleWeb(content, 'summon', FULL_SCOPE);
+    const ignite = (web: AssembledWeb, character: CharacterId): number =>
+      webBuild(web, { ...emptyProgress(character), ranks: {} }).stats.values.igniteChance;
+    expect(ignite(fire, 'fire')).toBeCloseTo(0.1, 12);
+    expect(ignite(summon, 'summon')).toBe(0);
+  });
+
   it('sets coef only on fusion boards’ triggers and rules', () => {
     let web = withEffects(fire, R1, { triggers: [PANDEMIC_TRIGGER], rules: [ETERNAL_FLAME] });
     web = withEffects(web, 'outer.poison.main.entry', { triggers: [PANDEMIC_TRIGGER] });
@@ -199,6 +207,21 @@ describe('webBuild (§5.1)', () => {
     expect(webBuild(web, owning({ [fire.root]: 1 }))).toEqual(bare);
     expect(bare.stats.values.maxLife).toBe(100);
     expect(bare.signature).toBe(fire.def.signature);
+  });
+
+  it('adds 5 % damage more per 迴響 ever earned, as one term, and nothing before any', () => {
+    const bare = webBuild(fire, owning({ [R1]: 1 }));
+    expect(webBuild(fire, { ...owning({ [R1]: 1 }), resonanceEarned: 0 })).toEqual(bare);
+    const earned = webBuild(fire, {
+      ...owning({ [R1]: 1 }),
+      resonanceEarned: 11,
+      // The balance does not matter: spending 迴響 never weakens (gd:778).
+      wallet: { shards: ZERO, cores: 0, resonance: 0 },
+    });
+    const extra = earned.stats.scoped.filter(
+      (mod) => !bare.stats.scoped.includes(mod) && mod.stat === 'damage',
+    );
+    expect(extra).toEqual([{ stat: 'damage', kind: 'more', value: 0.05 * 11 }]);
   });
 });
 
@@ -380,6 +403,9 @@ function runResult(overrides: Partial<RunResult> = {}): RunResult {
     bulletTakenBy: Object.fromEntries(
       ENEMY_IDS.map((id) => [id, { hits: 0, damage: 0 }]),
     ) as RunResult['bulletTakenBy'],
+    reflectTakenBy: Object.fromEntries(
+      ENEMY_IDS.map((id) => [id, { hits: 0, damage: 0 }]),
+    ) as RunResult['reflectTakenBy'],
     killedBy: null,
     ...overrides,
   };

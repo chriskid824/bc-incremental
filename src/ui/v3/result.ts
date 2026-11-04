@@ -1,8 +1,10 @@
 /**
  * The v3 result screen (docs/v3/game-design-v3.md §1, §7's 結算, A.4): why the run ended (with
  * B1's bullet lines, Q11), how far it got, the shards and cores it earned and the character's best
- * wave, one tip on a death, and the way back to the talent web or straight into the next run. It
- * waits for the player: no countdown, since the web is where the shards go.
+ * wave, one tip on a death, and the way back to the talent web or straight into the next run; on
+ * the account's first 3 runs, once a second character is playable, 「換一個角色試試」 back to the
+ * select screen (gd §1.1). It waits for the player: no countdown, since the web is where the
+ * shards go.
  */
 
 import { formatNum } from '../../core/format';
@@ -30,6 +32,8 @@ export interface V3ResultInfo extends V3RunEndFacts {
   readonly bestWave: number;
   /** The wallet's shards after the run. */
   readonly walletShards: Num;
+  /** Shows 「換一個角色試試」 (src/app/v3/scope.ts' showsSwitchHint). */
+  readonly switchHint?: boolean;
   /** 傷害分佈: the run's damage by source and by kind. */
   readonly damage: DamageBreakdownView;
   /** 控場: the run's freezes and shatters. */
@@ -39,6 +43,8 @@ export interface V3ResultInfo extends V3RunEndFacts {
 export interface V3ResultActions {
   toWeb(): void;
   nextRun(): void;
+  /** 「換一個角色試試」: back to the select screen. */
+  toSelect?(): void;
 }
 
 const FORMAT = { format: 'short' } as const;
@@ -53,6 +59,7 @@ export class V3ResultPanel {
   readonly root: HTMLElement;
   private readonly card: HTMLElement;
   private readonly actions: HTMLElement;
+  private readonly switchButton: HTMLButtonElement;
 
   constructor(
     private readonly doc: Document,
@@ -71,7 +78,11 @@ export class V3ResultPanel {
     again.type = 'button';
     again.dataset['action'] = 'again';
     again.addEventListener('click', () => handlers.nextRun());
-    this.actions.append(web, again);
+    this.switchButton = el(doc, 'button', 'bc-button', t('v3.result.switch'));
+    this.switchButton.type = 'button';
+    this.switchButton.dataset['action'] = 'switch';
+    this.switchButton.addEventListener('click', () => handlers.toSelect?.());
+    this.actions.append(web, again, this.switchButton);
     this.root.append(this.card);
   }
 
@@ -95,6 +106,9 @@ export class V3ResultPanel {
     cause.append(el(doc, 'div', 'bc-result-cause-leaks', text.leaks));
     if (text.bullets !== null) {
       cause.append(el(doc, 'div', 'bc-result-cause-leaks bc-game-result-bullets', text.bullets));
+    }
+    if (text.reflected !== null) {
+      cause.append(el(doc, 'div', 'bc-result-cause-leaks bc-game-result-bullets', text.reflected));
     }
 
     const rows = el(doc, 'dl', 'bc-result-rows');
@@ -133,6 +147,7 @@ export class V3ResultPanel {
       tip.firstElementChild?.prepend(el(doc, 'span', 'bc-result-tip-label', t('result.tipLabel')));
       parts.push(tip);
     }
+    this.switchButton.hidden = info.switchHint !== true;
     parts.push(this.actions);
     this.card.replaceChildren(...parts);
     this.root.hidden = false;

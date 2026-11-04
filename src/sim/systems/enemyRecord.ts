@@ -28,6 +28,7 @@ export const AI_DASH = 1;
 export const AI_SHOOT = 2;
 export const AI_SUMMON = 3;
 export const AI_TREASURE = 4;
+export const AI_REFLECT = 5;
 
 /**
  * Bits of EnemyV3.defence (docs/v3 C7 design §2.4): the defences defend
@@ -59,7 +60,8 @@ export const WARD_AILMENT_MULT = 0.25;
  * Bits of EnemyV3.state (docs/v3 C7 design §2.5): the phase of a behaviour
  * (src/sim/systems/enemyAi.ts, which exports them too), 0 while the enemy walks in. A dasher
  * charges as CHARGING | STOPPED, then dashes as DASHING; a treasure circles as ORBITING, then
- * flees as FLEEING. A boss that 荊棘纏繞 holds at the player is ENTANGLED alone (C7b,
+ * flees as FLEEING. 稜鏡 is REFLECTING during its reflect windows (src/sim/systems/prism.ts),
+ * which the renderer reads. A boss that 荊棘纏繞 holds at the player is ENTANGLED alone (C7b,
  * src/sim/systems/contact.ts), whatever it did before. The targetState condition reads DASHING
  * and STOPPED (src/sim/build/eval.ts), so they are defined here, outside every import cycle, as
  * SHIELDED is.
@@ -70,6 +72,7 @@ export const DASHING = 4;
 export const ORBITING = 8;
 export const FLEEING = 16;
 export const ENTANGLED = 32;
+export const REFLECTING = 64;
 
 /** A v3 run's enemy record (Enemy.v3). */
 export interface EnemyV3 {
@@ -87,13 +90,13 @@ export interface EnemyV3 {
   /** × on its contact damage (src/sim/systems/contact.ts); 1, or BERSERK_MULT while 狂暴 rages. */
   contactMult: number;
   /**
-   * Its behaviour's state bits (STOPPED … FLEEING), or ENTANGLED while 荊棘纏繞 holds it; 0 while
-   * it walks in, and for a walker.
+   * Its behaviour's state bits (STOPPED … FLEEING, REFLECTING), or ENTANGLED while 荊棘纏繞 holds
+   * it; 0 while it walks in, and for a walker.
    */
   state: number;
   /**
-   * The tick its current phase ends (a charge, an orbit, a hold); each frozen tick pushes it
-   * back one.
+   * The tick its current phase ends (a charge, an orbit, a hold, a reflect window); each frozen
+   * tick pushes it back one.
    */
   stateUntil: number;
   /** Its walk step per tick: its def's speed × DT, × SWIFT_MULT with 迅捷. */
@@ -109,8 +112,9 @@ export interface EnemyV3 {
   dropScale: number;
   /**
    * The tick of a shooter's next shot or a summoner's next summons (src/sim/systems/enemyAi.ts),
-   * armed when it first reaches its post; Infinity until then, and for every other type. Each
-   * frozen tick pushes it back one, which leaves Infinity as it is.
+   * armed when it first reaches its post (母巢: its stopDist), or of 稜鏡's next reflect window,
+   * armed on its first AI step; Infinity until then, and for every other type. Each frozen tick
+   * pushes it back one, which leaves Infinity as it is.
    */
   nextAct: number;
   /**
@@ -136,6 +140,13 @@ export interface EnemyV3 {
    */
   poolStart: number;
   poolSum: Num;
+  /**
+   * 稜鏡's reflect budget (src/sim/systems/prism.ts): the tick the current second of its window
+   * started at, and the share of the player's max life reflected in that second; 0 and 0 for
+   * every other type.
+   */
+  reflectSecStart: number;
+  reflectSecSum: number;
 }
 
 /**
@@ -188,6 +199,8 @@ function aiOf(def: EnemyDef): number {
       return AI_SUMMON;
     case 'treasure':
       return AI_TREASURE;
+    case 'reflect':
+      return AI_REFLECT;
     default:
       return AI_NONE;
   }
@@ -277,5 +290,7 @@ export function createEnemyV3(
     layersLeft: def.behaviour?.kind === 'layers' ? def.behaviour.layers : 0,
     poolStart: -Infinity,
     poolSum: ZERO,
+    reflectSecStart: 0,
+    reflectSecSum: 0,
   };
 }

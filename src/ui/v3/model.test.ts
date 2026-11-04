@@ -6,10 +6,13 @@ import { buy, canBuy, emptyProgress, planPath, unlockInvestment } from '../../me
 import type { AccountProgress, CharacterProgress } from '../../meta/web';
 import { fixtureLookups } from '../web/testing';
 import {
+  ascendancyLine,
   nodeState,
   nodeTip,
   outerStates,
   planClick,
+  prestigeLines,
+  prestigeOffer,
   priceText,
   refusalText,
   slotBar,
@@ -269,5 +272,74 @@ describe('spokeText (gd §2.3)', () => {
     const done = owned.spokes.find((s) => s.outer === 'crit');
     expect(done?.owned).toBe(true);
     if (done !== undefined) expect(spokeText(web, done, en)).toBe('Fire Crit');
+  });
+});
+
+describe('the prestige', () => {
+  const at = (cycleBest: number, extra: Partial<CharacterProgress> = {}): CharacterProgress => ({
+    ...start(Math.max(cycleBest, 33)),
+    cycleBest,
+    ...extra,
+  });
+
+  it('offers a prestige from wave 30 with the 迴響 it pays and the damage it holds', () => {
+    expect(prestigeOffer(at(29))).toBeNull();
+    expect(prestigeOffer(at(30))).toEqual({ resonance: 11, damagePercent: 55, cycleBest: 30 });
+    // The damage reads the 迴響 earned in total, this prestige's included.
+    expect(prestigeOffer(at(40, { resonanceEarned: 11 }))).toEqual({
+      resonance: 58,
+      damagePercent: 345,
+      cycleBest: 40,
+    });
+  });
+
+  it('says what resets, what is kept and what it pays, in both locales', () => {
+    const offer = prestigeOffer(at(30));
+    if (offer === null) throw new Error('no offer at wave 30');
+    expect(prestigeLines(offer, en)).toEqual([
+      "Resets this character's talents (fusion cores included), shards, cores and this cycle's best wave (30).",
+      'Keeps the all-time best wave and the outers it revealed.',
+      'You gain 11 resonance: damage +55% for good, and 1 resonance buys each ascendancy node.',
+    ]);
+    expect(prestigeLines(offer, zh)[2]).toBe(
+      '得到 11 迴響：永久傷害 +55%，每個昇華節點花 1 迴響。',
+    );
+  });
+
+  it('asks for 1 of the 2 ascendancies after a prestige, then names the chosen one', () => {
+    expect(ascendancyLine(web, at(30), en)).toBeNull();
+    expect(ascendancyLine(web, at(0, { prestiges: 1 }), en)).toBe(
+      'Choose 1 of 2 ascendancies: buy its first node with resonance',
+    );
+    const chosen = ascendancyLine(web, at(0, { prestiges: 1, ascendancy: 'path-one' }), zh);
+    expect(chosen?.startsWith('昇華：')).toBe(true);
+    expect(chosen).not.toContain('web.asc.');
+    // 熔核's registered web has no ascendancies yet: no line.
+    const real = assembleWeb(loadContent(), 'fire', FULL_SCOPE);
+    if (real.boards.every((board) => board.kind !== 'asc')) {
+      expect(ascendancyLine(real, at(0, { prestiges: 1 }), en)).toBeNull();
+    }
+  });
+
+  it('makes the chosen chain buyable with 迴響 and the other refused after a prestige', () => {
+    let progress: CharacterProgress = {
+      ...start(30),
+      prestiges: 1,
+      wallet: { ...RICH, resonance: 3 },
+    };
+    const route = planPath(web, progress, account, 'fire.asc.path-one.n1');
+    if (!route.ok) throw new Error('no route to the ascendancy');
+    for (const id of route.ids.slice(0, -1)) progress = buy(web, progress, account, id);
+    const model = (p: CharacterProgress) =>
+      new Map(webModel(web, layout, p, account).nodes.map((node) => [node.id, node]));
+    expect(model(progress).get('fire.asc.path-one.n1')?.state).toBe('buyable');
+    expect(model(progress).get('fire.asc.path-two.n1')?.state).toBe('buyable');
+    progress = buy(web, progress, account, 'fire.asc.path-one.n1');
+    const after = model(progress);
+    expect(after.get('fire.asc.path-one.n2')?.state).toBe('buyable');
+    expect(after.get('fire.asc.path-two.n1')?.check).toMatchObject({
+      ok: false,
+      reason: 'otherAscendancy',
+    });
   });
 });

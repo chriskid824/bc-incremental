@@ -298,8 +298,12 @@ export interface LobParams {
     trigger: number;
     effect: number;
   } | null;
-  /** The bombs' fire zones (火地): their slow on the enemies in them, 0 to 1. */
-  zone: { slow: number };
+  /**
+   * The bombs' fire zones (火地): their slow on the enemies in them, 0 to 1, and the factors on
+   * their duration, damage a second and radius (煉獄's 熔流, 灼地 and 火海; src/sim/rules/zoneTune.ts),
+   * 1 when nothing changes them.
+   */
+  zone: { slow: number; durationMult: number; damageMult: number; radiusMult: number };
 }
 
 /**

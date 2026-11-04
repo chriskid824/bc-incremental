@@ -18,6 +18,7 @@ import {
   buy,
   canBuy,
   defaultProgress,
+  fusionSlotOrder,
   nextPrice,
   progressFromOrder,
   unlockInvestment,
@@ -145,6 +146,7 @@ export function characterLookOf(
     arena: web.def.arena,
     color: web.def.color,
     fusions,
+    slots: fusionSlotOrder(web, progress),
     summons,
   };
 }

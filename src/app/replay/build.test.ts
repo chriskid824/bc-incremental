@@ -361,6 +361,8 @@ describe('characterLookOf (B1: the renderer draws the character)', () => {
     expect(look?.fusions).toEqual([
       { outer: 'poison', skin: { accent: 0x3fd08a, shape: 'bubble' } },
     ]);
+    // The fusion slots in order, for 蜂巢's drone skins (gd §5.3).
+    expect(look?.slots).toEqual(['poison']);
   });
 
   it('owns no fusion before its core is bought, and has no look for a preset', () => {

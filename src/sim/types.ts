@@ -683,6 +683,25 @@ export type SimEvent =
       readonly layersLeft: number;
       readonly x: number;
       readonly y: number;
+    }
+  /**
+   * 稜鏡 `enemyId` began a reflect window (REFLECTING, src/sim/systems/enemyAi.ts), or ended one.
+   * Never in an M1 run.
+   */
+  | { readonly type: 'reflectStarted'; readonly enemyId: number }
+  | { readonly type: 'reflectEnded'; readonly enemyId: number }
+  /**
+   * A hit on 稜鏡 `enemyId`, of type `enemy`, while it reflected dealt the player its bounded
+   * reflection (src/sim/systems/prism.ts) through damagePlayer: `damage` reached life past the
+   * shield, leaving `lifeLeft` (0 on a hit that revives). Pushed right after that hit's own `hit`
+   * event (a pulse's hit has none). It is not a leak. Never in an M1 run.
+   */
+  | {
+      readonly type: 'reflectHit';
+      readonly enemyId: number;
+      readonly enemy: EnemyId;
+      readonly damage: number;
+      readonly lifeLeft: number;
     };
 
 /**
@@ -816,8 +835,13 @@ export interface RunResult {
    */
   readonly bulletTakenBy: Readonly<Record<EnemyId, ContactTally>>;
   /**
-   * Type of the enemy whose contact, or whose bullet, brought life to 0 with no extra life left;
-   * null unless endReason is 'death'.
+   * The hits 稜鏡 reflected onto the player and their damage, as in the reflectHit events, by the
+   * reflecting enemy's type; every type is present, zero in a run without one (an M1 run's).
+   */
+  readonly reflectTakenBy: Readonly<Record<EnemyId, ContactTally>>;
+  /**
+   * Type of the enemy whose contact, bullet or reflected hit brought life to 0 with no extra life
+   * left; null unless endReason is 'death'.
    */
   readonly killedBy: EnemyId | null;
 }

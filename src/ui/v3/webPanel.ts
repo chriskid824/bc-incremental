@@ -3,7 +3,9 @@
  * 5, 9, 11, 12): the wallet, the slot bar (fusion and keystone slots; a click unequips, which is a
  * free refund), the web as SVG with three zoom levels and a pan, a tooltip per node, buying by
  * click (a far node plans its path and a second click or Confirm buys it all), refunding by right
- * click, the outers' reveal and collapse, the spokes' fusion progress and an outer's preview card.
+ * click, the outers' reveal and collapse, the spokes' fusion progress and an outer's preview card;
+ * from wave 30 the 轉生 button and its confirm (gd §1.7, §7), and after a prestige the line over
+ * the web that says which ascendancy is chosen (the chains are bought on the web, with 迴響).
  * The rules are src/meta/web's; the panel only draws them and hands each new progress to the host.
  *
  * Search, filters, loadouts, the DPS preview and suggested nodes are later batches.
@@ -15,14 +17,23 @@ import { layoutWeb } from '../../data/web';
 import type { AssembledWeb, WebLayout } from '../../data/web';
 import { MESSAGES } from '../../i18n';
 import type { Locale, MessageKey } from '../../i18n';
-import { buy, buyPath, outerView, refundAll, refundNode } from '../../meta/web';
+import { buy, buyPath, outerView, prestige, refundAll, refundNode } from '../../meta/web';
 import type { AccountProgress, CharacterProgress } from '../../meta/web';
 import { previewCard } from '../web/card';
 import { say } from '../web/names';
 import { messageLookup } from '../web/text';
 import type { TextLookup } from '../web/text';
 import type { ClickPlan, WebModel } from './model';
-import { nodeTip, planClick, priceText, slotBar, webModel } from './model';
+import {
+  ascendancyLine,
+  nodeTip,
+  planClick,
+  prestigeLines,
+  prestigeOffer,
+  priceText,
+  slotBar,
+  webModel,
+} from './model';
 import { renderWeb } from './render';
 import { injectPanelStyle } from './style';
 import {
@@ -84,6 +95,9 @@ export class WebPanel {
   private readonly wallet: HTMLDivElement;
   private readonly slots: HTMLDivElement;
   private readonly refundButton: HTMLButtonElement;
+  private readonly prestigeButton: HTMLButtonElement;
+  private readonly prestigeDialog: HTMLDivElement;
+  private readonly ascLine: HTMLDivElement;
   private readonly stage: HTMLDivElement;
   private readonly svg: SVGSVGElement;
   private readonly tip: HTMLDivElement;
@@ -106,6 +120,7 @@ export class WebPanel {
   /** The outer whose card is pinned by a click; a hover shows one only while none is. */
   private pinned: OuterId | null = null;
   private refundArmed = false;
+  private prestigeOpen = false;
   private drag: { x: number; y: number; camera: Camera; moved: boolean } | null = null;
   private destroyed = false;
 
@@ -132,10 +147,22 @@ export class WebPanel {
     this.refundButton = el(doc, 'button', 'v3p-refund', t('panel.refundAll'));
     this.refundButton.type = 'button';
     this.refundButton.onclick = () => this.onRefundAll();
+    this.prestigeButton = el(doc, 'button', 'v3p-prestige', t('panel.prestige'));
+    this.prestigeButton.type = 'button';
+    this.prestigeButton.hidden = true;
+    this.prestigeButton.onclick = () => this.openPrestige();
     const start = el(doc, 'button', 'v3p-start', t('panel.start'));
     start.type = 'button';
     start.onclick = () => options.onStartRun();
-    top.append(back, title, this.wallet, el(doc, 'div', 'v3p-spacer'), this.refundButton, start);
+    top.append(
+      back,
+      title,
+      this.wallet,
+      el(doc, 'div', 'v3p-spacer'),
+      this.prestigeButton,
+      this.refundButton,
+      start,
+    );
 
     this.slots = el(doc, 'div', 'v3p-slots');
 
@@ -149,6 +176,11 @@ export class WebPanel {
     this.card.hidden = true;
     this.pathBar = el(doc, 'div', 'v3p-pathbar');
     this.pathBar.hidden = true;
+    this.prestigeDialog = el(doc, 'div', 'v3p-dialog');
+    this.prestigeDialog.hidden = true;
+    this.prestigeDialog.setAttribute('role', 'dialog');
+    this.ascLine = el(doc, 'div', 'v3p-asc');
+    this.ascLine.hidden = true;
     const zoom = el(doc, 'div', 'v3p-zoom');
     const out = el(doc, 'button', 'v3p-zoom-out', '−');
     out.type = 'button';
@@ -170,7 +202,16 @@ export class WebPanel {
     this.zoomName = el(doc, 'span', 'v3p-zoom-name');
     zoom.append(out, pips, this.zoomName, zin);
     const hint = el(doc, 'div', 'v3p-hint', t('panel.hint'));
-    this.stage.append(this.svg, hint, zoom, this.pathBar, this.card, this.tip);
+    this.stage.append(
+      this.svg,
+      hint,
+      this.ascLine,
+      zoom,
+      this.pathBar,
+      this.card,
+      this.tip,
+      this.prestigeDialog,
+    );
     this.root.append(top, this.slots, this.stage);
     parent.append(this.root);
 
@@ -236,6 +277,7 @@ export class WebPanel {
     this.drawWallet();
     this.drawSlots();
     this.drawPathBar();
+    this.drawPrestige();
     this.drawZoom();
     this.drawCard();
     this.drawTip();
@@ -321,6 +363,34 @@ export class WebPanel {
     cancel.type = 'button';
     cancel.onclick = () => this.cancelPath();
     this.pathBar.replaceChildren(label, confirm, cancel);
+  }
+
+  /** The 轉生 button while a prestige is allowed, and its confirm while open. */
+  private drawPrestige(): void {
+    const offer = prestigeOffer(this.progress);
+    this.prestigeButton.hidden = offer === null;
+    if (offer === null) this.prestigeOpen = false;
+    const line = ascendancyLine(this.web, this.progress, this.lookup);
+    this.ascLine.hidden = line === null;
+    this.ascLine.textContent = line ?? '';
+    this.prestigeDialog.hidden = !this.prestigeOpen || offer === null;
+    if (this.prestigeDialog.hidden || offer === null) return;
+    const rows: HTMLElement[] = [
+      el(this.doc, 'div', 'v3p-dialog-title', this.t('panel.prestige.title')),
+    ];
+    for (const text of prestigeLines(offer, this.lookup)) {
+      rows.push(el(this.doc, 'div', 'v3p-dialog-line', text));
+    }
+    const buttons = el(this.doc, 'div', 'v3p-dialog-buttons');
+    const confirm = el(this.doc, 'button', 'v3p-confirm', this.t('panel.prestige.confirm'));
+    confirm.type = 'button';
+    confirm.onclick = () => this.confirmPrestige();
+    const cancel = el(this.doc, 'button', 'v3p-cancel', this.t('panel.prestige.cancel'));
+    cancel.type = 'button';
+    cancel.onclick = () => this.closePrestige();
+    buttons.append(confirm, cancel);
+    rows.push(buttons);
+    this.prestigeDialog.replaceChildren(...rows);
   }
 
   private drawZoom(): void {
@@ -541,6 +611,29 @@ export class WebPanel {
     this.apply(refundAll(this.progress));
   }
 
+  private openPrestige(): void {
+    if (prestigeOffer(this.progress) === null) return;
+    this.pending = null;
+    this.refundArmed = false;
+    this.prestigeOpen = true;
+    this.draw();
+  }
+
+  private closePrestige(): void {
+    this.prestigeOpen = false;
+    this.drawPrestige();
+  }
+
+  /** The prestige, saved through onChange as any purchase is; the camera goes home. */
+  private confirmPrestige(): void {
+    if (prestigeOffer(this.progress) === null) return;
+    this.prestigeOpen = false;
+    this.pinned = null;
+    this.expanded.clear();
+    this.camera = homeCamera(this.layout.bounds);
+    this.apply(prestige(this.progress));
+  }
+
   private clickOuter(outer: OuterId): void {
     const view = this.model.outers.find((o) => o.outer === outer);
     if (view === undefined) return;
@@ -655,7 +748,8 @@ export class WebPanel {
     });
     this.listen(this.doc, 'keydown', (event) => {
       if (event.key !== 'Escape') return;
-      if (this.pending !== null) this.cancelPath();
+      if (this.prestigeOpen) this.closePrestige();
+      else if (this.pending !== null) this.cancelPath();
       else if (this.pinned !== null) {
         this.pinned = null;
         this.drawCard();

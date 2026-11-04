@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { characterGameData } from '../../data';
-import { assembleWeb, FULL_SCOPE, loadContent } from '../../data/web';
+import { assembleWeb, DEMO_SCOPE_A, FULL_SCOPE, loadContent } from '../../data/web';
 import { emptyProgress } from '../../meta/web';
 import type { CharacterProgress } from '../../meta/web';
 import { CharacterRunState, maxStartWave, runSeed, startWaveOf, storedPick } from './run';
@@ -33,6 +33,21 @@ describe('start waves', () => {
   });
 });
 
+describe("the Demo's wave cap (DEMO_SCOPE_A)", () => {
+  const demo = assembleWeb(loadContent(), 'fire', DEMO_SCOPE_A);
+
+  it('caps the start-wave picker and the run at wave 40', () => {
+    const far = reached(100);
+    expect(maxStartWave(web, far)).toBeGreaterThan(40);
+    expect(maxStartWave(demo, far)).toBe(40);
+    expect(startWaveOf(demo, far, null)).toBe(40);
+    expect(startWaveOf(demo, far, 90)).toBe(40);
+    const run = new CharacterRunState(demo, far, startWaveOf(demo, far, null), characterGameData());
+    expect(run.config.waveCap).toBe(40);
+    expect(new CharacterRunState(web, far, 1, characterGameData()).config.waveCap).toBeUndefined();
+  });
+});
+
 describe('CharacterRunState', () => {
   it('seeds by character and run count', () => {
     expect(runSeed(fresh)).toBe(runSeed(emptyProgress('fire')));
@@ -49,6 +64,9 @@ describe('CharacterRunState', () => {
     expect(finished.progress.bestWave).toBe(finished.result.highestWaveReached);
     expect(finished.killedByBullet).toBe(
       finished.result.endReason === 'death' && run.fatalBlow === 'bullet',
+    );
+    expect(finished.killedByReflect).toBe(
+      finished.result.endReason === 'death' && run.fatalBlow === 'reflect',
     );
     if (finished.result.endReason === 'death') expect(run.fatalBlow).not.toBeNull();
   }, 30_000);

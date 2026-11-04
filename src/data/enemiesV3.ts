@@ -124,4 +124,60 @@ export const V3_ENEMIES = {
     boss: true,
     behaviour: { kind: 'layers', layers: 3, burst: { enemy: 'triangle', count: 12 } },
   },
+  /**
+   * 母巢 (game-design-v3 §6.3, waves 20, 50, 80: 「每 3 秒生 4 隻三角，本體慢慢前進」): the onion's
+   * hp, drops and contact, slower than it. It summons as the 召喚者 does, but keeps walking
+   * (keepWalking): its timer starts once it is 520 in, inside the screen's half-height of 540, so
+   * its first triangles come where they can be seen. At 40 a second it reaches the player about
+   * 10.6 s after that, about three rounds of 4 triangles if it is not killed first. Its triangles
+   * are ordinary enemies under the v3 enemyCap (summon, src/sim/systems/enemyAi.ts).
+   */
+  brood: {
+    id: 'brood',
+    shape: 'brood',
+    hpMult: 28,
+    speed: 40,
+    radius: 64,
+    contactDamage: 100,
+    dropMult: 16,
+    cores: 3,
+    color: NEUTRAL,
+    tough: true,
+    boss: true,
+    behaviour: {
+      kind: 'summon',
+      stopDist: 520,
+      periodSec: 3,
+      enemy: 'triangle',
+      count: 4,
+      keepWalking: true,
+    },
+  },
+  /**
+   * 稜鏡 (game-design-v3 §6.3, waves 30, 60, 90: 「每 5 秒切換 2 秒『反射』：擊中傷害反彈給角色，
+   * 異常狀態不反彈」): the onion's hp, speed, drops and contact. A hit's raw damage is on a 1e9+
+   * scale against about 100 life, so a reflected hit is bounded instead (src/sim/systems/prism.ts):
+   * 1 % of the player's max life a hit, at most 10 % of it a second of reflecting, both 初始值.
+   * Ailment ticks (burn, poison, bleed) never reflect, so damage over time is its answer.
+   */
+  prism: {
+    id: 'prism',
+    shape: 'prism',
+    hpMult: 28,
+    speed: 45,
+    radius: 60,
+    contactDamage: 100,
+    dropMult: 16,
+    cores: 3,
+    color: NEUTRAL,
+    tough: true,
+    boss: true,
+    behaviour: {
+      kind: 'reflect',
+      periodSec: 5,
+      activeSec: 2,
+      lifePctPerHit: 0.01,
+      maxLifePctPerSec: 0.1,
+    },
+  },
 } satisfies Readonly<Partial<Record<EnemyId, EnemyDef>>>;

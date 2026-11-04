@@ -38,6 +38,8 @@ export const COLORS = {
   damageCrit: 0xffe066,
   damageBurn: 0xff8a3d,
   damageChain: 0x7ff6ff,
+  /** Cold-tagged hits (碎冰, 霜蜂): a deeper frost blue than the chain's cyan. */
+  damageCold: 0x5aa9ff,
   /** Poison ticks: a mint green, apart from 蜂巢's lime hit numbers (hitNumberColor). */
   damagePoison: 0x5ef2a6,
   damageBleed: 0xff5068,
@@ -76,8 +78,8 @@ export const MAGMA_COLORS = {
 } as const;
 
 /**
- * The arenas (docs/v3/game-design-v3.md §11.5), by CharacterDef.arena. Only 熔核's is drawn so far;
- * the others fall back to M1's backdrop until their batches.
+ * The arenas (docs/v3/game-design-v3.md §11.5), by CharacterDef.arena. 熔核's and 蜂巢's are drawn
+ * so far; the others fall back to M1's backdrop until their batches.
  */
 export const ARENA_COLORS = {
   fire: {
@@ -91,6 +93,31 @@ export const ARENA_COLORS = {
     /** A faint heat under the grate's center, far dimmer than M1's light pool. */
     heat: 0x7a2e10,
   },
+  summon: {
+    /** Deep teal. */
+    floor: 0x061518,
+    /** The hex lattice, and the cells of every third ring around the center a little brighter. */
+    comb: 0x0f3236,
+    combHot: 0x184a46,
+    edge: 0x1c4a4c,
+    /** The turret seats' track at the turret radius. */
+    seat: 0x2c6a4e,
+    /** A faint glow over the nest, far dimmer than M1's light pool. */
+    glow: 0x1b5e52,
+  },
+} as const;
+
+/**
+ * 蜂巢's attack language (gd §1.5, §11.4, §11.5): the drones' colour is the character green
+ * (CONSTRUCT_COLORS.hive.main); these are the rest.
+ */
+export const HIVE_COLORS = {
+  /** An impact's flash and a turret's muzzle flash: green-white. */
+  flash: 0xf4ffe6,
+  /** The dock ring's cradles while their drone is out. */
+  cradleEmpty: 0x2f5f3a,
+  /** A turret's seat plate on the floor. */
+  seat: 0x3f8a52,
 } as const;
 
 /** Linear blend of two 0xRRGGBB colors; t = 0 gives a, t = 1 gives b. */

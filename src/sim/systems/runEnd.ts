@@ -47,6 +47,13 @@ function end(ctx: RunContext, reason: EndReason): void {
     const tally = bulletTally[id];
     bulletTakenBy[id] = { hits: tally.hits, damage: tally.damage };
   }
+  // 稜鏡's reflected hits, copied likewise; neither leaks nor damageTaken counts them.
+  const reflectTally = ctx.sys.enemyAi.reflectTakenBy;
+  const reflectTakenBy = {} as Record<EnemyId, ContactTally>;
+  for (const id of ENEMY_IDS) {
+    const tally = reflectTally[id];
+    reflectTakenBy[id] = { hits: tally.hits, damage: tally.damage };
+  }
   const bySource: Record<string, Num> = {};
   ctx.sources.names.forEach((name, ix) => {
     bySource[name] = ctx.bySource[ix] as Num;
@@ -78,6 +85,7 @@ function end(ctx: RunContext, reason: EndReason): void {
     damageTaken,
     damageTakenBy: takenBy,
     bulletTakenBy,
+    reflectTakenBy,
     killedBy: ctx.killedBy,
   };
 }

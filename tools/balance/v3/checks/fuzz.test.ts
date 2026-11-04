@@ -70,10 +70,17 @@ describe('fuzz (the nightly web fuzz)', () => {
         },
       })),
     );
-    // From B1, the registered content deals its builds over 熔核's webs, then its fixed cases.
+    // From B2, the registered content deals its builds over 熔核's and 蜂巢's webs, then its
+    // fixed cases.
     const registered = fuzzUnits(resolveContent('registered'), 'registered', SEED);
     expect(registered).toHaveLength(WEB_FUZZ_BUILDS + FIXED_WEB_CASES.length);
-    expect(registered.every((unit) => unit.id.startsWith('measure:fuzz:fire'))).toBe(true);
+    const on = (c: string): boolean => registered.some((u) => u.id.startsWith(`measure:fuzz:${c}`));
+    expect(on('fire') && on('summon')).toBe(true);
+    expect(
+      registered.every(
+        (u) => u.id.startsWith('measure:fuzz:fire') || u.id.startsWith('measure:fuzz:summon'),
+      ),
+    ).toBe(true);
     // The pr set points at ci.yml's step instead.
     const pr = checkSet('pr', fixtureContent('B1'), B1, { c7: NO_C7 });
     expect(

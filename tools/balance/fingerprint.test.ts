@@ -187,10 +187,15 @@ describe('M1 projection', () => {
         summoner: tally,
         treasure: tally,
         onion: tally,
+        brood: tally,
+        prism: tally,
       },
       bulletTakenBy: Object.fromEntries(
         ENEMY_IDS.map((id) => [id, tally]),
       ) as RunResult['bulletTakenBy'],
+      reflectTakenBy: Object.fromEntries(
+        ENEMY_IDS.map((id) => [id, tally]),
+      ) as RunResult['reflectTakenBy'],
       killedBy: 'triangle',
     } satisfies RunResult;
     const later: RunResult = {

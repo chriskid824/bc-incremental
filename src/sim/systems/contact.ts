@@ -58,6 +58,8 @@ export const HOLD_ROUND_TICKS = 15;
 export const CONTACT = 0;
 /** damagePlayer's `cause`: a shooter's bullet (stepBullets, src/sim/systems/bullets.ts). */
 export const BULLET = 1;
+/** damagePlayer's `cause`: a hit 稜鏡 reflected (reflectHit, src/sim/systems/prism.ts). */
+export const REFLECT = 2;
 
 /**
  * The enemy `enemyId` of type `type` deals `amount` of damage to the player, who is alive: by
@@ -70,18 +72,25 @@ export const BULLET = 1;
  * of setting killedBy, so checkRunEnd sees it alive, and pushes revive after its playerHit, whose
  * lifeLeft stays 0. A fully absorbed contact still pushes playerHit, with damage 0: it leaks. A
  * bullet takes the same steps, its tally ctx.sys.bullets.takenBy instead of ctx.taken and its
- * event bulletHit in playerHit's place; it is no leak (docs/v3 C7 design §2.6).
+ * event bulletHit in playerHit's place; it is no leak (docs/v3 C7 design §2.6). A reflected hit
+ * (REFLECT, `bulletId` −1) takes them too, its tally ctx.sys.enemyAi.reflectTakenBy and its event
+ * reflectHit; it is no leak either.
  */
 export function damagePlayer(
   ctx: RunContext,
   enemyId: number,
   type: EnemyId,
   amount: number,
-  cause: typeof CONTACT | typeof BULLET,
+  cause: typeof CONTACT | typeof BULLET | typeof REFLECT,
   bulletId: number,
 ): void {
   const player = ctx.player;
-  const tally = cause === CONTACT ? ctx.taken[type] : ctx.sys.bullets.takenBy[type];
+  const tally =
+    cause === CONTACT
+      ? ctx.taken[type]
+      : cause === BULLET
+        ? ctx.sys.bullets.takenBy[type]
+        : ctx.sys.enemyAi.reflectTakenBy[type];
   const defence = ctx.sys.defence;
   // Both paths: a contact tallies in ctx.taken and pushes playerHit; a bullet tallies in
   // sys.bullets.takenBy and pushes bulletHit in playerHit's place. The full path scales a contact
@@ -93,6 +102,14 @@ export function damagePlayer(
     if (player.life <= 0) ctx.killedBy = type;
     if (cause === CONTACT) {
       ctx.events.push({ type: 'playerHit', enemyId, damage: amount, lifeLeft: player.life });
+    } else if (cause === REFLECT) {
+      ctx.events.push({
+        type: 'reflectHit',
+        enemyId,
+        enemy: type,
+        damage: amount,
+        lifeLeft: player.life,
+      });
     } else {
       ctx.events.push({
         type: 'bulletHit',
@@ -125,6 +142,8 @@ export function damagePlayer(
   }
   if (cause === CONTACT) {
     ctx.events.push({ type: 'playerHit', enemyId, damage: rest, lifeLeft });
+  } else if (cause === REFLECT) {
+    ctx.events.push({ type: 'reflectHit', enemyId, enemy: type, damage: rest, lifeLeft });
   } else {
     ctx.events.push({ type: 'bulletHit', bulletId, enemyId, enemy: type, damage: rest, lifeLeft });
   }

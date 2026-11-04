@@ -142,6 +142,13 @@ describe('poison and bleed numbers', () => {
   const shown = (numbers: DamageNumbers): BitmapText[] =>
     (numbers.view.children[0] as Container).children.filter((t) => t.visible) as BitmapText[];
 
+  it('shows a cold hit (碎冰, 霜蜂) in the frost blue, whatever the hit colour', () => {
+    const numbers = new DamageNumbers(() => 0.5);
+    numbers.setHitColor(0x123456);
+    expect(numbers.spawn('cold', num(9), 400, 400, 1)).toBe('shown');
+    expect(shown(numbers).map((t) => t.tint)).toEqual([COLORS.damageCold]);
+  });
+
   it('shows poison ticks in the poison green and bleed ticks in the bleed red', () => {
     const numbers = new DamageNumbers(() => 0.5);
     expect(numbers.spawn('poison', num(12), 400, 400, 1)).toBe('shown');

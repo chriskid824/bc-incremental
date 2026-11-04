@@ -1,3 +1,9 @@
+fire.asc.incinerator.final -80 -1300
+fire.asc.incinerator.n1 -80 -1100
+fire.asc.incinerator.n2 -80 -1200
+fire.asc.inferno.final 80 -1300
+fire.asc.inferno.n1 80 -1100
+fire.asc.inferno.n2 80 -1200
 fire.center.furnace.detonate -497 379
 fire.center.furnace.far-throw -577 241
 fire.center.furnace.heatwave -277 160
@@ -154,6 +160,8 @@ outer.summon.main.bug-sea -2380 60
 outer.summon.main.entry -1700 0
 outer.summon.main.lock-beacon -2250 0
 outer.summon.main.threshold -2380 -60
+board fire.asc.incinerator label -80 -1200
+board fire.asc.inferno label 80 -1200
 board fire.center label 0 0
 board fusion.fire.aura label -588 1139
 board fusion.fire.barrage label -1139 -588
@@ -178,5 +186,5 @@ board outer.lightning label 1950 0 collapsed 1950 0 200
 board outer.poison label 975 -1689 collapsed 975 -1689 200
 board outer.summon label -1950 0 collapsed -1950 0 200
 board outer.thorns label -1689 975 collapsed -1689 975 200
-edges 179
+edges 185
 bounds -2380 -2091 2150 2380

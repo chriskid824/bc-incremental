@@ -138,7 +138,8 @@ describe('balance CLI', () => {
       strategy: 'default',
       session: 19,
       seed: 1,
-      minutes: 60,
+      // The default build's clear once B2 wrote the prestige (FULL_SESSION_MINUTES).
+      minutes: 360,
       startWave: { kind: 'max' },
       economy: DEFAULT_WEB_ECONOMY,
       menuSeconds: 20,
@@ -223,7 +224,7 @@ describe('balance CLI', () => {
     const one = capture();
     expect(await main(['--character', 'ice'], one)).toBe(2);
     expect(one.lines.join('\n')).toMatch(
-      /ice has no center in the registered content \(built: fire\).*--content fixture/s,
+      /ice has no center in the registered content \(built: fire, summon\).*--content fixture/s,
     );
   });
 

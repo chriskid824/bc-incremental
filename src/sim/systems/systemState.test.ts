@@ -51,8 +51,16 @@ const REMAINING_IMPORTS = [
   'sim/systems/enemyRecord.ts',
 ];
 
-/** The only modules that may value-import remaining.ts (§0.7's C4.10 entry). */
-const REMAINING_IMPORTERS = ['sim/effects/dispatch.ts', 'sim/effects/execute.ts'];
+/**
+ * The only modules that may value-import remaining.ts (§0.7's C4.10 entry), and B2's
+ * 連環焚燒, which reads what a burning victim had left from its kill hook, a leaf of the rule
+ * modules that no sim system imports back.
+ */
+const REMAINING_IMPORTERS = [
+  'sim/effects/dispatch.ts',
+  'sim/effects/execute.ts',
+  'sim/rules/fireAscendancy.ts',
+];
 
 /** One import or re-export declaration of a module: its specifier, and whether it loads it. */
 interface ImportDecl {
@@ -239,7 +247,7 @@ describe('remaining.ts stays outside every cycle (C4.10)', () => {
     expect(graph.has(CONTEXT)).toBe(false);
   });
 
-  it('is value-imported by execute.ts and dispatch.ts alone', () => {
+  it('is value-imported by execute.ts, dispatch.ts and 連環焚燒 alone', () => {
     const modules = readdirSync(SRC, { recursive: true, encoding: 'utf8' })
       .map((path) => path.replaceAll('\\', '/'))
       .filter((path) => path.endsWith('.ts') && !path.endsWith('.test.ts'));

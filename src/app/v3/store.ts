@@ -2,13 +2,14 @@
  * The v3 page's save wiring (src/app/profileStore.ts' header, the lead's ruling P3): save v2's
  * slots from createPlatform under PROFILE_SAVE_PREFIX, the M1 page's v1 slots for the one-time
  * import (none on Steam, nor where the page has no localStorage), the load context of the
- * registered content in FULL_SCOPE, and ISO timestamps. The page sends no playtest event in B1,
+ * registered content in the build's scope (./scope.ts: DEMO_SCOPE_A in the Demo, else FULL_SCOPE),
+ * and ISO timestamps. The page sends no playtest event in B1,
  * so its analytics is a stand-in that only drops events.
  */
 
 import type { Content } from '../../data/web';
-import { FULL_SCOPE } from '../../data/web';
 import { createPlatform } from '../../platform';
+import { FLAVOR } from '../../platform/flavor';
 import type { Platform } from '../../platform';
 import type { Analytics } from '../../platform/analytics';
 import { pageLocalStorage } from '../../platform/platform';
@@ -16,6 +17,7 @@ import { LocalSaveStorage, PROFILE_SAVE_PREFIX } from '../../platform/storage';
 import type { SaveStorage } from '../../platform/storage';
 import { profileContext } from '../../save/profile';
 import { ProfileStore } from '../profileStore';
+import { gameScope } from './scope';
 
 /** Analytics that keeps and sends nothing (B1: no playtest events on the v3 page). */
 export const NO_ANALYTICS: Analytics = {
@@ -45,7 +47,7 @@ export function openProfileStore(content: Content): ProfileStore {
   return new ProfileStore({
     storage: platform.storage,
     v1: v1Storage(platform),
-    context: profileContext(content, FULL_SCOPE),
+    context: profileContext(content, gameScope(FLAVOR)),
     now: () => new Date().toISOString(),
   });
 }

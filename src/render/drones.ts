@@ -393,6 +393,79 @@ export interface DroneSkin {
   readonly edge: number;
   readonly mark: number;
   readonly trail: number;
+  /** The glow around the kite; `fill` when left out. */
+  readonly halo?: number;
+  /** The fill's opacity; 0.95 when left out (a bubble's is see-through). */
+  readonly fillAlpha?: number;
+  /** What is drawn inside the kite in `mark`: the nose line when left out. */
+  readonly motif?: KiteMotif;
+  /** The trail's width in arena units; TRAIL_WIDTH when left out. */
+  readonly trailWidth?: number;
+}
+
+/**
+ * The shape drawn inside a kite (gd §5.3, §11.7: a fusion skin's shape on 蜂巢's drones): the
+ * nose line, a flame tongue, ice facets, bubbles or a blade's edge.
+ */
+export type KiteMotif = 'line' | 'flame' | 'crystal' | 'bubble' | 'blade';
+
+/**
+ * A per-row size multiplier the drone view may come to hold (蜂后 ×1.5, 巨像, gd §1.5); the
+ * layer reads it when it is there and draws every row at 1 until then.
+ */
+export interface SizedDroneView {
+  readonly size?: ArrayLike<number>;
+}
+
+/** The size multiplier of drone slot `s`: DroneViewState's `size` when it has one, else 1. */
+export function droneSize(ds: DroneViewState, s: number): number {
+  const size = (ds as DroneViewState & SizedDroneView).size?.[s];
+  return size !== undefined && size > 0 ? size : 1;
+}
+
+/** Draws `skin`'s kite, pointing +x around its center, on `g` (the layer bakes it once). */
+export function drawKite(g: Graphics, skin: DroneSkin): Graphics {
+  g.poly(KITE)
+    .stroke({ width: 3.6, color: skin.halo ?? skin.fill, alpha: 0.35, join: 'round' })
+    .poly(KITE)
+    .fill({ color: skin.fill, alpha: skin.fillAlpha ?? 0.95 });
+  const mark = skin.mark;
+  switch (skin.motif ?? 'line') {
+    case 'flame':
+      g.poly([-8.5, 0, -4.5, -3.2, 0.5, -2.4, 6.5, 0, 0.5, 2.4, -4.5, 3.2])
+        .fill({ color: mark, alpha: 0.95 })
+        .poly([-5.5, 0, -1.5, -1.3, 3.5, 0, -1.5, 1.3])
+        .fill({ color: 0xffffff, alpha: 0.85 });
+      break;
+    case 'crystal':
+      g.poly([7, 0, -2.6, -3.6, -7, 0, -2.6, 3.6])
+        .fill({ color: mark, alpha: 0.6 })
+        .moveTo(-10, 0)
+        .lineTo(10, 0)
+        .moveTo(-2.6, -5.8)
+        .lineTo(-2.6, 5.8)
+        .stroke({ width: 0.8, color: mark, alpha: 0.9 });
+      break;
+    case 'bubble':
+      g.circle(2.2, 0, 2.6)
+        .circle(-4, -1.7, 1.6)
+        .circle(-4.6, 2, 1.2)
+        .stroke({ width: 0.8, color: mark, alpha: 0.95 })
+        .circle(1.3, -0.9, 0.7)
+        .fill({ color: mark, alpha: 0.95 });
+      break;
+    case 'blade':
+      g.poly([10, 0, -2.6, 5.8, -10, 0])
+        .fill({ color: 0xaab4c4, alpha: 0.75 })
+        .moveTo(-9, 0)
+        .lineTo(10, 0)
+        .stroke({ width: 1.4, color: mark, alpha: 1, cap: 'round' });
+      break;
+    default:
+      g.moveTo(-10, 0).lineTo(6, 0).stroke({ width: 1.5, color: mark, alpha: 1, cap: 'round' });
+      break;
+  }
+  return g.poly(KITE).stroke({ width: 1.3, color: skin.edge, alpha: 1, join: 'round' });
 }
 
 /** 蜂巢's drones: hive green throughout. */
@@ -439,6 +512,7 @@ export class DroneLayer {
   private readonly baseSprites: Particle[] = [];
   private readonly barrelSprites: Particle[] = [];
   private readonly turrets = new TurretTracks();
+  private readonly trailWidth: number;
 
   /**
    * `streak` is the effect sheet's spark streak (src/render/fxTextures.ts); `skin` the drones'
@@ -449,21 +523,14 @@ export class DroneLayer {
     private readonly streak: Texture,
     private readonly skin: DroneSkin = HIVE_DRONE_SKIN,
   ) {
+    this.trailWidth = skin.trailWidth ?? TRAIL_WIDTH;
     this.trails = new ParticleContainer({
       label: 'drone-trails',
       texture: streak,
       dynamicProperties: { position: true, rotation: true, color: true, vertex: true },
     });
     this.trails.blendMode = 'add';
-    const kite = new Graphics()
-      .poly(KITE)
-      .stroke({ width: 3.6, color: skin.fill, alpha: 0.35, join: 'round' })
-      .poly(KITE)
-      .fill({ color: skin.fill, alpha: 0.95 })
-      .stroke({ width: 1.3, color: skin.edge, alpha: 1, join: 'round' })
-      .moveTo(-10, 0)
-      .lineTo(6, 0)
-      .stroke({ width: 1.5, color: skin.mark, alpha: 1, cap: 'round' });
+    const kite = drawKite(new Graphics(), skin);
     const bounds = kite.getLocalBounds();
     this.kiteAnchorX = -bounds.minX / bounds.width;
     this.kiteAnchorY = -bounds.minY / bounds.height;
@@ -473,10 +540,11 @@ export class DroneLayer {
       antialias: true,
     });
     kite.destroy();
+    // Vertices are dynamic: a row's size (droneSize) can change from frame to frame.
     this.kites = new ParticleContainer({
       label: 'drone-kites',
       texture: this.kiteTexture,
-      dynamicProperties: { position: true, rotation: true, color: false, vertex: false },
+      dynamicProperties: { position: true, rotation: true, color: false, vertex: true },
     });
     const half = TURRET_SIDE / 2;
     const hollow = HOLLOW_SIDE / 2;
@@ -520,11 +588,10 @@ export class DroneLayer {
       texture: this.barrelTexture,
       dynamicProperties: { position: true, rotation: true, color: false, vertex: false },
     });
-    // Its sprites keep SPIRIT_SCALE, so the kites' static vertices hold for it too.
     this.spirits = new ParticleContainer({
       label: 'spirit-kites',
       texture: this.kiteTexture,
-      dynamicProperties: { position: true, rotation: true, color: false, vertex: false },
+      dynamicProperties: { position: true, rotation: true, color: false, vertex: true },
     });
     this.view.addChild(
       this.trails,
@@ -597,14 +664,15 @@ export class DroneLayer {
       const py = ds.prevY[s] as number;
       const hx = px + ((ds.x[s] as number) - px) * alpha;
       const hy = py + ((ds.y[s] as number) - py) * alpha;
-      const width = spirit ? TRAIL_WIDTH * SPIRIT_SCALE : TRAIL_WIDTH;
-      streakCount = this.drawTrail(track.trail, hx, hy, streakCount, width);
+      const base = spirit ? SPIRIT_SCALE : 1;
+      const size = droneSize(ds, s) * base;
+      // The kite grows with its row's size; its trail keeps its width (E4).
+      streakCount = this.drawTrail(track.trail, hx, hy, streakCount, this.trailWidth * base);
       const kite = spirit ? this.spirit(spiritCount++) : this.kite(kiteCount++);
       kite.x = hx;
       kite.y = hy;
       kite.rotation = track.heading;
-      const size = ds.size[s] as number;
-      if (!spirit && kite.scaleX !== size) {
+      if (kite.scaleX !== size) {
         kite.scaleX = kite.scaleY = size;
         resized = true;
       }

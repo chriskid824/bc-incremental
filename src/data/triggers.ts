@@ -564,6 +564,15 @@ export interface CoinHitSpec {
 }
 
 /**
+ * Kills the event's enemy (or the one the trigger's selector picked) outright, unless it is a
+ * boss: one hit of exactly its hp left, tagged hit and trigger, past every defence and modifier.
+ * An enemy frozen when it dies shatters as from any other kill (霜蜂, src/sim/rules/frostBee.ts).
+ */
+export interface ExecuteSpec {
+  readonly kind: 'execute';
+}
+
+/**
  * A bolt of lightning that chains (電弧): one hit on its first enemy, then exactly `jumps`
  * jumps, each from the enemy it last hit to the nearest one within the chain range it has not
  * hit, for damagePct of the damage stat (a jump's × the chain retention once per jump), tagged
@@ -658,6 +667,7 @@ export interface BuffSpec {
  *   chain jumps from it, each shocking its enemy (ChainBoltSpec).
  * - comboStack: `stacks` combo stacks, up to the run's cap (ComboStackSpec).
  * - buff: × (1 + more) on the cadence of the emitters that carry its tags, for a time (BuffSpec).
+ * - execute: the event's enemy, if no boss, killed outright (ExecuteSpec).
  */
 export type EffectSpec =
   | {
@@ -708,7 +718,8 @@ export type EffectSpec =
   | CoinHitSpec
   | ChainBoltSpec
   | ComboStackSpec
-  | BuffSpec;
+  | BuffSpec
+  | ExecuteSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -746,6 +757,8 @@ export const COEF_FIELDS: {
   comboStack: [],
   // No payload carries one; a fusion that does names its field here.
   buff: [],
+  // All or nothing: a kill has no share to scale.
+  execute: [],
 };
 
 /**

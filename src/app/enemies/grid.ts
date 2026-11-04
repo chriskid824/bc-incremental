@@ -3,7 +3,10 @@
  * characterGameData() whose waves bring nothing, on a fixed seed. On its first tick a test module
  * stands every v3 type in a row above the player, in roster order, and a hexagon elite of each
  * affix in a row below it, in AFFIX_IDS order; between the rows, 洋蔥 with two shells left and
- * with one, a pair of 增殖's children at MULTIPLY_RADIUS and an elite of three affixes. Each is
+ * with one, a pair of 增殖's children at MULTIPLY_RADIUS and an elite of three affixes; then the
+ * later bosses apart (BOSS_SPOTS): 母巢 above the type row, inside the 520 it summons from, and
+ * 稜鏡 at the middle row's right end, past FOCUS_RANGE (800) so the player's attacks seldom pick
+ * it and its reflections stay small, its mirror showing every 5 s. Each is
  * immortal and stands still, placed where its behaviour shows: 衝刺者 charges (red) at once,
  * 射手 fires at the player, 召喚者 calls its triangles, 寶藏怪 orbits, then flees, and 守護's
  * neighbours stand inside its ring. The player attacks with M1's base stats, and a shield refilled
@@ -58,6 +61,12 @@ const AFFIX_STEP = 150;
 const ONION_SPOTS = [-600, -360] as const;
 const CHILD_SPOTS = [290, 420] as const;
 const TRIPLE_SPOT = 600;
+/** The bosses after 洋蔥, each at its own spot (dx, dy) rather than in the type row. */
+const BOSS_SPOTS = {
+  brood: [0, -440],
+  prism: [820, 0],
+} as const;
+const LATER_BOSSES = Object.keys(BOSS_SPOTS) as (keyof typeof BOSS_SPOTS)[];
 /** The three-affix elite's: 迅捷, 堅甲 and 元素護盾 (a symbol row and a shell). */
 const TRIPLE = ['swift', 'armoured', 'ward'] as const;
 
@@ -109,7 +118,9 @@ export function gridData(): GameData {
 
 /** The grid's enemies on `data`, in the order they spawn (the banner's sighting order). */
 export function gridSpots(data: GameData): GridSpot[] {
-  const types = ENEMY_IDS.filter((id) => Object.hasOwn(V3_ENEMIES, id));
+  const types = ENEMY_IDS.filter(
+    (id) => Object.hasOwn(V3_ENEMIES, id) && !(LATER_BOSSES as readonly string[]).includes(id),
+  );
   const elite = data.enemies.hexagon;
   const onion = data.enemies.onion;
   return [
@@ -148,6 +159,13 @@ export function gridSpots(data: GameData): GridSpot[] {
       dy: 0,
       origin: origin(TRIPLE.reduce((bits, id) => bits | bitOf(id), 0)),
     },
+    ...LATER_BOSSES.map((id) => ({
+      label: id,
+      def: still(data.enemies[id]),
+      dx: BOSS_SPOTS[id][0],
+      dy: BOSS_SPOTS[id][1],
+      origin: origin(0),
+    })),
   ];
 }
 

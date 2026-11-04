@@ -17,6 +17,7 @@ import {
   boardCounts,
   emptyProgress,
   nextPrice,
+  PRESTIGE_RULES,
   settleWebRun,
   webBuild,
   webStartWave,
@@ -35,7 +36,7 @@ import type { GreedyEvaluation, WebStrategy, WebStrategyId } from './strategies'
 import { cappedRunConfig, greedySeeds, openVisit, probeFrontiers } from './visit';
 
 /** gd:833 「第 30 波：第一次轉生」: the first prestige point (初始值). */
-export const PRESTIGE_WAVE = 30;
+export const PRESTIGE_WAVE = PRESTIGE_RULES.wave;
 /** CLAUDE.md:7: wave 100's 奇點 is the clear (初始值). */
 export const CLEAR_WAVE = 100;
 /**

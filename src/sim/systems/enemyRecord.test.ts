@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mul, num, ZERO } from '../../core/num';
 import { characterGameData, loadGameData } from '../../data';
+import { bossOf } from '../../data/compose';
 import { V3_ENEMIES } from '../../data/enemiesV3';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
 import { createSimulation } from '../simulation';
@@ -20,6 +21,7 @@ import type { Enemy, RunContext, WaveRecord } from './context';
 import {
   AI_DASH,
   AI_NONE,
+  AI_REFLECT,
   AI_SHOOT,
   AI_SUMMON,
   AI_TREASURE,
@@ -86,8 +88,12 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       summoner: AI_SUMMON,
       treasure: AI_TREASURE,
       onion: AI_NONE,
+      brood: AI_SUMMON,
+      prism: AI_REFLECT,
     });
-    expect([AI_NONE, AI_DASH, AI_SHOOT, AI_SUMMON, AI_TREASURE]).toEqual([0, 1, 2, 3, 4]);
+    expect([AI_NONE, AI_DASH, AI_SHOOT, AI_SUMMON, AI_TREASURE, AI_REFLECT]).toEqual([
+      0, 1, 2, 3, 4, 5,
+    ]);
   });
 
   it('holds `extra` from the origin, and true for the treasure whatever spawns it', () => {
@@ -110,6 +116,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       layersLeft: 0,
       poolStart: -Infinity,
       poolSum: ZERO,
+      reflectSecStart: 0,
+      reflectSecSum: 0,
     });
     expect(createEnemyV3(square, ORIGIN, 1)).toEqual({
       ai: AI_NONE,
@@ -129,6 +137,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       layersLeft: 0,
       poolStart: -Infinity,
       poolSum: ZERO,
+      reflectSecStart: 0,
+      reflectSecSum: 0,
     });
     expect(createEnemyV3(square, { ...ORIGIN, extra: false }, 1).extra).toBe(false);
     expect(createEnemyV3(treasure, undefined, 1)).toEqual({
@@ -149,6 +159,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       layersLeft: 0,
       poolStart: -Infinity,
       poolSum: ZERO,
+      reflectSecStart: 0,
+      reflectSecSum: 0,
     });
     expect(createEnemyV3(treasure, { ...ORIGIN, extra: false }, 1).extra).toBe(true);
   });
@@ -175,6 +187,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
         layersLeft: 0,
         poolStart: -Infinity,
         poolSum: ZERO,
+        reflectSecStart: 0,
+        reflectSecSum: 0,
       });
     }
     // A square given each behaviour acts as the type that has it, at the square's speed.
@@ -204,6 +218,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       layersLeft: 0,
       poolStart: -Infinity,
       poolSum: ZERO,
+      reflectSecStart: 0,
+      reflectSecSum: 0,
     });
   });
 
@@ -228,6 +244,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       layersLeft: 0,
       poolStart: -Infinity,
       poolSum: ZERO,
+      reflectSecStart: 0,
+      reflectSecSum: 0,
     });
     // The shielder's id on a square's def, which has no behaviour: no defence.
     expect(createEnemyV3({ ...square, id: 'shielder' }, undefined, 1)).toMatchObject({
@@ -254,6 +272,8 @@ describe('createEnemyV3 (docs/v3 C7 design §1.3)', () => {
       layersLeft: 0,
       poolStart: -Infinity,
       poolSum: ZERO,
+      reflectSecStart: 0,
+      reflectSecSum: 0,
     });
     // Every other v3 behaviour holds none.
     for (const def of Object.values(V3_ENEMIES)) {
@@ -295,8 +315,16 @@ describe('addEnemy: the v3 record (docs/v3 C7 design §1.3)', () => {
     }
     for (const data of [characterGameData(), v3TestData()]) {
       const enemies = enemiesOf(data, 50, 600);
+      // Wave 50's boss: the onion in the fixture's rotation, 母巢 in the content's.
       expect(typesOf(enemies)).toEqual(
-        expect.arrayContaining(['triangle', 'square', 'shielder', 'dasher', 'summoner', 'onion']),
+        expect.arrayContaining([
+          'triangle',
+          'square',
+          'shielder',
+          'dasher',
+          'summoner',
+          bossOf(50, data.waves),
+        ]),
       );
       for (const enemy of enemies) {
         // Wave spawns and their splits: none is extra, and only the treasure would be.
@@ -357,6 +385,8 @@ describe('addEnemy: the v3 record (docs/v3 C7 design §1.3)', () => {
       layersLeft: 0,
       poolStart: -Infinity,
       poolSum: ZERO,
+      reflectSecStart: 0,
+      reflectSecSum: 0,
     });
     expect([child.tough, child.boss, child.stepDist]).toEqual([true, false, plain.stepDist]);
   });

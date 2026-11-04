@@ -1,6 +1,6 @@
 /**
  * Which of a tick's events flash the core (docs/v3 C7 design §2.9; C7.2's hand-off to C7.8): a
- * contact (playerHit) or a bullet (bulletHit) that reached life does; one the shield took whole
+ * contact (playerHit), a bullet (bulletHit) or 稜鏡's reflection (reflectHit) that reached life does; one the shield took whole
  * does not. The sim pushes shieldAbsorbed immediately before the hit it absorbed
  * (src/sim/systems/contact.ts damagePlayer), so a hit of damage 0 right after a shieldAbsorbed is
  * the shield's alone. An M1 run has no shield, so every playerHit flashes, as before. DOM-free,
@@ -23,7 +23,8 @@ export class CoreHitFilter {
         this.absorbed = true;
         return false;
       case 'playerHit':
-      case 'bulletHit': {
+      case 'bulletHit':
+      case 'reflectHit': {
         const whole = this.absorbed && event.damage === 0;
         this.absorbed = false;
         return !whole;

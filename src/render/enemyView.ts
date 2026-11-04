@@ -2,7 +2,8 @@
  * One enemy's view (docs/v3 C7 design §2.9): its type's hull (src/render/enemyShapes.ts), tinted,
  * under its hp bar, and what its look and its v3 record (EnemyState.v3, §1.7) add around it. The
  * look: 再生者's cross pulses, 衝刺者 and 射手 face the player, 召喚者's triangles orbit it, 寶藏怪
- * glows (brighter once it flees) and 洋蔥 shows one shell per layer it has left. The record, each
+ * glows (brighter once it flees), 洋蔥 shows one shell per layer it has left and 稜鏡 wears a
+ * bright mirrored outline, pulsing, while it reflects (state & REFLECTING). The record, each
  * part made the first time a record asks for it and kept with the pooled view: 盾兵's shield
  * facing the center (defence & SHIELDED), 元素護盾's shell (defence & WARDED, which the sim clears
  * at wardBroken), 守護's ring at the sim's GUARD_RADIUS and the affix symbols above it (affixes,
@@ -18,13 +19,14 @@ import type { Graphics } from 'pixi.js';
 import { AFFIX_GUARDIAN } from '../data/affixes';
 import type { EnemyDef } from '../data/types';
 import type { EnemyState } from '../sim';
-import { CHARGING, FLEEING, SHIELDED, WARDED } from '../sim/systems/enemyRecord';
+import { CHARGING, FLEEING, REFLECTING, SHIELDED, WARDED } from '../sim/systems/enemyRecord';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../sim/types';
 import {
   bossRing,
   FACING_SHAPES,
   guardRing,
   HULLS,
+  mirrorOutline,
   ONION_CORE,
   ONION_SHELLS,
   onionShells,
@@ -60,6 +62,9 @@ export const GLOW_FLEE_ALPHA = 1.8;
  * brightening. treasureGlow draws its discs brighter to make up for it.
  */
 export const GLOW_REST_ALPHA = 1 / (GLOW_FLEE_ALPHA * (1 + GLOW_SHIMMER));
+/** 稜鏡's mirror while it reflects: its alpha swings between 1 − MIRROR_PULSE and 1, this often. */
+export const MIRROR_PULSE = 0.35;
+const MIRROR_PULSE_HZ = 4;
 /** The gap between the hp bar and the affix symbols above it, in screen units. */
 const SYMBOL_GAP = 5;
 
@@ -84,6 +89,8 @@ export class EnemyView {
   readonly orbit: Container | null;
   /** 寶藏怪's glow; null for any other shape. */
   readonly glow: Graphics | null;
+  /** 稜鏡's reflect cue, turned with its body, shown while REFLECTING; null for any other shape. */
+  readonly mirror: Graphics | null;
   /** The radius it draws at, the enemy's (EnemyState.radius); set by place(). */
   radius: number;
   /** enemy.radius / def.radius: 1 but for 增殖's children. */
@@ -120,6 +127,11 @@ export class EnemyView {
     if (this.orbit !== null) this.root.addChild(this.orbit);
     this.glow = def.shape === 'diamond' ? treasureGlow(r, def.color) : null;
     if (this.glow !== null) this.root.addChildAt(this.glow, 0);
+    this.mirror = def.shape === 'prism' ? mirrorOutline(r) : null;
+    if (this.mirror !== null) {
+      this.mirror.visible = false;
+      this.body.addChild(this.mirror);
+    }
     this.faces = FACING_SHAPES.has(def.shape);
 
     if (def.tough) {
@@ -193,6 +205,13 @@ export class EnemyView {
     }
     if (v3 === null) return;
     if (this.shells !== null) this.drawShells(v3.layersLeft);
+    if (this.mirror !== null) {
+      const reflecting = (v3.state & REFLECTING) !== 0;
+      this.mirror.visible = reflecting;
+      if (reflecting) {
+        this.mirror.alpha = 1 - MIRROR_PULSE * (0.5 + 0.5 * Math.sin(phase * MIRROR_PULSE_HZ));
+      }
+    }
 
     const shielded = (v3.defence & SHIELDED) !== 0;
     if (shielded && this.shield === null) this.shield = this.add(shieldArc(this.def.radius));

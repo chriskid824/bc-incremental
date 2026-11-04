@@ -185,7 +185,8 @@ const stubPool =
 
 /** The world a test fixes: the stub pool, a clock that never moves, a date, the commit and a ref. */
 const fixed = (overrides: NightlyDeps = {}): NightlyDeps => ({
-  checks: { sessions: 2, c7: BASE_C7 },
+  // Before B2's prestige unless a test says otherwise, as the plans below were written.
+  checks: { sessions: 2, c7: BASE_C7, prestige: false },
   run: stubPool(),
   now: () => new Date(Date.UTC(2026, 9, 28, 19, 17)),
   clock: () => 0,
@@ -278,7 +279,7 @@ describe('the nightly plan', () => {
     expect(new Set(seeds)).toEqual(new Set([11_260_404]));
   });
 
-  it("plans 熔核's shards and the globals on the registered content from B1, as Plan JSON v1 (OWN 6)", () => {
+  it("plans 熔核's and 蜂巢's shards and the globals on the registered content from B2, as Plan JSON v1 (OWN 6)", () => {
     for (const set of ['nightly', 'weekly'] as const) {
       const plan = nightlyPlan({ set, quick: false, content: 'registered', commit: SHA });
       expect(plan.json).toEqual({
@@ -288,17 +289,20 @@ describe('the nightly plan', () => {
         content: 'registered',
         commit: SHA,
         fuzzSeed: 11_260_404,
-        // The weekly adds 熔核's triples (three outers from B1's ice).
-        shards: [
-          { id: 'fire-sessions', kind: 'sessions', character: 'fire' },
-          { id: 'fire-probes', kind: 'probes', character: 'fire' },
-          { id: 'fire-doubles', kind: 'doubles', character: 'fire' },
-          ...(set === 'weekly'
-            ? [{ id: 'fire-triples', kind: 'triples', character: 'fire', part: [0, 1] }]
-            : []),
-          { id: 'global-m1', kind: 'm1' },
-          { id: 'global-fuzz', kind: 'fuzz' },
-        ],
+        // The weekly adds each character's triples (three outers from B1's ice).
+        shards: (['fire', 'summon'] as const)
+          .flatMap((c) => [
+            { id: `${c}-sessions`, kind: 'sessions', character: c },
+            { id: `${c}-probes`, kind: 'probes', character: c },
+            { id: `${c}-doubles`, kind: 'doubles', character: c },
+            ...(set === 'weekly'
+              ? [{ id: `${c}-triples`, kind: 'triples', character: c, part: [0, 1] }]
+              : []),
+          ])
+          .concat([
+            { id: 'global-m1', kind: 'm1' },
+            { id: 'global-fuzz', kind: 'fuzz' },
+          ] as never[]),
       });
       expect(plan.units.get('global-m1')).toEqual(m1Units());
     }
@@ -415,7 +419,8 @@ describe('the nightly plan', () => {
       content: 'registered',
       commit: SHA,
     });
-    expect(planText(registered).split('\n')[0]).toMatch(/, scopes full$/);
+    // B2 wrote the prestige, so the registered content's plan plays the Demo too.
+    expect(planText(registered).split('\n')[0]).toMatch(/, scopes full, demoA$/);
   });
 
   it('plans no shard without units: one fusion gives no doubles or triples shard (OWN 6)', () => {
@@ -578,7 +583,7 @@ describe('npm run nightly', () => {
     expect(await main(['--json'], io, fixed())).toBe(2);
     expect(await main(['--shard', 'nowhere', '--out', join(root, 'x')], io, fixed())).toBe(2);
     expect(io.lines).toContain(
-      "No shard 'nowhere' in the plan: fire-sessions, fire-probes, fire-doubles, global-m1, global-fuzz",
+      "No shard 'nowhere' in the plan: fire-sessions, fire-probes, fire-doubles, summon-sessions, summon-probes, summon-doubles, global-m1, global-fuzz",
     );
     const plan = capture();
     expect(

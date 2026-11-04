@@ -71,15 +71,18 @@ describe('the characters (D14, F44)', () => {
     expect(ROW_ENEMIES.map((enemy) => GLYPH[row[enemy]]).join('')).toBe(ROWS[c]);
   });
 
-  it("builds fire (B1) with its center and 預設 build, its ascendancies still B2's", () => {
-    const def = CHARACTERS.fire;
-    expect(def.center?.nodes).toHaveLength(40);
-    expect(def.ascendancies).toBeNull();
-    expect(def.defaultOrder.length).toBeGreaterThan(0);
-    expect(CharacterDefSchema.safeParse(def).success).toBe(true);
-  });
+  it.each(['fire', 'summon'] as const)(
+    'builds %s (B1, B2) with its center, its two ascendancies and its 預設 build',
+    (c) => {
+      const def = CHARACTERS[c];
+      expect(def.center?.nodes).toHaveLength(40);
+      expect(def.ascendancies).toHaveLength(2);
+      expect(def.defaultOrder.length).toBeGreaterThan(0);
+      expect(CharacterDefSchema.safeParse(def).success).toBe(true);
+    },
+  );
 
-  it.each(CHARACTER_IDS.filter((c) => c !== 'fire'))(
+  it.each(CHARACTER_IDS.filter((c) => c !== 'fire' && c !== 'summon'))(
     'builds %s as 「製作中」: no center, no ascendancies, no 預設 build',
     (c) => {
       const def = CHARACTERS[c];

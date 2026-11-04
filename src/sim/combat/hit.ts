@@ -9,7 +9,8 @@
  * their own (src/sim/combat/convert.ts). A shocked or frozen enemy takes more (takenMult). A v3
  * run's enemy with a shield or armour then defends (src/sim/combat/defend.ts): a hit it blocks
  * in full deals nothing (blockedHit). A lethal hit on a v3 onion with a shell left breaks the
- * shell and the onion lives on (src/sim/systems/onion.ts). Every damage instance, hits and
+ * shell and the onion lives on (src/sim/systems/onion.ts). A hit on a reflecting 稜鏡 deals the
+ * player its bounded reflection (src/sim/systems/prism.ts). Every damage instance, hits and
  * damage-over-time steps alike, goes into the run's tallies through tally.
  *
  * A hit raises the hit and crit trigger events and calls the onHit hooks (src/sim/effects/): a
@@ -58,7 +59,9 @@ import type { Payload } from '../emitters/types';
 import { clamp01 } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { killEnemy } from '../systems/death';
+import { REFLECTING } from '../systems/enemyRecord';
 import { onionBreak } from '../systems/onion';
+import { reflectHit } from '../systems/prism';
 import type { PulseAcc } from '../systems/systemState';
 import { convertHit } from './convert';
 import { blockedHit, bypassOf, defend } from './defend';
@@ -430,7 +433,8 @@ export function dispatchHit(
  * (the other is the damage-over-time step's, src/sim/systems/ailments.ts): a lethal hit on a v3
  * onion with a shell left breaks that shell instead (onionBreak), with no KILLED events and no
  * kill, and its caller goes on as after a surviving hit, the hit event and tallies keeping the
- * full amount.
+ * full amount. A hit of more than 0 on a v3 enemy that is REFLECTING (稜鏡) reflects onto the
+ * player (reflectHit) right after its hit event, before the lethal test.
  */
 export function applyHitDamage(
   ctx: RunContext,
@@ -472,10 +476,12 @@ export function applyHitDamage(
     acc.total = add(acc.total, amount);
     if (crit) acc.crits[acc.critCount++] = enemy.id;
   }
+  const v3 = enemy.v3;
+  // 稜鏡's window (src/sim/systems/prism.ts); an M1 hit pays the null test alone.
+  if (v3 !== null && (v3.state & REFLECTING) !== 0 && gt(amount, ZERO)) reflectHit(ctx, enemy, v3);
   if (lte(enemy.hp, ZERO)) {
     // A v3 onion with a shell left loses it here and lives on (src/sim/systems/onion.ts): the
     // hit goes on as a surviving one. An M1 kill pays this one test.
-    const v3 = enemy.v3;
     if (v3 !== null && v3.layersLeft > 0 && onionBreak(ctx, enemy)) return;
     enemy.killDepth = depth;
     enemy.killKind = KILL_BY_HIT;

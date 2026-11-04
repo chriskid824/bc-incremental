@@ -1,8 +1,8 @@
 /**
  * The enemies' geometry (docs/v3 C7 design §2.9; docs/v3/game-design-v3.md §6, A.5), drawn in code
  * (CLAUDE.md: no generated art): a hull for every EnemyShape, the parts some looks add around it
- * (盾兵's half-circle shield, 召喚者's orbiting triangles, 寶藏怪's glow, 洋蔥's shells, an elite's
- * 元素護盾 shell and 守護 ring) and a symbol for every affix. Hulls are white and take the type's
+ * (盾兵's half-circle shield, 召喚者's orbiting triangles, 寶藏怪's glow, 洋蔥's shells, 稜鏡's
+ * mirror outline, an elite's 元素護盾 shell and 守護 ring) and a symbol for every affix. Hulls are white and take the type's
  * color by tint (src/render/enemyView.ts), M1's polygons exactly as before; the v3 types keep
  * M1's style, a dark backing, a soft halo and a white outline over a translucent fill (gd §6
  * 「中性的白灰輪廓＋半透明填色」). Affix symbols are white with no color (gd:703: color is the
@@ -66,6 +66,28 @@ const ONION_SHELL_WIDTH = 0.12;
 /** The bright core left at its center when every shell is gone, as a share of r. */
 export const ONION_CORE = 0.16;
 const ONION_CORE_ALPHA = 0.85;
+/**
+ * 母巢's big triangle and the hollow, inverted triangle inside it (a nest of triangles), as a
+ * share of r, with three small eggs at its corners' side of the hollow.
+ */
+const BROOD_HOLLOW = 0.5;
+const BROOD_EGG = 0.16;
+const BROOD_EGG_AT = 0.55;
+const BROOD_EGG_ALPHA = 0.7;
+/** 稜鏡's long hexagonal crystal: half its length, its half-width and its shoulders, as shares of r. */
+const PRISM_LENGTH = 1.25;
+const PRISM_WIDTH = 0.72;
+const PRISM_SHOULDER = 0.5;
+/** Its facet lines, from the tips to the waist, and their alpha. */
+const PRISM_FACET_WIDTH = 2;
+const PRISM_FACET_ALPHA = 0.55;
+/**
+ * 稜鏡's reflect cue: two bright outlines of the crystal around it, a mirror and its echo, at these
+ * shares of r and widths, drawn added. The view shows it while REFLECTING and pulses it.
+ */
+export const MIRROR_SCALES = [1.28, 1.5] as const;
+const MIRROR_WIDTHS = [5, 3] as const;
+const MIRROR_ALPHAS = [1, 0.6] as const;
 /** 盾兵's half-circle shield, facing the center: its radius as a share of r, and its line. */
 export const SHIELD_ARC_SCALE = 1.4;
 const SHIELD_ARC_WIDTH = 4;
@@ -165,6 +187,25 @@ const diamond: Outline = (g, size) =>
     0,
   ]);
 
+const prismOutline: Outline = (g, size) =>
+  g.poly([
+    0,
+    -size * PRISM_LENGTH,
+    size * PRISM_WIDTH,
+    -size * PRISM_SHOULDER,
+    size * PRISM_WIDTH,
+    size * PRISM_SHOULDER,
+    0,
+    size * PRISM_LENGTH,
+    -size * PRISM_WIDTH,
+    size * PRISM_SHOULDER,
+    -size * PRISM_WIDTH,
+    -size * PRISM_SHOULDER,
+  ]);
+
+/** The triangle of `size` pointing down, the hollow of 母巢's hull. */
+const invertedTriangle: Outline = (g, size) => g.regularPoly(0, 0, size, 3, Math.PI);
+
 /**
  * A hull in M1's style around `outline`, M1's numbers as they were: a dark backing (tinting
  * leaves black black, so the shape stays solid over fire), a soft halo, then the translucent
@@ -225,6 +266,38 @@ export const HULLS: Readonly<Record<EnemyShape, HullDrawer>> = {
   },
   diamond: marked(diamond),
   onion: (r) => new Graphics().circle(0, 0, r).fill({ color: 0x000000, alpha: 0.6 }),
+  brood: (r) => {
+    // M1's big triangle, its middle hollowed out by a dark triangle pointing down, an egg
+    // waiting at each of its three corners.
+    const g = outlined(new Graphics(), polygon(POLYGON_SIDES.triangle), r);
+    invertedTriangle(g, r * BROOD_HOLLOW);
+    g.fill({ color: 0x000000, alpha: 0.6 }).stroke({
+      width: Math.max(2, r * 0.07),
+      color: 0xffffff,
+      alpha: 1,
+    });
+    for (let k = 0; k < 3; k++) {
+      const angle = -HALF_PI + (k / 3) * TAU;
+      g.regularPoly(
+        Math.cos(angle) * r * BROOD_EGG_AT,
+        Math.sin(angle) * r * BROOD_EGG_AT,
+        r * BROOD_EGG,
+        3,
+      );
+    }
+    return g.fill({ color: 0xffffff, alpha: BROOD_EGG_ALPHA });
+  },
+  prism: (r) => {
+    // A long crystal, its facets running from each tip to the waist.
+    const g = outlined(new Graphics(), prismOutline, r);
+    const tip = r * PRISM_LENGTH;
+    const side = r * PRISM_WIDTH;
+    const shoulder = r * PRISM_SHOULDER;
+    g.moveTo(0, -tip).lineTo(0, tip);
+    g.moveTo(-side, -shoulder).lineTo(0, 0).lineTo(side, -shoulder);
+    g.moveTo(-side, shoulder).lineTo(0, 0).lineTo(side, shoulder);
+    return g.stroke({ width: PRISM_FACET_WIDTH, color: 0xffffff, alpha: PRISM_FACET_ALPHA });
+  },
 };
 
 /** The shapes the view turns toward the player instead of spinning: their front is +x. */
@@ -290,6 +363,21 @@ export function treasureGlow(r: number, color: number): Graphics {
     .fill({ color, alpha: GLOW_INNER_ALPHA });
   glow.blendMode = 'add';
   return glow;
+}
+
+/** 稜鏡's reflect cue: its crystal's outline twice around it, bright and added (MIRROR_SCALES). */
+export function mirrorOutline(r: number): Graphics {
+  const g = new Graphics({ label: 'mirror' });
+  MIRROR_SCALES.forEach((scale, i) => {
+    prismOutline(g, r * scale);
+    g.stroke({
+      width: MIRROR_WIDTHS[i] as number,
+      color: 0xffffff,
+      alpha: MIRROR_ALPHAS[i] as number,
+    });
+  });
+  g.blendMode = 'add';
+  return g;
 }
 
 /** 盾兵's half-circle shield on its +x side; the view turns it toward the player. */

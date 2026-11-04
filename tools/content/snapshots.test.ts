@@ -64,13 +64,14 @@ describe('npm run snapshots (D17, D24)', () => {
     });
   });
 
-  it('keeps the registered set up to date: from B1, the ids and the 熔核 layout', () => {
+  it('keeps the registered set up to date: from B2, the ids and the 熔核 and 蜂巢 layouts', () => {
     const content = loadContent();
     const stored = storedSet(SNAPSHOTS);
     const texts = Object.fromEntries(snapshotTexts(content));
     expect(texts['ids.txt']).not.toBe('');
     expect(texts['layout-fire.txt']).not.toBe('');
-    for (const c of ['ice', 'lightning', 'summon']) expect(texts[`layout-${c}.txt`]).toBe('');
+    expect(texts['layout-summon.txt']).not.toBe('');
+    for (const c of ['ice', 'lightning']) expect(texts[`layout-${c}.txt`]).toBe('');
     expect(snapshotIssues(content, stored)).toEqual([]);
     expect(snapshotWrites(content, stored)).toEqual({ files: new Map(), refused: [] });
   });

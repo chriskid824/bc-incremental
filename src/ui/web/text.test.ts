@@ -422,6 +422,11 @@ function kitchenSink(): NodeEffects {
       do: [{ kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true }],
     },
     {
+      on: 'droneImpact',
+      when: [{ targetHas: 'frozen' }, { targetKind: 'elite' }],
+      do: [{ kind: 'execute' }],
+    },
+    {
       on: 'explode',
       target: { pick: 'nearest' },
       do: [{ kind: 'chainBolt', jumps: 2, damagePct: 0.4, shockStacks: 1, from: 'nearestToPoint' }],

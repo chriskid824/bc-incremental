@@ -161,7 +161,7 @@ export interface CompiledEffect {
    * hit, area and cold; groundZone: hit and zone, plus its tags and element; spawnDrone: hit,
    * minion and area, plus its tags and element; detonate: its ailment's kind and trigger, plus
    * area with a radius; projectiles: hit, trigger and projectile, plus its tags and element;
-   * slashLine: hit and trigger, plus its tags; coinHit: hit and trigger; chainBolt: hit,
+   * slashLine: hit and trigger, plus its tags; coinHit and execute: hit and trigger; chainBolt: hit,
    * trigger, chain and lightning) or of the hit an ailment it applies counts as (applyAilment:
    * hit and trigger); 0 for the others.
    */
@@ -420,6 +420,10 @@ export function compileEffect(
     case 'coinHit':
       tags = TAG.hit | TAG.trigger;
       baseDamage = mul(num(damage), scaled.multiplier);
+      break;
+    case 'execute':
+      tags = TAG.hit | TAG.trigger;
+      baseDamage = ONE;
       break;
     case 'chainBolt':
       tags = TAG.hit | TAG.trigger | TAG.chain | TAG.lightning;

@@ -91,6 +91,8 @@ const ROW_OF: Readonly<Record<EnemyId, RowEnemy | null>> = {
   summoner: 'summoner',
   treasure: 'treasure',
   onion: 'boss',
+  brood: 'boss',
+  prism: 'boss',
 };
 
 /** The gd §6.4 column enemy type `id` counts in, null for the elite (ROW_OF). */
