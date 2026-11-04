@@ -17,7 +17,7 @@ import { layoutWeb } from '../../data/web';
 import type { AssembledWeb, WebLayout } from '../../data/web';
 import { MESSAGES } from '../../i18n';
 import type { Locale, MessageKey } from '../../i18n';
-import { buy, buyPath, prestige, refundAll, refundNode } from '../../meta/web';
+import { buy, buyPath, outerView, prestige, refundAll, refundNode } from '../../meta/web';
 import type { AccountProgress, CharacterProgress } from '../../meta/web';
 import { previewCard } from '../web/card';
 import { say } from '../web/names';
@@ -454,8 +454,13 @@ export class WebPanel {
     if (view.state === 'hidden') {
       head.append(el(this.doc, 'div', 'v3p-card-name', this.t('panel.outer.unknown')));
       rows.push(head);
-      const wave = this.web.def.revealAt15.includes(outer) ? 15 : 30;
-      rows.push(el(this.doc, 'div', 'v3p-tip-line', this.t('panel.outer.revealAt', { wave })));
+      // A board not in the game yet says so now, not 「第 30 波出現」 and then 「即將推出」.
+      if (outerView(this.web, this.progress, outer) === 'absent') {
+        rows.push(el(this.doc, 'div', 'v3p-tip-line', this.t('panel.outer.absent')));
+      } else {
+        const wave = this.web.def.revealAt15.includes(outer) ? 15 : 30;
+        rows.push(el(this.doc, 'div', 'v3p-tip-line', this.t('panel.outer.revealAt', { wave })));
+      }
     } else {
       const card = previewCard(this.web, this.progress, outer, this.lookup);
       head.append(

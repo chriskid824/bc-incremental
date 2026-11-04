@@ -216,6 +216,19 @@ describe('nodeTip (gd §8 item 1)', () => {
     expect(tip.action).toMatch(/^Not connected yet: click to plan the path, \d+ nodes for /);
   });
 
+  it('gives the price beside 「碎片不足」, the node’s own or the whole path’s', () => {
+    const poor = { ...start(0), wallet: { shards: num(0), cores: 0, resonance: 0 } };
+    const next = (web.neighbours.get(web.root) ?? [])[0] as string;
+    const near = nodeTip(web, poor, account, next, zh);
+    expect(near.action).toBe('碎片不足');
+    expect(near.price).toMatch(/^價格：\d/);
+    const far = nodeTip(web, poor, account, 'fire.center.alpha.alpha-one', zh);
+    expect(far.action).toMatch(/碎片不足$/);
+    expect(far.price).toMatch(/^整條路徑 \d+ 個節點，共需 /);
+    // Not for a refusal that money does not fix.
+    expect(nodeTip(web, start(0), account, CRIT_CORE, en).price).toBeNull();
+  });
+
   it('says why a gated node cannot be bought', () => {
     const tip = nodeTip(web, start(0), account, CRIT_CORE, en);
     expect(tip.action).toBe(refusalText(planClick(web, start(0), account, CRIT_CORE) as never, en));

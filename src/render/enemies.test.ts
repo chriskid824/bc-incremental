@@ -129,7 +129,7 @@ function hitOnce(poison: boolean) {
 }
 
 describe('EnemyLayer’s fire reads the live burn (Hoshi’s Q10 (A))', () => {
-  it('draws a burn-plus-poison enemy’s flame and glow after its first damage-over-time step, as the same burn alone', () => {
+  it('draws a burn-plus-poison enemy’s flame and glow after its first damage-over-time step as the same burn alone’s', () => {
     const runs = [false, true].map((poison) => {
       const { ctx, target } = hitOnce(poison);
       const end = (target.burns[0] as BurnStack).end;
@@ -160,7 +160,12 @@ describe('EnemyLayer’s fire reads the live burn (Hoshi’s Q10 (A))', () => {
       expect(new Set(run.shown.flatMap((drawn) => drawn.heats))).toEqual(new Set([0.25]));
     }
     expect(withPoison.end).toBe(alone.end);
-    expect(withPoison.shown).toEqual(alone.shown);
+    // The same fire; only the poison's green cast (src/render/ailmentFx.test.ts) tells them apart.
+    const fire = (drawn: Drawn): Omit<Drawn, 'tints'> => ({
+      glows: drawn.glows,
+      heats: drawn.heats,
+    });
+    expect(withPoison.shown.map(fire)).toEqual(alone.shown.map(fire));
   });
 
   it('draws a stale burnStacks of 0 at the heat of the live records, as the same enemy counted right', () => {

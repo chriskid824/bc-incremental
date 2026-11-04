@@ -5,7 +5,9 @@
  *
  * Feel (docs/GDD.md §1, §3): kills explode in the enemy's color, crits flare and pop numbers
  * (a few big pops at a time), burning enemies glow and shed flames behind their outlines,
- * pandemic spreads as a fire nova, chains arc as flickering lightning. Shake and hit-stop are
+ * pandemic spreads as a fire nova, chains arc as flickering lightning. Poison and bleed ticks
+ * (dotTick) pop their own green and red numbers, tallied as burn's; poisoned, chilled and frozen
+ * enemies take a cast (src/render/enemies.ts); a freeze and a shatter burst in ice. Shake and hit-stop are
  * budgeted so they punch instead of jitter, and every effect pool is capped so a crowded screen
  * sheds detail instead of frame rate. docs/ARCHITECTURE.md §10 lists the layers and budgets.
  *
@@ -50,7 +52,7 @@ import type { CoreView } from './core';
 import { CritStopGate } from './critStop';
 import { DamageNumbers } from './damageNumbers';
 import { BLAST_SPIRIT_SKIN, DroneLayer, HIVE_DRONE_SKIN } from './drones';
-import { EnemyLayer, HIT_PUNCH } from './enemies';
+import { EnemyLayer } from './enemies';
 import { FxParticles } from './fx';
 import { createFxTextures } from './fxTextures';
 import { killTier, TIER_BOSS, TIER_ELITE } from './killTier';
@@ -67,6 +69,8 @@ import type { RenderRandom } from './random';
 import { RingLayer } from './rings';
 import { SegmentLineLayer } from './segmentLines';
 import { ScreenShake } from './shake';
+import { CRIT_PUNCH, HIT_PUNCH_STRONG, ImpactShakes } from './impact';
+import type { ShakeKick } from './impact';
 import { PlayerShield } from './shieldArc';
 import { SlashLayer } from './slashes';
 import { SwarmLayer, swarmDroneSkin, swarmLooks } from './swarm';
@@ -165,10 +169,14 @@ export class Renderer {
   private readonly shards: ShardParticles;
   private readonly numbers: DamageNumbers;
   private readonly burnTally = new BurnTally();
+  /** Poison and bleed ticks (dotTick) are tallied as burn's, each into its own numbers. */
+  private readonly poisonTally = new BurnTally();
+  private readonly bleedTally = new BurnTally();
   private readonly shake: ScreenShake;
   private readonly hitStop: (ms: number) => void;
   private readonly critStop = new CritStopGate();
   private critShakeCooldownMs = 0;
+  private readonly impactShakes = new ImpactShakes();
   private killsThisFrame = 0;
   /** pandemic spreads waiting for render() to aim their embers: x, y, radius triples. */
   private readonly pendingNovas = new Float64Array(MAX_PENDING_NOVAS * 3);
@@ -179,6 +187,12 @@ export class Renderer {
   private readonly onResize = (): void => this.fit();
   private readonly showBurn = (amount: Num, x: number, y: number, enemyId: number): void => {
     this.numbers.spawn('burn', amount, x, y, enemyId);
+  };
+  private readonly showPoison = (amount: Num, x: number, y: number, enemyId: number): void => {
+    this.numbers.spawn('poison', amount, x, y, enemyId);
+  };
+  private readonly showBleed = (amount: Num, x: number, y: number, enemyId: number): void => {
+    this.numbers.spawn('bleed', amount, x, y, enemyId);
   };
   private readonly flamePuff = (x: number, y: number): void => this.bursts.flamePuff(x, y);
 
@@ -291,6 +305,8 @@ export class Renderer {
     this.shards.clear();
     this.numbers.clear();
     this.burnTally.clear();
+    this.poisonTally.clear();
+    this.bleedTally.clear();
     this.core.reset();
     this.drones?.reset();
     this.poolShots?.reset();
@@ -304,6 +320,7 @@ export class Renderer {
     this.shake.reset();
     this.critStop.reset();
     this.critShakeCooldownMs = 0;
+    this.impactShakes.reset();
     this.killsThisFrame = 0;
     this.pendingNovaCount = 0;
     this.numbers.setTypicalHit(typicalHit);
@@ -334,6 +351,20 @@ export class Renderer {
         case 'burnTick':
           this.burnTally.add(event.targetId, event.amount, event.x, event.y);
           break;
+        case 'dotTick':
+          (event.ailment === 'poison' ? this.poisonTally : this.bleedTally).add(
+            event.targetId,
+            event.amount,
+            event.x,
+            event.y,
+          );
+          break;
+        case 'freeze':
+          if (!event.boss) this.onFrozen(event.targetId);
+          break;
+        case 'shatter':
+          this.bursts.shatter(event.x, event.y, event.radius);
+          break;
         case 'enemyKilled':
           this.onKill(event);
           break;
@@ -362,7 +393,10 @@ export class Renderer {
         case 'playerHit':
         case 'bulletHit':
         case 'reflectHit':
-          if (this.coreHits.flashes(event)) this.core.hit();
+          if (this.coreHits.flashes(event)) {
+            this.core.hit();
+            this.kick(this.impactShakes.playerHit());
+          }
           break;
         case 'shieldAbsorbed':
           this.coreHits.flashes(event);
@@ -383,6 +417,7 @@ export class Renderer {
           break;
         case 'explosion':
           this.magma?.explosion(event.x, event.y, event.radius);
+          this.kick(this.impactShakes.blast(event.radius));
           break;
         case 'burst':
           if (this.magma !== null) this.onBurst(event);
@@ -413,6 +448,7 @@ export class Renderer {
   render(state: Readonly<SimState>, alpha: number, frameMs: number): void {
     const dt = Math.min(Math.max(0, frameMs), MAX_EFFECT_DT_MS);
     this.critShakeCooldownMs = Math.max(0, this.critShakeCooldownMs - dt);
+    this.impactShakes.update(dt);
     this.critStop.update(dt);
     this.shake.update(dt);
     this.world.position.set(
@@ -459,6 +495,8 @@ export class Renderer {
     const absorbed = this.shards.update(dt, state.player.x, state.player.y, PLAYER_RADIUS * 1.5);
     if (absorbed > 0) this.core.pulse();
     this.burnTally.update(dt, this.showBurn);
+    this.poisonTally.update(dt, this.showPoison);
+    this.bleedTally.update(dt, this.showBleed);
     this.numbers.update(dt);
     this.killsThisFrame = 0;
   }
@@ -483,7 +521,7 @@ export class Renderer {
   private onHit(event: Extract<SimEvent, { type: 'hit' }>): void {
     const { x, y, crit } = event;
     const chain = event.chainIndex > 0;
-    this.enemies.flash(event.targetId, crit ? HIT_PUNCH * 1.8 : HIT_PUNCH);
+    this.enemies.flash(event.targetId, crit ? CRIT_PUNCH : HIT_PUNCH_STRONG);
     if (chain && event.fromX !== null && event.fromY !== null) {
       this.arcs.add(event.fromX, event.fromY, x, y, event.chainIndex);
       this.bursts.chain(x, y);
@@ -509,9 +547,12 @@ export class Renderer {
 
   private onKill(event: Extract<SimEvent, { type: 'enemyKilled' }>): void {
     this.burnTally.flush(event.enemyId, this.showBurn);
+    this.poisonTally.flush(event.enemyId, this.showPoison);
+    this.bleedTally.flush(event.enemyId, this.showBleed);
     const def = this.data.enemies[event.enemy];
     const tier = killTier(def);
     this.killsThisFrame++;
+    this.kick(this.impactShakes.kills(this.killsThisFrame));
     const crowd = 1 / (1 + Math.max(0, this.killsThisFrame - 1) / CROWD_KILLS);
     this.bursts.kill(event.x, event.y, def.color, def.radius, tier, crowd);
     const count = Math.max(3, Math.round(def.radius / 3.5));
@@ -523,6 +564,11 @@ export class Renderer {
       this.shake.add(ELITE_SHAKE, ELITE_SHAKE_CEILING);
       this.hitStop(ELITE_HIT_STOP_MS);
     }
+  }
+
+  /** Adds an impact shake (src/render/impact.ts), if its cooldown let one through. */
+  private kick(kick: ShakeKick | null): void {
+    if (kick !== null) this.shake.add(kick.amount, kick.ceiling);
   }
 
   /**
@@ -547,6 +593,12 @@ export class Renderer {
     const spot = this.enemies.positionOf(event.targetId);
     if (spot === null) return;
     this.swarm?.muzzle(event.x, event.y, Math.atan2(spot.y - event.y, spot.x - event.x));
+  }
+
+  /** An enemy froze: an ice burst where it is drawn. */
+  private onFrozen(enemyId: number): void {
+    const spot = this.enemies.positionOf(enemyId);
+    if (spot !== null) this.bursts.freeze(spot.x, spot.y, spot.radius);
   }
 
   /** An enemy was poisoned: where it is drawn, for the poisoned-explosion check (瘟爆). */

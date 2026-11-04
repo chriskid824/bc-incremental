@@ -14,6 +14,8 @@ import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
 import type { EndReason } from '../../sim/types';
 import { el } from '../style';
+import type { ControlCounts } from '../../app/v3/controlTally';
+import type { DamageBreakdownView, DamageShare } from './damageBreakdown';
 import { describeV3RunEnd } from './runEnd';
 import type { V3Enemies, V3RunEndFacts } from './runEnd';
 
@@ -32,6 +34,10 @@ export interface V3ResultInfo extends V3RunEndFacts {
   readonly walletShards: Num;
   /** Shows 「換一個角色試試」 (src/app/v3/scope.ts' showsSwitchHint). */
   readonly switchHint?: boolean;
+  /** 傷害分佈: the run's damage by source and by kind. */
+  readonly damage: DamageBreakdownView;
+  /** 控場: the run's freezes and shatters. */
+  readonly control: ControlCounts;
 }
 
 export interface V3ResultActions {
@@ -130,6 +136,10 @@ export class V3ResultPanel {
     row(t('v3.result.wallet'), formatNum(info.walletShards, FORMAT));
 
     const parts: HTMLElement[] = [head, title, cause, rows];
+    if (info.damage.sources.length > 0) parts.push(this.damageSection(info.damage));
+    if (info.control.freezes > 0 || info.control.slowedShare > 0) {
+      parts.push(this.controlSection(info.control));
+    }
     const tips = [text.lowerStart, text.tip].filter((line): line is string => line !== null);
     if (tips.length > 0) {
       const tip = el(doc, 'div', 'bc-result-tip');
@@ -144,6 +154,51 @@ export class V3ResultPanel {
     requestAnimationFrame(() => {
       if (!this.root.hidden) this.root.classList.add('bc-visible');
     });
+  }
+
+  /** 傷害分佈: one bar per source, then one per kind, with the amount and the share. */
+  private damageSection(view: DamageBreakdownView): HTMLElement {
+    const doc = this.doc;
+    const section = el(doc, 'div', 'bc-game-damage');
+    section.append(el(doc, 'div', 'bc-game-damage-title', t('v3.result.damage')));
+    const list = (heading: string, rows: readonly DamageShare[]): void => {
+      if (rows.length === 0) return;
+      section.append(el(doc, 'div', 'bc-label bc-game-damage-heading', heading));
+      for (const row of rows) {
+        const line = el(doc, 'div', 'bc-game-damage-row');
+        line.dataset['id'] = row.id;
+        const bar = el(doc, 'div', 'bc-game-damage-bar');
+        bar.style.width = `${(row.share * 100).toFixed(1)}%`;
+        line.append(
+          bar,
+          el(doc, 'span', 'bc-game-damage-name', row.label),
+          el(doc, 'span', 'bc-game-damage-amount', formatNum(row.amount, FORMAT)),
+          el(doc, 'span', 'bc-game-damage-share', `${(row.share * 100).toFixed(1)}%`),
+        );
+        section.append(line);
+      }
+    };
+    list(t('v3.result.damageSources'), view.sources);
+    list(t('v3.result.damageKinds'), view.kinds);
+    return section;
+  }
+
+  /** 控場: what freezing did, which the damage rows credit to the attack that hit. */
+  private controlSection(control: ControlCounts): HTMLElement {
+    const doc = this.doc;
+    const section = el(doc, 'div', 'bc-game-damage');
+    section.append(el(doc, 'div', 'bc-label bc-game-damage-heading', t('v3.result.control')));
+    const rows = el(doc, 'dl', 'bc-result-rows');
+    rows.append(
+      el(doc, 'dt', '', t('v3.result.freezes')),
+      el(doc, 'dd', '', String(control.freezes)),
+      el(doc, 'dt', '', t('v3.result.shatters')),
+      el(doc, 'dd', '', String(control.shatters)),
+      el(doc, 'dt', '', t('v3.result.slowedShare')),
+      el(doc, 'dd', '', `${(control.slowedShare * 100).toFixed(0)}%`),
+    );
+    section.append(rows, el(doc, 'div', 'bc-game-damage-note', t('v3.result.controlNote')));
+    return section;
   }
 
   hide(): void {

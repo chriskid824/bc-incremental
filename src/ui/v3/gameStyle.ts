@@ -7,6 +7,36 @@
 const STYLE_ID = 'bc-game-game-style';
 
 const CSS = `
+/* 傷害分佈 on the result card. */
+.bc-game-damage { margin-top: 14px; }
+.bc-game-damage-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+.bc-game-damage-heading { margin: 8px 0 4px; }
+.bc-game-damage-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 52px;
+  gap: 10px;
+  padding: 3px 8px;
+  font-size: 13px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bc-game-damage-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(255, 122, 47, 0.22);
+  pointer-events: none;
+}
+.bc-game-damage-name,
+.bc-game-damage-amount,
+.bc-game-damage-share {
+  position: relative;
+}
+.bc-game-damage-name { display: block; }
+.bc-game-damage-note { margin-top: 4px; font-size: 12px; color: #8b93a3; }
+.bc-game-damage-name::first-letter { text-transform: uppercase; }
+.bc-game-damage-amount { color: #b8bfcc; font-variant-numeric: tabular-nums; }
+.bc-game-damage-share { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 /* The talent web over the arena canvas: in flow it would sit below the full-height canvas. */
 #app > .v3p {
   position: absolute;
@@ -90,7 +120,7 @@ const CSS = `
   pointer-events: auto;
 }
 .bc-game-wave-hint { font-size: 13px; color: #8e98b3; margin-top: 6px; }
-.bc-game-pause { inset: auto auto 20px 24px; }
+.bc-game-pause { inset: auto auto 20px 24px; display: flex; gap: 8px; }
 .bc-game-paused {
   position: fixed;
   top: 50%;

@@ -13,7 +13,15 @@ import {
 } from './numberLayout';
 import type { NumberBox, NumberStyle, Point, SafeArea } from './numberLayout';
 
-const STYLES: readonly NumberStyle[] = ['hit', 'chain', 'burn', 'crit', 'critSmall'];
+const STYLES: readonly NumberStyle[] = [
+  'hit',
+  'chain',
+  'burn',
+  'poison',
+  'bleed',
+  'crit',
+  'critSmall',
+];
 const DECADES = [-3, -1, -0.5, 0, 0.3, 0.7, 1, 1.4, 2, 3, 4, 10];
 const W = 1920;
 const H = 1080;
@@ -41,9 +49,13 @@ describe('numberSize', () => {
     expect(numberSize('crit', 0)).toBeGreaterThan(NORMAL_SIZE * 1.2);
   });
 
-  it('keeps burn numbers no bigger than hits and every number legible', () => {
+  it('keeps burn, poison and bleed numbers no bigger than hits and every number legible', () => {
     for (const d of DECADES) {
       expect(numberSize('burn', d)).toBeLessThanOrEqual(numberSize('hit', d));
+      // Poison ticks read a step above burn's, still no bigger than a hit; bleed as burn.
+      expect(numberSize('poison', d)).toBeGreaterThanOrEqual(numberSize('burn', d));
+      expect(numberSize('poison', d)).toBeLessThanOrEqual(numberSize('hit', d));
+      expect(numberSize('bleed', d)).toBe(numberSize('burn', d));
       for (const style of STYLES) expect(numberSize(style, d)).toBeGreaterThan(8);
     }
     expect(numberSize('hit', Number.NaN)).toBe(numberSize('hit', -1));

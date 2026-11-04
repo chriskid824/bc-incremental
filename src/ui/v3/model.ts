@@ -6,7 +6,7 @@
  */
 
 import { formatNum } from '../../core/format';
-import { isZero } from '../../core/num';
+import { isZero, num } from '../../core/num';
 import { OUTER_IDS } from '../../data/sources';
 import type { OuterId } from '../../data/sources';
 import type {
@@ -501,6 +501,38 @@ export interface NodeTip {
   readonly refund: string | null;
 }
 
+const WALLET_REASONS: ReadonlySet<BuyReason> = new Set([
+  'notEnoughShards',
+  'notEnoughCores',
+  'notEnoughResonance',
+]);
+
+/**
+ * What a refusal for the wallet would cost, so 「碎片不足」 comes with the price: the node's own
+ * price, or the whole path's when the click plans one. Null for every other refusal.
+ */
+function shortfallPrice(
+  web: AssembledWeb,
+  progress: CharacterProgress,
+  account: AccountProgress,
+  plan: Extract<ClickPlan, { readonly kind: 'refused' }>,
+  lookup: TextLookup,
+): string | null {
+  if (!WALLET_REASONS.has(plan.reason)) return null;
+  const rich: CharacterProgress = {
+    ...progress,
+    wallet: { shards: num(1e300), cores: 1e9, resonance: 1e9 },
+  };
+  const direct = canBuy(web, rich, account, plan.id);
+  if (direct.ok) return say(lookup, 'panel.tip.price', { price: priceText(direct.price, lookup) });
+  const path = planPath(web, rich, account, plan.id);
+  if (!path.ok) return null;
+  return say(lookup, 'panel.tip.pathPrice', {
+    count: path.ids.length,
+    price: priceText(path.price, lookup),
+  });
+}
+
 /** The tooltip of a node (§8 item 1): name, kind, rank, describeNode's text, price, and what a click does. */
 export function nodeTip(
   web: AssembledWeb,
@@ -526,6 +558,7 @@ export function nodeTip(
       price: priceText(plan.price, lookup),
     });
   } else if (plan.reason !== 'owned') {
+    price = shortfallPrice(web, progress, account, plan, lookup);
     const reason = refusalText(plan, lookup);
     action =
       plan.at === id

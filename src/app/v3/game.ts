@@ -9,6 +9,7 @@
  */
 
 import type { Application } from 'pixi.js';
+import { AudioEngine, browserAudioContext, readMuted, SimAudio, writeMuted } from '../../audio';
 import { add, div, ZERO } from '../../core/num';
 import type { Num } from '../../core/num';
 import { characterGameData } from '../../data';
@@ -23,6 +24,7 @@ import type { Locale } from '../../i18n';
 import type { CharacterProgress } from '../../meta/web';
 import { FLAVOR } from '../../platform/flavor';
 import { Renderer } from '../../render';
+import { killTier } from '../../render/killTier';
 import {
   accountProgress,
   addPlaySeconds,
@@ -39,14 +41,18 @@ import type { RunResult } from '../../sim';
 import { EnemyBanner } from '../../ui/banner';
 import { BannerLine } from '../../ui/bannerView';
 import { Hud } from '../../ui/hud';
-import { NoticeList, PauseControl, StartWavePicker } from '../../ui/v3/controls';
+import { MuteControl, NoticeList, PauseControl, StartWavePicker } from '../../ui/v3/controls';
 import { V3ResultPanel } from '../../ui/v3/result';
 import type { V3ResultInfo } from '../../ui/v3/result';
+import { damageBreakdown } from '../../ui/v3/damageBreakdown';
+import { ControlTally } from './controlTally';
 import { SelectScreen } from '../../ui/v3/select';
 import { WebPanel } from '../../ui/v3/webPanel';
 import { GameLoop, SPEEDS } from '../loop';
 import type { Speed } from '../loop';
 import type { ProfileStore } from '../profileStore';
+import { openKeyValueStore } from '../../platform';
+import type { KeyValueStore } from '../../platform/analytics';
 import { bindSpeedKeys } from '../input';
 import { ConstructStills, mountCardPreview } from './preview';
 import { characterRendererOptions } from './renderOptions';
@@ -85,11 +91,18 @@ export class GamePage {
   private readonly scope: WebScope;
   private readonly data: GameData = characterGameData();
   private readonly webs = new Map<CharacterId, AssembledWeb | null>();
+  /** The run's freezes and shatters, for the result screen's 控場. */
+  private readonly control = new ControlTally();
   private readonly hud: Hud<Speed>;
   private readonly loop: GameLoop;
   private readonly results: V3ResultPanel;
   private readonly picker: StartWavePicker;
   private readonly pause: PauseControl;
+  private readonly mute: MuteControl;
+  /** The mute choice's store: per device, outside the save (src/audio/prefs.ts). */
+  private readonly prefs: KeyValueStore = openKeyValueStore();
+  private readonly audio: AudioEngine;
+  private readonly simAudio: SimAudio;
   private readonly notices: NoticeList;
   private readonly bannerLine: BannerLine;
   private readonly stills = new ConstructStills();
@@ -123,6 +136,14 @@ export class GamePage {
     });
     this.picker = new StartWavePicker(doc, (wave) => this.pickStartWave(wave));
     this.pause = new PauseControl(doc, () => this.togglePause());
+    this.audio = new AudioEngine({
+      createContext: browserAudioContext,
+      muted: readMuted(this.prefs),
+    });
+    this.simAudio = new SimAudio(this.audio, (id) => killTier(this.data.enemies[id]));
+    this.mute = new MuteControl(doc, () => this.toggleMute());
+    this.mute.muted = this.audio.muted;
+    this.pause.root.append(this.mute.button);
     this.notices = new NoticeList(doc, (c) => t(this.def(c).nameKey));
     this.bannerLine = new BannerLine(doc);
     this.loop = new GameLoop(
@@ -152,11 +173,29 @@ export class GamePage {
       this.notices.show(again.notices);
       this.showSelect();
     });
-    this.loop.speed = this.store.profile.account.settings.speed;
-    bindSpeedKeys(window, (speed) => {
-      if (this.screen === 'run') this.setSpeed(speed);
-    });
+    if (FLAVOR === 'demo') {
+      // The demo plays at 1× only: no buttons, no keys (Hoshi's playtest, 2026-11-03).
+      this.hud.showSpeed(false);
+      this.loop.speed = 1;
+    } else {
+      this.loop.speed = this.store.profile.account.settings.speed;
+      bindSpeedKeys(window, (speed) => {
+        if (this.screen === 'run') this.setSpeed(speed);
+      });
+    }
     window.addEventListener('keydown', (event) => this.key(event));
+    // Browsers start audio only from a user gesture; capture runs before the page's own handlers.
+    const unlock = (): void => this.audio.unlock();
+    window.addEventListener('pointerdown', unlock, true);
+    window.addEventListener('keydown', unlock, true);
+    this.root.addEventListener('click', (event) => {
+      if (event.target instanceof Element && event.target.closest('button') !== null) {
+        this.audio.play('uiClick');
+      }
+    });
+    if (import.meta.env.DEV || new URLSearchParams(window.location.search).has('audioDebug')) {
+      (window as { bcAudio?: AudioEngine }).bcAudio = this.audio;
+    }
     // Not before the first pick: a fresh profile written by a visit that picked nothing would
     // take the place of the M1 save's one-time import (profileStore.ts' fresh path).
     window.addEventListener('pagehide', () => {
@@ -253,6 +292,7 @@ export class GamePage {
       locale: this.locale,
       initial: this.progressOf(c),
       onChange: (progress) => {
+        this.audio.play('buy');
         this.update(setProgress(this.profile, c, progress));
         this.save();
         this.showPicker();
@@ -324,6 +364,8 @@ export class GamePage {
     const run = new CharacterRunState(web, progress, startWave, this.data);
     this.run = run;
     this.rendererFor(web, progress).beginRun(run.typicalHit);
+    this.simAudio.reset();
+    this.control.reset();
     this.banner = new EnemyBanner(
       this.data.enemies,
       this.profile.account.seenEnemies as readonly EnemyId[],
@@ -342,6 +384,9 @@ export class GamePage {
     if (run === null) return;
     const events = run.step();
     this.renderer?.handleEvents(events);
+    this.simAudio.handleEvents(events);
+    this.control.handleEvents(events);
+    this.control.observe(run.sim.state);
     this.banner?.events(events);
     if (run.finished) this.finishRun(run);
   }
@@ -400,6 +445,8 @@ export class GamePage {
         this.profile.account.stats.runs,
         CHARACTER_IDS.filter((c) => this.webOf(c) !== null).length,
       ),
+      damage: damageBreakdown(result.damageBySource, result.damage, t(web.def.nameKey)),
+      control: this.control.counts,
     };
   }
 
@@ -429,6 +476,12 @@ export class GamePage {
     this.update(setSpeed(this.profile, speed));
   }
 
+  private toggleMute(): void {
+    this.audio.muted = !this.audio.muted;
+    this.mute.muted = this.audio.muted;
+    writeMuted(this.prefs, this.audio.muted);
+  }
+
   private togglePause(): void {
     if (this.screen !== 'run') return;
     this.pause.paused = !this.pause.paused;
@@ -440,6 +493,8 @@ export class GamePage {
     if (event.target instanceof HTMLInputElement && event.key !== 'Enter') return;
     if (event.key === 'p' || event.key === 'P' || event.key === 'Escape') {
       this.togglePause();
+    } else if (event.key === 'm' || event.key === 'M') {
+      this.toggleMute();
     } else if (event.key === ' ' || event.key === 'Enter') {
       if (this.screen === 'web') {
         event.preventDefault();

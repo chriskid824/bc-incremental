@@ -1,6 +1,6 @@
 /**
  * Render colors. Effect colors follow the archetype palette reserved in src/data/enemies.ts:
- * crit yellow/white, burn orange-red, chain cyan.
+ * crit yellow/white, burn orange-red, chain cyan, poison green, frost icy blue.
  */
 
 export const COLORS = {
@@ -24,12 +24,23 @@ export const COLORS = {
   burnHot: 0xffc44a,
   burnDeep: 0xe0301a,
   chain: 0x5ff4ff,
+  /**
+   * Poisoned enemies' cast (src/render/enemies.ts): 熔核's 瘟爆 green (DEFAULT_MAGMA_LOOKS.poison),
+   * bluer than 蜂巢's lime so a poisoned enemy does not read as the hive's colour.
+   */
+  poison: 0x3fd08a,
+  /** Chilled enemies lean toward `chill` with the meter; frozen ones toward the paler `frozen`. */
+  chill: 0x7fd4ff,
+  frozen: 0xaee9ff,
   hpBack: 0x05060a,
   hpFill: 0xff6b81,
   damageHit: 0xeef2ff,
   damageCrit: 0xffe066,
   damageBurn: 0xff8a3d,
   damageChain: 0x7ff6ff,
+  /** Poison ticks: a mint green, apart from 蜂巢's lime hit numbers (hitNumberColor). */
+  damagePoison: 0x5ef2a6,
+  damageBleed: 0xff5068,
   /** A hit the enemy's defences took in full (hitBlocked): steel, apart from a landed hit's white. */
   blocked: 0x9aa6bd,
   /** 衝刺者 while it charges its dash (gd A.5 「衝刺前變紅 0.6 秒」). */
