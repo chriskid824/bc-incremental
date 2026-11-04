@@ -1,6 +1,7 @@
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
+import { parseRelease } from './electron/release';
 
 /**
  * The Electron shell's build (docs/v3 C9 design §1.6): `vite build --config
@@ -26,8 +27,11 @@ export default defineConfig(({ mode }) => {
   if (mode !== 'main' && mode !== 'preload') {
     throw new Error(`vite.electron.config.ts builds --mode main or --mode preload, not '${mode}'`);
   }
+  // BC_RELEASE picks the Steam app and page (electron/release.ts); a bad value fails here.
+  const release = parseRelease(process.env['BC_RELEASE']);
   return {
     root: ROOT,
+    define: { __BC_RELEASE__: JSON.stringify(release) },
     publicDir: false,
     build: {
       target: 'node22',
