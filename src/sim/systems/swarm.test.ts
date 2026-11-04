@@ -316,6 +316,9 @@ describe('swarm (§4.6, D17)', () => {
       roles: [],
       turretRadius: 90,
       sizeMult: 1,
+      lastImpact: null,
+      guards: null,
+      surge: null,
     });
     expect([build.signature.lob, build.signature.fan, build.signature.arc]).toEqual([
       null,

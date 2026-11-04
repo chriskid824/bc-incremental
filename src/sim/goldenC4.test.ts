@@ -67,6 +67,7 @@ import {
   COUNTER_IDS,
   DRONE_DASH,
   DRONE_DOCKED,
+  DRONE_GUARD,
   DRONE_KIND_DRONE,
   DRONE_KIND_SPIRIT,
   DRONE_KIND_TURRET,
@@ -2535,6 +2536,64 @@ const FOCUS_FIRE_STATS = makeStats(
 /** B2's 集火指令: the flag it sets. */
 const focusFireModule = (): TestModule => (b) => void (b.flags.summonHighestHp = true);
 
+/** A test module standing in for B2's: `fields` over the swarm's SwarmParams (E5). */
+const swarmFields =
+  (fields: Record<string, unknown>): TestModule =>
+  (b) => {
+    const swarm = b.signature().swarm;
+    if (swarm !== null) Object.assign(swarm, fields);
+  };
+
+/**
+ * E5's 自爆協議 (gd:183 「無人機回巢前的第 3 次撞擊改成爆炸，半徑 80、150% 傷害」; lead ruling K1): the
+ * swarm's 3 drones without their turret, its SwarmParams.lastImpact { radius 80, damagePct 1.5 }
+ * from a test module standing in for B2's, beside a drone grant of 2 on outer.summon, whose
+ * impacts never explode; SWARM_STATS' poison on each droneImpact and its chain; from wave 12 of
+ * the fixture waves. It pins the explosions, every sortie's third impact at 80, their hits at
+ * 0.75 × an impact's and what they list, and the other impacts at the splash.
+ */
+const SELF_DESTRUCT_STATS = makeStats(SWARM_VALUES, maskProbeMods(), {
+  triggers: [{ source: 'center', spec: SWARM_POISON }],
+  conversions: [],
+  emitters: [{ source: 'outer.summon', grant: { kind: 'drone', drones: 2 } }],
+});
+
+/**
+ * E5's 攔截守衛 (gd:188 「2 架無人機改在半徑 120 繞行，優先撞正在蓄力的衝刺者」; lead rulings K2
+ * and K2-R1): the swarm of 4 drones without its turret, its last 2 guards on a ring of 120
+ * (SwarmParams.guards), at damage 3 over v3 waves of the fixture walkers and of dashers from wave
+ * 1, 3 a wave and more (C7.4a's TEST_V3_WAVES rules, as regenDasherTreasure builds them, with no
+ * affix, treasure, elite or boss), from wave 12. Dashers walk in to 420 and charge: it pins the
+ * charge starts, the guards' forced picks of the charging dashers and their impacts on them, their
+ * other picks in the ring, and the other drones' picks past it.
+ */
+const GUARD_STATS = makeStats({ ...SWARM_VALUES, damage: 3 }, maskProbeMods());
+const guardsData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: [
+        ...TEST_WAVES.rules,
+        { enemy: 'dasher', fromWave: 1, base: 3, perWave: 0.2, maxCount: 8 },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
+/**
+ * E5's 蜂潮 (gd:194 「每 8 秒，全部無人機一起俯衝到最密集處，傷害 ×2」; lead ruling K3): the swarm of
+ * 6 drones and its turret, its SwarmParams.surge { periodSec 8, damageMult 2 }, on SWARM_STATS
+ * from wave 20 of the fixture waves, dense with triangles, squares and pentagons. It pins the
+ * run's two surges (ticks 480 and 960), their targets and the 6 rows each sends, and each row's
+ * next impact, on the target, at × 2: neither seed loses a target with a row's mark on it.
+ */
+const SURGE_STATS = SWARM_STATS;
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -2993,6 +3052,25 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [focusFireModule()],
     expected: ['13eb4c5d3f7085d2', 'd6f1fd704e524f17'],
   },
+  {
+    name: 'selfDestruct',
+    config: { stats: SELF_DESTRUCT_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    modules: () => [swarmFields({ turrets: 0, lastImpact: { radius: 80, damagePct: 1.5 } })],
+    expected: ['284a23bfd4930626', 'f1708fa8f56b5901'],
+  },
+  {
+    name: 'guards',
+    config: { stats: GUARD_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    data: guardsData,
+    modules: () => [swarmFields({ drones: 4, turrets: 0, guards: { count: 2, radius: 120 } })],
+    expected: ['568b23db868767ff', '386d786a2875eff3'],
+  },
+  {
+    name: 'surge',
+    config: { stats: SURGE_STATS, rules: [], signature: { id: 'swarm' }, startWave: 20 },
+    modules: () => [swarmFields({ drones: 6, surge: { periodSec: 8, damageMult: 2 } })],
+    expected: ['dfbb0e7129a32dfd', 'd3a3f581aa9b9f5e'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -3100,8 +3178,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E4's hiveRoles and focusFire are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([60, 'hiveRoles', 'focusFire']);
+    // The count docs/ARCHITECTURE.md gives: E5's guards and surge are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([63, 'guards', 'surge']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -5330,6 +5408,233 @@ describe('golden C4 runs', () => {
         shotCounts: { 2: 120 },
         lives: { 180: 120 },
         expired: { spent: 59, time: 47 },
+      },
+    });
+  });
+
+  it('explodes every sortie’s third impact of selfDestruct’s swarm at 80, and never a granted drone’s (E5)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'selfDestruct') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each drone's impacts left at the last tick's end, by id.
+      const left = new Map<number, number>();
+      const c = {
+        impacts: 0,
+        explosions: 0,
+        listed: 0,
+        mostListed: 0,
+        notLast: 0,
+        lastPlain: 0,
+        grant: 0,
+        radii: [] as number[],
+      };
+      const radii = new Set<number>();
+      watchRun(entry, seed, (_now, events, ctx) => {
+        const ds = ctx.sys.drones;
+        const owner = new Map<number, number>();
+        for (let s = 0; s < ds.count; s++) owner.set(ds.id[s] as number, ds.owner[s] as number);
+        for (const event of events) {
+          if (event.type !== 'impact' || event.droneId < 0) continue;
+          radii.add(event.radius);
+          if (owner.get(event.droneId) !== 0) {
+            c.grant++;
+            if (event.radius !== 40) c.notLast++;
+            continue;
+          }
+          c.impacts++;
+          const was = left.get(event.droneId) ?? 3;
+          if (event.radius === 80) {
+            c.explosions++;
+            c.listed += event.count;
+            c.mostListed = Math.max(c.mostListed, event.count);
+            if (was !== 1) c.notLast++;
+          } else if (was === 1) c.lastPlain++;
+        }
+        for (let s = 0; s < ds.count; s++) {
+          left.set(ds.id[s] as number, ds.impactsLeft[s] as number);
+        }
+      });
+      c.radii = [...radii].sort((a, b) => a - b);
+      bySeed[seed] = c;
+    }
+    // Every explosion a sortie's last impact and every last impact an explosion; the granted
+    // drones' impacts at their splash of 40.
+    expect(bySeed).toEqual({
+      1: {
+        impacts: 54,
+        explosions: 17,
+        listed: 20,
+        mostListed: 3,
+        notLast: 0,
+        lastPlain: 0,
+        grant: 35,
+        radii: [40, 80],
+      },
+      2: {
+        impacts: 50,
+        explosions: 15,
+        listed: 15,
+        mostListed: 1,
+        notLast: 0,
+        lastPlain: 0,
+        grant: 35,
+        radii: [40, 80],
+      },
+    });
+  });
+
+  it('sends guards’ guards at the charging dashers on each charge start and impacts them, picking in the ring otherwise; the other drones past it (E5)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'guards') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each drone's target while it dashes at the last tick's end (−1 otherwise), and its mode
+      // then, by id; every enemy seen, by id.
+      const prev = new Map<number, number>();
+      const prevMode = new Map<number, number>();
+      const byId = new Map<number, Enemy>();
+      const c = {
+        chargeStarts: 0,
+        forced: 0,
+        chargingPicks: 0,
+        ringPicks: 0,
+        pastRing: 0,
+        guardImpacts: 0,
+        onCharging: 0,
+        otherPicks: 0,
+        otherPastRing: 0,
+        orbitTicks: 0,
+        docks: 0,
+      };
+      const charging = (e: Enemy | undefined): boolean =>
+        e !== undefined && e.v3 !== null && (e.v3.state & CHARGING) !== 0;
+      watchRun(entry, seed, (_now, events, ctx) => {
+        for (const e of ctx.enemies) byId.set(e.id, e);
+        const ds = ctx.sys.drones;
+        const starts = events.filter((e) => e.type === 'dasherCharge').length;
+        c.chargeStarts += starts;
+        const guards = new Set<number>();
+        for (let s = 0; s < ds.count; s++) {
+          if (ds.kind[s] !== DRONE_KIND_DRONE) continue;
+          const id = ds.id[s] as number;
+          const guard = s >= ds.guardFirst && s < ds.guardEnd;
+          if (guard) guards.add(id);
+          const mode = ds.mode[s] as number;
+          const t = mode === DRONE_DASH ? (ds.targetId[s] as number) : -1;
+          if (t !== -1 && t !== (prev.get(id) ?? -1)) {
+            const e = ds.target[s] as Enemy;
+            if (!guard) {
+              c.otherPicks++;
+              if (e.dist > 120) c.otherPastRing++;
+            } else if (charging(e)) {
+              c.chargingPicks++;
+              if (starts > 0) c.forced++;
+            } else if (e.dist <= 120) c.ringPicks++;
+            else c.pastRing++;
+          }
+          if (mode === DRONE_GUARD) c.orbitTicks++;
+          // A guard back on its orbit from its flight home (lead ruling K2-R1).
+          if (guard && mode === DRONE_GUARD && prevMode.get(id) === DRONE_RETURN) c.docks++;
+          prev.set(id, t);
+          prevMode.set(id, mode);
+        }
+        for (const event of events) {
+          if (event.type !== 'impact' || !guards.has(event.droneId)) continue;
+          c.guardImpacts++;
+          if (charging(byId.get(event.targetId))) c.onCharging++;
+        }
+      });
+      bySeed[seed] = c;
+    }
+    // Charge starts and the guards' picks of charging dashers on them; their impacts on charging
+    // dashers; every other guard pick in the ring, and none past it; the other drones' picks,
+    // many past the ring; the guards' dockings back on their orbits (K2-R1).
+    expect(bySeed).toEqual({
+      1: {
+        chargeStarts: 13,
+        forced: 17,
+        chargingPicks: 17,
+        ringPicks: 19,
+        pastRing: 0,
+        guardImpacts: 32,
+        onCharging: 6,
+        otherPicks: 15,
+        otherPastRing: 15,
+        orbitTicks: 773,
+        docks: 9,
+      },
+      2: {
+        chargeStarts: 12,
+        forced: 12,
+        chargingPicks: 12,
+        ringPicks: 24,
+        pastRing: 0,
+        guardImpacts: 43,
+        onCharging: 6,
+        otherPicks: 16,
+        otherPastRing: 14,
+        orbitTicks: 803,
+        docks: 14,
+      },
+    });
+  });
+
+  it('surges surge’s swarm at the densest enemy at 480 and 960 with its 6 drones, each one’s next impact on it spending its mark (E5)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'surge') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each drone's mark at the last tick's end, by id.
+      const marked = new Map<number, number>();
+      const c = { surges: [] as number[][], surged: 0, onTarget: 0, cleared: 0 };
+      watchRun(entry, seed, (now, events, ctx) => {
+        const ds = ctx.sys.drones;
+        const fired = events.some((e) => e.type === 'droneSurge');
+        for (const event of events) {
+          if (event.type === 'droneSurge') c.surges.push([now, event.targetId, event.count]);
+        }
+        const impacted = new Map<number, number>();
+        for (const event of events) {
+          if (event.type === 'impact' && event.droneId >= 0) {
+            impacted.set(event.droneId, event.targetId);
+          }
+        }
+        const target = ds.surge?.target?.id ?? -1;
+        for (let s = 0; s < ds.count; s++) {
+          if (ds.kind[s] !== DRONE_KIND_DRONE || ds.owner[s] !== 0) continue;
+          const id = ds.id[s] as number;
+          const was = fired ? 1 : (marked.get(id) ?? 0);
+          const is = ds.surging[s] as number;
+          if (was === 1 && is === 0) {
+            const hit = impacted.get(id);
+            if (hit === undefined) c.cleared++;
+            else {
+              c.surged++;
+              if (hit === target) c.onTarget++;
+            }
+          }
+          marked.set(id, is);
+        }
+      });
+      bySeed[seed] = c;
+    }
+    // Two surges of 6 rows; each row's mark spent on its next impact, on the target.
+    expect(bySeed).toEqual({
+      1: {
+        surges: [
+          [480, 8, 6],
+          [960, 57, 6],
+        ],
+        surged: 12,
+        onTarget: 12,
+        cleared: 0,
+      },
+      2: {
+        surges: [
+          [480, 10, 6],
+          [960, 43, 6],
+        ],
+        surged: 12,
+        onTarget: 12,
+        cleared: 0,
       },
     });
   });

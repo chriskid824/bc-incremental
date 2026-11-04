@@ -9,13 +9,14 @@
  * another drone dashes at. It picks at most once every PICK_TICKS, whatever its speed, and
  * dashes at once. It moves by one straight step a tick towards its target's center and arrives
  * when the step reaches the target's edge, by the homing shots' arrival rule
- * (src/sim/systems/shots.ts), snapping to the center, where it impacts (impactAt). It stays on a
- * living target and impacts it again when its cooldown ends, until its sortie's impacts are
- * spent; then it flies home and docks again. A target that dies or is pushed out of the arena
- * is lost: the drone picks again when its clock allows, hovering where it is until then, and
- * flies home when a pick finds nothing. Each dash tick that starts outside the target's body
- * writes the drone's heading (DronePool.hx, hy: the target's center minus the drone), so it holds
- * the way the drone last flew in, through the ticks it rides its target, until it docks (FL).
+ * (src/sim/systems/shots.ts), snapping to the center, where it impacts (impact(), its splash and
+ * scale worked out in dash). It stays on a living target and impacts it again when its cooldown
+ * ends, until its sortie's impacts are spent; then it flies home and docks again. A target that
+ * dies or is pushed out of the arena is lost: the drone picks again when its clock allows, hovering
+ * where it is until then, and flies home when a pick finds nothing. Each dash tick that starts
+ * outside the target's body writes the drone's heading (DronePool.hx, hy: the target's center minus
+ * the drone), so it holds the way the drone last flew in, through the ticks it rides its target,
+ * until it docks (FL).
  *
  * Its attack frequency m = attackSpeed / BASE_ATTACK_SPEED × its emitter's cadence, read every
  * tick, multiplies its speed and divides its dock time and cooldown; at m ≤ 0, or NaN, the drone
@@ -78,6 +79,24 @@
  * 前哨's seat radius, 巨像's and 蜂后's drawn size (DroneViewState.size, which nothing here reads)
  * and 蜂王漿's summonDuration (the timed rows' lives, SpawnSpecs.lifeTicks) are the fill's.
  *
+ * 蜂巢's center board (E5, gd:181-197) sets three SwarmParams, which the fill reads once
+ * (src/sim/emitters/drone.ts). 自爆協議 (lastImpact): the impact that spends a swarm drone's
+ * sortie (impactsLeft 1 → 0) explodes, an impact at the explosion's sized radius and hit scale in
+ * place of the splash and 1, everything else as an impact; never under 蟲海, and never a granted
+ * drone's, a spirit's or a repeat's. 攔截守衛 (guards): the swarm's last drones are guards, docked
+ * on an orbit (DRONE_GUARD) instead of at a dock. Each guard keeps its own orbit angle
+ * (DronePool.guardAngle), which the stage's start advances a step, whatever the attack frequency,
+ * and writes into its dock while the guard is on its orbit, and leaves as it is while the guard
+ * is away (stepGuards, lead ruling K2-R1); on its orbit a guard rides its point around the player,
+ * runs down its dock time and picks as a docked drone does, but with guardPick: the charging
+ * dashers first, at any distance, else pickOuter within the guards' ring (under 集火指令 the
+ * highest-hp enemy within it). On a tick a dasher began charging, every guard not dashing at a
+ * charging dasher picks one at once (the charge start); a guard flies home to the fixed point where
+ * it left its orbit, docks there as a drone does at its dock and goes on from that angle. 蜂潮
+ * (surge): once due, every swarm drone dashes at the densest enemy at once with a full sortie, its
+ * next impact on it × damageMult (stepSurge). Both run at the stage's start, the guards first. A
+ * run without them pays one test an impact and two a stage.
+ *
  * Kills inside the stage only mark their enemy dead, and enemy objects are never reused, so a
  * target a slot keeps from an earlier tick is alive or reads dead.
  */
@@ -85,7 +104,13 @@
 import { gt, mul, num, ZERO } from '../../core/num';
 import { APPLIED_AILMENTS } from '../../data/triggers';
 import type { AppliedAilment } from '../../data/triggers';
-import { DRONE_COOLDOWN_MAX, DRONE_MEMORY, PICK_TICKS, SMALL_PROJECTILE_TICKS } from '../caps';
+import {
+  DRONE_COOLDOWN_MAX,
+  DRONE_MEMORY,
+  GUARD_REV_PER_SEC,
+  PICK_TICKS,
+  SMALL_PROJECTILE_TICKS,
+} from '../caps';
 import { beginAttack, chainFrom, endAttack } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
 import { emitCenterEvent } from '../effects/centerEvents';
@@ -102,29 +127,40 @@ import {
   ARENA_WIDTH,
   DRONE_DASH,
   DRONE_DOCKED,
+  DRONE_GUARD,
   DRONE_HOVER,
+  DRONE_KIND_DRONE,
   DRONE_KIND_SPIRIT,
   DRONE_KIND_TURRET,
   DRONE_RETURN,
+  TICK_RATE,
 } from '../types';
 import { focused, toughFocus } from './context';
 import type { Enemy, RunContext } from './context';
+import { CHARGING } from './enemyRecord';
 import { MOTION_HOMING, spawnShot } from './shots';
 import { AIM_OUTER, NEVER_LEAVES } from './systemState';
-import type { DronePool, SpawnSpecs } from './systemState';
+import type { DronePool, DroneSurge, SpawnSpecs } from './systemState';
 
 const DRONE_IMPACT = EVENT.droneImpact;
 const DRONE_EXPIRE = EVENT.droneExpire;
+const TWO_PI = 2 * Math.PI;
+/** A guard's orbit angle a tick on its orbit: GUARD_REV_PER_SEC turns a second (K2-R1). */
+const GUARD_STEP = (TWO_PI * GUARD_REV_PER_SEC) / TICK_RATE;
 
 /**
- * Steps every slot of the drone pool once, in id order (step 6b), then drops the timed rows that
- * left (dropLeft).
+ * Steps every slot of the drone pool once, in id order (step 6b), after 攔截守衛's orbit and
+ * charge start (stepGuards) and 蜂潮 (stepSurge), then drops the timed rows that left
+ * (dropLeft).
  */
 export function stepDrones(ctx: RunContext): void {
   const ds = ctx.sys.drones;
   const emitters = ctx.emitters;
   const now = ctx.now;
   const asMult = ctx.build.values.attackSpeed / BASE_ATTACK_SPEED;
+  // E5's two stage tests: guards, then a surge.
+  if (ds.guardEnd !== 0) stepGuards(ctx, ds, now);
+  if (ds.surge !== null) stepSurge(ctx, ds, ds.surge, now);
   const { x, y, prevX, prevY, kind, mode, owner, until } = ds;
   for (let s = 0; s < ds.count; s++) {
     // A timed row whose time is up leaves, mid-dash too, and at m ≤ 0; a fixed row never does.
@@ -161,6 +197,9 @@ export function stepDrones(ctx: RunContext): void {
       case DRONE_RETURN:
         flyHome(ds, s, em, m);
         break;
+      case DRONE_GUARD:
+        guarding(ctx, ds, s, em, m, now);
+        break;
     }
   }
   if (ds.left !== 0) dropLeft(ds, now);
@@ -193,6 +232,36 @@ function docked(
 }
 
 /**
+ * A guard on its orbit (DRONE_GUARD, 攔截守衛; E5), a guard's docked state: it rides onto its
+ * orbit point (its dockX, dockY, which stepGuards advanced at the stage's start), then runs as a
+ * docked slot does, picking with guardPick, and stays on the orbit when the pick finds nothing.
+ * At m ≤ 0, or NaN, the stage skips it, as every drone, while its point still advances: it falls
+ * behind its point and snaps back onto it on its next tick with m > 0.
+ */
+function guarding(
+  ctx: RunContext,
+  ds: DronePool,
+  s: number,
+  em: EmitterRuntime,
+  m: number,
+  now: number,
+): void {
+  ds.x[s] = ds.dockX[s] as number;
+  ds.y[s] = ds.dockY[s] as number;
+  const left = ds.dockLeft[s] as number;
+  if (left > 0) {
+    ds.dockLeft[s] = left - m;
+    return;
+  }
+  if (now < (ds.nextPick[s] as number)) return;
+  const t = guardPick(ctx, ds, s);
+  ds.nextPick[s] = now + PICK_TICKS;
+  if (t === null) return;
+  engage(ds, s, t);
+  dash(ctx, ds, s, em, m, now);
+}
+
+/**
  * A dashing slot: a target that died or was pushed out of the arena is lost (lose). Otherwise
  * the slot steps towards the target's center and arrives when the step reaches its edge: it
  * snaps to the center and impacts, unless the target is in its cooldown memory, where it waits
@@ -202,6 +271,9 @@ function docked(
  * one for a pick that finds nothing (repick). A tick that starts outside the target's body
  * writes the heading (hx, hy), the target's center minus the slot, before the step or the snap;
  * one that starts within it, riding the target or ramming it again, leaves it as it was (FL).
+ * A swarm drone's impact is 自爆協議's explosion when it spends the sortie, and × 蜂潮's
+ * damageMult when the row surges (E5), on top of its role's damage factor and 蜂后's follow
+ * factor (E4, followScale): its splash and scale are worked out here, at the impact's call.
  */
 function dash(
   ctx: RunContext,
@@ -233,7 +305,26 @@ function dash(
     ds.y[s] = t.y;
     if (inMemory(ds, s, t.id, now)) return;
     const p = em.payload;
-    impactAt(ctx, s, t, p, em, (p.flags & SIGNATURE) !== 0, 0, -1);
+    let r2 = ds.splashSq[em.index] as number;
+    // Its role's damage factor (E4), × 蜂后's follow factor; a run without a leader pays the one
+    // load and the one test.
+    const role = ds.roleDamage[s] as number;
+    let scale = ds.leader < 0 ? role : followScale(ds, s, t, role);
+    // 自爆協議 and 蜂潮 (E5), on the swarm's own drones, on top: one test without them.
+    if (ds.impactRules && em.index === 0) {
+      // The impact that spends the sortie explodes; lastImpactScale is 0 without it, and under
+      // 蟲海, whose sorties never end.
+      if (ds.lastImpactScale > 0 && ds.impactsLeft[s] === 1) {
+        r2 = ds.lastImpactSq;
+        scale *= ds.lastImpactScale;
+      }
+      // Its target is the surge's: stepSurge clears the mark of a row that dashes at another.
+      if (ds.surging[s] !== 0) {
+        ds.surging[s] = 0;
+        scale *= (ds.surge as DroneSurge).damageMult;
+      }
+    }
+    impact(ctx, s, t, p, (p.flags & SIGNATURE) !== 0 ? em : null, r2, scale, 0, -1);
     remember(ds, s, t.id, now + cooldownTicks(ds.coolTicks[em.index] as number, m));
     const left = (ds.impactsLeft[s] as number) - 1;
     ds.impactsLeft[s] = left;
@@ -266,13 +357,14 @@ function lose(ctx: RunContext, ds: DronePool, s: number, now: number): void {
 }
 
 /**
- * Slot s picks: it dashes at what it found from the next tick on, or flies home. Under 蟲海
- * (BuildFlags.dronesStay) a pick that finds nothing falls back on the target the slot's spent
- * sortie ended on (kept), so the slot dashes on at it and waits out its cooldown memory, as
- * between a sortie's impacts; it flies home only when there is none.
+ * Slot s picks, a guard with guardPick (E5): it dashes at what it found from the next tick on,
+ * or flies home. Under 蟲海 (BuildFlags.dronesStay) a pick that finds nothing falls back on the
+ * target the slot's spent sortie ended on (kept), so the slot dashes on at it and waits out its
+ * cooldown memory, as between a sortie's impacts; it flies home only when there is none.
  */
 function repick(ctx: RunContext, ds: DronePool, s: number, now: number): void {
-  const t = pickOuter(ctx, s) ?? (ctx.build.flags.dronesStay ? kept(ds, s) : null);
+  const found = isGuard(ds, s) ? guardPick(ctx, ds, s) : pickOuter(ctx, s);
+  const t = found ?? (ctx.build.flags.dronesStay ? kept(ds, s) : null);
   ds.nextPick[s] = now + PICK_TICKS;
   if (t !== null) engage(ds, s, t);
   else ds.mode[s] = DRONE_RETURN;
@@ -299,6 +391,8 @@ function engage(ds: DronePool, s: number, t: Enemy): void {
  * A slot flying home steps towards its dock, as fast as it dashes (its role's speed factor
  * included); arriving, it docks there with its dock time to run down and a full sortie, and no
  * target or heading, so its next sortie's impacts never carry this one's.
+ * A guard's dock is the point of its orbit where it left, fixed while it is away (lead ruling
+ * K2-R1), where it docks on its orbit (DRONE_GUARD).
  */
 function flyHome(ds: DronePool, s: number, em: EmitterRuntime, m: number): void {
   const x = ds.x[s] as number;
@@ -313,7 +407,7 @@ function flyHome(ds: DronePool, s: number, em: EmitterRuntime, m: number): void 
   if (dist <= step) {
     ds.x[s] = homeX;
     ds.y[s] = homeY;
-    ds.mode[s] = DRONE_DOCKED;
+    ds.mode[s] = isGuard(ds, s) ? DRONE_GUARD : DRONE_DOCKED;
     ds.dockLeft[s] = ds.dockTicks[i] as number;
     ds.impactsLeft[s] = ds.impacts[i] as number;
     ds.target[s] = null;
@@ -325,6 +419,164 @@ function flyHome(ds: DronePool, s: number, em: EmitterRuntime, m: number): void 
     ds.x[s] = x + dx * k;
     ds.y[s] = y + dy * k;
   }
+}
+
+/** Slot s is a guard (攔截守衛, E5): DronePool.guardFirst .. guardEnd − 1, none without one. */
+function isGuard(ds: DronePool, s: number): boolean {
+  return s < ds.guardEnd && s >= ds.guardFirst;
+}
+
+/**
+ * 攔截守衛 at the start of the drone stage (SwarmParams.guards, lead rulings K2 and K2-R1; E5).
+ * Each guard on its orbit (DRONE_GUARD) at this moment advances its own angle
+ * (DronePool.guardAngle, the fill's 2πg/G) by 2π × GUARD_REV_PER_SEC / TICK_RATE, whatever the
+ * attack frequency, and writes the point at that angle on the guards' ring around the player into
+ * its dock, which it rides. A guard in any other mode keeps its angle and its dock, the point where
+ * it left, which it flies home to; docking there, it advances again from the next stage's start.
+ * Then the charge start, on a tick a dasher began charging (EnemyAiState.chargeStarts):
+ * every guard that is not dashing at a charging dasher picks one at once (chargingPick), whatever
+ * its dock time and pick clock, and dashes at it from where it is with a full sortie, its next pick
+ * PICK_TICKS on; one that finds none keeps what it was doing.
+ */
+function stepGuards(ctx: RunContext, ds: DronePool, now: number): void {
+  const first = ds.guardFirst;
+  const end = ds.guardEnd;
+  const ring = ds.guardRadius;
+  const angle = ds.guardAngle;
+  const px = ctx.player.x;
+  const py = ctx.player.y;
+  for (let s = first; s < end; s++) {
+    if (ds.mode[s] !== DRONE_GUARD) continue;
+    const a = (angle[s - first] as number) + GUARD_STEP;
+    angle[s - first] = a;
+    ds.dockX[s] = px + ring * Math.cos(a);
+    ds.dockY[s] = py + ring * Math.sin(a);
+  }
+  if (ctx.sys.enemyAi.chargeStartCount === 0) return;
+  const impacts = ds.impacts[0] as number;
+  for (let s = first; s < end; s++) {
+    if (ds.mode[s] === DRONE_DASH && charging(ds.target[s] as Enemy)) continue;
+    const t = chargingPick(ctx, ds, s);
+    if (t === null) continue;
+    engage(ds, s, t);
+    ds.impactsLeft[s] = impacts;
+    ds.nextPick[s] = now + PICK_TICKS;
+  }
+}
+
+/** `e` is alive and charging its dash: its v3 state holds the CHARGING bit (a dasher's). */
+function charging(e: Enemy): boolean {
+  const v = e.v3;
+  return e.alive && v !== null && (v.state & CHARGING) !== 0;
+}
+
+/**
+ * The charging dasher guard s picks (guardPick's first tier, the charge start's pick): of the
+ * alive enemies in the arena whose v3 state holds the CHARGING bit, at any distance, the nearest
+ * to the row (squared distance from its position) that no other row dashes at, else the nearest
+ * one another row dashes at, the lowest id on ties, whatever the row's cooldown memory; null for
+ * none. One forward scan of EnemyAiState.list, where every dasher is, in id order. Draws
+ * nothing.
+ */
+function chargingPick(ctx: RunContext, ds: DronePool, s: number): Enemy | null {
+  const list = ctx.sys.enemyAi.list;
+  const x = ds.x[s] as number;
+  const y = ds.y[s] as number;
+  let best = Infinity;
+  let bestE: Enemy | null = null;
+  let bestC = Infinity;
+  let bestCE: Enemy | null = null;
+  // Forwards with <, so ties keep the lower id.
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i] as Enemy;
+    if (!charging(e) || outOfArena(e)) continue;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    const d = dx * dx + dy * dy;
+    if (chased(ds, e, s)) {
+      if (d < bestC) {
+        bestC = d;
+        bestCE = e;
+      }
+    } else if (d < best) {
+      best = d;
+      bestE = e;
+    }
+  }
+  return bestE ?? bestCE;
+}
+
+/**
+ * The enemy guard s picks (攔截守衛, E5): the charging dasher chargingPick finds, else the
+ * drones' own pick (pickOuter, its flags and tiers included) over the enemies at most the guards'
+ * ring from the player (Enemy.dist ≤ DronePool.guardRadius); null for none. Every pick of a guard
+ * is this one: on its orbit, after a lost target and after a spent sortie under 蟲海. Draws
+ * nothing.
+ */
+export function guardPick(ctx: RunContext, ds: DronePool, s: number): Enemy | null {
+  return chargingPick(ctx, ds, s) ?? pickOuter(ctx, s, ds.guardRadius);
+}
+
+/**
+ * 蜂潮 at the start of the drone stage, after the charge start (SwarmParams.surge, lead ruling
+ * K3; E5). First the mark of every row no longer dashing at the last surge's target clears: a
+ * lost target (dead, or out of the arena), a docking or a charge start leaves it behind, and the
+ * row impacts nothing before this. Then, on a tick at or after the due tick, the surge fires when
+ * there is a densest enemy (densest) and stays due when there is none, banking nothing: every
+ * swarm drone row (kind DRONE of emitter 0, the guards too), whatever its mode, dashes at it at
+ * once from where it is (engage) with a full sortie, its next pick PICK_TICKS on, marked surging
+ * (DronePool.surging); the next surge is due a period on; and droneSurge carries the target and
+ * the rows sent. Turrets, granted drones and spirits never surge.
+ */
+function stepSurge(ctx: RunContext, ds: DronePool, surge: DroneSurge, now: number): void {
+  const { kind, owner, mode, target, surging } = ds;
+  const count = ds.count;
+  for (let s = 0; s < count; s++) {
+    if (surging[s] !== 0 && (mode[s] !== DRONE_DASH || target[s] !== surge.target)) surging[s] = 0;
+  }
+  if (now < surge.due) return;
+  const t = densest(ctx, ds);
+  if (t === null) return;
+  surge.due = now + surge.period;
+  surge.target = t;
+  const impacts = ds.impacts[0] as number;
+  let sent = 0;
+  for (let s = 0; s < count; s++) {
+    if (kind[s] !== DRONE_KIND_DRONE || owner[s] !== 0) continue;
+    engage(ds, s, t);
+    ds.impactsLeft[s] = impacts;
+    ds.nextPick[s] = now + PICK_TICKS;
+    surging[s] = 1;
+    sent++;
+  }
+  ctx.events.push({ type: 'droneSurge', x: t.x, y: t.y, targetId: t.id, count: sent });
+}
+
+/**
+ * 蜂潮's target (E5): the alive enemy in the arena with the most alive enemies in the arena whose
+ * center is within the swarm's sized splash of its center, itself included (ctx.grid.within with
+ * emitter 0's splashSq, into DronePool.splash), the lowest id on ties; null for none. One scan of
+ * the enemies, in id order, only on a tick a surge fires. Draws nothing.
+ */
+export function densest(ctx: RunContext, ds: DronePool): Enemy | null {
+  const enemies = ctx.enemies;
+  const r2 = ds.splashSq[0] as number;
+  const splash = ds.splash;
+  let best = 0;
+  let bestE: Enemy | null = null;
+  // Forwards with >, so ties keep the lower id.
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i] as Enemy;
+    if (!e.alive || outOfArena(e)) continue;
+    const n = ctx.grid.within(e.x, e.y, r2, splash);
+    let c = 0;
+    for (let k = 0; k < n; k++) if (!outOfArena(splash[k] as Enemy)) c++;
+    if (c > best) {
+      best = c;
+      bestE = e;
+    }
+  }
+  return bestE;
 }
 
 /**
@@ -502,13 +754,14 @@ function chased(ds: DronePool, e: Enemy, s: number): boolean {
  * two tiers run over the alive tough enemies first (pickOuterTough), and over every enemy only
  * when they find none; a run without it pays the one flag test. Under 集火指令
  * (BuildFlags.summonHighestHp), checked first, it is the highest-hp enemy (pickHighestHp) alone.
- * Draws nothing.
+ * Every tier, 集火指令's included, passes over the enemies farther than `range` from the player:
+ * a guard's ring (guardPick, E5), Infinity for every other pick. Draws nothing.
  */
-export function pickOuter(ctx: RunContext, s: number): Enemy | null {
+export function pickOuter(ctx: RunContext, s: number, range = Infinity): Enemy | null {
   const flags = ctx.build.flags;
-  if (flags.summonHighestHp) return pickHighestHp(ctx);
+  if (flags.summonHighestHp) return pickHighestHp(ctx, range);
   if (flags.summonEliteFirst) {
-    const t = pickOuterTough(ctx, s);
+    const t = pickOuterTough(ctx, s, range);
     if (t !== null) return t;
   }
   const ds = ctx.sys.drones;
@@ -521,7 +774,7 @@ export function pickOuter(ctx: RunContext, s: number): Enemy | null {
     const e = enemies[i] as Enemy;
     if (!e.alive) continue;
     const d = e.dist;
-    if (d < best) continue;
+    if (d < best || d > range) continue;
     if (outOfArena(e) || inMemory(ds, s, e.id, now) || chased(ds, e, s)) continue;
     best = d;
     bestE = e;
@@ -534,7 +787,7 @@ export function pickOuter(ctx: RunContext, s: number): Enemy | null {
   for (let o = 0; o < ds.count; o++) {
     if (o === s || mode[o] !== DRONE_DASH) continue;
     const e = target[o] as Enemy;
-    if (!e.alive || outOfArena(e) || inMemory(ds, s, e.id, now)) continue;
+    if (!e.alive || e.dist > range || outOfArena(e) || inMemory(ds, s, e.id, now)) continue;
     if (bestC === null || e.dist > bestC.dist || (e.dist === bestC.dist && e.id < bestC.id)) {
       bestC = e;
     }
@@ -544,10 +797,10 @@ export function pickOuter(ctx: RunContext, s: number): Enemy | null {
 
 /**
  * pickOuter's tiers over the alive tough enemies (Enemy.tough: elites and bosses) alone, at any
- * distance: the farthest unchased one, then the farthest one another slot dashes at, each
- * the lowest id on ties, with pickOuter's rejects; null for none (鎖定信標, C5.9).
+ * distance up to `range`: the farthest unchased one, then the farthest one another slot dashes
+ * at, each the lowest id on ties, with pickOuter's rejects; null for none (鎖定信標, C5.9).
  */
-function pickOuterTough(ctx: RunContext, s: number): Enemy | null {
+function pickOuterTough(ctx: RunContext, s: number, range: number): Enemy | null {
   const ds = ctx.sys.drones;
   const now = ctx.now;
   const enemies = ctx.enemies;
@@ -557,7 +810,7 @@ function pickOuterTough(ctx: RunContext, s: number): Enemy | null {
     const e = enemies[i] as Enemy;
     if (!e.alive || !e.tough) continue;
     const d = e.dist;
-    if (d < best) continue;
+    if (d < best || d > range) continue;
     if (outOfArena(e) || inMemory(ds, s, e.id, now) || chased(ds, e, s)) continue;
     best = d;
     bestE = e;
@@ -569,7 +822,8 @@ function pickOuterTough(ctx: RunContext, s: number): Enemy | null {
   for (let o = 0; o < ds.count; o++) {
     if (o === s || mode[o] !== DRONE_DASH) continue;
     const e = target[o] as Enemy;
-    if (!e.tough || !e.alive || outOfArena(e) || inMemory(ds, s, e.id, now)) continue;
+    if (!e.tough || !e.alive || e.dist > range || outOfArena(e)) continue;
+    if (inMemory(ds, s, e.id, now)) continue;
     if (bestC === null || e.dist > bestC.dist || (e.dist === bestC.dist && e.id < bestC.id)) {
       bestC = e;
     }
@@ -683,17 +937,20 @@ function pickNearestTough(ctx: RunContext, s: number): Enemy | null {
  * 集火指令's pick (BuildFlags.summonHighestHp, E4), every summon's: the alive enemy with the most
  * hp whose center is in the arena, the lowest id on ties (one forward scan of ctx.enemies with
  * core/num's strict gt, as highestHpId's, src/sim/systems/globals.ts), at this point of the tick,
- * whatever a slot's cooldown memory and the chase; null for none. EvalInput.highestHpId is not
- * read: written before the contact step, it can name an enemy dead since or overtaken. Draws
- * nothing.
+ * whatever a slot's cooldown memory and the chase; null for none. It passes over the enemies
+ * farther than `range` from the player (Enemy.dist): a guard's ring (guardPick through
+ * pickOuter, E5), Infinity for every other pick. EvalInput.highestHpId is not read: written
+ * before the contact step, it can name an enemy dead since or overtaken. Draws nothing.
  */
-export function pickHighestHp(ctx: RunContext): Enemy | null {
+export function pickHighestHp(ctx: RunContext, range = Infinity): Enemy | null {
   const enemies = ctx.enemies;
   let best: Enemy | null = null;
   // Forwards with a strict >, so ties keep the lower id.
   for (let i = 0; i < enemies.length; i++) {
     const e = enemies[i] as Enemy;
-    if (!e.alive || (best !== null && !gt(e.hp, best.hp)) || outOfArena(e)) continue;
+    if (!e.alive || (best !== null && !gt(e.hp, best.hp)) || e.dist > range || outOfArena(e)) {
+      continue;
+    }
     best = e;
   }
   return best;
@@ -713,7 +970,8 @@ export function pickHighestHp(ctx: RunContext): Enemy | null {
  * impact hit; the impact event; and the droneImpact center event at the target, without a list,
  * which rule 8 raises for the signature's own impacts alone, its value the flight's angle
  * (flightAngle). The repeats waiting for a counted impact follow it. `depth` and `origin` are the
- * hits' trigger depth and origin (0 and −1 for a drone).
+ * hits' trigger depth and origin (0 and −1 for a drone). A drone's own impact (dash) works out
+ * the same splash and scale itself, 自爆協議's and 蜂潮's on top (E5), and calls impact.
  */
 export function impactAt(
   ctx: RunContext,
@@ -751,11 +1009,11 @@ function followScale(ds: DronePool, s: number, target: Enemy, scale: number): nu
 }
 
 /**
- * impactAt's impact, its splash radius squared `r2` and its hits' `scale` given (none at 0); a
- * `counted` impact names its emitter, and null counts nothing; `s` is −1 for a repeat's
- * (swarmRepeat), at scale 1, its target the primary hit too, its payload being the signature's.
- * A timed row's (spiritImpact) is a granted drone's at its effect's splash and damagePct.
- * Returns how many enemies it listed (DronePool.splash).
+ * A drone's impact (dash's, and impactAt's), its splash radius squared `r2` and its hits' `scale`
+ * given (none at 0); a `counted` impact names its emitter, and null counts nothing; `s` is −1 for a
+ * repeat's (swarmRepeat), at scale 1, its target the primary hit too, its payload being the
+ * signature's. A timed row's (spiritImpact) is a granted drone's at its effect's splash and
+ * damagePct. Returns how many enemies it listed (DronePool.splash).
  */
 function impact(
   ctx: RunContext,
@@ -1013,6 +1271,7 @@ export function spawnRows(
     ds.roleDamage[s] = 1;
     ds.roleSpeed[s] = 1;
     ds.size[s] = 1;
+    ds.surging[s] = 0;
   }
   live[f] = (live[f] as number) + placed;
   ctx.state.droneCount = ds.count;
@@ -1095,4 +1354,5 @@ function moveRow(ds: DronePool, from: number, to: number): void {
   ds.roleDamage[to] = ds.roleDamage[from] as number;
   ds.roleSpeed[to] = ds.roleSpeed[from] as number;
   ds.size[to] = ds.size[from] as number;
+  ds.surging[to] = ds.surging[from] as number;
 }

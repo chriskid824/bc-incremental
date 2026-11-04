@@ -5,6 +5,7 @@ import {
   DRONE_DASH,
   DRONE_DOCKED,
   DRONE_FIXED,
+  DRONE_GUARD,
   DRONE_HOVER,
   DRONE_KIND_DRONE,
   DRONE_KIND_TURRET,
@@ -418,5 +419,60 @@ describe('DroneLayer', () => {
     const alphas = streaks.map((streak) => streak.color >>> 24);
     expect(alphas).toEqual([...alphas].sort((a, b) => b - a));
     expect(new Set(alphas).size).toBe(TRAIL_TICKS);
+  });
+});
+
+describe('a guard on its orbit (攔截守衛, DRONE_GUARD, E5)', () => {
+  const renderer = { generateTexture: () => Texture.WHITE } as unknown as Renderer;
+  const noEnemies: EnemyLocator = { positionOf: () => null };
+  const sim = (tick: number, slots: readonly Slot[]): SimState =>
+    frame(tick, slots) as unknown as SimState;
+  /** A point on the guards' ring, 120 from the core, at angle `a`. */
+  const ring = (a: number): { x: number; y: number } => ({
+    x: CENTER.x + 120 * Math.cos(a),
+    y: CENTER.y + 120 * Math.sin(a),
+  });
+  /** A guard that rode from angle a0 to a1 on its orbit over the last tick. */
+  const guard = (a0: number, a1: number): Slot => {
+    const [from, to] = [ring(a0), ring(a1)];
+    return { mode: DRONE_GUARD, prevX: from.x, prevY: from.y, x: to.x, y: to.y };
+  };
+
+  it('counts a guard on its orbit out of the comb: dockedFraction counts DRONE_DOCKED alone', () => {
+    // The hive's comb holds the docked drones; a guard orbits 120 out, its cell empty.
+    const docked = { mode: DRONE_DOCKED };
+    expect(dockedFraction(pool([docked, { mode: DRONE_GUARD }, { mode: DRONE_GUARD }]), 3)).toBe(
+      1 / 3,
+    );
+    expect(dockedFraction(pool([{ mode: DRONE_GUARD }]), 1)).toBe(0);
+  });
+
+  it('draws a guard’s kite at its position on its orbit, between its last two ticks, nose along the orbit, not at a dock', () => {
+    const layer = new DroneLayer(renderer, Texture.WHITE);
+    const kites = layer.view.children[2] as ParticleContainer;
+    const a0 = 0.3;
+    const a1 = 0.3 + Math.PI / 60;
+    const docked = { mode: DRONE_DOCKED, x: CENTER.x + DOCK, y: CENTER.y };
+    for (const alpha of [0, 0.5, 1]) {
+      layer.update(sim(10, [docked, guard(a0, a1)]), alpha, noEnemies);
+      expect(kites.particleChildren).toHaveLength(2);
+      const kite = kites.particleChildren[1];
+      const [from, to] = [ring(a0), ring(a1)];
+      expect(kite?.x).toBeCloseTo(from.x + (to.x - from.x) * alpha, 9);
+      expect(kite?.y).toBeCloseTo(from.y + (to.y - from.y) * alpha, 9);
+      // Along the chord of its last tick: a quarter turn on from its angle, give or take half
+      // the tick's turn.
+      expectAngle(kite?.rotation ?? NaN, Math.atan2(to.y - from.y, to.x - from.x));
+      expect(Math.cos((kite?.rotation ?? NaN) - (a0 + a1) / 2 - Math.PI / 2)).toBeCloseTo(1, 12);
+    }
+    expect(layer.dockedShare).toBe(0.5);
+  });
+
+  it('heads a guard’s track along its move, never outward as a docked drone’s', () => {
+    const tracks = new DroneTracks();
+    tracks.follow(frame(1, [guard(0, Math.PI / 60)]));
+    tracks.follow(frame(2, [guard(Math.PI / 60, Math.PI / 30)]));
+    const heading = tracks.get(1)?.heading ?? NaN;
+    expectAngle(heading, Math.PI / 40 + Math.PI / 2);
   });
 });
