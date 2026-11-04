@@ -33,6 +33,7 @@ const CSS = `
   position: relative;
 }
 .bc-game-damage-name { display: block; }
+.bc-game-damage-note { margin-top: 4px; font-size: 12px; color: #8b93a3; }
 .bc-game-damage-name::first-letter { text-transform: uppercase; }
 .bc-game-damage-amount { color: #b8bfcc; font-variant-numeric: tabular-nums; }
 .bc-game-damage-share { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }

@@ -42,6 +42,7 @@ import { MuteControl, NoticeList, PauseControl, StartWavePicker } from '../../ui
 import { V3ResultPanel } from '../../ui/v3/result';
 import type { V3ResultInfo } from '../../ui/v3/result';
 import { damageBreakdown } from '../../ui/v3/damageBreakdown';
+import { ControlTally } from './controlTally';
 import { SelectScreen } from '../../ui/v3/select';
 import { WebPanel } from '../../ui/v3/webPanel';
 import { GameLoop, SPEEDS } from '../loop';
@@ -84,6 +85,8 @@ export class GamePage {
   private readonly store: ProfileStore;
   private readonly data: GameData = characterGameData();
   private readonly webs = new Map<CharacterId, AssembledWeb | null>();
+  /** The run's freezes and shatters, for the result screen's 控場. */
+  private readonly control = new ControlTally();
   private readonly hud: Hud<Speed>;
   private readonly loop: GameLoop;
   private readonly results: V3ResultPanel;
@@ -351,6 +354,7 @@ export class GamePage {
     this.run = run;
     this.rendererFor(web, progress).beginRun(run.typicalHit);
     this.simAudio.reset();
+    this.control.reset();
     this.banner = new EnemyBanner(
       this.data.enemies,
       this.profile.account.seenEnemies as readonly EnemyId[],
@@ -370,6 +374,8 @@ export class GamePage {
     const events = run.step();
     this.renderer?.handleEvents(events);
     this.simAudio.handleEvents(events);
+    this.control.handleEvents(events);
+    this.control.observe(run.sim.state);
     this.banner?.events(events);
     if (run.finished) this.finishRun(run);
   }
@@ -423,6 +429,7 @@ export class GamePage {
       bestWave: progress.bestWave,
       walletShards: progress.wallet.shards,
       damage: damageBreakdown(result.damageBySource, result.damage, t(web.def.nameKey)),
+      control: this.control.counts,
     };
   }
 
