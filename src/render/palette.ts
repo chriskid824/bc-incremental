@@ -38,6 +38,8 @@ export const COLORS = {
   damageCrit: 0xffe066,
   damageBurn: 0xff8a3d,
   damageChain: 0x7ff6ff,
+  /** Cold-tagged hits (碎冰, 霜蜂): a deeper frost blue than the chain's cyan. */
+  damageCold: 0x5aa9ff,
   /** Poison ticks: a mint green, apart from 蜂巢's lime hit numbers (hitNumberColor). */
   damagePoison: 0x5ef2a6,
   damageBleed: 0xff5068,

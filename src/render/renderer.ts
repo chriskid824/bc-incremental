@@ -37,6 +37,7 @@
 import { Container, Graphics } from 'pixi.js';
 import type { Application } from 'pixi.js';
 import type { Num } from '../core/num';
+import { TAG } from '../data/tags';
 import type { GameData } from '../data/types';
 import { ARENA_HEIGHT, ARENA_WIDTH, PLAYER_RADIUS } from '../sim';
 import type { SimEvent, SimState } from '../sim';
@@ -528,7 +529,7 @@ export class Renderer {
     } else if (!crit) {
       this.bursts.hit(x, y, x - CENTER_X, y - CENTER_Y);
     }
-    const kind = crit ? 'crit' : chain ? 'chain' : 'hit';
+    const kind = crit ? 'crit' : chain ? 'chain' : (event.tags & TAG.cold) !== 0 ? 'cold' : 'hit';
     const shown = this.numbers.spawn(kind, event.amount, x, y, event.targetId);
     if (!crit) return;
 

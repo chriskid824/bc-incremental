@@ -16,6 +16,7 @@ import type { NumberBox, NumberStyle, Point, SafeArea } from './numberLayout';
 const STYLES: readonly NumberStyle[] = [
   'hit',
   'chain',
+  'cold',
   'burn',
   'poison',
   'bleed',

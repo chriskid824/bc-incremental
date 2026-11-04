@@ -63,6 +63,14 @@ const ETERNAL_FLAME: RuleSpec = { id: 'eternalFlame', durationMore: -0.5 };
 const STEADY_AIM = (fire.byId.get('fusion.fire.ice.core') as WebNode).effects.rules[0] as RuleSpec;
 
 describe('webBuild (§5.1)', () => {
+  it('keeps the base 10% ignite on 熔核 only; elsewhere a burn needs the fire outer', () => {
+    const summon = assembleWeb(content, 'summon', FULL_SCOPE);
+    const ignite = (web: AssembledWeb, character: CharacterId): number =>
+      webBuild(web, { ...emptyProgress(character), ranks: {} }).stats.values.igniteChance;
+    expect(ignite(fire, 'fire')).toBeCloseTo(0.1, 12);
+    expect(ignite(summon, 'summon')).toBe(0);
+  });
+
   it('sets coef only on fusion boards’ triggers and rules', () => {
     let web = withEffects(fire, R1, { triggers: [PANDEMIC_TRIGGER], rules: [ETERNAL_FLAME] });
     web = withEffects(web, 'outer.poison.main.entry', { triggers: [PANDEMIC_TRIGGER] });

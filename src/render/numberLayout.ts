@@ -7,9 +7,11 @@
 
 /**
  * How a number is drawn; 'critSmall' is a crit shown at normal size once big pops run out.
+ * 'cold' is a cold-tagged hit (碎冰, 霜蜂): a hit number in the frost blue.
  * 'poison' and 'bleed' are the damage-over-time ticks of those ailments, as 'burn' is burn's.
  */
-export type NumberStyle = 'hit' | 'chain' | 'burn' | 'poison' | 'bleed' | 'crit' | 'critSmall';
+export type NumberStyle =
+  'hit' | 'chain' | 'cold' | 'burn' | 'poison' | 'bleed' | 'crit' | 'critSmall';
 
 interface SizeRule {
   /** Height at the typical hit. */
@@ -26,6 +28,7 @@ export const NORMAL_SIZE = 22;
 const SIZES: Readonly<Record<NumberStyle, SizeRule>> = {
   hit: { base: NORMAL_SIZE, perDecade: 0.3, max: NORMAL_SIZE * 1.3 },
   chain: { base: 20, perDecade: 0.3, max: NORMAL_SIZE * 1.2 },
+  cold: { base: NORMAL_SIZE, perDecade: 0.3, max: NORMAL_SIZE * 1.3 },
   burn: { base: 16, perDecade: 0.25, max: NORMAL_SIZE },
   // A poison build's main damage: a step above burn so the green ticks read in a crowd.
   poison: { base: 17, perDecade: 0.25, max: NORMAL_SIZE },

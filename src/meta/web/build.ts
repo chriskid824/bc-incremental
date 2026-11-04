@@ -9,6 +9,7 @@ import type { Num } from '../../core/num';
 import type { SourcedEmitter } from '../../data/emitters';
 import type { SignatureSpec } from '../../data/rules';
 import { sourceOfNode } from '../../data/sources';
+import { BASE_STATS } from '../../data/stats';
 import type {
   Modifier,
   SourcedConversion,
@@ -82,6 +83,11 @@ export function webBuild(web: AssembledWeb, progress: CharacterProgress): WebRun
     }
     for (const grant of effects.emitters) emitters.push({ source, grant });
     for (const spec of effects.rules) rules.push({ source, spec, coef: coef ?? 1 });
+  }
+  // The base 10% ignite (M1's, BASE_STATS) is 熔核's alone: on any other character a burn
+  // reads as the fire outer's (AILMENT_OUTER), so there it comes from that outer's 火種 only.
+  if (web.def.archetype !== 'fire') {
+    modifiers.push({ stat: 'igniteChance', kind: 'flat', value: -BASE_STATS.igniteChance });
   }
   const resonance = resonanceDamageMore(progress.resonanceEarned);
   if (resonance > 0) modifiers.push({ stat: 'damage', kind: 'more', value: resonance });
