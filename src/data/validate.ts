@@ -951,6 +951,65 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`frostBee.frostPct must be in (0, 1] (got ${rule.frostPct})`);
       }
       break;
+    case 'thermalShock':
+      if (!isPositiveInt(rule.burnStacks)) {
+        issues.push(`thermalShock.burnStacks must be a positive integer (got ${rule.burnStacks})`);
+      }
+      if (!(rule.hitPct > 0 && Number.isFinite(rule.hitPct))) {
+        issues.push(`thermalShock.hitPct must be finite and > 0 (got ${rule.hitPct})`);
+      }
+      break;
+    case 'superconduct':
+      if (!(isPositiveInt(rule.arcs) && rule.arcs <= 32)) {
+        issues.push(`superconduct.arcs must be an integer in [1, 32] (got ${rule.arcs})`);
+      }
+      if (!(rule.arcDamagePct >= 0 && Number.isFinite(rule.arcDamagePct))) {
+        issues.push(`superconduct.arcDamagePct must be finite and >= 0 (got ${rule.arcDamagePct})`);
+      }
+      if (!(rule.frostPct > 0 && rule.frostPct <= 1)) {
+        issues.push(`superconduct.frostPct must be in (0, 1] (got ${rule.frostPct})`);
+      }
+      if (!(rule.shockFrostMore >= 0 && Number.isFinite(rule.shockFrostMore))) {
+        issues.push(
+          `superconduct.shockFrostMore must be finite and >= 0 (got ${rule.shockFrostMore})`,
+        );
+      }
+      break;
+    case 'frostSentry':
+      if (!(rule.chance > 0 && rule.chance <= 1)) {
+        issues.push(`frostSentry.chance must be in (0, 1] (got ${rule.chance})`);
+      }
+      if (!isPositiveInt(rule.shots)) {
+        issues.push(`frostSentry.shots must be a positive integer (got ${rule.shots})`);
+      }
+      issues.push(...timedDroneIssues('frostSentry', rule.lifeSec, rule.damagePct, rule.maxLive));
+      break;
+    case 'plasma':
+      if (!isPositiveInt(rule.arcsPerBlast)) {
+        issues.push(`plasma.arcsPerBlast must be a positive integer (got ${rule.arcsPerBlast})`);
+      }
+      if (!(rule.arcDamagePct > 0 && Number.isFinite(rule.arcDamagePct))) {
+        issues.push(`plasma.arcDamagePct must be finite and > 0 (got ${rule.arcDamagePct})`);
+      }
+      if (!(rule.shockBurnMore >= 0 && Number.isFinite(rule.shockBurnMore))) {
+        issues.push(`plasma.shockBurnMore must be finite and >= 0 (got ${rule.shockBurnMore})`);
+      }
+      break;
+    case 'hemorrhage':
+      if (!(isPositiveInt(rule.maxStacks) && rule.maxStacks <= 8)) {
+        issues.push(`hemorrhage.maxStacks must be an integer in [1, 8] (got ${rule.maxStacks})`);
+      }
+      break;
+    case 'stormWeb':
+      if (!(rule.damagePct > 0 && Number.isFinite(rule.damagePct))) {
+        issues.push(`stormWeb.damagePct must be finite and > 0 (got ${rule.damagePct})`);
+      }
+      for (const field of ['periodSec', 'pairPeriodSec'] as const) {
+        if (!(rule[field] > 0 && Number.isFinite(rule[field]))) {
+          issues.push(`stormWeb.${field} must be finite and > 0 (got ${rule[field]})`);
+        }
+      }
+      break;
   }
   return issues;
 }
@@ -1766,6 +1825,12 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'zoneTune':
     case 'flameBee':
     case 'frostBee':
+    case 'thermalShock':
+    case 'superconduct':
+    case 'frostSentry':
+    case 'plasma':
+    case 'stormWeb':
+    case 'hemorrhage':
       return [];
   }
 }

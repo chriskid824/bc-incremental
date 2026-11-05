@@ -40,7 +40,10 @@ import {
   royalJelly,
   swarmTune,
 } from './hive';
+import { frostSentry, superconduct, thermalShock } from './frostFusions';
+import { hemorrhage } from './hemorrhage';
 import { flameBee, frostBee } from './hiveFusions';
+import { plasma, stormWeb } from './lightningFusions';
 import { bugSea, cannon, lockBeacon, teslaTower } from './summonPolicies';
 import { triphaseArc } from './triphaseArc';
 
@@ -100,6 +103,12 @@ export const RULE_MODULES: {
   zoneTune,
   flameBee,
   frostBee,
+  thermalShock,
+  superconduct,
+  frostSentry,
+  plasma,
+  stormWeb,
+  hemorrhage,
 };
 
 export const SIGNATURES: {

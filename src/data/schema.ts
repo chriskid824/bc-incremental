@@ -629,6 +629,45 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       })
       .readonly(),
     z.strictObject({ id: z.literal('frostBee'), frostPct: finite }).readonly(),
+    z
+      .strictObject({ id: z.literal('thermalShock'), burnStacks: finite, hitPct: finite })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('superconduct'),
+        arcs: finite,
+        arcDamagePct: finite,
+        frostPct: finite,
+        shockFrostMore: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('frostSentry'),
+        chance: finite,
+        lifeSec: finite,
+        shots: finite,
+        damagePct: finite,
+        maxLive: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('plasma'),
+        arcsPerBlast: finite,
+        arcDamagePct: finite,
+        shockBurnMore: finite,
+      })
+      .readonly(),
+    z.strictObject({ id: z.literal('hemorrhage'), maxStacks: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('stormWeb'),
+        damagePct: finite,
+        periodSec: finite,
+        pairPeriodSec: finite,
+      })
+      .readonly(),
   ]),
 );
 

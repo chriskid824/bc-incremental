@@ -122,8 +122,8 @@ describe('registries', () => {
     ]);
   });
 
-  it('OVERRIDES and CALIBRATED hold only B1 and B2 pairs so far; 冰光 and 雷光 may add rules', () => {
-    const landed = (key: string): boolean => key.startsWith('fire.') || key.startsWith('summon.');
+  it('OVERRIDES and CALIBRATED hold only B1-B3 pairs so far; 冰光 and 雷光 may add rules', () => {
+    const landed = (key: string): boolean => !key.startsWith('lightning.');
     for (const key of Object.keys(OVERRIDES)) expect(landed(key)).toBe(true);
     for (const key of Object.keys(CALIBRATED)) expect(landed(key)).toBe(true);
     expect(TEMPLATE_RULE_OVERRIDES).toEqual(['ice.aura', 'lightning.aura']);

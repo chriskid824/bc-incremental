@@ -83,6 +83,25 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   zoneTune: { id: 'zoneTune', durationMult: 2, damageMult: 1, radiusMult: 1.25 },
   flameBee: { id: 'flameBee', burnStacks: 2, blastRadius: 60, blastDamagePct: 1 },
   frostBee: { id: 'frostBee', frostPct: 0.12 },
+  thermalShock: { id: 'thermalShock', burnStacks: 2, hitPct: 2 },
+  superconduct: {
+    id: 'superconduct',
+    arcs: 3,
+    arcDamagePct: 0.5,
+    frostPct: 0.2,
+    shockFrostMore: 0.5,
+  },
+  frostSentry: {
+    id: 'frostSentry',
+    chance: 0.25,
+    lifeSec: 5,
+    shots: 5,
+    damagePct: 0.4,
+    maxLive: 4,
+  },
+  plasma: { id: 'plasma', arcsPerBlast: 3, arcDamagePct: 0.5, shockBurnMore: 0.3 },
+  stormWeb: { id: 'stormWeb', damagePct: 0.1, periodSec: 0.25, pairPeriodSec: 0.5 },
+  hemorrhage: { id: 'hemorrhage', maxStacks: 8 },
 };
 
 describe('ModifierSchema', () => {

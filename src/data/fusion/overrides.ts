@@ -45,6 +45,29 @@ export const OVERRIDES: Readonly<Partial<Record<FusionKey, FusionOverride>>> = {
   // 冰召喚「霜蜂」 (gd §5.2): drone impacts add 12% chill; an impact on a frozen enemy (no boss)
   // shatters it.
   'summon.ice': { rule: { id: 'frostBee', frostPct: 0.12 } },
+  // 冰火「熱震」 (gd §5.2): a freeze ignites the target 2 stacks; a frozen enemy that is ignited
+  // takes one 200% hit (the thaw waits on the engine, src/sim/rules/frostFusions.ts).
+  'ice.fire': { rule: { id: 'thermalShock', burnStacks: 2, hitPct: 2 } },
+  // 冰雷「超導」 (gd §5.2): a freeze arcs to the 3 nearest enemies, each arc +20% chill; a shocked
+  // enemy's chill builds ×1.5. The arcs' hit (50%) is B3's initial value.
+  'ice.lightning': {
+    rule: { id: 'superconduct', arcs: 3, arcDamagePct: 0.5, frostPct: 0.2, shockFrostMore: 0.5 },
+  },
+  // 冰靈「冰晶哨」 (gd §5.2): a shatter leaves, 25% of the time, a 5 s ice sentry that shoots
+  // cones, at most 4. Its cones (5 shots of 40%) are B3's initial values.
+  'ice.summon': {
+    rule: { id: 'frostSentry', chance: 0.25, lifeSec: 5, shots: 5, damagePct: 0.4, maxLive: 4 },
+  },
+  // 火雷「電漿」 (gd §5.2): each explosion arcs from every burning enemy in it at the nearest enemy,
+  // at most 3 a bomb; shocked enemies take +30% burn damage. The arc's hit (50%) is B3's.
+  'fire.lightning': {
+    rule: { id: 'plasma', arcsPerBlast: 3, arcDamagePct: 0.5, shockBurnMore: 0.3 },
+  },
+  // 雷召喚「雷網蜂」 (gd §5.2): every 0.5 s each drone links to its nearest other drone; every
+  // 0.25 s each enemy on a link takes a 10% hit and a shock stack.
+  'summon.lightning': {
+    rule: { id: 'stormWeb', damagePct: 0.1, periodSec: 0.25, pairPeriodSec: 0.5 },
+  },
 };
 
 /** Fusions accepted outside the band, each with the reason the batch PR quotes (F21). */

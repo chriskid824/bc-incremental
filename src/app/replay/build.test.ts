@@ -346,8 +346,8 @@ describe('resolveReplayBuild (docs/v3 C10 design §1.7; B5’s dev start options
     const preset = resolveReplayBuild({ kind: 'preset', id: 'renderStress' }, content, FULL_SCOPE);
     expect([preset.web, preset.progress]).toEqual([null, null]);
     expect(preset.run.testModules).toHaveLength(4);
-    // 熔核 has its center from B1; 霜晶 is still 製作中.
-    expect(() => resolveSpec(previewSpec('ice'))).toThrow(/製作中/);
+    // 熔核 has its center from B1 and 霜晶 from B3; 雷塔 is still 製作中.
+    expect(() => resolveSpec(previewSpec('lightning'))).toThrow(/製作中/);
     expect(resolveSpec(fusionClipSpec('ice.fire', { content: 'fixture' })).web?.character).toBe(
       'ice',
     );
