@@ -47,7 +47,10 @@ export const FREEZE_LIST_RADIUS = 90;
  * the oldest effect zone, counted in zonesEvicted.
  */
 export const ZONE_CAP = 64;
-/** Effect zones one source keeps at once; its next one evicts its own oldest. */
+/**
+ * Effect zones one source keeps at once; its next one evicts its own oldest. The zones of a
+ * groundZone effect with maxLive (E11) count in that effect's own cap instead, at most this.
+ */
 export const ZONE_SOURCE_CAP = 16;
 /** Signature zones live at once, apart from the effect zones; the next evicts the oldest. */
 export const SIGNATURE_ZONE_CAP = 16;

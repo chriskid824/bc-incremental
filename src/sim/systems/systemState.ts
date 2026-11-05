@@ -19,6 +19,7 @@ import {
   REPEAT_CHARGE_CAP,
   SIGNATURE_ZONE_CAP,
   ZONE_CAP,
+  ZONE_SOURCE_CAP,
 } from '../caps';
 import type { CompiledBuild } from '../build/compile';
 import { IN_ZONE } from '../build/eval';
@@ -138,8 +139,23 @@ export interface ZonePool extends ZonePoolState {
   readonly slow: Float64Array;
   /** 1: its pulses mark the enemies in it for inZone (stampSources). */
   readonly stamp: Uint8Array;
-  /** Live effect zones per source index (ZONE_SOURCE_CAP). */
+  /**
+   * Live effect zones per source index (ZONE_SOURCE_CAP), apart from those an effect's own cap
+   * counts (capEffect).
+   */
   readonly perSource: Uint8Array;
+  /**
+   * Each effect's own zone cap, by its index in CompiledBuild.effects: a groundZone's maxLive
+   * (E11); 0 for every other effect, whose zones count in perSource.
+   */
+  readonly effectCap: Uint8Array;
+  /** Live zones of each effect with an own cap, by effect index. */
+  readonly perEffect: Uint8Array;
+  /**
+   * The counter each zone is in, by record: the index of the effect whose own cap counts it, or
+   * −1 for its source's (perSource), and for a signature zone (liveSignature).
+   */
+  readonly capEffect: Int32Array;
   /** The last zone id given. */
   nextId: number;
   /** A zone has slowed an enemy this run: movement takes its slow path from then on. */
@@ -156,7 +172,31 @@ function markZoneSources(conds: readonly CompiledCondition[] | null, out: Uint8A
   for (const c of conds) if (c.code === IN_ZONE) out[c.a] = 1;
 }
 
-/** An empty pool for `build`, whose inZone conditions decide which sources mark enemies. */
+/**
+ * Each groundZone effect's maxLive (E11) by effect index, 0 for none. Data validation keeps it
+ * in [1, ZONE_SOURCE_CAP]; an effect a module compiled (BuildCompiler.addEffect) skips that, so
+ * one outside it throws here.
+ */
+function effectCaps(build: CompiledBuild): Uint8Array {
+  const caps = new Uint8Array(build.effects.length);
+  build.effects.forEach((fx, f) => {
+    const spec = fx.spec;
+    if (spec.kind !== 'groundZone' || spec.maxLive === undefined) return;
+    const max = spec.maxLive;
+    if (!(Number.isInteger(max) && max >= 1 && max <= ZONE_SOURCE_CAP)) {
+      throw new Error(
+        `groundZone effect ${f}: maxLive must be an integer in [1, ${ZONE_SOURCE_CAP}] (got ${max})`,
+      );
+    }
+    caps[f] = max;
+  });
+  return caps;
+}
+
+/**
+ * An empty pool for `build`, whose inZone conditions decide which sources mark enemies and whose
+ * groundZone effects' maxLive their own caps.
+ */
 export function createZonePool(build: CompiledBuild): ZonePool {
   const n = ZONE_CAP + SIGNATURE_ZONE_CAP;
   // Record 0 on top, so a run's records are first taken in order and `payload` grows packed.
@@ -191,6 +231,9 @@ export function createZonePool(build: CompiledBuild): ZonePool {
     slow: new Float64Array(n),
     stamp: new Uint8Array(n),
     perSource: new Uint8Array(MAX_SOURCES),
+    effectCap: effectCaps(build),
+    perEffect: new Uint8Array(build.effects.length),
+    capEffect: new Int32Array(n),
     nextId: 0,
     slowApplied: false,
     stampSources,

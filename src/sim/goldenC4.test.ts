@@ -2765,6 +2765,69 @@ const frostGainModule = (): TestModule => (b) => {
   b.flags.frostGainBoss = 0.5;
 };
 
+/**
+ * E11's own zone cap (GroundZoneSpec.maxLive; the gap map's E11, lead rulings Z1-Z7): the M1
+ * volley, chilling fast with a chain jump, and two of the center's groundZone triggers. Each
+ * freeze drops a small zone of radius 60 for 2 s that only chills, at maxLive 4 (◆凍土's shape,
+ * gd:104 「凍結的敵人周圍 60 變成 2 秒霜地」), and every 0.25 s a large zone of radius 200 for
+ * 5 s lands on the densest spot, hitting and chilling (門檻 暴風雪's, gd:114, at a rate that fills
+ * the center's 16). From wave 12 of the fixture waves the freezes keep the small zones at their
+ * own cap of 4 and the 0.25 s rate keeps the large ones at the source's 16: each evicts only its
+ * own oldest, the small ones never count in the source's 16, and the pool's 64 is never reached.
+ */
+const ZONE_CAP_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    frostOnHit: 0.5,
+    chainCount: 1,
+    attackSpeed: 6,
+    projectileCount: 2,
+  },
+  maskProbeMods(),
+  {
+    triggers: [
+      {
+        source: 'center',
+        spec: {
+          on: 'freeze',
+          do: [
+            {
+              kind: 'groundZone',
+              radius: 60,
+              durationSec: 2,
+              damagePctPerSec: 0,
+              addFrostPerSec: 0.2,
+              maxLive: 4,
+            },
+          ],
+        },
+      },
+      {
+        source: 'center',
+        spec: {
+          on: 'periodic',
+          every: 0.25,
+          target: { pick: 'densest' },
+          do: [
+            {
+              kind: 'groundZone',
+              radius: 200,
+              durationSec: 5,
+              damagePctPerSec: 0.6,
+              addFrostPerSec: 0.4,
+            },
+          ],
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3271,6 +3334,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [frostGainModule()],
     expected: ['ca215a045e5e26c1', '94329b45724f7c45'],
   },
+  {
+    name: 'zoneCap',
+    config: { stats: ZONE_CAP_STATS, rules: [], startWave: 12 },
+    expected: ['11bd8ca20b9c69ae', '193e4d088bbc1fce'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -3378,8 +3446,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E6's thaw and frostGain are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([68, 'thaw', 'frostGain']);
+    // The count docs/ARCHITECTURE.md gives: E6's frostGain and E11's zoneCap are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([69, 'frostGain', 'zoneCap']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -6281,6 +6349,94 @@ describe('golden C4 runs', () => {
         'normal shocked': { 1.5: 26 },
         'boss plain': { 1.5: 1 },
         'boss shocked': { 2: 9 },
+      },
+    });
+  });
+
+  it('keeps zoneCap’s small zones at their own cap of 4 and its large ones at the center’s 16, each evicting only its own, the small ones never in the source’s count (E11)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'zoneCap') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each live zone's radius, by id.
+      const radius = new Map<number, number>();
+      const live = { 60: 0, 200: 0 };
+      const c = {
+        freezes: 0,
+        small: 0,
+        large: 0,
+        // Evictions as "<evicted radius> by <new zone's radius>".
+        evicted: {} as Record<string, number>,
+        peak: { 60: 0, 200: 0 },
+        firstAtCap: { 60: -1, 200: -1 },
+        sources: [] as number[],
+        miscounted: 0,
+      };
+      const sources = new Set<number>();
+      watchRun(entry, seed, (now, events, ctx) => {
+        events.forEach((event, i) => {
+          if (event.type === 'freeze') c.freezes++;
+          else if (event.type === 'zone') {
+            const r = event.radius as 60 | 200;
+            radius.set(event.id, r);
+            sources.add(event.source);
+            if (r === 60) c.small++;
+            else c.large++;
+            live[r]++;
+            c.peak[r] = Math.max(c.peak[r], live[r]);
+            if (live[r] === (r === 60 ? 4 : 16) && c.firstAtCap[r] < 0) c.firstAtCap[r] = now;
+          } else if (event.type === 'zoneEnd') {
+            const r = radius.get(event.id) as 60 | 200;
+            radius.delete(event.id);
+            live[r]--;
+            if (event.evicted) {
+              const next = events[i + 1];
+              const key = `${r} by ${next?.type === 'zone' ? next.radius : 'none'}`;
+              c.evicted[key] = (c.evicted[key] ?? 0) + 1;
+            }
+          }
+        });
+        // The pool's counters each tick: the center's perSource the large zones alone, the
+        // small zones' effect its own count.
+        const z = ctx.sys.zones;
+        const small = ctx.build.effects.findIndex(
+          (fx) => fx.spec.kind === 'groundZone' && fx.spec.maxLive !== undefined,
+        );
+        const center = ctx.build.effects[small]?.source as number;
+        if (
+          z.perSource[center] !== live[200] ||
+          z.perEffect[small] !== live[60] ||
+          z.live !== live[60] + live[200] ||
+          z.effectCap[small] !== 4
+        ) {
+          c.miscounted++;
+        }
+      });
+      c.sources = [...sources];
+      bySeed[seed] = c;
+    }
+    // Every zone the center's; the small zones at 4 from about tick 50 and the large at 16 from
+    // tick 242, each eviction of a zone by a new one of its own kind, none by the pool's 64; the
+    // counters right on every tick.
+    expect(bySeed).toEqual({
+      1: {
+        freezes: 73,
+        small: 73,
+        large: 77,
+        evicted: { '60 by 60': 60, '200 by 200': 61 },
+        peak: { 60: 4, 200: 16 },
+        firstAtCap: { 60: 46, 200: 242 },
+        sources: [0],
+        miscounted: 0,
+      },
+      2: {
+        freezes: 83,
+        small: 83,
+        large: 78,
+        evicted: { '60 by 60': 71, '200 by 200': 62 },
+        peak: { 60: 4, 200: 16 },
+        firstAtCap: { 60: 50, 200: 242 },
+        sources: [0],
+        miscounted: 0,
       },
     });
   });

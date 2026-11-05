@@ -335,6 +335,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         slow: finite.exactOptional(),
         tags: damagePart.tags,
         element: damagePart.element,
+        maxLive: finite.exactOptional(),
       })
       .readonly(),
     z
