@@ -204,8 +204,8 @@ export function createSimulation(
    *    run (emitters.ts, src/sim/emitters/).
    * 6b. drones: the drone pool's slots step in id order (src/sim/systems/drones.ts): drones
    *    move, pick and impact, with their hits, chains and kills resolved inline as in step 7,
-   *    and turrets fire homing shots, which move in step 7. The timed rows (spirits) move, pick
-   *    and impact too; one whose time is up or whose impacts are spent leaves, raising
+   *    and turrets fire homing shots, which move in step 7. The timed rows move, pick and impact
+   *    too (spirits) or stand and queue their fire for step 11 (sentries, E8); one whose time is up or whose impacts are spent leaves, raising
    *    droneExpire, and the rows that left are dropped at the stage's end. The rows a spawnDrone
    *    appends in step 11 first step here on the next tick.
    * 7. projectiles: the volley's projectiles move, retarget, and hit on arrival, and the shot

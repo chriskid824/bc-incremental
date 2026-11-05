@@ -435,11 +435,14 @@ export interface GroundZoneSpec {
  * (default 1) impacts, or when its time is up, the row leaves and raises droneExpire. Rows count in
  * the run's summon cap with the fixed drones and turrets (SUMMON_CAP); a spawn past it, or past
  * `maxLive` (default SUMMON_CAP) live rows of this effect, is refused and counted.
+ * A seated row (`seat`, E8: 冰晶哨, 電蜂) never dashes or impacts: it stands where it appears for
+ * its life and fires `fires` (SpawnDroneFires), its tags and element going to those hits; it takes
+ * no impacts, aim, speed, splash or ailment term, and its damagePct is 0.
  */
 export interface SpawnDroneSpec {
   readonly kind: 'spawnDrone';
   readonly lifeSec: number;
-  /** Required: 0 makes a row that only applies its ailment. */
+  /** Required: 0 makes a row that only applies its ailment, or a seated one. */
   readonly damagePct: number;
   readonly count?: number;
   readonly impacts?: number;
@@ -454,7 +457,33 @@ export interface SpawnDroneSpec {
   readonly tags?: readonly DamageTag[];
   /** The element its hits carry. */
   readonly element?: 'cold' | 'lightning';
+  /** A seated row (E8): it needs `fires`, and `fires` needs it. */
+  readonly seat?: true;
+  readonly fires?: SpawnDroneFires;
 }
+
+/**
+ * What a seated row fires (SpawnDroneSpec.fires, E8): `do`, every round(everySec × 60) / m ticks
+ * (m the attack speed over the base, as a spirit's; at most once a tick, its first on its first
+ * tick), at the alive enemy in the arena nearest to the row within `range` of it (at any distance
+ * without one), from where the row stands, as an effect of its row's trigger at the row's depth
+ * and origin: projectiles start at the row ('target' homing on that enemy, 'fan' aimed at it),
+ * and a chainBolt's first enemy is that one, or with 'nearestToPoint' the one nearest the row
+ * within the chain range ('nearestOther': that nearest one but the pick; `bolts` above 1: that
+ * many nearest the row; `arc`: each first hit drawn from the row). A
+ * row due with no enemy in range fires on the first tick it finds one, banking nothing. `do` is
+ * compiled once with the row's source, coefficient and barrage count, its hits tagged as its own
+ * plus minion and the row's tags, with its own element, or else the row's (a chainBolt's is
+ * lightning).
+ */
+export interface SpawnDroneFires {
+  readonly everySec: number;
+  readonly range?: number;
+  readonly do: SeatedFireSpec;
+}
+
+/** The effects a seated row fires: projectiles (not from 'player') or a chainBolt. */
+export type SeatedFireSpec = ProjectilesSpec | ChainBoltSpec;
 
 /**
  * Repeats of the signature attack (回聲, 多重施法): `count` of them, each the attack again at

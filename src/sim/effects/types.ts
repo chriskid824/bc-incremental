@@ -34,6 +34,8 @@ import {
 import type {
   DetonateSpec,
   EffectSpec,
+  SpawnDroneFires,
+  SpawnDroneSpec,
   TargetSelector,
   TriggerEventId,
   TriggerSpec,
@@ -165,8 +167,9 @@ export interface CompiledEffect {
    * minion and area, plus its tags and element; detonate: its ailment's kind and trigger, plus
    * area with a radius; projectiles: hit, trigger and projectile, plus its tags and element;
    * slashLine: hit and trigger, plus its tags; coinHit and execute: hit and trigger; chainBolt: hit,
-   * trigger, chain and lightning) or of the hit an ailment it applies counts as (applyAilment:
-   * hit and trigger); 0 for the others.
+   * trigger, chain and lightning; a seated row's fire, its own plus minion and its row's tags and
+   * element, compileFire) or of the hit an ailment it applies counts as (applyAilment: hit and
+   * trigger); 0 for the others.
    */
   readonly tags: TagMask;
   /**
@@ -193,6 +196,12 @@ export interface CompiledEffect {
    * enemy of the list (fireOne in dispatch.ts).
    */
   readonly fanout: boolean;
+  /**
+   * A seated spawnDrone's fire (E8): the CompiledBuild.effects index of its compiled fires.do
+   * (compileFire), which compileBuild puts after its trigger's effects and its rows' SpawnSpecs
+   * keep (fireEffect); −1 for every other effect.
+   */
+  readonly fire: number;
 }
 
 /**
@@ -320,6 +329,7 @@ export function shatterEffect(radius: number): CompiledEffect {
     atTarget: false,
     atPlayer: false,
     fanout: false,
+    fire: -1,
   };
 }
 
@@ -489,5 +499,27 @@ export function compileEffect(
     atTarget: target !== undefined && target.pick !== 'player',
     atPlayer: target !== undefined && target.pick === 'player',
     fanout,
+    fire: -1,
   };
+}
+
+/**
+ * A seated row's fire (E8, SpawnDroneFires): `row`'s fires.do compiled as an effect of its own,
+ * with the row's `source`, `coef`, the damage stat and `barrageCount` (compileEffect), its hits'
+ * tags merged once here: the effect's own, plus minion and the row's tags, and its own element
+ * (projectiles' element; a chainBolt's lightning), or else the row's (lead ruling A12: 冰晶哨's
+ * hits are minion, projectile and cold). No selector: the row gives its enemy and point.
+ */
+export function compileFire(
+  row: SpawnDroneSpec,
+  source: number,
+  coef: number,
+  damage: number,
+  barrageCount: number,
+): CompiledEffect {
+  const spec = (row.fires as SpawnDroneFires).do;
+  const fx = compileEffect(spec, source, coef, damage, undefined, barrageCount);
+  const own = spec.kind === 'chainBolt' || spec.element !== undefined;
+  const element = own || row.element === undefined ? 0 : TAG[row.element];
+  return { ...fx, tags: fx.tags | TAG.minion | tagMask(row.tags ?? []) | element };
 }

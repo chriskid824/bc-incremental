@@ -28,6 +28,8 @@ import {
 /** A drone's impacts and a turret's shots, by their tags. */
 const DRONE = { tags: ['minion', 'area'], notTags: ['projectile', 'trigger'] } as const;
 const TURRET = { tags: ['minion', 'projectile'] } as const;
+/** A turret's shots alone: a seated row's fire (E8's sentries) carries 'trigger' too (A12). */
+const TURRET_SHOTS = { tags: ['minion', 'projectile'], notTags: ['trigger'] } as const;
 const SUMMONS = { tags: ['minion'] } as const;
 
 export const SUMMON = defineOuter({
@@ -42,10 +44,10 @@ export const SUMMON = defineOuter({
       }),
       r2: ranked('attackSpeed', 0.06, 4, 'more', TURRET),
       // 加農砲: turrets fire a third as often for ×4 damage, each shot blasting radius 60
-      // (答案：盾兵).
+      // (答案：盾兵). Its ×4 reaches the turrets' shots only, not a sentry's (A12).
       a: answers(
         notable('cannon', {
-          modifiers: [more('damage', 3, TURRET)],
+          modifiers: [more('damage', 3, TURRET_SHOTS)],
           rules: [{ id: 'cannon', rateMult: 1 / 3, splash: 60 }],
         }),
         'shielder',

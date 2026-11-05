@@ -70,6 +70,7 @@ import {
   DRONE_DOCKED,
   DRONE_GUARD,
   DRONE_KIND_DRONE,
+  DRONE_KIND_SENTRY,
   DRONE_KIND_SPIRIT,
   DRONE_KIND_TURRET,
   DRONE_RETURN,
@@ -2828,6 +2829,67 @@ const ZONE_CAP_STATS = makeStats(
   },
 );
 
+/**
+ * E8's seated rows (lead rulings T1-T7): M1's volley over FREEZE_LIST_STATS' numbers (crits, a
+ * chain jump, frost on half the hits, a high max life and maskProbeMods()), without its freeze
+ * triggers. 冰晶哨's shape (gd:528 「碎裂時 25% 機率留下 5 秒的冰晶哨，會射冰錐（最多 4 座）」):
+ * a quarter of the shatters leave a cold sentry of 5 s where the victim stood, at most 4, which
+ * fires a fan of 3 at 30° every 0.5 s at the enemy nearest to it within 300, each shot 30 % of
+ * the damage stat, tagged minion, projectile and cold. 電蜂's (gd:531, a sentry here): every
+ * fourth attack leaves a sentry of 5 s on the enemy nearest to the player, at most 3, which
+ * fires a chainBolt of 2 jumps at 50 % every second at the enemy nearest to it at any distance.
+ * Both reach their maxLive; spawns past it are refused and counted (the bees' 18 at each seed,
+ * one cone's at seed 2); the sentries' hits chill
+ * and their kills shatter too, the trigger's own rows aside (rule 3).
+ */
+const ICE_SENTRY_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'outer.summon',
+    {
+      on: 'shatter',
+      when: [{ chance: 0.25 }],
+      do: [
+        {
+          kind: 'spawnDrone',
+          lifeSec: 5,
+          damagePct: 0,
+          maxLive: 4,
+          seat: true,
+          element: 'cold',
+          fires: {
+            everySec: 0.5,
+            range: 300,
+            do: { kind: 'projectiles', count: 3, aim: 'fan', spreadDeg: 30, damagePct: 0.3 },
+          },
+        },
+      ],
+    },
+  ],
+  [
+    'outer.lightning',
+    {
+      on: 'nthAttack',
+      every: 4,
+      target: { pick: 'nearest' },
+      do: [
+        {
+          kind: 'spawnDrone',
+          lifeSec: 5,
+          damagePct: 0,
+          maxLive: 3,
+          seat: true,
+          fires: { everySec: 1, do: { kind: 'chainBolt', jumps: 2, damagePct: 0.5 } },
+        },
+      ],
+    },
+  ],
+];
+const ICE_SENTRY_STATS = makeStats(FREEZE_LIST_STATS.values, maskProbeMods(), {
+  triggers: ICE_SENTRY_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+  conversions: [],
+  emitters: [],
+});
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3339,7 +3401,16 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: ZONE_CAP_STATS, rules: [], startWave: 12 },
     expected: ['11bd8ca20b9c69ae', '193e4d088bbc1fce'],
   },
+  {
+    name: 'iceSentry',
+    config: { stats: ICE_SENTRY_STATS, rules: [], startWave: 12 },
+    expected: ['0591d0fdc929cdfc', '856dd71b40f5bc2e'],
+  },
 ];
+
+/** iceSentry's shatter row: the build's first spawnDrone effect. */
+const iceRow = (ctx: RunContext): number =>
+  ctx.build.effects.findIndex((fx) => fx.kind === 'spawnDrone');
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
 function nonzeroCounters(counters: Readonly<Record<CounterId, number>>): [CounterId, number][] {
@@ -3446,8 +3517,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E6's frostGain and E11's zoneCap are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([69, 'frostGain', 'zoneCap']);
+    // The count docs/ARCHITECTURE.md gives: E11's zoneCap and E8's iceSentry are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([70, 'zoneCap', 'iceSentry']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -6438,6 +6509,81 @@ describe('golden C4 runs', () => {
         sources: [0],
         miscounted: 0,
       },
+    });
+  });
+
+  it('leaves iceSentry’s sentries where the shatters and the picks were, each at its maxLive, firing minion hits that stand still (E8)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'iceSentry') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each sentry's spot, by id; the shatters' spots of this tick and the last.
+      const spots = new Map<number, string>();
+      let shatters = new Set<string>();
+      const c = {
+        spawned: [0, 0],
+        onShatter: 0,
+        maxLive: [0, 0],
+        moved: 0,
+        depths: [] as number[],
+        iceHits: 0,
+        boltHits: 0,
+        otherMinionHits: 0,
+        capped: 0,
+      };
+      watchRun(entry, seed, (_now, events, ctx) => {
+        const ds = ctx.sys.drones;
+        const last = shatters;
+        shatters = new Set();
+        for (const event of events) {
+          if (event.type === 'shatter') shatters.add(`${event.x},${event.y}`);
+          if (event.type !== 'hit' || (event.tags & TAG.minion) === 0) continue;
+          // Crits aside: the cones' hits are minion, projectile and cold; the bolts' chain and
+          // lightning.
+          const tags = event.tags & ~TAG.crit;
+          if (tags === (TAG.hit | TAG.trigger | TAG.projectile | TAG.minion | TAG.cold)) {
+            c.iceHits++;
+          } else if (tags === (TAG.hit | TAG.trigger | TAG.chain | TAG.lightning | TAG.minion)) {
+            c.boltHits++;
+          } else c.otherMinionHits++;
+        }
+        const live = [0, 0];
+        for (let s = 0; s < ds.count; s++) {
+          if (ds.kind[s] !== DRONE_KIND_SENTRY) continue;
+          // The shatter trigger's row is the build's first spawnDrone effect.
+          const n = (ds.spec[s] as number) === iceRow(ctx) ? 0 : 1;
+          live[n] = (live[n] as number) + 1;
+          const id = ds.id[s] as number;
+          const spot = `${ds.x[s]},${ds.y[s]}`;
+          const seen = spots.get(id);
+          if (seen === undefined) {
+            spots.set(id, spot);
+            c.spawned[n] = (c.spawned[n] as number) + 1;
+            if (n === 0 && (last.has(spot) || shatters.has(spot))) c.onShatter++;
+            if (!c.depths.includes(ds.depth[s] as number)) c.depths.push(ds.depth[s] as number);
+          } else if (seen !== spot) c.moved++;
+        }
+        c.maxLive = c.maxLive.map((m, n) => Math.max(m, live[n] as number));
+        c.capped = ctx.counters.summonCapped;
+      });
+      c.depths.sort();
+      bySeed[seed] = c;
+    }
+    // Every cone sentry where a shatter was; both rows at their maxLive, the bees refused most;
+    // no sentry moved; seed 1's sentries' kills shatter too, leaving one at depth 2.
+    const run = (spawned: number[], depths: number[], hits: number[], capped: number) => ({
+      spawned,
+      onShatter: spawned[0],
+      maxLive: [4, 3],
+      moved: 0,
+      depths,
+      iceHits: hits[0],
+      boltHits: hits[1],
+      otherMinionHits: 0,
+      capped,
+    });
+    expect(bySeed).toEqual({
+      1: run([8, 12], [1, 2], [86, 180], 18),
+      2: run([10, 12], [1], [115, 168], 19),
     });
   });
 

@@ -26,6 +26,7 @@ import type {
   Condition,
   ConversionSpec,
   EffectSpec,
+  SpawnDroneSpec,
   TargetPick,
   TargetSelector,
   TriggerEventId,
@@ -1438,6 +1439,7 @@ function effectIssues(
     case 'spawnDrone':
       issues.push(...spawnDroneIssues(effect));
       delivery(effect.tags);
+      if (effect.fires !== undefined) issues.push(...firesIssues(effect.fires, on, zonesRead));
       break;
     case 'detonate':
       if (effect.fraction !== undefined && !(effect.fraction > 0 && effect.fraction <= 1)) {
@@ -1691,8 +1693,9 @@ const SPAWN_IMPACTS_MAX = 32767;
 /**
  * Ranges of a spawnDrone: a life above 0, a hit of 0 or more, whole counts (impacts up to 32767,
  * maxLive up to the summon cap), an aim the simulation runs, a speed above 0 and a splash of 0 or
- * more, all finite; ailment terms only with an ailment, as a groundZone's; and something to do:
- * a hit or an ailment.
+ * more, all finite; ailment terms only with an ailment, as a groundZone's; a seat and fires only
+ * together (E8), a seated row without impacts, aim, speed, splash or ailment terms and with
+ * damagePct 0; and something to do: a hit, an ailment or fires.
  */
 function spawnDroneIssues(effect: Extract<EffectSpec, { kind: 'spawnDrone' }>): string[] {
   const issues: string[] = [];
@@ -1739,8 +1742,84 @@ function spawnDroneIssues(effect: Extract<EffectSpec, { kind: 'spawnDrone' }>): 
   ) {
     issues.push('ailmentStacks and ailmentDamagePct need ailment');
   }
-  if (damagePct === 0 && effect.ailment === undefined) {
+  // A seated row (E8) only fires: none of the row's own impact, pick, dash or ailment terms.
+  const { seat, fires } = effect;
+  if (seat !== undefined && seat !== true) {
+    issues.push(`seat must be true or left out (got ${String(seat)})`);
+  } else if (seat === true && fires === undefined) {
+    issues.push('seat needs fires: a seated row never dashes or impacts, it only fires');
+  }
+  if (fires !== undefined && seat !== true) {
+    issues.push('fires needs seat: true; a row that dashes and impacts fires nothing');
+  }
+  if (seat === true) {
+    for (const field of SEATED_LEFT_OUT) {
+      if (effect[field] !== undefined) {
+        issues.push(`${field} does not apply to a seated row, which never dashes or impacts`);
+      }
+    }
+    if (damagePct !== undefined && damagePct !== 0) {
+      issues.push(
+        `damagePct must be 0 on a seated row, whose hits are its fires' (got ${damagePct})`,
+      );
+    }
+  }
+  if (damagePct === 0 && effect.ailment === undefined && fires === undefined) {
     issues.push('spawnDrone does nothing: give it damagePct > 0 or ailment');
+  }
+  return issues;
+}
+
+/** A seated row's fields that only a row that dashes and impacts takes (E8). */
+const SEATED_LEFT_OUT = [
+  'impacts',
+  'aim',
+  'speed',
+  'splash',
+  'ailment',
+  'ailmentStacks',
+  'ailmentDamagePct',
+] as const;
+
+/** The simulation's ticks a second (TICK_RATE, src/sim/types.ts), which a fire's period counts. */
+const TICKS_PER_SEC = 60;
+
+/**
+ * The enemy a seated row fires at, as a selector would give it: alive when the fire runs, so its
+ * `do` is checked as on an event whose enemy a selector picked (E8).
+ */
+const FIRE_TARGET: TargetSelector = { pick: 'nearest' };
+
+/**
+ * A seated row's fires (SpawnDroneFires, E8): a period of one tick or more, finite; a range above
+ * 0, finite; and a `do` that is a projectiles effect, not from 'player' (it starts where the row
+ * stands), or a chainBolt, checked as that effect is anywhere else (effectIssues), on an enemy the
+ * row picked.
+ */
+function firesIssues(
+  fires: NonNullable<SpawnDroneSpec['fires']>,
+  on: TriggerEventId,
+  zonesRead: boolean,
+): string[] {
+  const issues: string[] = [];
+  const { everySec, range } = fires;
+  if (!(Number.isFinite(everySec) && everySec > 0 && Math.round(everySec * TICKS_PER_SEC) >= 1)) {
+    issues.push(`fires.everySec must be finite with round(everySec × 60) >= 1 (got ${everySec})`);
+  }
+  if (range !== undefined && !(Number.isFinite(range) && range > 0)) {
+    issues.push(`fires.range must be finite and > 0 (got ${range})`);
+  }
+  // The schema takes only the two kinds; data checked without it can still carry another.
+  const fire = fires.do as EffectSpec;
+  if (fire.kind !== 'projectiles' && fire.kind !== 'chainBolt') {
+    issues.push(`fires.do must be a projectiles or chainBolt effect (got ${fire.kind})`);
+    return issues;
+  }
+  if (fire.kind === 'projectiles' && fire.from === 'player') {
+    issues.push("fires.do's projectiles start where the row stands: leave out from 'player'");
+  }
+  for (const problem of effectIssues(fire, on, FIRE_TARGET, false, zonesRead)) {
+    issues.push(`fires.do ${problem}`);
   }
   return issues;
 }

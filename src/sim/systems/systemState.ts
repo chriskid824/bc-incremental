@@ -678,6 +678,14 @@ export interface SpawnSpecs {
    * (蜂王漿's summonDuration, E4): what its spawnDrone executor gives spawnRows.
    */
   readonly lifeTicks: Float64Array;
+  /**
+   * A seated row's fire (E8, its rows DRONE_KIND_SENTRY): its compiled fire effect
+   * (CompiledEffect.fire; −1 for an effect whose rows are spirits), its period in ticks at m = 1,
+   * round(everySec × 60), and its range squared (Infinity without a range).
+   */
+  readonly fireEffect: Int32Array;
+  readonly fireTicks: Float64Array;
+  readonly fireRangeSq: Float64Array;
 }
 
 /** SpawnSpecs.aim: the nearest enemy to the row (pickNearest), or the drones' pick (pickOuter). */
@@ -858,6 +866,12 @@ export interface DronePool extends DroneViewState {
    * impact on it × DroneSurge.damageMult; 0 otherwise (at the fill, for every appended row).
    */
   readonly surging: Uint8Array;
+  /**
+   * A sentry's clock (E8): what is left of its period before its next fire, in ticks at m = 1,
+   * run down by m a tick; due at 0 or below, and 0 for every appended row, so a new sentry is
+   * due at once. Only a sentry reads it.
+   */
+  readonly fireLeft: Float64Array;
   /** Slots marked as leaving in the current stage, dropped at its end (0 outside the stage). */
   left: number;
   /** DroneLayout.spawnSpecs, with its own `live` counts; null in a build without spawnDrone. */
@@ -990,6 +1004,7 @@ export function createDronePool(
     roleSpeed: slots(Float64Array, layout.roleSpeed),
     size: slots(Float64Array, layout.size),
     surging: new Uint8Array(cap),
+    fireLeft: new Float64Array(cap),
     left: 0,
     specs: spawnSpecs === null ? null : { ...spawnSpecs, live: new Int32Array(spawnSpecs.live) },
     stepBase: Float64Array.from(layout.stepBase),

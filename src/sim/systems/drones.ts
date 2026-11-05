@@ -61,6 +61,15 @@
  * at the stage's end, the others keeping their order. A spawn past the summon cap, fixed and timed
  * rows together, or past its effect's maxLive is refused and counted (summonCapped).
  *
+ * A seated row's effect (E8: `seat` and `fires`) appends sentries (DRONE_KIND_SENTRY) in the
+ * same way, with the same life, depth, origin, maxLive and caps: a sentry is a timed row that
+ * stands where it appeared (DRONE_FIXED), with no target, heading or memory, and fires
+ * (sentryStep): every round(everySec × 60) / m ticks while it finds an enemy, it queues its fire
+ * effect, compiled once with the spawning one, at the row's depth and origin with the nearest
+ * enemy in its range as the event's enemy and its position as the event's point (sentryPick). It
+ * leaves only on time. The turret policies, droneCountMult, dronesStay and E4's roles never reach
+ * one; summonDuration scales its life, and 鎖定信標 and 集火指令 its pick.
+ *
  * The summon policies (C5.9) are BuildFlags that B1's rule modules set: 鎖定信標
  * (summonEliteFirst) runs pickOuter's and pickNearest's tiers over the elites and bosses first
  * and makes them a turret's focus targets at any distance; 蟲海 multiplies the drones at the fill
@@ -117,7 +126,9 @@ import { emitCenterEvent } from '../effects/centerEvents';
 import { fire } from '../effects/dispatch';
 import { applyStacks, drainRepeatCharges, durationOf } from '../effects/execute';
 import { PRIMARY, REPEAT } from '../effects/flags';
+import { enqueue } from '../effects/queue';
 import { EVENT } from '../effects/types';
+import type { CompiledEffect } from '../effects/types';
 import { BASE_ATTACK_SPEED, nextShotSteady, SIGNATURE } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { countAttack } from '../emitters/volley';
@@ -127,9 +138,11 @@ import {
   ARENA_WIDTH,
   DRONE_DASH,
   DRONE_DOCKED,
+  DRONE_FIXED,
   DRONE_GUARD,
   DRONE_HOVER,
   DRONE_KIND_DRONE,
+  DRONE_KIND_SENTRY,
   DRONE_KIND_SPIRIT,
   DRONE_KIND_TURRET,
   DRONE_RETURN,
@@ -170,10 +183,12 @@ export function stepDrones(ctx: RunContext): void {
     }
     prevX[s] = x[s] as number;
     prevY[s] = y[s] as number;
-    const k = kind[s];
-    // A spirit has no emitter: nothing reads emitters[owner] for one.
-    if (k === DRONE_KIND_SPIRIT) {
-      spiritStep(ctx, ds, s, asMult, now);
+    const k = kind[s] as number;
+    // A timed row, a spirit or a sentry (E8), has no emitter: nothing reads emitters[owner] for
+    // one. A fixed row pays this one test.
+    if (k >= DRONE_KIND_SPIRIT) {
+      if (k === DRONE_KIND_SPIRIT) spiritStep(ctx, ds, s, asMult, now);
+      else sentryStep(ctx, ds, s, asMult);
       continue;
     }
     const em = emitters[owner[s] as number] as EmitterRuntime;
@@ -683,6 +698,83 @@ function spiritImpact(
     const e = splash[i] as Enemy;
     if (e.alive) applyStacks(ctx, ailment, e, p, base, stacks, depth, origin);
   }
+}
+
+/**
+ * A sentry (E8, DRONE_KIND_SENTRY; lead rulings T4-T6), which stands where it appeared: at m ≤ 0,
+ * or NaN, it does nothing, its clock held. Otherwise, while its clock (DronePool.fireLeft) is
+ * above 0, it runs down by m. Once it is due (0 or below), the sentry fires when it finds an enemy
+ * (sentryPick), and otherwise waits at 0, banking nothing, to fire on the first stage it finds
+ * one. A fire queues its effect's fire (SpawnSpecs.fireEffect) as an effect of the trigger that
+ * spawned it, at the row's depth and origin, its target the event's enemy and the row's position
+ * the event's point, with value 0 and no flags; it runs in this tick's effect phase. Then the clock
+ * gains the period, round(everySec × 60) ticks, and runs down by m: what a due clock was below 0
+ * carries into the next period, so at a steady m the fires are period / m ticks apart in the long
+ * run, and at most one a stage; a clock past one period below 0 (period / m under a tick) starts
+ * the period from 0. A fire counts no attack and raises no center event.
+ */
+function sentryStep(ctx: RunContext, ds: DronePool, s: number, m: number): void {
+  if (!(m > 0)) return;
+  const left = ds.fireLeft[s] as number;
+  if (left > 0) {
+    ds.fireLeft[s] = left - m;
+    return;
+  }
+  const specs = ds.specs as SpawnSpecs;
+  const f = ds.spec[s] as number;
+  const x = ds.x[s] as number;
+  const y = ds.y[s] as number;
+  const t = sentryPick(ctx, x, y, specs.fireRangeSq[f] as number);
+  if (t === null) {
+    ds.fireLeft[s] = 0;
+    return;
+  }
+  const fire = specs.fireEffect[f] as number;
+  const source = (ctx.build.effects[fire] as CompiledEffect).source;
+  const depth = ds.depth[s] as number;
+  enqueue(ctx, fire, depth, ds.origin[s] as number, source, t, x, y, ZERO, 0);
+  ds.fireLeft[s] = Math.max(0, left + (specs.fireTicks[f] as number)) - m;
+}
+
+/**
+ * The enemy a sentry at (x, y) fires at (E8, lead ruling T5): the alive enemy whose center is in
+ * the arena and within `r2` (its range squared) of the row, the nearest to it by squared center
+ * distance, the lowest id on ties. Under 集火指令 (BuildFlags.summonHighestHp) the highest-hp such
+ * one instead (strict gt, ties to the lowest id), and under 鎖定信標 (summonEliteFirst) the nearest
+ * tough such one first, as pickNearest orders its tiers. No memory and no chase: sentries claim no
+ * enemy, and no row's pick sees them. One forward scan of the enemies, in id order. Draws nothing.
+ */
+export function sentryPick(ctx: RunContext, x: number, y: number, r2: number): Enemy | null {
+  const flags = ctx.build.flags;
+  const top = flags.summonHighestHp;
+  const tough = !top && flags.summonEliteFirst;
+  const enemies = ctx.enemies;
+  let best: Enemy | null = null;
+  let bestD = Infinity;
+  let bestT: Enemy | null = null;
+  let bestTD = Infinity;
+  // Forwards with < (gt for hp), so ties keep the lower id.
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i] as Enemy;
+    if (!e.alive) continue;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    const d = dx * dx + dy * dy;
+    if (d > r2 || outOfArena(e)) continue;
+    if (top) {
+      if (best === null || gt(e.hp, best.hp)) best = e;
+      continue;
+    }
+    if (d < bestD) {
+      bestD = d;
+      best = e;
+    }
+    if (tough && e.tough && d < bestTD) {
+      bestTD = d;
+      bestT = e;
+    }
+  }
+  return bestT ?? best;
 }
 
 /** An impact's same-enemy cooldown at frequency m: coolTicks / m, rounded up, in [1, 90]. */
@@ -1237,11 +1329,15 @@ export function spawnRows(
   const now = ctx.now;
   const until = Math.min(NEVER_LEAVES, now + lifeTicks);
   const impacts = specs.impacts[f] as number;
+  // A seated row's effect (E8) appends sentries, fixed where they stand.
+  const sentry = (specs.fireEffect[f] as number) >= 0;
+  const rowKind = sentry ? DRONE_KIND_SENTRY : DRONE_KIND_SPIRIT;
+  const rowMode = sentry ? DRONE_FIXED : DRONE_HOVER;
   for (let k = 0; k < placed; k++) {
     const s = ds.count++;
     ds.id[s] = ds.nextId++;
-    ds.kind[s] = DRONE_KIND_SPIRIT;
-    ds.mode[s] = DRONE_HOVER;
+    ds.kind[s] = rowKind;
+    ds.mode[s] = rowMode;
     ds.x[s] = x;
     ds.y[s] = y;
     ds.prevX[s] = x;
@@ -1272,6 +1368,7 @@ export function spawnRows(
     ds.roleSpeed[s] = 1;
     ds.size[s] = 1;
     ds.surging[s] = 0;
+    ds.fireLeft[s] = 0;
   }
   live[f] = (live[f] as number) + placed;
   ctx.state.droneCount = ds.count;
@@ -1355,4 +1452,5 @@ function moveRow(ds: DronePool, from: number, to: number): void {
   ds.roleSpeed[to] = ds.roleSpeed[from] as number;
   ds.size[to] = ds.size[from] as number;
   ds.surging[to] = ds.surging[from] as number;
+  ds.fireLeft[to] = ds.fireLeft[from] as number;
 }
