@@ -52,8 +52,8 @@ export const BARRAGE = defineOuter({
       // 子母彈: a small projectile that kills splits into 3 (the split ones do not split again).
       a: notable('cluster', { rules: [{ id: 'clusterShot', count: 3, chance: 1 }] }),
       r3: ranked('damage', 0.08, 3, 'increased', BULLETS),
-      // 分裂's split chance (A19 (a), E10b's barrageSplit): base 0, so 'flat'. It splits only
-      // under ◆子母彈 (split null without it), which this rank sits behind.
+      // 分裂's split chance (A19 (a), E10b's barrageSplit): base 0, so 'flat'. Without ◆子母彈 a
+      // kill splits into 3 at this chance (EB); with it, the chance adds to ◆'s.
       r4: ranked('barrageSplit', 0.15, 3, 'flat'),
       // 聚焦: while a boss is alive every small projectile goes at it, +20% (答案：Boss; A20 (b)).
       b: answers(

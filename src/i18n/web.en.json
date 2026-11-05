@@ -599,6 +599,7 @@
   "web.branch.outer.barrage.split": "Split",
   "web.node.outer.barrage.split.cluster.name": "Cluster Rounds",
   "web.node.outer.barrage.split.cluster.desc": "A small projectile that kills splits into 3 (the split ones do not split again).",
+  "web.node.outer.barrage.split.r4.desc": "A small projectile that kills has a +15% chance to split into 3 (the split ones do not split again).",
   "web.node.outer.barrage.split.focus.name": "Focus",
   "web.node.outer.barrage.split.focus.desc": "While a Boss is alive, every small projectile goes at it and deals +20% (its burn, poison and bleed too).",
   "web.node.outer.barrage.main.focus-fire.name": "Concentrated Fire",

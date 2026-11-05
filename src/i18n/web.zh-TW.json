@@ -599,6 +599,7 @@
   "web.branch.outer.barrage.split": "分裂",
   "web.node.outer.barrage.split.cluster.name": "子母彈",
   "web.node.outer.barrage.split.cluster.desc": "小彈擊殺時分裂成 3 發（分裂出來的不再分裂）",
+  "web.node.outer.barrage.split.r4.desc": "小彈擊殺時 +15% 機率分裂成 3 發（分裂出來的不再分裂）",
   "web.node.outer.barrage.split.focus.name": "聚焦",
   "web.node.outer.barrage.split.focus.desc": "有 Boss 在場時，所有小彈都打它，傷害 +20%（燃燒、中毒、流血也一樣）",
   "web.node.outer.barrage.main.focus-fire.name": "集火",
