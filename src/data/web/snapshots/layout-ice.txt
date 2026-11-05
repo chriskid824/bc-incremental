@@ -1,0 +1,251 @@
+fusion.ice.barrage.core -965 -488
+fusion.ice.barrage.mastery -1312 -688
+fusion.ice.barrage.r1 -1052 -538
+fusion.ice.barrage.r2 -1139 -588
+fusion.ice.barrage.r3 -1225 -638
+fusion.ice.bleed.core 905 -592
+fusion.ice.bleed.mastery 1252 -792
+fusion.ice.bleed.r1 992 -642
+fusion.ice.bleed.r2 1079 -692
+fusion.ice.bleed.r3 1165 -742
+fusion.ice.crit.core 592 905
+fusion.ice.crit.mastery 792 1252
+fusion.ice.crit.r1 642 992
+fusion.ice.crit.r2 692 1079
+fusion.ice.crit.r3 742 1165
+fusion.ice.fire.core -60 -1080
+fusion.ice.fire.mastery -60 -1480
+fusion.ice.fire.r1 -60 -1180
+fusion.ice.fire.r2 -60 -1280
+fusion.ice.fire.r3 -60 -1380
+fusion.ice.lightning.core 1080 -60
+fusion.ice.lightning.mastery 1480 -60
+fusion.ice.lightning.r1 1180 -60
+fusion.ice.lightning.r2 1280 -60
+fusion.ice.lightning.r3 1380 -60
+fusion.ice.poison.core 488 -965
+fusion.ice.poison.mastery 688 -1312
+fusion.ice.poison.r1 538 -1052
+fusion.ice.poison.r2 588 -1139
+fusion.ice.poison.r3 638 -1225
+fusion.ice.summon.core -1080 60
+fusion.ice.summon.mastery -1480 60
+fusion.ice.summon.r1 -1180 60
+fusion.ice.summon.r2 -1280 60
+fusion.ice.summon.r3 -1380 60
+hub.defense.r1 480 -831
+hub.defense.r2 831 -480
+hub.defense.r3 960 0
+hub.defense.r4 831 480
+hub.defense.r5 856 182
+hub.defense.second-life 585 -650
+hub.defense.wave-shield 832 -270
+hub.echo.echo -856 -182
+hub.echo.kill-blast -650 -585
+hub.echo.multicast -832 270
+hub.echo.nova -270 -832
+hub.echo.r1 -831 480
+hub.echo.r2 -960 0
+hub.echo.r3 -831 -480
+hub.echo.r4 -480 -831
+hub.economy.elite-bounty 270 832
+hub.economy.r1 480 831
+hub.economy.r2 0 960
+hub.economy.r3 -480 831
+hub.economy.r4 -182 856
+hub.economy.treasure-sense -585 650
+hub.might.might 0 -960
+hub.rules.gigantism 650 585
+hub.rules.glass-cannon 182 -856
+ice.center.frost.brittle 80 -620
+ice.center.frost.glacier 0 -320
+ice.center.frost.mastery 0 -720
+ice.center.frost.permafrost -80 -620
+ice.center.frost.r1 0 -120
+ice.center.frost.r2 0 -220
+ice.center.frost.r3 80 -420
+ice.center.frost.r4 80 -520
+ice.center.frost.r5 -80 -420
+ice.center.frost.r6 -80 -520
+ice.center.main.absolute-zero 710 -410
+ice.center.main.c1 410 -710
+ice.center.main.c2 820 0
+ice.center.main.c3 410 710
+ice.center.main.c4 -410 710
+ice.center.main.c5 -820 0
+ice.center.main.c6 -410 -710
+ice.center.main.prism -710 -410
+ice.center.main.signature 0 0
+ice.center.main.threshold 0 820
+ice.center.shatter.chain-shatter 277 160
+ice.center.shatter.icicle 577 241
+ice.center.shatter.mastery 624 360
+ice.center.shatter.pulverize 497 379
+ice.center.shatter.r1 104 60
+ice.center.shatter.r2 191 110
+ice.center.shatter.r3 324 279
+ice.center.shatter.r4 410 329
+ice.center.shatter.r5 404 141
+ice.center.shatter.r6 490 191
+ice.center.wall.frost-armour -497 379
+ice.center.wall.frost-nova -277 160
+ice.center.wall.mastery -624 360
+ice.center.wall.preserve -577 241
+ice.center.wall.r1 -104 60
+ice.center.wall.r2 -191 110
+ice.center.wall.r3 -404 141
+ice.center.wall.r4 -490 191
+ice.center.wall.r5 -324 279
+ice.center.wall.r6 -410 329
+outer.barrage.main.bullet-hell -2091 -1138
+outer.barrage.main.entry -1472 -850
+outer.barrage.main.focus-fire -1949 -1125
+outer.barrage.main.threshold -2031 -1242
+outer.barrage.split.cluster -1795 -892
+outer.barrage.split.focus -1899 -1010
+outer.barrage.split.mastery -2054 -1042
+outer.barrage.split.r1 -1621 -792
+outer.barrage.split.r2 -1708 -842
+outer.barrage.split.r3 -1906 -898
+outer.barrage.split.r4 -1993 -948
+outer.barrage.volley.fan -1670 -1108
+outer.barrage.volley.mastery -1929 -1258
+outer.barrage.volley.r1 -1496 -1008
+outer.barrage.volley.r2 -1583 -1058
+outer.barrage.volley.r3 -1731 -1202
+outer.barrage.volley.r4 -1818 -1252
+outer.barrage.volley.ring-shot -1824 -1140
+outer.bleed.deep-wound.lacerate 1795 -892
+outer.bleed.deep-wound.mastery 2054 -1042
+outer.bleed.deep-wound.r1 1621 -792
+outer.bleed.deep-wound.r2 1708 -842
+outer.bleed.deep-wound.r3 1906 -898
+outer.bleed.deep-wound.r4 1993 -948
+outer.bleed.deep-wound.rend 1899 -1010
+outer.bleed.hunt.mastery 1929 -1258
+outer.bleed.hunt.r1 1496 -1008
+outer.bleed.hunt.r2 1583 -1058
+outer.bleed.hunt.r3 1731 -1202
+outer.bleed.hunt.r4 1818 -1252
+outer.bleed.hunt.rupture 1824 -1140
+outer.bleed.hunt.wound-tear 1670 -1108
+outer.bleed.main.anticoagulant 1949 -1125
+outer.bleed.main.entry 1472 -850
+outer.bleed.main.hemorrhage 2031 -1242
+outer.bleed.main.threshold 2091 -1138
+outer.crit.heavy.armour-break 1140 1824
+outer.crit.heavy.execute 1108 1670
+outer.crit.heavy.mastery 1258 1929
+outer.crit.heavy.r1 1008 1496
+outer.crit.heavy.r2 1058 1583
+outer.crit.heavy.r3 1202 1731
+outer.crit.heavy.r4 1252 1818
+outer.crit.main.entry 850 1472
+outer.crit.main.shatter-crit 1125 1949
+outer.crit.main.steady-aim 1242 2031
+outer.crit.main.threshold 1138 2091
+outer.crit.precision.first-blood 1010 1899
+outer.crit.precision.lock-on 892 1795
+outer.crit.precision.mastery 1042 2054
+outer.crit.precision.r1 792 1621
+outer.crit.precision.r2 842 1708
+outer.crit.precision.r3 898 1906
+outer.crit.precision.r4 948 1993
+outer.fire.blaze.fuel 125 -2000
+outer.fire.blaze.long-burn 75 -2150
+outer.fire.blaze.mastery 125 -2300
+outer.fire.blaze.r1 125 -1800
+outer.fire.blaze.r2 125 -1900
+outer.fire.blaze.r3 175 -2100
+outer.fire.blaze.r4 175 -2200
+outer.fire.main.entry 0 -1700
+outer.fire.main.eternal-flame -60 -2380
+outer.fire.main.searing-ground 0 -2250
+outer.fire.main.threshold 60 -2380
+outer.fire.wildfire.mastery -125 -2300
+outer.fire.wildfire.r1 -125 -1800
+outer.fire.wildfire.r2 -125 -1900
+outer.fire.wildfire.r3 -175 -2100
+outer.fire.wildfire.r4 -175 -2200
+outer.fire.wildfire.scorch -75 -2150
+outer.fire.wildfire.sparks -125 -2000
+outer.lightning.arc.charge 2150 75
+outer.lightning.arc.leap 2000 125
+outer.lightning.arc.mastery 2300 125
+outer.lightning.arc.r1 1800 125
+outer.lightning.arc.r2 1900 125
+outer.lightning.arc.r3 2100 175
+outer.lightning.arc.r4 2200 175
+outer.lightning.main.entry 1700 0
+outer.lightning.main.far-thunder 2250 0
+outer.lightning.main.overload 2380 -60
+outer.lightning.main.threshold 2380 60
+outer.lightning.static.charged 2000 -125
+outer.lightning.static.discharge 2150 -75
+outer.lightning.static.mastery 2300 -125
+outer.lightning.static.r1 1800 -125
+outer.lightning.static.r2 1900 -125
+outer.lightning.static.r3 2100 -175
+outer.lightning.static.r4 2200 -175
+outer.poison.contagion.contagion 1010 -1899
+outer.poison.contagion.mastery 1042 -2054
+outer.poison.contagion.r1 792 -1621
+outer.poison.contagion.r2 842 -1708
+outer.poison.contagion.r3 898 -1906
+outer.poison.contagion.r4 948 -1993
+outer.poison.contagion.toxic-cloud 892 -1795
+outer.poison.main.entry 850 -1472
+outer.poison.main.lethal-toxin 1138 -2091
+outer.poison.main.neurotoxin 1125 -1949
+outer.poison.main.threshold 1242 -2031
+outer.poison.virulence.double-dose 1108 -1670
+outer.poison.virulence.mastery 1258 -1929
+outer.poison.virulence.r1 1008 -1496
+outer.poison.virulence.r2 1058 -1583
+outer.poison.virulence.r3 1202 -1731
+outer.poison.virulence.r4 1252 -1818
+outer.poison.virulence.seep 1140 -1824
+outer.summon.emplacement.cannon -2000 -125
+outer.summon.emplacement.mastery -2300 -125
+outer.summon.emplacement.r1 -1800 -125
+outer.summon.emplacement.r2 -1900 -125
+outer.summon.emplacement.r3 -2100 -175
+outer.summon.emplacement.r4 -2200 -175
+outer.summon.emplacement.tesla-tower -2150 -75
+outer.summon.fleet.mastery -2300 125
+outer.summon.fleet.overclock -2150 75
+outer.summon.fleet.r1 -1800 125
+outer.summon.fleet.r2 -1900 125
+outer.summon.fleet.r3 -2100 175
+outer.summon.fleet.r4 -2200 175
+outer.summon.fleet.twin-drones -2000 125
+outer.summon.main.bug-sea -2380 60
+outer.summon.main.entry -1700 0
+outer.summon.main.lock-beacon -2250 0
+outer.summon.main.threshold -2380 -60
+board fusion.ice.aura label -588 1139
+board fusion.ice.barrage label -1139 -588
+board fusion.ice.bleed label 1079 -692
+board fusion.ice.combo label 1139 588
+board fusion.ice.crit label 692 1079
+board fusion.ice.fire label -60 -1280
+board fusion.ice.greed label -692 -1079
+board fusion.ice.lightning label 1280 -60
+board fusion.ice.poison label 588 -1139
+board fusion.ice.summon label -1280 60
+board fusion.ice.thorns label -1079 692
+board hub label 0 -960
+board ice.center label 0 0
+board outer.aura label -975 1689 collapsed -975 1689 200
+board outer.barrage label -1689 -975 collapsed -1689 -975 200
+board outer.bleed label 1689 -975 collapsed 1689 -975 200
+board outer.combo label 1689 975 collapsed 1689 975 200
+board outer.crit label 975 1689 collapsed 975 1689 200
+board outer.fire label 0 -1950 collapsed 0 -1950 200
+board outer.greed label -975 -1689 collapsed -975 -1689 200
+board outer.lightning label 1950 0 collapsed 1950 0 200
+board outer.poison label 975 -1689 collapsed 975 -1689 200
+board outer.summon label -1950 0 collapsed -1950 0 200
+board outer.thorns label -1689 975 collapsed -1689 975 200
+edges 257
+bounds -2380 -2380 2380 2091

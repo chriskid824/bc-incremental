@@ -220,11 +220,11 @@ describe('balance CLI', () => {
   });
 
   it('exits 2 for a character without a center in the registered content', async () => {
-    expect(characterOptions(['--character', 'ice']).content).toBe('registered');
+    expect(characterOptions(['--character', 'lightning']).content).toBe('registered');
     const one = capture();
-    expect(await main(['--character', 'ice'], one)).toBe(2);
+    expect(await main(['--character', 'lightning'], one)).toBe(2);
     expect(one.lines.join('\n')).toMatch(
-      /ice has no center in the registered content \(built: fire, summon\).*--content fixture/s,
+      /lightning has no center in the registered content \(built: fire, ice, summon\).*--content fixture/s,
     );
   });
 

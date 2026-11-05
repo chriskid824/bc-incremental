@@ -77,6 +77,8 @@ export const superconduct: RuleModule<Extract<RuleSpec, { id: 'superconduct' }>>
         stat: 'frostOnHit',
         kind: 'more',
         value: more,
+        // Every hit adds its frost; tagged so the modifier reads per hit, as conditions need.
+        tags: ['hit'],
         when: [{ targetHas: 'shock' }],
       });
     }

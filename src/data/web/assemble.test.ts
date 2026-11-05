@@ -305,9 +305,10 @@ describe('loadContent (§4.8; N-6, P8)', () => {
     const content = web.loadContent();
     expect(vi.mocked(contentIssues)).toHaveBeenCalledTimes(1);
     expect(Object.keys(content.characters)).toEqual(['fire', 'ice', 'lightning', 'summon']);
-    // Validation assembles the web of each character with a center: 熔核's (B1) and 蜂巢's (B2).
+    // Validation assembles the web of each character with a center: 熔核's (B1), 蜂巢's (B2) and
+    // 霜晶's (B3).
     const characters = new Set(vi.mocked(assembled).mock.calls.map((call) => call[1]));
-    expect([...characters]).toEqual(['fire', 'summon']);
+    expect([...characters]).toEqual(['fire', 'ice', 'summon']);
     expect(web.loadContent()).toBe(content);
     expect(web.loadContent()).toBe(content);
     expect(vi.mocked(contentIssues)).toHaveBeenCalledTimes(1);

@@ -504,10 +504,10 @@ describe('the exit code', () => {
 describe('registered content from B1', () => {
   const registered = resolveContent('registered');
 
-  it('plans 熔核 and 蜂巢 in every set, and no check is noCenter', () => {
+  it('plans 熔核, 霜晶 and 蜂巢 in every set, and no check is noCenter', () => {
     for (const set of SETS) {
       const plan = checkSet(set, registered, 'registered');
-      expect(plan.characters).toEqual(['fire', 'summon']);
+      expect(plan.characters).toEqual(['fire', 'ice', 'summon']);
       const rows = evaluate(plan, {});
       expect(rows.filter((row) => row.reason?.id === 'noCenter')).toEqual([]);
     }
