@@ -130,6 +130,7 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   comboStack: 'web.effect.comboStack',
   buff: 'web.effect.buff',
   execute: 'web.effect.execute',
+  thaw: 'web.effect.thaw',
 };
 
 /**
@@ -442,6 +443,7 @@ export const COEF_FORMAT: {
   comboStack: {},
   execute: {},
   buff: {},
+  thaw: {},
 };
 
 // Numbers, as M1 writes them (src/ui/describe.ts).
@@ -624,6 +626,7 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
   };
   switch (spec.kind) {
     case 'execute':
+    case 'thaw':
       return text({});
     case 'applyAilment': {
       const n = spec.stacks ?? 1;
@@ -812,8 +815,9 @@ const isCenterEvent = (on: TriggerEventId): on is CenterEvent =>
 
 /** An effect the engine runs once per enemy of a center event's list (CompiledEffect.fanout). */
 const fansOut = (effect: EffectSpec): boolean =>
-  (effect.kind === 'applyAilment' || effect.kind === 'addFrost' || effect.kind === 'detonate') &&
-  effect.radius === undefined;
+  effect.kind === 'thaw' ||
+  ((effect.kind === 'applyAilment' || effect.kind === 'addFrost' || effect.kind === 'detonate') &&
+    effect.radius === undefined);
 const onPlayer = (effect: EffectSpec): boolean =>
   effect.kind === 'repeatAttack' ||
   effect.kind === 'heal' ||

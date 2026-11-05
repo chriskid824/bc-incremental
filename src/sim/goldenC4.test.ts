@@ -25,6 +25,7 @@ import type { EnemyId, GameData } from '../data/types';
 import { enemySlow, frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
 import { liveBleedStacks, livePoisonStacks } from './ailments/rings';
+import { holdsShock } from './ailments/shock';
 import { compileScaling, scaledValue } from './build/eval';
 import { spreadOf } from './build/size';
 import { SMALL_PROJECTILE_TICKS } from './caps';
@@ -2661,6 +2662,109 @@ const CHAIN_BOLTS_STATS = makeStats(
   },
 );
 
+/** M1's volley with frost on hit, for E6's entries: no ignite or shock unless an entry adds one. */
+const ICE_VALUES = {
+  damage: 6,
+  maxLife: 1e6,
+  critChance: 0.2,
+  critMultiplier: 2,
+  igniteChance: 0,
+  frostOnHit: 0.5,
+  attackSpeed: 6,
+  projectileCount: 2,
+};
+
+/**
+ * E6's ◆連鎖碎裂 (gd:105 「被碎裂打死的敵人也會碎裂」; lead ruling F1): ICE_VALUES' volley at
+ * frostOnHit 1 with shatterDamage 1.5 and shatterRadius 180, so that a shatter kills most enemies
+ * within 180 of it at 150 % of its victim's max life, and BuildFlags.shatterChain from a test
+ * module standing in for B3's, over the fixture waves from wave 12, dense with triangles, squares
+ * and pentagons. It pins the chained shatters of the enemies shatters kill, frozen or not, and
+ * the cascade's end at MAX_DEPTH: two chained shatters at most after a hit's kill, the next
+ * capped.
+ */
+const SHATTER_CHAIN_STATS = makeStats(
+  { ...ICE_VALUES, frostOnHit: 1, shatterDamage: 1.5, shatterRadius: 180 },
+  maskProbeMods(),
+);
+const shatterChainModule = (): TestModule => (b) => void (b.flags.shatterChain = true);
+
+/**
+ * E6's ◆粉碎 (gd:106 「凍結中死亡的五角不分裂」; lead ruling F2): ICE_VALUES' volley and
+ * BuildFlags.frozenNoSplit from a test module standing in for B3's, over v3 waves of 8 s with
+ * pentagons from wave 1 and an elite every wave with 3 affixes (no treasure), from wave 8. It pins
+ * the pentagons frozen at their death leaving no shard, the others their 3, and the 增殖 elites
+ * frozen at their death leaving their 2 children all the same.
+ */
+const NO_SPLIT_STATS = makeStats(ICE_VALUES, maskProbeMods());
+const noSplitModule = (): TestModule => (b) => void (b.flags.frozenNoSplit = true);
+const noSplitData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: [
+        ...TEST_WAVES.rules.slice(0, 2),
+        { enemy: 'pentagon', fromWave: 1, base: 4, perWave: 0.5, maxCount: 20 },
+      ],
+      eliteEvery: 1,
+      bossEvery: 1000,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        affixes: [{ fromWave: 1, count: 3 }],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
+/**
+ * E6's thaw (熱震's 「解凍」, gd:526; lead ruling F3): ICE_VALUES' volley igniting at 0.3, and a
+ * 冰火 trigger that thaws the frozen enemies an ignite reaches (on ailmentApplied burn with
+ * targetHas frozen), from wave 12 of the fixture waves. It pins the thaws at the ignites, each
+ * thawed meter locked for 180 ticks from the thaw, beside the freezes that end on their own, and
+ * a thawed enemy that dies before it freezes again shattering nothing.
+ */
+const THAW_STATS = makeStats(
+  { ...ICE_VALUES, damage: 2, frostOnHit: 1, igniteChance: 0.3 },
+  maskProbeMods(),
+  {
+    triggers: [
+      {
+        source: 'fusion.ice.fire',
+        spec: {
+          on: 'ailmentApplied',
+          when: [{ ailment: 'burn' }, { targetHas: 'frozen' }],
+          do: [{ kind: 'thaw' }],
+        },
+      },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+
+/**
+ * E6's frost gain (超導's gd:527 「感電的敵人冰冷累積 ×1.5」, B5's 霜蝕 at gd:119; lead ruling F4):
+ * ICE_VALUES' volley at frostOnHit 0.125, shocking at 0.5, and BuildFlags.frostGainShocked and
+ * frostGainBoss both 0.5 from a test module standing in for B3's and B5's, from wave 10 of the
+ * fixture waves, its boss among them. It pins each hit's frost: × 1 on a normal enemy, × 1.5 on a
+ * shocked one or the boss, × 2 on the shocked boss.
+ */
+const FROST_GAIN_STATS = makeStats(
+  {
+    ...ICE_VALUES,
+    damage: 3,
+    critChance: 0,
+    projectileCount: 1,
+    frostOnHit: 0.125,
+    shockChance: 0.5,
+    shockMaxStacks: 3,
+  },
+  maskProbeMods(),
+);
+const frostGainModule = (): TestModule => (b) => {
+  b.flags.frostGainShocked = 0.5;
+  b.flags.frostGainBoss = 0.5;
+};
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3143,6 +3247,30 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: CHAIN_BOLTS_STATS, rules: [], startWave: 12 },
     expected: ['8c4f28efce9228f0', '19e7da6f3f42c620'],
   },
+  {
+    name: 'shatterChain',
+    config: { stats: SHATTER_CHAIN_STATS, rules: [], startWave: 12 },
+    modules: () => [shatterChainModule()],
+    expected: ['1a4a0456d886a73e', '73c7070f5fc52c99'],
+  },
+  {
+    name: 'frozenNoSplit',
+    config: { stats: NO_SPLIT_STATS, rules: [], startWave: 8 },
+    data: noSplitData,
+    modules: () => [noSplitModule()],
+    expected: ['4ee5ff613357723e', '626a400e541a839a'],
+  },
+  {
+    name: 'thaw',
+    config: { stats: THAW_STATS, rules: [], startWave: 12 },
+    expected: ['e83223c6b7566a9a', '3ecaacfc6cd25bc2'],
+  },
+  {
+    name: 'frostGain',
+    config: { stats: FROST_GAIN_STATS, rules: [], startWave: 10 },
+    modules: () => [frostGainModule()],
+    expected: ['ca215a045e5e26c1', '94329b45724f7c45'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -3250,8 +3378,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E5's surge and E7's chainBolts are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([64, 'surge', 'chainBolts']);
+    // The count docs/ARCHITECTURE.md gives: E6's thaw and frostGain are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([68, 'thaw', 'frostGain']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -5877,6 +6005,282 @@ describe('golden C4 runs', () => {
         outOfRange: 0,
         badJump: 0,
         unshocked: 0,
+      },
+    });
+  });
+
+  /**
+   * Whether each enemy killed in a tick was frozen at its death, by id: frozen through the tick
+   * as the last tick left it (frozenUntil > now), or frozen by a freeze event of the tick. Call
+   * `kill` for each enemyKilled event in order, `freeze` for each freeze event and `end` with the
+   * tick's context once the tick's events are read.
+   */
+  function freezeWatch() {
+    let frozenUntil = new Map<number, number>();
+    const froze = new Set<number>();
+    return {
+      freeze(id: number): void {
+        froze.add(id);
+      },
+      frozenAt(id: number, now: number): boolean {
+        return (frozenUntil.get(id) ?? 0) > now || froze.has(id);
+      },
+      end(ctx: RunContext): void {
+        frozenUntil = new Map(ctx.enemies.map((e) => [e.id, e.frozenUntil]));
+        froze.clear();
+      },
+    };
+  }
+
+  it('chains the shatters of shatterChain’s shatter kills, frozen or not, two deep at most after a hit’s kill, then caps (E6)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'shatterChain') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const watch = freezeWatch();
+      // Each victim's chain generation and freeze, by its death point, until its shatter: 0
+      // for a kill by anything but a shatter, one more than the killing shatter's otherwise.
+      const victims = new Map<string, { gen: number; frozen: boolean }>();
+      const c = {
+        shatters: 0,
+        chained: 0,
+        unfrozenChained: 0,
+        byGen: [0, 0, 0, 0],
+        unmatched: 0,
+        capped: 0,
+      };
+      watchRun(entry, seed, (now, events, ctx) => {
+        let gen = -1;
+        let lastHit: Extract<SimEvent, { type: 'hit' }> | null = null;
+        for (const event of events) {
+          if (event.type === 'freeze') watch.freeze(event.targetId);
+          else if (event.type === 'hit') lastHit = event;
+          else if (event.type === 'shatter') {
+            const at = `${event.x},${event.y}`;
+            const victim = victims.get(at);
+            victims.delete(at);
+            c.shatters++;
+            if (victim === undefined) {
+              c.unmatched++;
+              gen = -1;
+              continue;
+            }
+            gen = victim.gen;
+            c.byGen[gen] = (c.byGen[gen] ?? 0) + 1;
+            if (gen > 0) {
+              c.chained++;
+              if (!victim.frozen) c.unfrozenChained++;
+            }
+          } else if (event.type === 'enemyKilled') {
+            const byShatter =
+              lastHit !== null &&
+              lastHit.targetId === event.enemyId &&
+              (lastHit.tags & TAG.area) !== 0;
+            victims.set(`${event.x},${event.y}`, {
+              gen: byShatter ? gen + 1 : 0,
+              frozen: watch.frozenAt(event.enemyId, now),
+            });
+          }
+        }
+        watch.end(ctx);
+        c.capped = ctx.counters.triggerDepthCapped;
+      });
+      bySeed[seed] = c;
+    }
+    // Every shatter found its victim; chained ones, many of unfrozen victims, two deep at most
+    // (the third generation, recorded at depth 3, capped).
+    expect(bySeed).toEqual({
+      1: {
+        shatters: 46,
+        chained: 35,
+        unfrozenChained: 25,
+        byGen: [11, 13, 22, 0],
+        unmatched: 0,
+        capped: 9,
+      },
+      2: {
+        shatters: 40,
+        chained: 25,
+        unfrozenChained: 14,
+        byGen: [15, 18, 7, 0],
+        unmatched: 0,
+        capped: 5,
+      },
+    });
+  });
+
+  it('leaves no shard of frozenNoSplit’s pentagons frozen at their death, 3 of the others, and 2 children of every 增殖 elite, frozen or not (E6)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'frozenNoSplit') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const watch = freezeWatch();
+      // The affix bits of each enemy as the last tick left it, by id.
+      let affixes = new Map<number, number>();
+      const tally: Record<string, number[]> = {};
+      const add = (key: string, children: number): void => {
+        tally[key] = [...(tally[key] ?? []), children];
+      };
+      watchRun(entry, seed, (now, events, ctx) => {
+        for (let i = 0; i < events.length; i++) {
+          const event = events[i] as SimEvent;
+          if (event.type === 'freeze') watch.freeze(event.targetId);
+          if (event.type !== 'enemyKilled') continue;
+          // The children follow their parent's kill event.
+          let children = 0;
+          while (events[i + 1 + children]?.type === 'enemySpawned') children++;
+          const frozen = watch.frozenAt(event.enemyId, now) ? 'frozen' : 'unfrozen';
+          if (event.enemy === 'pentagon') add(`pentagon ${frozen}`, children);
+          else if (((affixes.get(event.enemyId) ?? 0) & AFFIX_MULTIPLY) !== 0) {
+            add(`增殖 ${event.enemy} ${frozen}`, children);
+          }
+        }
+        watch.end(ctx);
+        affixes = new Map(ctx.enemies.map((e) => [e.id, e.v3?.affixes ?? 0]));
+      });
+      bySeed[seed] = Object.fromEntries(
+        Object.entries(tally)
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([key, list]) => [key, { kills: list.length, children: [...new Set(list)] }]),
+      );
+    }
+    // Each seed kills a 增殖 hexagon frozen, which leaves its 2 elites all the same.
+    const tallies = (frozen: number, unfrozen: number) => ({
+      'pentagon frozen': { kills: frozen, children: [0] },
+      'pentagon unfrozen': { kills: unfrozen, children: [3] },
+      '增殖 hexagon frozen': { kills: 1, children: [MULTIPLY_COUNT] },
+    });
+    expect(bySeed).toEqual({ 1: tallies(13, 2), 2: tallies(12, 1) });
+  });
+
+  it('thaws thaw’s frozen enemies as they ignite, locks each meter 180 ticks from the thaw, and shatters none that dies thawed (E6)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'thaw') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each enemy's freeze and lock as the last tick left them, by id.
+      let last = new Map<number, { frozenUntil: number; lock: number }>();
+      // The enemies thawed and not frozen since, with their lock's end, by id.
+      const thawed = new Map<number, number>();
+      const c = {
+        thaws: 0,
+        ignitedThaws: 0,
+        lockedFromThaw: 0,
+        naturalEnds: 0,
+        lockedHits: 0,
+        chilledInLock: 0,
+        refrozen: 0,
+        refrozenEarly: 0,
+        thawedKills: 0,
+        thawedShatters: 0,
+      };
+      watchRun(entry, seed, (now, events, ctx) => {
+        const ignited = new Set<number>();
+        const killedAt = new Set<string>();
+        for (const event of events) {
+          if (event.type === 'ignite') ignited.add(event.targetId);
+          else if (event.type === 'hit') {
+            const lock = thawed.get(event.targetId);
+            if (lock !== undefined && now < lock) c.lockedHits++;
+          } else if (event.type === 'freeze') {
+            const lock = thawed.get(event.targetId);
+            if (lock !== undefined) {
+              c.refrozen++;
+              if (now < lock) c.refrozenEarly++;
+              thawed.delete(event.targetId);
+            }
+          } else if (event.type === 'enemyKilled' && thawed.has(event.enemyId)) {
+            c.thawedKills++;
+            killedAt.add(`${event.x},${event.y}`);
+            thawed.delete(event.enemyId);
+          } else if (event.type === 'shatter' && killedAt.has(`${event.x},${event.y}`)) {
+            c.thawedShatters++;
+          }
+        }
+        for (const e of ctx.enemies) {
+          const lock = thawed.get(e.id);
+          if (lock !== undefined && now < lock && e.frost !== 0) c.chilledInLock++;
+          const was = last.get(e.id);
+          if (was === undefined) continue;
+          if (was.frozenUntil > now && e.frozenUntil === now) {
+            c.thaws++;
+            if (ignited.has(e.id)) c.ignitedThaws++;
+            if (e.frostLockUntil === now + 180) c.lockedFromThaw++;
+            thawed.set(e.id, e.frostLockUntil);
+          } else if (was.frozenUntil === now) c.naturalEnds++;
+        }
+        last = new Map(
+          ctx.enemies.map((e) => [e.id, { frozenUntil: e.frozenUntil, lock: e.frostLockUntil }]),
+        );
+      });
+      bySeed[seed] = c;
+    }
+    // Every thaw at an ignite, its lock 180 from it; the locked meters take none of the hits'
+    // frost, and none thaws early again before its lock ends.
+    expect(bySeed).toEqual({
+      1: {
+        thaws: 27,
+        ignitedThaws: 27,
+        lockedFromThaw: 27,
+        naturalEnds: 17,
+        lockedHits: 97,
+        chilledInLock: 0,
+        refrozen: 1,
+        refrozenEarly: 0,
+        thawedKills: 3,
+        thawedShatters: 0,
+      },
+      2: {
+        thaws: 23,
+        ignitedThaws: 23,
+        lockedFromThaw: 23,
+        naturalEnds: 18,
+        lockedHits: 96,
+        chilledInLock: 0,
+        refrozen: 0,
+        refrozenEarly: 0,
+        thawedKills: 3,
+        thawedShatters: 0,
+      },
+    });
+  });
+
+  it('gives frostGain’s hits their frost × 1 on a normal enemy, × 1.5 shocked or on the boss, × 2 on the shocked boss (E6)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'frostGain') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Each enemy's meter and lock as the last tick left them, by id.
+      let last = new Map<number, { frost: number; lock: number }>();
+      const ratios: Record<string, Record<string, number>> = {};
+      watchRun(entry, seed, (now, events, ctx) => {
+        const hits = new Map<number, number>();
+        for (const event of events) {
+          if (event.type === 'hit') hits.set(event.targetId, (hits.get(event.targetId) ?? 0) + 1);
+        }
+        for (const e of ctx.enemies) {
+          const was = last.get(e.id);
+          // A tick of one hit on an enemy whose meter takes it and does not fill.
+          if (was === undefined || hits.get(e.id) !== 1 || now < was.lock) continue;
+          if (!(e.frost > was.frost)) continue;
+          const key = `${e.boss ? 'boss' : 'normal'} ${holdsShock(e, now) ? 'shocked' : 'plain'}`;
+          const ratio = String((e.frost - was.frost) / 0.125);
+          const seen = (ratios[key] ??= {});
+          seen[ratio] = (seen[ratio] ?? 0) + 1;
+        }
+        last = new Map(ctx.enemies.map((e) => [e.id, { frost: e.frost, lock: e.frostLockUntil }]));
+      });
+      bySeed[seed] = ratios;
+    }
+    // The ratio of each one-hit tick's frost to frostOnHit, by the enemy's kind and shock.
+    expect(bySeed).toEqual({
+      1: {
+        'normal plain': { 1: 10 },
+        'normal shocked': { 1.5: 31 },
+        'boss plain': { 1.5: 1 },
+        'boss shocked': { 2: 9 },
+      },
+      2: {
+        'normal plain': { 1: 8 },
+        'normal shocked': { 1.5: 26 },
+        'boss plain': { 1.5: 1 },
+        'boss shocked': { 2: 9 },
       },
     });
   });

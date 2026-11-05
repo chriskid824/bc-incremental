@@ -11,7 +11,10 @@ import type { SimEvent, SimState } from '../../sim/types';
 export interface ControlCounts {
   /** Enemies frozen (a boss whose meter emptied without a freeze is not counted). */
   readonly freezes: number;
-  /** Frozen enemies that died and shattered. */
+  /**
+   * Enemies that died and shattered: the frozen ones, and under 連鎖碎裂 (BuildFlags.shatterChain)
+   * any a shatter killed.
+   */
   readonly shatters: number;
   /** The share of live enemy time spent chilled, frozen or in a slowing zone, 0 to 1. */
   readonly slowedShare: number;

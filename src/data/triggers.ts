@@ -115,7 +115,8 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  * - freeze: an enemy's chill meter filled, at that enemy: a normal enemy froze, or a boss's meter
  *   emptied (a boss never freezes). It needs no signature hit.
  * - shatter: a frozen enemy died and shattered (its triggers run at the next tick, like kill's);
- *   an enemy killed by a shatter does not shatter.
+ *   an enemy killed by a shatter does not shatter, but under ◆連鎖碎裂 (BuildFlags.shatterChain,
+ *   E6) it does, frozen or not.
  * - explode: a bomb of the signature attack (magmaBomb) landed and exploded, after its hits and
  *   its chain, at its landing point; the target is the enemy nearest that point among those it
  *   hit, none when it hit nothing. Its list is the first enemies of the blast, by id. Each bomb
@@ -656,6 +657,17 @@ export interface BuffSpec {
 }
 
 /**
+ * Thaws the event's enemy (or the one the trigger's selector picked) if it is frozen and no boss
+ * (熱震's 「解凍」, gd:526; E6): its freeze ends now, and the frost immunity that follows a freeze
+ * (BuildFlags.frostImmuneTicks) starts now, not at the freeze's planned end. It does nothing to
+ * an enemy that is not frozen, a dead one or a boss, takes no numbers, and raises no freeze or
+ * shatter event: a thawed enemy that dies before it freezes again does not shatter.
+ */
+export interface ThawSpec {
+  readonly kind: 'thaw';
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -701,6 +713,7 @@ export interface BuffSpec {
  * - comboStack: `stacks` combo stacks, up to the run's cap (ComboStackSpec).
  * - buff: × (1 + more) on the cadence of the emitters that carry its tags, for a time (BuffSpec).
  * - execute: the event's enemy, if no boss, killed outright (ExecuteSpec).
+ * - thaw: the event's enemy, if frozen and no boss, thawed at once (ThawSpec).
  */
 export type EffectSpec =
   | {
@@ -752,7 +765,8 @@ export type EffectSpec =
   | ChainBoltSpec
   | ComboStackSpec
   | BuffSpec
-  | ExecuteSpec;
+  | ExecuteSpec
+  | ThawSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -792,6 +806,8 @@ export const COEF_FIELDS: {
   buff: [],
   // All or nothing: a kill has no share to scale.
   execute: [],
+  // No numbers: a freeze ends or it does not.
+  thaw: [],
 };
 
 /**

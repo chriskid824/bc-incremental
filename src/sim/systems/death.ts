@@ -3,7 +3,8 @@
  * inline, at the hit or burn tick that kills, in this order:
  * 1. the kill's transfer triggers (Pandemic's spread; src/sim/effects/dispatch.ts), then the rule
  *    modules' onKill hooks, while the victim still holds its ailments;
- * 2. removal, drops, the kill event and split children, so later hits of the same tick can
+ * 2. removal, drops, the kill event and split children (none from a victim frozen at its death
+ *    under ◆粉碎, E6: split in src/sim/systems/spawn.ts), so later hits of the same tick can
  *    reach the children; then (2b) the transfer triggers of step 1 with a toSplitChildren spread
  *    give each child its share of the victim's poison;
  * 3. the kill's other triggers, recorded as pending kills (a frozen victim's shatter with them);

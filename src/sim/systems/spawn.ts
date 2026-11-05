@@ -272,6 +272,9 @@ export function spawnOrSkip(
  * Children appear around the parent and belong to its wave. Their angles come from their
  * own stream: kills depend on combat, and must not shift later waves' spawns. In a v3 run each
  * child draws its angle, then goes through spawnOrSkip, so a child past the enemy cap is skipped.
+ * Under ◆粉碎 (BuildFlags.frozenNoSplit, E6) a parent frozen at its death leaves none and draws
+ * nothing: its flag test is the one cost a split-capable death pays without it, and 增殖's
+ * children (multiply, src/sim/systems/affixes.ts) come after this all the same.
  * Returns where the children start in ctx.enemies: they are `ctx.enemies[start ..]` right after
  * the call, an empty range for an enemy that does not split or whose children were all skipped
  * (kill step 2, src/sim/systems/death.ts).
@@ -280,6 +283,8 @@ export function split(ctx: RunContext, parent: Enemy): number {
   const start = ctx.enemies.length;
   const splitInto = parent.def.splitInto;
   if (splitInto === undefined) return start;
+  // killEnemy calls this before anything can end the victim's freeze.
+  if (ctx.build.flags.frozenNoSplit && parent.frozenUntil > ctx.now) return start;
   const def = ctx.data.enemies[splitInto.enemy];
   const player = ctx.player;
   if (ctx.sys.enemyAi.cap === Infinity) {

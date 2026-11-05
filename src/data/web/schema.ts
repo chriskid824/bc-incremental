@@ -234,6 +234,7 @@ const [
   comboStack,
   buff,
   execute,
+  thaw,
 ] = EffectSpecSchema.options;
 
 /**
@@ -263,6 +264,7 @@ export const PayloadEffectSchema = exact<PayloadEffect>()(
     comboStack,
     buff,
     execute,
+    thaw,
   ]),
 );
 

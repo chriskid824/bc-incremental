@@ -543,6 +543,8 @@ describe('EffectSpecSchema', () => {
     { kind: 'comboStack', stacks: 1 },
     { kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2 },
     { kind: 'buff', stat: 'attackSpeed', more: -0.3, durationSec: 0.5, tags: ['minion', 'hit'] },
+    // E6: 熱震's 解凍.
+    { kind: 'thaw' },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -744,6 +746,8 @@ describe('EffectSpecSchema', () => {
       'buff with an unknown key',
       { kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2, stacks: 1 },
     ],
+    ['thaw with a number (E6)', { kind: 'thaw', amount: 1 }],
+    ['thaw with a radius (E6)', { kind: 'thaw', radius: 90 }],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
   });

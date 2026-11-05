@@ -1657,6 +1657,17 @@ function effectIssues(
       }
       break;
     }
+    case 'thaw':
+      // It thaws the event's enemy, or the selector's, alive when it runs (see the event's enemy
+      // above), as chainBolt from 'eventTarget' needs one.
+      if (target !== undefined) {
+        if (target.pick === 'player') {
+          issues.push("thaw needs an enemy, which target.pick 'player' does not give");
+        }
+      } else if (ENEMYLESS_EVENTS.has(on) || dead || on === 'contact') {
+        issues.push(`thaw needs a live enemy, which '${on}' events do not give; add target {pick}`);
+      }
+      break;
   }
   return issues;
 }

@@ -169,6 +169,7 @@ export function conditionNumbers(condition: Condition): string[][] {
 export function effectNumbers(effect: EffectSpec): string[][] {
   switch (effect.kind) {
     case 'execute':
+    case 'thaw':
       return [];
     case 'applyAilment':
       return [

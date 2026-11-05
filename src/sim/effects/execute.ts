@@ -68,6 +68,9 @@
  * at the event's point, each keeping the entry's effect, depth and origin and living its
  * effect's SpawnSpecs.lifeTicks; a row past the summon cap or its maxLive is refused and counted
  * (summonCapped). They first step in the next tick's drone stage, which runs before this phase.
+ *
+ * A thaw (E6) ends the freeze of its live target, a normal enemy frozen now, and starts its frost
+ * immunity there (thawEnemy, src/sim/ailments/frost.ts); it raises no event.
  */
 
 import type { Num } from '../../core/num';
@@ -83,7 +86,7 @@ import {
   spreadBurn,
   spreadPoison,
 } from '../ailments/apply';
-import { addFrost } from '../ailments/frost';
+import { addFrost, thawEnemy } from '../ailments/frost';
 import { consumeAilment, remainingOf } from '../ailments/remaining';
 import { addShock } from '../ailments/shock';
 import { sizeOf } from '../build/size';
@@ -914,6 +917,11 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   },
   buff(ctx, _spec, _fx, entry) {
     fireBuff(ctx, entry.effect);
+  },
+  // The live target, if frozen and no boss, thaws now, its frost immunity from now (thawEnemy).
+  thaw(ctx, _spec, _fx, entry) {
+    const target = liveTarget(entry);
+    if (target !== null) thawEnemy(ctx, target);
   },
 };
 
