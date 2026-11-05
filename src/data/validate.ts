@@ -1619,11 +1619,17 @@ const ZONE_RADIUS_MIN = 1;
 const ZONE_RADIUS_MAX = 400;
 /** The strongest slow a groundZone may apply. */
 const ZONE_SLOW_MAX = 0.9;
+/**
+ * The most zones a groundZone's maxLive keeps (E11): ZONE_SOURCE_CAP (src/sim/caps.ts), a
+ * source's own, so an effect's cap is never above the one it stands in for.
+ */
+const ZONE_LIVE_MAX = 16;
 
 /**
  * Ranges of a groundZone: a radius in [1, 400], at least one pulse (0.25 s), a hit of 0 or more,
- * ailment terms only with an ailment, a slow in (0, 0.9], and something to do: a hit, a term, or,
- * when `zonesRead`, the inZone mark its node's condition reads (readsZones).
+ * ailment terms only with an ailment, a slow in (0, 0.9], a maxLive in [1, 16], and something to
+ * do: a hit, a term, or, when `zonesRead`, the inZone mark its node's condition reads
+ * (readsZones).
  */
 function groundZoneIssues(
   effect: Extract<EffectSpec, { kind: 'groundZone' }>,
@@ -1660,6 +1666,10 @@ function groundZoneIssues(
   }
   if (slow !== undefined && !(slow > 0 && slow <= ZONE_SLOW_MAX)) {
     issues.push(`slow must be in (0, ${ZONE_SLOW_MAX}] (got ${slow})`);
+  }
+  const maxLive = effect.maxLive;
+  if (maxLive !== undefined && !(isPositiveInt(maxLive) && maxLive <= ZONE_LIVE_MAX)) {
+    issues.push(`maxLive must be an integer in [1, ${ZONE_LIVE_MAX}] (got ${maxLive})`);
   }
   if (
     damagePctPerSec === 0 &&

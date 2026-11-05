@@ -23,7 +23,11 @@
  * SIGNATURE_ZONE_CAP signature zones. A new effect zone of a source at its cap evicts that
  * source's oldest; otherwise a new effect zone at ZONE_CAP evicts the oldest effect zone of any
  * source; a new signature zone at its cap evicts the oldest signature zone. Each eviction counts
- * in zonesEvicted and raises zoneEnd with `evicted`.
+ * in zonesEvicted and raises zoneEnd with `evicted`. A groundZone effect with maxLive (E11)
+ * keeps its own cap in place of its source's: its zones count in their effect's count
+ * (ZonePool.perEffect), not their source's, and a new one at that cap evicts the effect's own
+ * oldest; otherwise it takes ZONE_CAP's rule, which counts its zones as any effect zone's. Each
+ * zone's record keeps the counter it is in (ZonePool.capEffect), which its end takes it out of.
  *
  * Slots 0 .. count − 1 hold the live zones in id order, kept in order as zones end. A zone's
  * other arrays stay at its record (ZonePool.record) from its creation to its end, so closing a
@@ -98,7 +102,8 @@ const ZONE_HOLD_TICKS = PULSE_TICKS + 1;
  * Adds a zone at (x, y) of `radius` that pulses `pulses` times from the next tick on: a
  * signature zone, or an effect zone of groundZone effect `effect`, whose terms it takes. Its hits
  * deal payload `p` at `scale` (0: none), credited to `source` like its terms, at `depth` from
- * trigger `origin`. At its cap it first evicts the oldest zone the cap counts (K5).
+ * trigger `origin`. At its cap it first evicts the oldest zone the cap counts (K5): its effect's
+ * own cap, when it has one (E11), in place of its source's.
  */
 export function addZone(
   ctx: RunContext,
@@ -115,10 +120,17 @@ export function addZone(
   origin: number,
 ): void {
   const z = ctx.sys.zones;
+  // Its effect's own cap (GroundZoneSpec.maxLive, E11), which it counts in place of its
+  // source's; 0 for none, as for a signature zone.
+  const own = signature ? 0 : (z.effectCap[effect] as number);
   if (signature) {
     if (z.liveSignature >= SIGNATURE_ZONE_CAP) evict(ctx, z, oldest(z, 1, -1));
-  } else if ((z.perSource[source] as number) >= ZONE_SOURCE_CAP) {
-    evict(ctx, z, oldest(z, 0, source));
+  } else if (
+    own === 0
+      ? (z.perSource[source] as number) >= ZONE_SOURCE_CAP
+      : (z.perEffect[effect] as number) >= own
+  ) {
+    evict(ctx, z, own === 0 ? oldest(z, 0, source) : oldestOf(z, effect));
   } else if (z.live >= ZONE_CAP) {
     evict(ctx, z, oldest(z, 0, -1));
   }
@@ -143,6 +155,7 @@ export function addZone(
   z.depth[i] = depth;
   z.origin[i] = origin;
   z.stamp[i] = z.stampSources[source] as number;
+  z.capEffect[i] = own === 0 ? -1 : effect;
   if (effect >= 0) {
     const spec = ctx.build.effects[effect]?.spec as GroundZoneSpec;
     z.ailment[i] = spec.ailment === undefined ? -1 : APPLIED_AILMENTS.indexOf(spec.ailment);
@@ -162,24 +175,35 @@ export function addZone(
   if (signature) z.liveSignature++;
   else {
     z.live++;
-    z.perSource[source] = (z.perSource[source] as number) + 1;
+    if (own === 0) z.perSource[source] = (z.perSource[source] as number) + 1;
+    else z.perEffect[effect] = (z.perEffect[effect] as number) + 1;
   }
   ctx.state.zoneCount = z.count;
   ctx.events.push({ type: 'zone', id, x, y, radius, expiresAt, source, signature });
 }
 
 /**
- * The slot of the oldest live zone with signature flag `signature` and, unless −1, of `source`:
- * the first in slot order, which is id order.
+ * The slot of the oldest live zone with signature flag `signature` and, unless −1, of `source`
+ * among the zones its count holds (perSource: no own cap's, E11): the first in slot order, which
+ * is id order.
  */
 function oldest(z: ZonePool, signature: number, source: number): number {
   for (let s = 0; s < z.count; s++) {
+    const r = z.record[s] as number;
     if (
       z.signature[s] === signature &&
-      (source < 0 || z.source[z.record[s] as number] === source)
+      (source < 0 || (z.source[r] === source && (z.capEffect[r] as number) < 0))
     ) {
       return s;
     }
+  }
+  throw new Error('No zone to evict');
+}
+
+/** The slot of the oldest live zone that effect `effect`'s own cap counts (E11). */
+function oldestOf(z: ZonePool, effect: number): number {
+  for (let s = 0; s < z.count; s++) {
+    if (z.capEffect[z.record[s] as number] === effect) return s;
   }
   throw new Error('No zone to evict');
 }
@@ -203,14 +227,20 @@ function evict(ctx: RunContext, z: ZonePool, s: number): void {
   z.count = n - 1;
 }
 
-/** Takes the zone in slot `s` out of the live counts and frees its record. */
+/**
+ * Takes the zone in slot `s` out of the live counts, its own cap's or its source's as its record
+ * keeps (capEffect), and frees its record.
+ */
 function release(z: ZonePool, s: number): void {
   const r = z.record[s] as number;
   if (z.signature[s] === 1) z.liveSignature--;
   else {
     z.live--;
-    const source = z.source[r] as number;
-    z.perSource[source] = (z.perSource[source] as number) - 1;
+    const f = z.capEffect[r] as number;
+    if (f < 0) {
+      const source = z.source[r] as number;
+      z.perSource[source] = (z.perSource[source] as number) - 1;
+    } else z.perEffect[f] = (z.perEffect[f] as number) - 1;
   }
   z.free[z.freeCount++] = r;
 }

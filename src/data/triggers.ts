@@ -392,8 +392,9 @@ interface NovaSpec extends DamagePart {
  * `ailmentStacks` (default 1) of `ailment`, each as an applyAilment of damagePct
  * `ailmentDamagePct` (default 1) would apply it; addFrostPerSec × 0.25 of frost; and `slow`,
  * which holds 16 ticks past the pulse (the strongest live one counts, with frost the larger
- * slow). A source keeps at most 16 zones, the oldest giving way; inZone conditions read the zones
- * of the source they name.
+ * slow). A source keeps at most 16 zones, the oldest giving way, apart from the zones of an
+ * effect with `maxLive`, which counts its own instead; inZone conditions read the zones of the
+ * source they name.
  */
 export interface GroundZoneSpec {
   readonly kind: 'groundZone';
@@ -410,6 +411,15 @@ export interface GroundZoneSpec {
   readonly tags?: readonly DamageTag[];
   /** The element its hits carry. */
   readonly element?: 'cold' | 'lightning';
+  /**
+   * Its own zone cap (E11), a whole number in [1, 16] (ZONE_SOURCE_CAP): this effect keeps at
+   * most maxLive live zones, its next one evicting its own oldest, and they count toward no
+   * source's 16, so no source's cap ever evicts them and they never evict another effect's
+   * zones, except through the pool's 64 (ZONE_CAP), which still counts them and evicts its
+   * oldest effect zone, theirs or another's. Without it, its zones count toward its source's 16
+   * as every zone's did before E11.
+   */
+  readonly maxLive?: number;
 }
 
 /**
