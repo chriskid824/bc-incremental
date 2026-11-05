@@ -49,8 +49,9 @@
  *   (not --check) adds the cap probe: a ring of 64 bouncing shots every 2 ticks on top, which
  *   fills the pool, and the µs per tick at its PROJECTILE_CAP shots against the scenario's own.
  * - fan: a stress-family scenario (C4.19), 霜晶's iceFan at 7.5 rounds a second of 9 cones
- *   (attackSpeed 12, projectileCount 6 and the fan's 3), each through two enemies, with a sixth
- *   of the damage of the stress start wave's target (src/sim/emitters/fan.ts).
+ *   (attackSpeed 8 on the fan's base 3.75 a second, projectileCount 6 and the fan's 3), each
+ *   through two enemies, with a sixth of the damage of the stress start wave's target
+ *   (src/sim/emitters/fan.ts).
  * - arc: a stress-family scenario (C4.20), 雷塔's triphaseArc under 六線圈, 6 discharges a second
  *   at two targets each, chaining 8 times (chainCount 6 and the arc's 2) from both by a test
  *   policy that forks every jump by 2 and adds an extra jump on half of them, so its attacks
@@ -883,7 +884,8 @@ export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
   // C4.19: 霜晶's fan, 7.5 rounds a second of 9 cones.
   fan: stressScenario(() => ({
     stats: stressStats({
-      attackSpeed: 12,
+      // 8 on the base 3.75 rounds a second keeps the recorded 7.5 (12 on the old 2.5).
+      attackSpeed: 8,
       projectileCount: 6,
       damage: targetDamage(STRESS_START_WAVE) / 6,
     }),
