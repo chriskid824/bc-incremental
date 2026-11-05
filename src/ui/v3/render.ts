@@ -29,6 +29,8 @@ export const PALETTE = {
   fusion: '#f2c46b',
   path: '#9fe8ff',
   ready: '#7ee08a',
+  /** 建議節點 (gd §8 item 8): the death review's marks. */
+  suggested: '#ffd166',
 } as const;
 
 export interface RenderOptions {
@@ -38,6 +40,8 @@ export interface RenderOptions {
   readonly lookup: TextLookup;
   /** The planned path's nodes, outlined. */
   readonly path?: ReadonlySet<string>;
+  /** The death review's suggested nodes (gd §8 item 8), ringed. */
+  readonly suggested?: ReadonlySet<string>;
 }
 
 const esc = (text: string): string =>
@@ -225,6 +229,7 @@ export function renderWeb(web: AssembledWeb, model: WebModel, options: RenderOpt
   const { scale, lookup, level } = options;
   const shows = LEVEL_SHOWS[level];
   const path = options.path ?? new Set<string>();
+  const suggested = options.suggested ?? new Set<string>();
   const parts: string[] = [];
   const front: string[] = [];
   const owned = new Set(model.nodes.filter((v) => v.rank > 0).map((v) => v.id));
@@ -259,6 +264,10 @@ export function renderWeb(web: AssembledWeb, model: WebModel, options: RenderOpt
       node.state === 'buyable' || onPath
         ? `<circle class="v3p-halo" r="34" fill="none" stroke="${onPath ? PALETTE.path : stroke}" stroke-width="5" opacity="0.8"/>`
         : '';
+    const mark =
+      suggested.has(node.id) && node.state !== 'maxed'
+        ? `<circle class="v3p-suggested" r="46" fill="none" stroke="${PALETTE.suggested}" stroke-width="4" stroke-dasharray="10 7"/>`
+        : '';
     const shape = shapeSvg(
       SHAPE_OF[node.kind],
       fill,
@@ -266,8 +275,8 @@ export function renderWeb(web: AssembledWeb, model: WebModel, options: RenderOpt
       PALETTE.fillDark,
     );
     parts.push(
-      `<g class="v3p-node" data-id="${esc(node.id)}" data-state="${node.state}" data-kind="${node.kind}"${onPath ? ' data-path="true"' : ''} transform="translate(${n(node.at.x)} ${n(node.at.y)})">` +
-        `<circle class="v3p-hit" r="40" fill="transparent"/>${halo}${shape}</g>`,
+      `<g class="v3p-node" data-id="${esc(node.id)}" data-state="${node.state}" data-kind="${node.kind}"${onPath ? ' data-path="true"' : ''}${mark === '' ? '' : ' data-suggested="true"'} transform="translate(${n(node.at.x)} ${n(node.at.y)})">` +
+        `<circle class="v3p-hit" r="40" fill="transparent"/>${mark}${halo}${shape}</g>`,
     );
     if (shows.nodeLabels) {
       const below = { x: node.at.x, y: node.at.y };

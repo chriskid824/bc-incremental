@@ -21,7 +21,8 @@ import type { AssembledWeb, CharacterDef, Content, WebScope } from '../../data/w
 import { FIRST_PICK } from '../../data/characters';
 import { t } from '../../i18n';
 import type { Locale } from '../../i18n';
-import type { CharacterProgress } from '../../meta/web';
+import { suggest } from '../../meta/web';
+import type { CharacterProgress, Suggestions } from '../../meta/web';
 import { FLAVOR } from '../../platform/flavor';
 import { Renderer } from '../../render';
 import { killTier } from '../../render/killTier';
@@ -48,6 +49,7 @@ import { damageBreakdown } from '../../ui/v3/damageBreakdown';
 import { ControlTally } from './controlTally';
 import { SelectScreen } from '../../ui/v3/select';
 import { WebPanel } from '../../ui/v3/webPanel';
+import { nodeName } from '../../ui/web/names';
 import { GameLoop, SPEEDS } from '../loop';
 import type { Speed } from '../loop';
 import type { ProfileStore } from '../profileStore';
@@ -110,6 +112,9 @@ export class GamePage {
   private character: CharacterId | null = null;
   private select: SelectScreen | null = null;
   private panel: WebPanel | null = null;
+  /** The last death's 建議 (gd §8 items 8 and 14): its nodes ringed on that character's web. */
+  private suggested: { readonly character: CharacterId; readonly ids: readonly string[] } | null =
+    null;
   private run: CharacterRunState | null = null;
   private banner: EnemyBanner | null = null;
   private renderer: Renderer | null = null;
@@ -299,6 +304,7 @@ export class GamePage {
       },
       onStartRun: () => this.startRun(),
       onBack: () => this.showSelect(),
+      suggested: this.suggested?.character === c ? this.suggested.ids : [],
     });
     // Over the panel, which was appended after it.
     this.root.append(this.picker.root);
@@ -404,13 +410,20 @@ export class GamePage {
     this.screen = 'result';
     this.hud.setHint(null);
     this.pause.root.hidden = true;
-    this.results.show(this.resultInfo(run, finished, web));
+    const suggestions =
+      finished.result.endReason === 'death'
+        ? suggest(web, finished.progress, accountProgress(this.profile), finished.result)
+        : null;
+    this.suggested =
+      suggestions === null ? null : { character: c, ids: suggestions.nodes.map((s) => s.id) };
+    this.results.show(this.resultInfo(run, finished, web, suggestions));
   }
 
   private resultInfo(
     run: CharacterRunState,
     finished: FinishedRun,
     web: AssembledWeb,
+    suggestions: Suggestions | null,
   ): V3ResultInfo {
     const { result, settlement, progress } = finished;
     const seconds = result.ticks / TICK_RATE;
@@ -447,6 +460,20 @@ export class GamePage {
       ),
       damage: damageBreakdown(result.damageBySource, result.damage, t(web.def.nameKey)),
       control: this.control.counts,
+      suggestions:
+        suggestions === null
+          ? null
+          : {
+              nodes: suggestions.nodes.map((s) => nodeName(web, s.id)),
+              outer:
+                suggestions.outer === null
+                  ? null
+                  : {
+                      outer: t(`web.outer.${suggestions.outer.outer}.name`),
+                      enemy: t(`web.enemy.${suggestions.outer.enemy}`),
+                      cover: suggestions.outer.cover,
+                    },
+            },
     };
   }
 

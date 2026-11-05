@@ -8,7 +8,8 @@
  * the web that says which ascendancy is chosen (the chains are bought on the web, with 迴響).
  * The rules are src/meta/web's; the panel only draws them and hands each new progress to the host.
  *
- * Search, filters, loadouts, the DPS preview and suggested nodes are later batches.
+ * The last death's suggested nodes are ringed (gd §8 item 8). Search, filters and loadouts are
+ * later batches.
  */
 
 import { formatNum } from '../../core/format';
@@ -59,6 +60,8 @@ export interface WebPanelOptions {
   readonly onStartRun: () => void;
   /** Back to the character select. */
   readonly onBack: () => void;
+  /** The last death's suggested nodes (gd §8 item 8): ringed until maxed or the next run ends. */
+  readonly suggested?: readonly string[];
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -272,6 +275,7 @@ export class WebPanel {
       scale,
       lookup: this.lookup,
       path: new Set(this.pending?.ids ?? []),
+      suggested: new Set(this.options.suggested ?? []),
     });
     this.applyCamera();
     this.drawWallet();

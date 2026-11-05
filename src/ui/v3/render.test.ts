@@ -37,6 +37,22 @@ describe('renderWeb (gd §3, §8 items 2, 9)', () => {
     expect(markup).toContain(`data-id="${first}" data-state=`);
   });
 
+  it("rings the death review's suggested nodes (gd §8 item 8), but not a maxed one", () => {
+    const model = webModel(web, layout, start, account);
+    const other = (web.neighbours.get(web.root) ?? [])[1] as string;
+    const markup = renderWeb(web, model, {
+      level: 1,
+      scale: 0.4,
+      lookup: zh,
+      suggested: new Set([first, other]),
+    });
+    expect(count(markup, /class="v3p-suggested"/g)).toBe(2);
+    expect(markup).toContain(`data-id="${first}" data-state="buyable"`);
+    expect(renderWeb(web, model, { level: 1, scale: 0.4, lookup: zh })).not.toContain(
+      'v3p-suggested',
+    );
+  });
+
   it('draws hidden outers as 「？」 and collapsed ones with their name', () => {
     const model = webModel(web, layout, start, account);
     const markup = renderWeb(web, model, { level: 0, scale: 0.2, lookup: zh });
