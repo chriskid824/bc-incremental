@@ -26,6 +26,7 @@ import { enemySlow, frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
 import { liveBleedStacks, livePoisonStacks } from './ailments/rings';
 import { holdsShock } from './ailments/shock';
+import type { BarrageParams } from './build/compile';
 import { compileScaling, scaledValue } from './build/eval';
 import { spreadOf } from './build/size';
 import { SMALL_PROJECTILE_TICKS } from './caps';
@@ -49,7 +50,13 @@ import {
   SHIELDED,
   STOPPED,
 } from './systems/enemyRecord';
-import { MOTION_HOMING, MOTION_LOB, MOTION_STRAIGHT, spawnShot } from './systems/shots';
+import {
+  MOTION_HOMING,
+  MOTION_LOB,
+  MOTION_STRAIGHT,
+  spawnShot,
+  SPLIT_ROUND,
+} from './systems/shots';
 import {
   afterimageModule,
   GOLDEN_BUILDS,
@@ -2987,6 +2994,72 @@ const BLOOD_RIVER_RINGS: TestModule = (b) => {
   b.flags.bleedMoveMult = 1;
 };
 
+/** A test module standing in for the barrage outer's ◆ nodes: `params` over BuildFlags.barrage. */
+const barrageShape =
+  (params: Partial<BarrageParams>): TestModule =>
+  (b) =>
+    void Object.assign(b.flags.barrage, params);
+
+/**
+ * E10b's ◆扇形 (gd:489 「小彈改成扇形射向同一個目標」, lead ruling X3): barrage's build with
+ * aim 'fan' at spreadDeg 30, from wave 3: each attack's 3 small shots fly from the player at the
+ * nearest alive enemy alone, turned −15°, 0° and 15° from it, none lost while one lives. It pins
+ * the one pick and the spread.
+ */
+const BARRAGE_FAN_MODULES = (): TestModule[] => [barrageShape({ aim: 'fan' })];
+
+/**
+ * E10b's ◆環射 (gd:489 「每第 6 次攻擊朝 12 個方向射出小彈」, lead ruling X4) on 蜂巢: barrageHive's
+ * swarm and turret, values and poison, barrageCount 2, with ring { every 6, directions 12 } and
+ * no ★, from wave 12: the rider's own count of the signature's counted attacks, every impact and
+ * every turret firing (A18), and on every 6th a ring of 12 shots round that attack's origin, the
+ * first away from the player. It pins the count across both kinds and the rings' origins.
+ */
+const BARRAGE_RING_STATS = makeStats({ ...SWARM_VALUES, barrageCount: 2 }, maskProbeMods(), {
+  triggers: [{ source: 'center', spec: SWARM_POISON }],
+  conversions: [],
+  emitters: [BARRAGE_GRANT],
+});
+const BARRAGE_RING_MODULES = (): TestModule[] => [
+  barrageShape({ ring: { every: 6, directions: 12 } }),
+];
+
+/**
+ * E10b's ◆子母彈 (gd:490 「小彈擊殺時分裂成 3 發（分裂出來的不再分裂）」, lead ruling X5): barrage's
+ * build with split { count 3, chance 1 }, from wave 3: each kill by a rider shot leaves 3 children
+ * at the victim after the projectile stage, the first along the killing shot, which never split;
+ * then (`also`) A19 (a)'s 分裂 rank alone, split { count 3, chance 0 } and barrageSplit 0.5: half
+ * the kills split, rolled on the barrage stream. It pins the splits, the children and their
+ * origins.
+ */
+const BARRAGE_SPLIT_STATS = makeStats(
+  { ...BARRAGE_STATS.values, barrageSplit: 0.5 },
+  maskProbeMods(),
+  { triggers: [], conversions: [], emitters: [BARRAGE_GRANT] },
+);
+
+/**
+ * E10b's ◆聚焦 at A20 (b) (gd:490 「所有小彈都打它，傷害 +20%（答案：Boss）」, lead ruling X6):
+ * barrage's build with focus { bonus 0.2, when 'boss' }, from wave 10, a boss wave of the
+ * fixture waves: while a boss lives every attack's 3 shots fly at the nearest one at scale 1.2,
+ * and the rider is as without focus before it comes and after it dies. It pins the condition, the
+ * target and the bonus.
+ */
+const BARRAGE_FOCUS_MODULES = (): TestModule[] => [
+  barrageShape({ focus: { bonus: 0.2, when: 'boss' } }),
+];
+
+/**
+ * E10b's 彈雨 threshold (gd:493 「每 10 秒有 2 秒，小彈數量 ×3」, lead ruling X7) with ★子彈地獄's
+ * params beside it (countMult 2, bounce 2): barrage's build with rain { 10 s, 2 s, ×3 }, from
+ * wave 3: 18 shots an attack on ticks 1–119 and 600–719 of the run, 6 on the others, each
+ * bouncing twice at most. It pins the window and the counts in and out of it.
+ */
+const BARRAGE_RAIN_MODULES = (): TestModule[] => [
+  barrageParams(2, 2),
+  barrageShape({ rain: { periodSec: 10, activeSec: 2, countMult: 3 } }),
+];
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3527,6 +3600,40 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [BLOOD_RIVER_RINGS],
     expected: ['647382082a5b90e6', '3c959acb38081b68'],
   },
+  {
+    name: 'barrageFan',
+    config: { stats: BARRAGE_STATS, rules: [], startWave: 3 },
+    modules: BARRAGE_FAN_MODULES,
+    expected: ['2585a1267a4dbaad', 'c31392e19c9863f8'],
+  },
+  {
+    name: 'barrageRing',
+    config: { stats: BARRAGE_RING_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    modules: BARRAGE_RING_MODULES,
+    expected: ['9a1febdd9441e411', 'dfc5ec6daff596c9'],
+  },
+  {
+    name: 'barrageSplit',
+    config: { stats: BARRAGE_STATS, rules: [], startWave: 3 },
+    modules: () => [barrageShape({ split: { count: 3, chance: 1 } })],
+    also: {
+      config: { stats: BARRAGE_SPLIT_STATS, rules: [], startWave: 3 },
+      modules: () => [barrageShape({ split: { count: 3, chance: 0 } })],
+    },
+    expected: ['c16bc740bd44e345', 'b02b7cb19b31d532'],
+  },
+  {
+    name: 'barrageFocus',
+    config: { stats: BARRAGE_STATS, rules: [], startWave: 10 },
+    modules: BARRAGE_FOCUS_MODULES,
+    expected: ['948da7900bab9723', 'e7bbe00701f599ac'],
+  },
+  {
+    name: 'barrageRain',
+    config: { stats: BARRAGE_STATS, rules: [], startWave: 3 },
+    modules: BARRAGE_RAIN_MODULES,
+    expected: ['5b35c22ad68ec91a', 'ca3f3a78b933092d'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3638,8 +3745,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E9's bloodRiver and bloodRiverRings are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([74, 'bloodRiver', 'bloodRiverRings']);
+    // The count docs/ARCHITECTURE.md gives: E10b's barrageFocus and barrageRain are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([79, 'barrageFocus', 'barrageRain']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -7290,6 +7397,412 @@ describe('golden C4 runs', () => {
         wrongRaise: 0,
         above: 0,
         slot: 0,
+      },
+    });
+  });
+
+  /** The heading of slot `s`'s velocity turned from `base` radians, in degrees in (−180, 180]. */
+  const turnedDeg = (ctx: RunContext, s: number, base: number): number => {
+    let d = Math.atan2(ctx.shots.vy[s] as number, ctx.shots.vx[s] as number) - base;
+    while (d <= -Math.PI) d += 2 * Math.PI;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    return Math.round(((d * 180) / Math.PI) * 1e6) / 1e6 + 0;
+  };
+
+  it('fires barrageFan’s 3 small shots at the nearest alive enemy alone after each attack, turned −15°, 0° and 15° from it (E10b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'barrageFan') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        attacks: 0,
+        shots: 0,
+        none: 0,
+        fanned: 0,
+        misaimed: 0,
+        miscounted: 0,
+        offOrigin: 0,
+        stray: 0,
+        hits: 0,
+        capped: 0,
+      };
+      let attacks = 0;
+      const hook = (ctx: RunContext): void => {
+        const em = ctx.emitters[0] as EmitterRuntime;
+        const rider = em.barrage as BarrageRider;
+        const shots = ctx.shots;
+        const fired = em.attacks - attacks;
+        attacks = em.attacks;
+        const fresh = riderSlots(ctx, rider).filter((s) => shots.launched[s] === ctx.now);
+        if (fired === 0) {
+          c.stray += fresh.length;
+          return;
+        }
+        c.attacks += fired;
+        c.shots += fresh.length;
+        const { x: px, y: py } = ctx.player;
+        const pick = ctx.enemies
+          .filter((e) => e.alive)
+          .sort((a, b) => dist2(a, ctx.player) - dist2(b, ctx.player) || a.id - b.id)[0];
+        if (pick === undefined) {
+          c.none += fired;
+          if (fresh.length !== 0) c.miscounted++;
+          return;
+        }
+        if (fresh.length !== 3 * fired) c.miscounted++;
+        const base = Math.atan2(pick.y - py, pick.x - px);
+        fresh.forEach((s, i) => {
+          if (shots.x[s] !== px || shots.y[s] !== py) c.offOrigin++;
+          if (turnedDeg(ctx, s, base) === [-15, 0, 15][i % 3]) c.fanned++;
+          else c.misaimed++;
+        });
+      };
+      watchRun(withHook(entry, hook), seed, (_now, events, ctx) => {
+        const source = ctx.sources.index('outer.barrage');
+        for (const event of events) if (event.type === 'hit' && event.source === source) c.hits++;
+        c.capped = ctx.counters.barrageCapped;
+      });
+      bySeed[seed] = c;
+    }
+    // 120 attacks of 3 shots, every one at the nearest alive enemy, none lost: one lived each time.
+    const fan = { capped: 0, misaimed: 0, miscounted: 0, none: 0, offOrigin: 0, stray: 0 };
+    expect(bySeed).toEqual({
+      1: { ...fan, attacks: 120, shots: 360, fanned: 360, hits: 43 },
+      2: { ...fan, attacks: 120, shots: 360, fanned: 360, hits: 31 },
+    });
+  });
+
+  it('fires barrageRing’s ring of 12 round the origin of every 6th counted attack, impacts and turret firings counted alike (E10b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'barrageRing') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        impacts: 0,
+        turretFirings: 0,
+        counted: 0,
+        miscounted: 0,
+        rings: 0,
+        afterImpact: 0,
+        afterFiring: 0,
+        ringShots: 0,
+        lostRingShots: 0,
+        unmatched: 0,
+        capped: 0,
+      };
+      watchRun(entry, seed, (now, events, ctx) => {
+        const em = ctx.emitters[0] as EmitterRuntime;
+        const rider = em.barrage as BarrageRider;
+        const shots = ctx.shots;
+        const impacts: [number, number][] = [];
+        const seats: [number, number][] = [];
+        for (const event of events) {
+          if (event.type === 'impact' && event.droneId >= 0) impacts.push([event.x, event.y]);
+          else if (event.type === 'turretFire') seats.push([event.x, event.y]);
+        }
+        c.impacts += impacts.length;
+        c.turretFirings += seats.length;
+        const before = c.counted;
+        c.counted += impacts.length + seats.length;
+        if (rider.attacks !== c.counted || em.attacks !== c.counted) c.miscounted++;
+        const due = Math.floor(c.counted / 6) - Math.floor(before / 6);
+        // The tick's fresh shots by origin (the first step undone; no bounce here), and those at
+        // a multiple of 30° from the player → origin heading: the ring's.
+        const byOrigin = new Map<string, number>();
+        for (const s of riderSlots(ctx, rider)) {
+          if (shots.launched[s] !== now) continue;
+          const ox = (shots.x[s] as number) - (shots.vx[s] as number);
+          const oy = (shots.y[s] as number) - (shots.vy[s] as number);
+          const dx = ox - ctx.player.x;
+          const dy = oy - ctx.player.y;
+          const first = dx === 0 && dy === 0 ? 0 : Math.atan2(dy, dx);
+          const turned = turnedDeg(ctx, s, first);
+          if (Math.abs(turned / 30 - Math.round(turned / 30)) > 1e-6) continue;
+          const near = ([px, py]: [number, number]): boolean =>
+            Math.abs(px - ox) < 1e-6 && Math.abs(py - oy) < 1e-6;
+          const kind = impacts.some(near) ? 'impact' : seats.some(near) ? 'seat' : 'none';
+          const key = `${kind}:${Math.round(ox * 1e6)},${Math.round(oy * 1e6)}`;
+          byOrigin.set(key, (byOrigin.get(key) ?? 0) + 1);
+        }
+        let rings = 0;
+        for (const [key, n] of byOrigin) {
+          rings++;
+          c.ringShots += n;
+          if (key.startsWith('impact')) c.afterImpact++;
+          else if (key.startsWith('seat')) c.afterFiring++;
+          else c.unmatched++;
+        }
+        if (rings !== due) c.miscounted++;
+        c.rings += due;
+        c.capped = ctx.counters.barrageCapped;
+      });
+      c.lostRingShots = 12 * c.rings - c.ringShots;
+      bySeed[seed] = c;
+    }
+    // 53 + 40 = 93 and 54 + 40 = 94 counted attacks: 15 rings each, 8 from impact points and 7
+    // from the seat; 4 and 6 of their 180 shots ended on their first step.
+    expect(bySeed).toEqual({
+      1: {
+        impacts: 53,
+        turretFirings: 40,
+        counted: 93,
+        miscounted: 0,
+        rings: 15,
+        afterImpact: 8,
+        afterFiring: 7,
+        ringShots: 176,
+        lostRingShots: 4,
+        unmatched: 0,
+        capped: 0,
+      },
+      2: {
+        impacts: 54,
+        turretFirings: 40,
+        counted: 94,
+        miscounted: 0,
+        rings: 15,
+        afterImpact: 8,
+        afterFiring: 7,
+        ringShots: 174,
+        lostRingShots: 6,
+        unmatched: 0,
+        capped: 0,
+      },
+    });
+  });
+
+  /** The kills of a tick whose last hit was `source`'s, by enemy id: the victim's point. */
+  const killsBy = (events: readonly SimEvent[], source: number): Map<number, [number, number]> => {
+    const last = new Map<number, number>();
+    const kills = new Map<number, [number, number]>();
+    for (const event of events) {
+      if (event.type === 'hit') last.set(event.targetId, event.source);
+      else if (event.type === 'enemyKilled' && last.get(event.enemyId) === source) {
+        kills.set(event.enemyId, [event.x, event.y]);
+      }
+    }
+    return kills;
+  };
+
+  it('splits barrageSplit’s killing shots into 3 children at the victim after the stage, children never splitting, and half of them under the 分裂 rank alone (E10b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'barrageSplit') as GoldenC4Entry;
+    const runs = [entry, { ...entry, ...entry.also }] as GoldenC4Entry[];
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      bySeed[seed] = runs.map((run) => {
+        const c = {
+          gen0: 0,
+          kills: 0,
+          splits: 0,
+          children: 0,
+          misshapen: 0,
+          offVictim: 0,
+          fromGen0: 0,
+          fromChild: 0,
+          unmatched: 0,
+          capped: 0,
+        };
+        // Each rider shot's generation and heading as the projectile stage begins, by id.
+        let flying: { round: number; ux: number; uy: number }[] = [];
+        const hook = (ctx: RunContext): void => {
+          const rider = (ctx.emitters[0] as EmitterRuntime).barrage as BarrageRider;
+          const shots = ctx.shots;
+          flying = riderSlots(ctx, rider).map((s) => {
+            const vx = shots.vx[s] as number;
+            const vy = shots.vy[s] as number;
+            const len = Math.hypot(vx, vy);
+            return { round: shots.round[s] as number, ux: vx / len, uy: vy / len };
+          });
+        };
+        watchRun(withHook(run, hook), seed, (now, events, ctx) => {
+          const rider = (ctx.emitters[0] as EmitterRuntime).barrage as BarrageRider;
+          const shots = ctx.shots;
+          const kills = killsBy(events, ctx.sources.index('outer.barrage'));
+          c.kills += kills.size;
+          // The children spawned after the stage: unmoved, at round −1, grouped by origin.
+          const groups = new Map<string, number[]>();
+          for (const s of riderSlots(ctx, rider)) {
+            if (shots.launched[s] !== now) continue;
+            if (shots.round[s] === SPLIT_ROUND) {
+              c.gen0++;
+              continue;
+            }
+            const key = `${shots.x[s]},${shots.y[s]}`;
+            groups.set(key, [...(groups.get(key) ?? []), s]);
+          }
+          for (const group of groups.values()) {
+            c.splits++;
+            c.children += group.length;
+            const first = group[0] as number;
+            const x = shots.x[first] as number;
+            const y = shots.y[first] as number;
+            const base = Math.atan2(shots.vy[first] as number, shots.vx[first] as number);
+            const turned = group.map((s) => turnedDeg(ctx, s, base));
+            if (JSON.stringify(turned) !== '[0,120,-120]') c.misshapen++;
+            if (![...kills.values()].some(([kx, ky]) => kx === x && ky === y)) c.offVictim++;
+            const ux = Math.cos(base);
+            const uy = Math.sin(base);
+            const along = flying.filter(
+              (f) => Math.abs(f.ux - ux) < 1e-9 && Math.abs(f.uy - uy) < 1e-9,
+            );
+            if (along.some((f) => f.round === SPLIT_ROUND)) c.fromGen0++;
+            else if (along.length > 0) c.fromChild++;
+            else c.unmatched++;
+          }
+          c.capped = ctx.counters.barrageCapped;
+        });
+        return c;
+      });
+    }
+    // Chance 1: 15 and 17 splits of 3, the other 4 and 1 small kills the children's, which split
+    // nothing; the rank alone: 7 splits each. Every group sits on a kill, along a generation-0
+    // shot.
+    const clean = { misshapen: 0, offVictim: 0, fromChild: 0, unmatched: 0, capped: 0 };
+    const run = (gen0: number, kills: number, splits: number) => ({
+      ...clean,
+      gen0,
+      kills,
+      splits,
+      children: 3 * splits,
+      fromGen0: splits,
+    });
+    expect(bySeed).toEqual({
+      1: [run(310, 19, 15), run(317, 18, 7)],
+      2: [run(308, 18, 17), run(309, 10, 7)],
+    });
+  });
+
+  it('fires every shot of barrageFocus’s attacks at the nearest live boss at scale 1.2 while one lives, and as without focus otherwise (E10b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'barrageFocus') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        attacks: 0,
+        focused: 0,
+        focusedShots: 0,
+        plainShots: 0,
+        misaimed: 0,
+        misscaled: 0,
+        miscounted: 0,
+        bossHits: 0,
+        otherHits: 0,
+      };
+      let attacks = 0;
+      const hook = (ctx: RunContext): void => {
+        const em = ctx.emitters[0] as EmitterRuntime;
+        const rider = em.barrage as BarrageRider;
+        const shots = ctx.shots;
+        const fired = em.attacks - attacks;
+        attacks = em.attacks;
+        if (fired === 0) return;
+        c.attacks += fired;
+        const fresh = riderSlots(ctx, rider).filter((s) => shots.launched[s] === ctx.now);
+        const { x: px, y: py } = ctx.player;
+        const boss = ctx.enemies
+          .filter((e) => e.alive && e.boss)
+          .sort((a, b) => dist2(a, ctx.player) - dist2(b, ctx.player) || a.id - b.id)[0];
+        if (boss === undefined) {
+          c.plainShots += fresh.length;
+          for (const s of fresh) if (shots.scale[s] !== 1) c.misscaled++;
+          return;
+        }
+        c.focused += fired;
+        c.focusedShots += fresh.length;
+        if (fresh.length !== 3 * fired) c.miscounted++;
+        const base = Math.atan2(boss.y - py, boss.x - px);
+        for (const s of fresh) {
+          if (turnedDeg(ctx, s, base) !== 0) c.misaimed++;
+          if (shots.scale[s] !== 1.2) c.misscaled++;
+        }
+      };
+      watchRun(withHook(entry, hook), seed, (_now, events, ctx) => {
+        const source = ctx.sources.index('outer.barrage');
+        for (const event of events) {
+          if (event.type !== 'hit' || event.source !== source) continue;
+          const target = ctx.enemies.find((e) => e.id === event.targetId);
+          if (target?.boss === true) c.bossHits++;
+          else c.otherHits++;
+        }
+      });
+      bySeed[seed] = c;
+    }
+    // The wave-10 boss lives for 12 and 21 of the 120 attacks: their 36 and 63 shots go at it at
+    // scale 1.2; the others' at scale 1.
+    const focus = { attacks: 120, misaimed: 0, miscounted: 0, misscaled: 0 };
+    expect(bySeed).toEqual({
+      1: { ...focus, focused: 12, focusedShots: 36, plainShots: 295, bossHits: 27, otherHits: 266 },
+      2: { ...focus, focused: 21, focusedShots: 63, plainShots: 273, bossHits: 54, otherHits: 248 },
+    });
+  });
+
+  it('fires barrageRain’s 18 shots an attack on ticks 1–119 and 600–719 and 6 on the others, as far as enemies go, each bouncing twice at most (E10b)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'barrageRain') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        attacksIn: 0,
+        attacksOut: 0,
+        shotsIn: 0,
+        shotsOut: 0,
+        lost: 0,
+        miscounted: 0,
+        bounced: [0, 0, 0],
+        capped: 0,
+      };
+      let attacks = 0;
+      const bounces = new Map<number, number>();
+      const hook = (ctx: RunContext): void => {
+        const em = ctx.emitters[0] as EmitterRuntime;
+        const rider = em.barrage as BarrageRider;
+        const shots = ctx.shots;
+        const fired = em.attacks - attacks;
+        attacks = em.attacks;
+        if (fired === 0) return;
+        const fresh = riderSlots(ctx, rider).filter((s) => shots.launched[s] === ctx.now);
+        const inside = ctx.now % 600 < 120;
+        const n = inside ? 18 : 6;
+        const alive = ctx.enemies.filter((e) => e.alive).length;
+        const want = fired * Math.min(n, alive);
+        if (fresh.length !== want) c.miscounted++;
+        c.lost += fired * n - fresh.length;
+        if (inside) {
+          c.attacksIn += fired;
+          c.shotsIn += fresh.length;
+        } else {
+          c.attacksOut += fired;
+          c.shotsOut += fresh.length;
+        }
+      };
+      watchRun(withHook(entry, hook), seed, (_now, _events, ctx) => {
+        const rider = (ctx.emitters[0] as EmitterRuntime).barrage as BarrageRider;
+        for (const s of riderSlots(ctx, rider)) {
+          bounces.set(ctx.shots.id[s] as number, 2 - (ctx.shots.bounce[s] as number));
+        }
+        c.capped = ctx.counters.barrageCapped;
+      });
+      for (const taken of bounces.values()) c.bounced[taken] = (c.bounced[taken] as number) + 1;
+      bySeed[seed] = c;
+    }
+    // 24 attacks in the two windows (2 s at 6 a second) and 96 out of them, each as many shots as
+    // enemies lived up to 18 and 6.
+    expect(bySeed).toEqual({
+      1: {
+        attacksIn: 24,
+        attacksOut: 96,
+        shotsIn: 135,
+        shotsOut: 395,
+        lost: 478,
+        miscounted: 0,
+        bounced: [31, 107, 392],
+        capped: 0,
+      },
+      2: {
+        attacksIn: 24,
+        attacksOut: 96,
+        shotsIn: 104,
+        shotsOut: 380,
+        lost: 524,
+        miscounted: 0,
+        bounced: [33, 109, 342],
+        capped: 0,
       },
     });
   });

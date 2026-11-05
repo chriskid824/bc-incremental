@@ -197,6 +197,7 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'spreadRadius',
       'droneSpeed',
       'summonDuration',
+      'barrageSplit',
     ]);
   });
 
@@ -873,6 +874,22 @@ describe('every template, through one node (§4.7)', () => {
           { stat: 'barragePierce', kind: 'flat', value: 1 },
         ],
         emitters: [{ kind: 'barrage' }, { kind: 'barrage', damagePct: 0.6 }],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    ['en', ['+15% Small projectile split chance', '+1 Small projectile pierce']],
+    ['zh-TW', ['小彈分裂機率 +15%', '小彈穿透 +1']],
+  ] as const)(
+    'writes the 分裂 rank’s barrageSplit as a chance beside the pierce rank, in %s (E10b)',
+    (locale, expected) => {
+      const web = withEffects(fire, NOTABLE, {
+        modifiers: [
+          { stat: 'barrageSplit', kind: 'flat', value: 0.15 },
+          { stat: 'barragePierce', kind: 'flat', value: 1 },
+        ],
       });
       expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
     },

@@ -29,7 +29,7 @@ import type { TagMask } from '../../data/tags';
 import type { TargetSelector } from '../../data/triggers';
 import type { ArcParams, CompiledBarrage, CompiledBuild } from '../build/compile';
 import { ailmentCredit, jumpCredit, rowKey } from '../build/sources';
-import { ORB_MEMORY } from '../caps';
+import { ORB_MEMORY, SMALL_SHOT_CAP } from '../caps';
 import type { CompiledSelector } from '../effects/select';
 import type { Enemy, RunContext } from '../systems/context';
 import type { ChainPolicy } from '../systems/systemState';
@@ -600,21 +600,56 @@ function lobZonePayload(build: CompiledBuild, spec: LobSpec, rng: Rng): Payload 
 /**
  * The barrage rider of a run (CompiledBarrage, src/sim/systems/barrage.ts): its shots an attack,
  * at least 1, each hitting `hits` enemies at most and bouncing off the arena's edge `bounce`
- * times, with their payload.
+ * times, with their payload; and its ◆ params (E10b), null for those the build has none of.
  */
 export interface BarrageRider {
   readonly count: number;
   readonly hits: number;
   readonly bounce: number;
   readonly payload: Payload;
+  /** ◆扇形 (aim 'fan'): every shot of an attack at its first pick, over `spread` radians. */
+  readonly fan: boolean;
+  readonly spread: number;
+  /** ◆環射: every `every`-th counted attack, `count` more shots round its origin. */
+  readonly ring: { readonly every: number; readonly count: number } | null;
+  /**
+   * The counted attacks of the signature this rider has followed this run, which its ring
+   * counts (the rider is made with the run, so it starts from 0 with each run); 0 without one.
+   */
+  attacks: number;
+  /** ◆子母彈 and the 分裂 rank: the splits' chance, children and pending records. */
+  readonly split: BarrageSplits | null;
+  /** ◆聚焦: its hits' bonus, and whether it holds while a boss lives (else: one enemy alive). */
+  readonly focus: { readonly bonus: number; readonly boss: boolean } | null;
+  /** 彈雨: × `mult` while the tick % `period` < `active`. */
+  readonly rain: { readonly period: number; readonly active: number; readonly mult: number } | null;
+}
+
+/**
+ * A rider's splits (◆子母彈, E10b): a generation-0 shot whose hit kills its enemy splits with
+ * `chance` into `count` children (× the rain's factor at the spawn). The projectile stage
+ * records each split, in hit order, as the victim's id and position and the killing shot's
+ * velocity, `pending` of them (at most SMALL_SHOT_CAP), and they spawn once it has compacted
+ * (spawnSplits, src/sim/systems/barrage.ts).
+ */
+export interface BarrageSplits {
+  readonly count: number;
+  readonly chance: number;
+  pending: number;
+  readonly victim: Int32Array;
+  readonly x: Float64Array;
+  readonly y: Float64Array;
+  readonly vx: Float64Array;
+  readonly vy: Float64Array;
 }
 
 /**
  * The rider of `build`'s barrage on `rng` (the barrage stream), which createRunContext gives the
- * signature emitter alone; null for a build without one or with no shots an attack. Its payload
- * is a plain hit's (lead ruling W8): the damage stat × damagePct, tagged hit and projectile with
- * no element, credited to the grant's source, no SIGNATURE, no chain; it can crit and rolls
- * ailments.
+ * signature emitter alone; null for a build without one or with no shots an attack, which then
+ * fires no ring and splits nothing either. Its payload is a plain hit's (lead ruling W8): the
+ * damage stat × damagePct, tagged hit and projectile with no element, credited to the grant's
+ * source, no SIGNATURE, no chain; it can crit and rolls ailments. Its splits' records are
+ * allocated here, once a run, SMALL_SHOT_CAP of them.
  */
 export function barrageRider(build: CompiledBuild, rng: Rng): BarrageRider | null {
   const barrage: CompiledBarrage | null = build.barrage;
@@ -630,7 +665,32 @@ export function barrageRider(build: CompiledBuild, rng: Rng): BarrageRider | nul
     canCrit: true,
     damageMode: ROWS,
   });
-  return { count: barrage.count, hits: barrage.hits, bounce: barrage.bounce, payload };
+  const { split, focus } = barrage;
+  return {
+    count: barrage.count,
+    hits: barrage.hits,
+    bounce: barrage.bounce,
+    payload,
+    fan: barrage.aim === 'fan',
+    spread: barrage.spread,
+    ring: barrage.ring,
+    attacks: 0,
+    split:
+      split === null
+        ? null
+        : {
+            count: split.count,
+            chance: split.chance,
+            pending: 0,
+            victim: new Int32Array(SMALL_SHOT_CAP),
+            x: new Float64Array(SMALL_SHOT_CAP),
+            y: new Float64Array(SMALL_SHOT_CAP),
+            vx: new Float64Array(SMALL_SHOT_CAP),
+            vy: new Float64Array(SMALL_SHOT_CAP),
+          },
+    focus: focus === null ? null : { bonus: focus.bonus, boss: focus.when === 'boss' },
+    rain: barrage.rain,
+  };
 }
 
 /** Ticks between periodic events at `rate` per second: Infinity (never) at a rate ≤ 0. */

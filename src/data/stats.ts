@@ -210,6 +210,14 @@ export const STAT_IDS = [
    * compileBarrage); it reaches no other shot.
    */
   'barragePierce',
+  /**
+   * 小彈分裂機率 (the barrage outer's 分裂 ranks, A19 (a), docs/v3/game-design-v3.md §4.11): the
+   * chance that a small shot of the barrage rider whose hit kills its enemy splits, added to the
+   * split param's own chance (BuildFlags.barrage.split): min(1, split.chance + max(0,
+   * barrageSplit)). Read once a compile (src/sim/build/compile.ts compileBarrage); without the
+   * split param nothing splits, whatever its value.
+   */
+  'barrageSplit',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -280,6 +288,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   droneSpeed: 1,
   summonDuration: 1,
   barragePierce: 0,
+  barrageSplit: 0,
 };
 
 /**

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { loadGameData } from '../data';
 import type { EmitterGrant } from '../data/emitters';
 import { BASE_STATS, isScopedStat, NO_EXTRAS, SCOPED_STATS, STAT_IDS } from '../data/stats';
+import { ModifierSchema } from '../data/schema';
 import type { Modifier, StatBlock } from '../data/stats';
 import { tagMask } from '../data/tags';
 import type { ConversionSpec, TriggerSpec } from '../data/triggers';
@@ -291,9 +292,8 @@ describe('computeStatBlock', () => {
     expect(() => block([when])).toThrow(/Tags/);
   });
 
-  it("appends E10a's barragePierce: last of 63, base 0, an unscoped count that flat adds to", () => {
-    expect(STAT_IDS).toHaveLength(63);
-    expect(STAT_IDS.slice(-2)).toEqual(['summonDuration', 'barragePierce']);
+  it("appends E10a's barragePierce: the 63rd, base 0, an unscoped count that flat adds to", () => {
+    expect(STAT_IDS.slice(61, 63)).toEqual(['summonDuration', 'barragePierce']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.barragePierce).toBe(0);
     expect(isScopedStat('barragePierce')).toBe(false);
@@ -319,6 +319,41 @@ describe('computeStatBlock', () => {
       scope: 'outer.barrage',
     } as const;
     expect(() => block([scoped])).toThrow(/Tags/);
+  });
+
+  it("appends E10b's barrageSplit: last of 64, base 0, an unscoped chance that flat adds to", () => {
+    expect(STAT_IDS).toHaveLength(64);
+    expect(STAT_IDS.slice(-2)).toEqual(['barragePierce', 'barrageSplit']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.barrageSplit).toBe(0);
+    expect(isScopedStat('barrageSplit')).toBe(false);
+    expect(block([]).values.barrageSplit).toBe(0);
+    // 分裂's ranks under A19 (a): flat chance, which compileBarrage adds to the split's own.
+    const stats = block([
+      { stat: 'barrageSplit', kind: 'flat', value: 0.1 },
+      { stat: 'barrageSplit', kind: 'flat', value: 0.15 },
+    ]);
+    expect(stats.values.barrageSplit).toBeCloseTo(0.25, 12);
+    expect(stats.scoped).toEqual([]);
+    const tagged = {
+      stat: 'barrageSplit',
+      kind: 'flat',
+      value: 0.1,
+      tags: ['projectile'],
+    } as const;
+    expect(() => block([tagged])).toThrow(/Tags/);
+    const scoped = {
+      stat: 'barrageSplit',
+      kind: 'flat',
+      value: 0.1,
+      scope: 'outer.barrage',
+    } as const;
+    expect(() => block([scoped])).toThrow(/Tags/);
+    // And at load: the modifier schema refuses either, and takes the plain flat chance.
+    expect(ModifierSchema.safeParse(tagged).success).toBe(false);
+    expect(ModifierSchema.safeParse(scoped).success).toBe(false);
+    const flat = { stat: 'barrageSplit', kind: 'flat', value: 0.1 };
+    expect(ModifierSchema.safeParse(flat).success).toBe(true);
   });
 
   it('passes the triggers and conversions through', () => {

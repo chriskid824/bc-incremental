@@ -14,7 +14,7 @@ import type { GameData, TalentNode } from '../../src/data';
 import type { DroneGrant } from '../../src/data/emitters';
 import { toNumber, ZERO } from '../../src/core/num';
 import { createSimulation, DRONE_KIND_DRONE, DRONE_KIND_TURRET, NO_INPUT } from '../../src/sim';
-import { compileBuild } from '../../src/sim/build/compile';
+import { compileBuild, DEFAULT_BARRAGE_PARAMS } from '../../src/sim/build/compile';
 import type { RunConfig } from '../../src/sim';
 import { SUMMON_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../../src/sim/caps';
 import { BASE_ATTACK_SPEED } from '../../src/sim/emitters/types';
@@ -1304,8 +1304,14 @@ describe('barrage (E10a, lead ruling W12)', () => {
       count: 12,
       hits: 2,
       bounce: 2,
+      aim: 'distinct',
+      spread: Math.PI / 6,
+      ring: null,
+      split: null,
+      focus: null,
+      rain: null,
     });
-    expect(build.flags.barrage).toEqual({ countMult: 2, bounce: 2 });
+    expect(build.flags.barrage).toEqual({ ...DEFAULT_BARRAGE_PARAMS, countMult: 2, bounce: 2 });
   });
 
   it('gives no other scenario a rider, so normal, shots and hive time what they did', () => {
@@ -1322,7 +1328,7 @@ describe('barrage (E10a, lead ruling W12)', () => {
         config.character ?? null,
       );
       expect(build.barrage, id).toBeNull();
-      expect(build.flags.barrage, id).toEqual({ countMult: 1, bounce: 0 });
+      expect(build.flags.barrage, id).toEqual(DEFAULT_BARRAGE_PARAMS);
     }
   });
 

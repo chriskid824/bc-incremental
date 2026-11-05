@@ -64,7 +64,8 @@
       "spreadRadius": 1,
       "droneSpeed": 1,
       "summonDuration": 1,
-      "barragePierce": 0
+      "barragePierce": 0,
+      "barrageSplit": 0
     },
     "values": {
       "damage": 450.22067097931824,
@@ -129,7 +130,8 @@
       "spreadRadius": 1,
       "droneSpeed": 1,
       "summonDuration": 1,
-      "barragePierce": 0
+      "barragePierce": 0,
+      "barrageSplit": 0
     },
     "scoped": [
       {
