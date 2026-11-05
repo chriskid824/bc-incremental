@@ -598,7 +598,7 @@
   "web.node.outer.barrage.split.focus.name": "聚焦",
   "web.node.outer.barrage.main.focus-fire.name": "集火",
   "web.node.outer.barrage.main.bullet-hell.name": "子彈地獄",
-  "web.node.outer.barrage.main.bullet-hell.desc": "小彈數量 ×2，每發傷害 −40%",
+  "web.node.outer.barrage.main.bullet-hell.desc": "小彈數量 ×2，每發傷害 −40%，小彈碰到場地邊緣會反彈 2 次",
   "web.node.outer.barrage.main.threshold.name": "彈雨",
   "web.node.outer.barrage.main.threshold.desc": "每 10 秒有 2 秒，每次攻擊的小型投射物 ×3"
 }
