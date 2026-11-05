@@ -47,6 +47,7 @@ import { triphaseArc } from './triphaseArc';
 export type {
   BuildCompiler,
   CenterEventScratch,
+  ChainEndScratch,
   HitScratch,
   HookName,
   Hooks,

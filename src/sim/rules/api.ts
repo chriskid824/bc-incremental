@@ -13,8 +13,9 @@ import type { Enemy, RunContext } from '../systems/context';
 
 /**
  * The event a hook queues an effect on. Hooks pass their scratch: HitScratch, KillScratch (no
- * target: the victim is dead by the time the effect runs) or CenterEventScratch. A tick hook
- * passes depth 0, origin −1, no target and the player's position.
+ * target: the victim is dead by the time the effect runs), CenterEventScratch or ChainEndScratch
+ * (its target the chain's last enemy, which may be dead). A tick hook passes depth 0, origin −1,
+ * no target and the player's position.
  */
 export interface ModuleEvent {
   readonly depth: number;

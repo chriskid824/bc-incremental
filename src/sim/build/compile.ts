@@ -910,6 +910,7 @@ export function compileBuild(
     onHit: [],
     modifyDamage: [],
     onCenterEvent: [],
+    onChainEnd: [],
   };
   const hookOwners: { [K in HookName]: number[] } = {
     tick: [],
@@ -918,6 +919,7 @@ export function compileBuild(
     onHit: [],
     modifyDamage: [],
     onCenterEvent: [],
+    onChainEnd: [],
   };
   // The talent nodes' emitter grants, then the ones modules add.
   const grants: SourcedEmitter[] = [...stats.emitters];

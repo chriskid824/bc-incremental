@@ -38,6 +38,10 @@ const EV_CHAIN_JUMP = EVENT.chainJump;
  * CHAIN_HIT_CAP refuses counts in chainHitCapped, and when it leaves a level empty, so do the
  * levels left under it; an extra-jump roll or a bounce past EXTRA_JUMP_CAP counts in
  * extraJumpsCapped, with no roll drawn. `steady`, `depth` and `origin` as in chainAttack.
+ *
+ * Returns the enemy of its last jump hit in hit order, alive or dead, a bounce's included and
+ * one its defences blocked in full too (R1), or null when it made none: what the signature arc's
+ * onChainEnd hooks see (E13, src/sim/emitters/arc.ts). Its other callers ignore it.
  */
 export function chainGeneral(
   ctx: RunContext,
@@ -48,7 +52,7 @@ export function chainGeneral(
   steady: boolean,
   depth: number,
   origin: number,
-): void {
+): Enemy | null {
   const chain = ctx.sys.chain;
   const pol = p.policy ?? chain.noPolicy;
   const budget = ctx.chainBudget;
@@ -64,6 +68,8 @@ export function chainGeneral(
   let spare = chain.frontier;
   let fn = nRoots;
   let last = roots[nRoots - 1] as Enemy;
+  // The last jump hit's enemy; `last`, the extra jumps' start, is not moved by a bounce.
+  let hit: Enemy | null = null;
   let extra = 0;
   let bounced = 0;
   let kDone = 0;
@@ -104,6 +110,7 @@ export function chainGeneral(
                 depth,
                 origin,
               );
+              hit = node;
               next[nn++] = node;
             } else counters.extraJumpsCapped++;
           }
@@ -114,6 +121,7 @@ export function chainGeneral(
         jumpHit(ctx, p, p, nxt, k, r, node.x, node.y, steady, depth, origin);
         next[nn++] = nxt;
         last = nxt;
+        hit = nxt;
         // 跳電: one roll per jump hit, none once the attack has its extra jumps.
         if (pol.extraJumpChance > 0) {
           if (budget.extraJumps < EXTRA_JUMP_CAP) {
@@ -150,8 +158,10 @@ export function chainGeneral(
     budget.hits++;
     jumpHit(ctx, p, p.extraJumpPayload, nxt, k, r, last.x, last.y, steady, depth, origin);
     last = nxt;
+    hit = nxt;
   }
   counters.chainHitCapped += capped;
+  return hit;
 }
 
 /**

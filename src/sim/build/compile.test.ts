@@ -147,6 +147,7 @@ describe('compileBuild', () => {
       onHit: [],
       modifyDamage: [],
       onCenterEvent: [],
+      onChainEnd: [],
     });
     // Only the shatter's entry, which cannot freeze and so listens to nothing.
     expect(build.triggers).toEqual([shatterTrigger(false, 0)]);

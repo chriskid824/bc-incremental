@@ -30,7 +30,7 @@ import type { BarrageParams } from './build/compile';
 import { compileScaling, scaledValue } from './build/eval';
 import { spreadOf } from './build/size';
 import { SMALL_PROJECTILE_TICKS } from './caps';
-import { KILLED, REPEAT } from './effects/flags';
+import { KILLED, REPEAT, SIGNATURE } from './effects/flags';
 import { MAX_DEPTH } from './effects/types';
 import { enemiesInAura } from './emitters/aura';
 import { createPayload, ROWS } from './emitters/types';
@@ -3061,6 +3061,55 @@ const BARRAGE_RAIN_MODULES = (): TestModule[] => [
   barrageShape({ rain: { periodSec: 10, activeSec: 2, countMult: 3 } }),
 ];
 
+/** 雷火's board, which 引信 (CHAIN_END_MODULES) is credited to. */
+const FUSE_SOURCE = 'fusion.lightning.fire';
+
+/**
+ * E13's onChainEnd (gd:529 雷火「引信」 「每跳讓目標燃燒 +1 層；最後一跳引爆目標剩餘燃燒的 50%」, lead
+ * ruling 8 of B4, rulings Y1–Y7): the arc's own chain of 3 jumps (chainCount 1 and 三相雷's 2,
+ * no roll), with a 30% extra jump (跳電) and one bounce (回彈) written as test modules may write
+ * them, crits, ignites and C4.9's repeat triggers; and 引信 as a test module credited to
+ * fusion.lightning.fire: each signature jump hit burns its enemy 1 stack ({ hitIs: 'signature' }
+ * beside { hitIs: 'chainJump' }), and an onChainEnd hook queues a detonate of 50% of the burn
+ * left on the last jump hit's enemy once a discharge, from wave 12. It pins the hook's target,
+ * the repeats it passes over and the detonations.
+ */
+const CHAIN_END_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.2,
+    chainCount: 1,
+    attackSpeed: 4,
+  },
+  maskProbeMods(),
+  {
+    triggers: REPEAT_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+const CHAIN_END_MODULES = (): TestModule[] => [
+  (b) => void Object.assign(b.chainPolicy(), { extraJumpChance: 0.3, bounces: 1 }),
+  Object.assign(
+    (b: BuildCompiler) => {
+      const { name } = b.credit();
+      b.addTrigger(name, {
+        on: 'hit',
+        when: [{ hitIs: 'signature' }, { hitIs: 'chainJump' }],
+        do: [{ kind: 'applyAilment', ailment: 'burn', stacks: 1 }],
+      });
+      const detonate = b.addEffect(name, { kind: 'detonate', ailment: 'burn', fraction: 0.5 });
+      const trigger = b.hook('onChainEnd', (ctx, ev) => {
+        enqueueModuleEffect(ctx, trigger, detonate, ev);
+      });
+    },
+    { source: FUSE_SOURCE },
+  ),
+];
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3635,6 +3684,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: BARRAGE_RAIN_MODULES,
     expected: ['5b35c22ad68ec91a', 'ca3f3a78b933092d'],
   },
+  {
+    name: 'chainEnd',
+    config: { stats: CHAIN_END_STATS, rules: [], signature: { id: 'triphaseArc' }, startWave: 12 },
+    modules: CHAIN_END_MODULES,
+    expected: ['7b2d8981479590a6', 'd1af12f58df76bea'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3746,8 +3801,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E10b's barrageFocus and barrageRain are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([79, 'barrageFocus', 'barrageRain']);
+    // The count docs/ARCHITECTURE.md gives: E10b's barrageRain and E13's chainEnd are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([80, 'barrageRain', 'chainEnd']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -7804,6 +7859,145 @@ describe('golden C4 runs', () => {
         miscounted: 0,
         bounced: [33, 109, 342],
         capped: 0,
+      },
+    });
+  });
+
+  it('calls chainEnd’s onChainEnd hook once each discharge of the arc’s own whose chain hit, at its last jump’s enemy, bounces and extra jumps among them, never at a repeat’s, and detonates the burn left (E13)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'chainEnd') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    GOLDEN_C4_SEEDS.forEach((seed, i) => {
+      const c = {
+        attacks: 0,
+        repeats: 0,
+        jumped: 0,
+        calls: 0,
+        miscalled: 0,
+        alive: 0,
+        dead: 0,
+        burning: 0,
+        levels: 0,
+        bounces: 0,
+        extra: 0,
+        mistargeted: 0,
+        detonations: 0,
+        total: 0,
+      };
+      const watched: { ctx: RunContext | null } = { ctx: null };
+      // The tick's events from the arc's own attack being counted (−1: none open), and the calls
+      // since: one when its chain made a jump hit, none otherwise and none for a repeat.
+      let start = -1;
+      let calls = 0;
+      const settle = (ctx: RunContext): void => {
+        if (start < 0) return;
+        // The attack's events: its discharge event and hits, up to a waiting repeat's discharge.
+        let jumped = false;
+        let seen = 0;
+        for (let k = start; k < ctx.events.length; k++) {
+          const e = ctx.events[k] as SimEvent;
+          if (e.type === 'discharge' && ++seen > 1) break;
+          if (e.type === 'hit' && e.chainIndex > 0) jumped = true;
+        }
+        if (jumped) c.jumped++;
+        if (calls !== (jumped ? 1 : 0)) c.miscalled++;
+        start = -1;
+        calls = 0;
+      };
+      // Appended after the entry's own: hooks that change nothing it hashes.
+      const observe: TestModule = (b) => {
+        b.hook('onAttack', (ctx) => {
+          settle(ctx);
+          start = ctx.events.length;
+        });
+        b.hook('tick', settle);
+        b.hook('onChainEnd', (ctx, ev) => {
+          watched.ctx = ctx;
+          c.calls++;
+          // A call outside an attack of the arc's own, or a second one in it, is a repeat's.
+          if (start < 0 || ev.flags !== SIGNATURE) c.miscalled++;
+          calls++;
+          if (ev.target.alive) c.alive++;
+          else c.dead++;
+          if (holdsBurn(ev.target, ctx.now)) c.burning++;
+          // The chain's last hit is the tick's last hit event: a level's jump (index 1–3), a
+          // bounce (from its own point) or an extra jump (index 4 and 5).
+          let at = ctx.events.length - 1;
+          while (at >= 0 && ctx.events[at]?.type !== 'hit') at--;
+          const last = ctx.events[at];
+          if (last?.type !== 'hit' || last.targetId !== ev.target.id || last.chainIndex === 0) {
+            c.mistargeted++;
+          } else if (last.fromX === ev.target.x && last.fromY === ev.target.y) c.bounces++;
+          else if (last.chainIndex > 3) c.extra++;
+          else c.levels++;
+        });
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const modules = [...(entry.modules?.() ?? []), observe];
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), modules);
+      const fuse = sim.state.sources.indexOf(FUSE_SOURCE);
+      const hash = createHash('sha256');
+      let discharges = 0;
+      while (!sim.state.finished) {
+        const events = sim.step(NO_INPUT);
+        hash.update(JSON.stringify(events));
+        for (const e of events) {
+          if (e.type === 'discharge') discharges++;
+          if (e.type === 'hit' && e.source === fuse) {
+            c.detonations++;
+            c.total += toNumber(e.amount);
+          }
+        }
+      }
+      const result = sim.result();
+      hash.update(
+        JSON.stringify([
+          projectResult(result),
+          result.damageBySource,
+          nonzeroCounters(result.counters),
+        ]),
+      );
+      // The observed run is the run the entry hashes.
+      expect(hash.digest('hex').slice(0, 16), `seed ${seed}`).toBe(entry.expected[i]);
+      const em = (watched.ctx as RunContext).emitters[0] as EmitterRuntime;
+      c.attacks = em.attacks;
+      c.repeats = discharges - em.attacks;
+      c.total = Math.round(c.total * 1000) / 1000;
+      bySeed[seed] = c;
+    });
+    // 60 attacks of the arc's own a seed and 88 and 67 repeat discharges; a call for each attack
+    // whose chain hit (all but one at seed 2), at a level's jump, a bounce or an extra jump; the
+    // detonations those whose enemy still burned and lived when it ran.
+    const none = { miscalled: 0, mistargeted: 0 };
+    expect(bySeed).toEqual({
+      1: {
+        ...none,
+        attacks: 60,
+        repeats: 88,
+        jumped: 60,
+        calls: 60,
+        alive: 54,
+        dead: 6,
+        burning: 46,
+        levels: 20,
+        bounces: 30,
+        extra: 10,
+        detonations: 49,
+        total: 1116.661,
+      },
+      2: {
+        ...none,
+        attacks: 60,
+        repeats: 67,
+        jumped: 59,
+        calls: 59,
+        alive: 52,
+        dead: 7,
+        burning: 41,
+        levels: 16,
+        bounces: 29,
+        extra: 14,
+        detonations: 50,
+        total: 926.637,
       },
     });
   });

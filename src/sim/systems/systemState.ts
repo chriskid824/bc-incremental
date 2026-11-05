@@ -28,6 +28,7 @@ import { MAX_SOURCES } from '../build/sources';
 import type { CompiledEffect } from '../effects/types';
 import type { EmitterRuntime, Payload, SegmentSpec } from '../emitters/types';
 import type { GridPoint, SpatialGrid } from '../grid';
+import type { ChainEndScratch } from '../rules/module';
 import { DRONE_DOCKED, DRONE_FIXED, DRONE_GUARD, DRONE_KIND_TURRET, DT, TICK_RATE } from '../types';
 import type {
   BulletViewState,
@@ -635,6 +636,11 @@ export interface ChainState {
   readonly noPolicy: ChainPolicy;
   /** farthestChainTarget's within() output. */
   readonly far: Enemy[];
+  /**
+   * The end of a signature discharge's chain the onChainEnd hooks see (src/sim/emitters/arc.ts),
+   * refilled before each call; its target is unset until the first.
+   */
+  readonly end: ChainEndScratch;
 }
 
 /** Empty levels, and the table without a policy of a run whose jumps keep `chainRetention`. */
@@ -644,6 +650,7 @@ export function createChainState(chainRetention: number): ChainState {
     next: [],
     noPolicy: compilePolicy(NO_POLICY_SPEC, chainRetention),
     far: [],
+    end: { target: null as unknown as Enemy, x: 0, y: 0, depth: 0, origin: -1, flags: 0 },
   };
 }
 

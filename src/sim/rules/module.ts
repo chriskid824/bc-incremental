@@ -217,6 +217,30 @@ export interface CenterEventScratch {
   value: Num;
 }
 
+/**
+ * The end of a signature discharge's chain an onChainEnd hook sees; one reused object per run
+ * (RunContext.sys.chain.end), filled before the hooks run (fireDischarge,
+ * src/sim/emitters/arc.ts). It is a ModuleEvent: a hook passes it to enqueueModuleEffect as it
+ * is, and what it queues has the last enemy as its target.
+ */
+export interface ChainEndScratch {
+  /**
+   * The enemy of the chain's last jump hit in hit order (chainGeneral, src/sim/combat/policy.ts):
+   * a level's jump, a fork's, a 回彈 bounce's (the bounced enemy) or a 跳電 extra jump's, its hit
+   * blocked in full or not (lead ruling R1); a jump refused at a cap is none. Alive or dead, as
+   * it stands when the hooks run.
+   */
+  target: Enemy;
+  /** The target's position when the hooks run. */
+  x: number;
+  y: number;
+  /** The discharge's depth and the trigger it comes from: 0 and −1 for the arc's own. */
+  depth: number;
+  origin: number;
+  /** The discharge payload's flags (Payload.flags): SIGNATURE, never REPEAT. */
+  flags: number;
+}
+
 /** Points in the tick where the simulation calls rule modules. Hooks allocate nothing. */
 export interface Hooks {
   /** Every tick after the emitters' attacks, while the player is alive. May queue effects. */
@@ -244,6 +268,12 @@ export interface Hooks {
   readonly modifyDamage: (ctx: RunContext, hit: Readonly<HitScratch>, amount: Num) => Num;
   /** At each center event that passes rule 8 (src/sim/effects/centerEvents.ts). May queue. */
   readonly onCenterEvent: (ctx: RunContext, ev: Readonly<CenterEventScratch>) => void;
+  /**
+   * Once a discharge of the signature arc, its repeats' never (rule 8), when its chain made a
+   * jump hit: after the chain, before the attack ends (src/sim/emitters/arc.ts). May queue
+   * effects, which run after those the chain's hits queued.
+   */
+  readonly onChainEnd: (ctx: RunContext, ev: Readonly<ChainEndScratch>) => void;
 }
 
 export type HookName = keyof Hooks;

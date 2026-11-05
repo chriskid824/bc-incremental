@@ -17,6 +17,11 @@
  * its chain rolled on that payload's stream; 六線圈 applies, and its jumps raise no chainJump
  * (the repeat's payload does not raise it). The repeats waiting for a discharge fire right after
  * it (drainRepeatCharges).
+ *
+ * After the chain of each of the signature's own discharges, never a repeat's (rule 8), the
+ * rule modules' onChainEnd hooks see its last jump hit's enemy (E13, lead ruling 8 of B4: 引信's
+ * 「最後一跳」, once a discharge, nothing for a chain that made no jump hit); a build without
+ * such a hook pays one length test a discharge.
  */
 
 import type { ArcParams } from '../build/compile';
@@ -25,9 +30,10 @@ import { chainGeneral } from '../combat/policy';
 import { drainRepeatCharges } from '../effects/execute';
 import { pickTargetInGrid } from '../targeting';
 import { fireBarrage } from '../systems/barrage';
+import { REPEAT } from '../effects/flags';
 import { focused, rollCount } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
-import { nextShotSteady } from './types';
+import { nextShotSteady, SIGNATURE } from './types';
 import type { EmitterRuntime, Payload } from './types';
 import { countAttack } from './volley';
 
@@ -83,7 +89,9 @@ export function fireArcRepeat(
  * order, raises a discharge event from the next coil and takes a primary hit; then one chain of
  * p from both, its jumps rolled once on p's stream. `steady` makes every hit crit (steadyAim);
  * `depth` and `origin` are the hits' trigger depth and the trigger they come from: 0 and −1 for
- * the emitter's own.
+ * the emitter's own. Then, when p is the signature's own (SIGNATURE without REPEAT) and the chain
+ * made a jump hit, the onChainEnd hooks, once for both targets (chainEnd), before the attack
+ * ends.
  */
 export function fireDischarge(
   ctx: RunContext,
@@ -119,6 +127,33 @@ export function fireDischarge(
   }
   const rng = p.rng;
   const jumps = rollCount(ctx.chainCount, (c) => rng.chance(c));
-  chainGeneral(ctx, p, roots, nRoots, jumps, steady, depth, origin);
+  const last = chainGeneral(ctx, p, roots, nRoots, jumps, steady, depth, origin);
+  // The hooks' length first: a build without one pays this test alone.
+  if (ctx.build.hooks.onChainEnd.length !== 0 && last !== null) {
+    if ((p.flags & (SIGNATURE | REPEAT)) === SIGNATURE) chainEnd(ctx, last, depth, origin, p.flags);
+  }
   endAttack(ctx);
+}
+
+/**
+ * The onChainEnd hooks, in the order the modules added them, on the end of a discharge's chain:
+ * `last`, its last jump hit's enemy, at its position now, with the discharge's `depth`, `origin`
+ * and payload `flags`, in the run's one scratch (RunContext.sys.chain.end).
+ */
+function chainEnd(
+  ctx: RunContext,
+  last: Enemy,
+  depth: number,
+  origin: number,
+  flags: number,
+): void {
+  const ev = ctx.sys.chain.end;
+  ev.target = last;
+  ev.x = last.x;
+  ev.y = last.y;
+  ev.depth = depth;
+  ev.origin = origin;
+  ev.flags = flags;
+  const hooks = ctx.build.hooks.onChainEnd;
+  for (let h = 0; h < hooks.length; h++) (hooks[h] as (typeof hooks)[number])(ctx, ev);
 }
