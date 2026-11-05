@@ -63,7 +63,8 @@
       "bombRadius": 1,
       "spreadRadius": 1,
       "droneSpeed": 1,
-      "summonDuration": 1
+      "summonDuration": 1,
+      "barragePierce": 0
     },
     "values": {
       "damage": 450.22067097931824,
@@ -127,7 +128,8 @@
       "bombRadius": 1,
       "spreadRadius": 1,
       "droneSpeed": 1,
-      "summonDuration": 1
+      "summonDuration": 1,
+      "barragePierce": 0
     },
     "scoped": [
       {

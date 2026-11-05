@@ -254,9 +254,9 @@ describe('computeStatBlock', () => {
     expect(() => block([when])).toThrow(/Tags/);
   });
 
-  it("appends E4's summonDuration: last of 62, base 1, an unscoped multiplier that increased raises and more multiplies", () => {
-    expect(STAT_IDS).toHaveLength(62);
-    expect(STAT_IDS.slice(-2)).toEqual(['droneSpeed', 'summonDuration']);
+  it("appends E4's summonDuration: 62nd, base 1, an unscoped multiplier that increased raises and more multiplies", () => {
+    expect(STAT_IDS.indexOf('summonDuration')).toBe(61);
+    expect(STAT_IDS.slice(60, 62)).toEqual(['droneSpeed', 'summonDuration']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.summonDuration).toBe(1);
     expect(isScopedStat('summonDuration')).toBe(false);
@@ -289,6 +289,36 @@ describe('computeStatBlock', () => {
       when: [{ targetKind: 'elite' }],
     } as const;
     expect(() => block([when])).toThrow(/Tags/);
+  });
+
+  it("appends E10a's barragePierce: last of 63, base 0, an unscoped count that flat adds to", () => {
+    expect(STAT_IDS).toHaveLength(63);
+    expect(STAT_IDS.slice(-2)).toEqual(['summonDuration', 'barragePierce']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.barragePierce).toBe(0);
+    expect(isScopedStat('barragePierce')).toBe(false);
+    expect(block([]).values.barragePierce).toBe(0);
+    // 分裂's ranks: flat pierce, whose whole part the rider reads (compileBarrage).
+    const stats = block([
+      { stat: 'barragePierce', kind: 'flat', value: 1 },
+      { stat: 'barragePierce', kind: 'flat', value: 1.5 },
+    ]);
+    expect(stats.values.barragePierce).toBe(2.5);
+    expect(stats.scoped).toEqual([]);
+    const tagged = {
+      stat: 'barragePierce',
+      kind: 'flat',
+      value: 1,
+      tags: ['projectile'],
+    } as const;
+    expect(() => block([tagged])).toThrow(/Tags/);
+    const scoped = {
+      stat: 'barragePierce',
+      kind: 'flat',
+      value: 1,
+      scope: 'outer.barrage',
+    } as const;
+    expect(() => block([scoped])).toThrow(/Tags/);
   });
 
   it('passes the triggers and conversions through', () => {

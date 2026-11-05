@@ -186,6 +186,7 @@
   "stat.spreadRadius": "Spread distance",
   "stat.droneSpeed": "Drone speed",
   "stat.summonDuration": "Summon duration",
+  "stat.barragePierce": "Small projectile pierce",
   "enemy.triangle.name": "Triangle",
   "enemy.triangle.plural": "Triangles",
   "enemy.square.name": "Square",

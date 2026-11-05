@@ -11,6 +11,7 @@
 
 import {
   AURA_DEFAULTS,
+  BARRAGE_DAMAGE_PCT,
   DRONE_DEFAULTS,
   ORBIT_DEFAULTS,
   SEGMENT_DEFAULTS,
@@ -271,7 +272,7 @@ export const EVENT_TEXT: Readonly<Record<TriggerEventId, MessageKey>> = {
   droneExpire: 'web.event.droneExpire',
 };
 
-/** Every grant kind, aura and orbit included (C4.21; N-1). */
+/** Every grant kind, aura, orbit and barrage included (C4.21; N-1; E10a). */
 export const GRANT_TEXT: Readonly<Record<GrantKind, MessageKey>> = {
   thorns: 'web.grant.thorns',
   segment: 'web.grant.segment',
@@ -279,6 +280,7 @@ export const GRANT_TEXT: Readonly<Record<GrantKind, MessageKey>> = {
   drone: 'web.grant.drone',
   aura: 'web.grant.aura',
   orbit: 'web.grant.orbit',
+  barrage: 'web.grant.barrage',
 };
 
 /** A segment grant's line by its endpoints (C5.8): 雷網's GRANT_TEXT one, and the pool's two. */
@@ -411,6 +413,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   spreadRadius: 'percent',
   droneSpeed: 'percent',
   summonDuration: 'percent',
+  barragePierce: 'number',
 };
 
 /**
@@ -1172,6 +1175,9 @@ function grantText(lookup: TextLookup, grant: EmitterGrant): string {
         damage: percent(grant.damagePct ?? ORBIT_DEFAULTS.damagePct),
         cooldown: trim(grant.cooldownSec ?? ORBIT_DEFAULTS.cooldownSec),
       });
+    case 'barrage':
+      // Its count is the barrageCount stat's, which the node's own stat line writes.
+      return say(lookup, key, { damage: percent(grant.damagePct ?? BARRAGE_DAMAGE_PCT) });
   }
 }
 

@@ -377,12 +377,13 @@ describe('timed rows: the pool’s capacity and tables (K3)', () => {
     expect(specsOf(fresh).live[specOf(fresh)]).toBe(0);
   });
 
-  it('adds no member to the run context: 126 own properties (B1’s frostBurnCap among them), as an M1 run’s, and keeps COUNTER_IDS at 19', () => {
+  it('adds no member to the run context: 126 own properties (B1’s frostBurnCap among them), as an M1 run’s, and keeps COUNTER_IDS at 20 (E10a’s barrageCapped the last)', () => {
     const m1 = createRunContext(makeConfig(), makeTestData());
     expect(Object.keys(m1).length).toBe(126);
     const timed = fixture([], { grants: [on('outer.summon', drone(3))] });
     expect(Object.keys(timed).length).toBe(126);
-    expect(COUNTER_IDS).toHaveLength(19);
+    expect(COUNTER_IDS).toHaveLength(20);
+    expect(COUNTER_IDS.at(-1)).toBe('barrageCapped');
   });
 });
 

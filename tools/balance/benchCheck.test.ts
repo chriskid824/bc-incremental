@@ -220,6 +220,7 @@ describe('bench.baseline.json', () => {
       'grants',
       'v3fire',
       'enemies',
+      'barrage',
     ]);
   });
 });

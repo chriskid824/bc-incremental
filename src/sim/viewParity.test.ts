@@ -173,11 +173,15 @@ const BUILDS: Readonly<Record<string, ParityBuild>> = {
   },
 };
 
-/** The digests V1's parent (13bbb2e) gives, seeds 1 and 2. */
+/**
+ * The digests V1's parent (13bbb2e) gives, seeds 1 and 2, with E10a's barrageCapped among the
+ * hashed counters (0 in all of them): without that key they are the parent's own, 1af237b4…,
+ * 0e2128d2…; c446ec63…, cc06f126…; 5ca3a307…, 18c81616….
+ */
 const EXPECTED: Readonly<Record<string, readonly [string, string]>> = {
-  zones: ['1af237b43b44bf38', '0e2128d2d23543be'],
-  lob: ['c446ec63e7cbc251', 'cc06f126e58016a5'],
-  segments: ['5ca3a3077ffef185', '18c81616bf8d7896'],
+  zones: ['257ffd41430675ac', '8c3d9eac497b8861'],
+  lob: ['e83d21d09747f416', '2548af5c45d01275'],
+  segments: ['d3a7aa474b282060', 'eddf5907eb30dae7'],
 };
 
 const TICKS = 1200;

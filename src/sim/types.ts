@@ -780,6 +780,11 @@ export const COUNTER_IDS = [
    * children, and from C7.4b, C7.6 and C7.7 summons, 增殖 children and onion bursts.
    */
   'enemySpawnsSkipped',
+  /**
+   * Barrage rider shots not fired because SMALL_SHOT_CAP projectiles were already in flight
+   * (src/sim/systems/barrage.ts), one for each shot of an attack's that was refused.
+   */
+  'barrageCapped',
 ] as const;
 export type CounterId = (typeof COUNTER_IDS)[number];
 

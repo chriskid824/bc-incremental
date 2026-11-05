@@ -17,15 +17,15 @@ describe('simulation speed', () => {
     expect(Object.keys(ctx).length).toBeLessThan(128);
   });
 
-  it('keeps COUNTER_IDS below 20 entries, while createRunContext builds counters in a loop', () => {
-    // createRunContext fills RunContext.counters key by key from COUNTER_IDS (16 at C5.1), which
-    // gives the object a hidden class only while it is small; past about 20 keys V8 may turn it
-    // into a dictionary, and every counter write in the systems slows down (docs/v3 C5 design
-    // §0.4, CD12).
-    expect(
-      COUNTER_IDS.length,
-      'build RunContext.counters as one object literal before adding a 20th counter',
-    ).toBeLessThan(20);
+  it('builds RunContext.counters as one object literal of every COUNTER_IDS key, in order', () => {
+    // Filled key by key from COUNTER_IDS, as createRunContext did up to 19 counters, the object
+    // keeps a hidden class only while it is small; past about 20 keys V8 may turn it into a
+    // dictionary, and every counter write in the systems slows down (docs/v3 C5 design §0.4,
+    // CD12). So from E10a's barrageCapped, the 20th, it is one literal, typed over CounterId so
+    // that a new counter does not compile without its key; this holds its order to the list's.
+    const ctx = createRunContext(makeConfig(), makeTestData());
+    expect(COUNTER_IDS).toHaveLength(20);
+    expect(Object.keys(ctx.counters)).toEqual([...COUNTER_IDS]);
   });
 
   it('runs a full 180 s run with a crowded arena quickly', () => {

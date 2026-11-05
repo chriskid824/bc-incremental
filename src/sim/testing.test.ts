@@ -115,6 +115,7 @@ describe('rngPositions', () => {
       'trigger',
       'effects',
       'affixes',
+      'barrage',
     ]);
   });
 });

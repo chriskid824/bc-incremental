@@ -28,6 +28,7 @@
 import type { FanParams } from '../build/compile';
 import { drainRepeatCharges } from '../effects/execute';
 import { pickTargetInGrid } from '../targeting';
+import { fireBarrage } from '../systems/barrage';
 import { focused, rollCount } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { MOTION_STRAIGHT, spawnShot } from '../systems/shots';
@@ -36,11 +37,12 @@ import type { EmitterRuntime, FanSpec, Payload } from './types';
 import { countAttack } from './volley';
 
 /**
- * Fires every due round of `em`, a fan, each followed by the repeats waiting for it. The
- * accumulator gains the emitter's cadence per tick; a round is due each time it reaches the
- * emitter's interval. Without a target the emitter stays ready without banking rounds, as the
- * volley does (runVolley): it fires on the tick a target appears. Under 冰柱 the round counted
- * as every icicleEvery-th attack fires the icicle cone.
+ * Fires every due round of `em`, a fan, each followed by its barrage rider's shots from the
+ * player (src/sim/systems/barrage.ts) and the repeats waiting for it. The accumulator gains the
+ * emitter's cadence per tick; a round is due each time it reaches the emitter's interval. Without
+ * a target the emitter stays ready without banking rounds, as the volley does (runVolley): it
+ * fires on the tick a target appears. Under 冰柱 the round counted as every icicleEvery-th attack
+ * fires the icicle cone.
  */
 export function runFan(ctx: RunContext, em: EmitterRuntime): void {
   const grid = ctx.grid;
@@ -59,6 +61,8 @@ export function runFan(ctx: RunContext, em: EmitterRuntime): void {
     // 冰柱 counts the round countAttack just counted.
     const icicle = every > 0 && em.attacks % every === 0;
     fireRound(ctx, em, target, icicle ? (em.alt as Payload) : em.payload, true, 0, -1);
+    // The barrage rider follows the round's cones (E10a).
+    if (em.barrage !== null) fireBarrage(ctx, em.barrage, player.x, player.y);
     drainRepeatCharges(ctx, em);
   }
 }

@@ -319,11 +319,19 @@ export function placedEnemies(
   return ctx;
 }
 
+/** rngPositions' result: each stream's Rng.snapshot(), the barrage one's null without a rider. */
+export type RngPositions = {
+  readonly [K in RngStreamName]: K extends 'barrage'
+    ? ReturnType<Rng['snapshot']> | null
+    : ReturnType<Rng['snapshot']>;
+};
+
 /**
  * The position of every RNG stream of the run (Rng.snapshot()), by stream name: equal before
- * and after something that draws nothing.
+ * and after something that draws nothing. The barrage stream is the signature's rider's
+ * (EmitterRuntime.barrage), null for a run without one, which never draws from it.
  */
-export function rngPositions(ctx: RunContext): Record<RngStreamName, ReturnType<Rng['snapshot']>> {
+export function rngPositions(ctx: RunContext): RngPositions {
   return {
     spawn: ctx.spawnRng.snapshot(),
     split: ctx.splitRng.snapshot(),
@@ -332,6 +340,7 @@ export function rngPositions(ctx: RunContext): Record<RngStreamName, ReturnType<
     trigger: ctx.triggerRng.snapshot(),
     effects: ctx.effectsRng.snapshot(),
     affixes: ctx.sys.affixes.rng.snapshot(),
+    barrage: ctx.emitters[0]?.barrage?.payload.rng.snapshot() ?? null,
   };
 }
 

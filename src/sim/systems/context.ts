@@ -49,6 +49,7 @@ import type { CompiledEffect, CompiledTrigger } from '../effects/types';
 import { droneLayout } from '../emitters/drone';
 import {
   ALWAYS_IGNITES,
+  barrageRider,
   coronaPayload,
   createEmitterRuntime,
   createOrbMemory,
@@ -80,7 +81,6 @@ import { FOCUS_RANGE, isCovered } from '../targeting';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
-  COUNTER_IDS,
   DRONE_KIND_TURRET,
   DT,
   MAX_RUN_SECONDS,
@@ -867,6 +867,7 @@ export function createRunContext(
     trigger: triggerRng,
     effects: effectsRng,
     affixes: affixesRng,
+    barrage: barrageRng,
   } = createStreams(config.seed);
   const startWaveNumber = config.startWave;
 
@@ -881,7 +882,8 @@ export function createRunContext(
   // strike picks its target as a periodic trigger does, from the player, its range × the spread
   // factor when node data marks it (spreadSelector, E3); a fan's icicle cones (冰柱) and an
   // aura's corona (日冕) take a payload of their own; an orbit's orbs, counted once for the run
-  // and none of 巨大化's four counts (not halved), each remember the enemies they hit.
+  // and none of 巨大化's four counts (not halved), each remember the enemies they hit. The
+  // signature carries the barrage rider (E10a), whose hits roll on the barrage stream.
   const emitters = build.emitters.map((spec, index) => {
     const payload = emitterPayload(build, spec, combatRng, index === 0 ? policy : null);
     return createEmitterRuntime(
@@ -898,6 +900,7 @@ export function createRunContext(
           ? coronaPayload(build, spec, payload)
           : null,
       spec.kind === 'orbit' ? createOrbMemory(spec.count + Math.floor(values.orbitCount)) : null,
+      index === 0 ? barrageRider(build, barrageRng) : null,
     );
   });
   // The drone emitters' summons, placed once in emitter order up to the summon cap, which only a
@@ -1010,8 +1013,9 @@ export function createRunContext(
           ticks: Math.max(1, Math.round(comboEcho.delaySec * TICK_RATE)),
         };
   // Who burn damage can be credited to: the applier of every payload whose hits ignite, an
-  // emitter's zone payload among them (Payload.zoneVariant), and of every applyAilment,
-  // groundZone and spawnDrone burn. A repeat's payloads have the signature's sources.
+  // emitter's zone payload among them (Payload.zoneVariant) and the barrage rider's, and of every
+  // applyAilment, groundZone and spawnDrone burn. A repeat's payloads have the signature's
+  // sources.
   const burnCredits = new Set<number>();
   for (const emitter of emitters) {
     const p = emitter.payload;
@@ -1019,6 +1023,10 @@ export function createRunContext(
     const zone = p.zoneVariant;
     if (zone !== null && zone.rollsAilments) {
       burnCredits.add(ailmentCredit(sources, attribution, 'burn', zone.source));
+    }
+    const rider = emitter.barrage;
+    if (rider !== null) {
+      burnCredits.add(ailmentCredit(sources, attribution, 'burn', rider.payload.source));
     }
   }
   effects.forEach((fx, i) => {
@@ -1057,9 +1065,30 @@ export function createRunContext(
 
   const taken = {} as Record<EnemyId, { hits: number; damage: number }>;
   for (const id of ENEMY_IDS) taken[id] = { hits: 0, damage: 0 };
-  const counters = {} as Record<CounterId, number>;
-  for (const id of COUNTER_IDS) counters[id] = 0;
-  counters.summonCapped = layout.refused;
+  // One literal in COUNTER_IDS order, so the object keeps a hidden class past 20 keys
+  // (simulation.perf.test.ts; docs/v3 C5 design §0.4, CD12).
+  const counters: Record<CounterId, number> = {
+    effectsRun: 0,
+    effectQueuePeak: 0,
+    effectBudgetTicks: 0,
+    effectsDeferred: 0,
+    effectsDropped: 0,
+    triggerDepthCapped: 0,
+    freezePayloadsLimited: 0,
+    effectBudgetStreakMax: 0,
+    chainHitCapped: 0,
+    chainHitsPeak: 0,
+    projectilesCapped: 0,
+    zonesEvicted: 0,
+    repeatChargesDropped: 0,
+    extraJumpsCapped: 0,
+    centerEventsCapped: 0,
+    summonCapped: layout.refused,
+    orbMemoryFull: 0,
+    enemyCapDelayed: 0,
+    enemySpawnsSkipped: 0,
+    barrageCapped: 0,
+  };
 
   const ctx: RunContext = {
     data,

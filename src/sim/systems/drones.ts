@@ -133,6 +133,7 @@ import { BASE_ATTACK_SPEED, nextShotSteady, SIGNATURE } from '../emitters/types'
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { countAttack } from '../emitters/volley';
 import { pickTargetInGrid } from '../targeting';
+import { fireBarrage } from './barrage';
 import {
   ARENA_HEIGHT,
   ARENA_WIDTH,
@@ -1061,8 +1062,9 @@ export function pickHighestHp(ctx: RunContext, range = Infinity): Enemy | null {
  * own. Then come the chain from the target when `p` chains, which passes over the enemies the
  * impact hit; the impact event; and the droneImpact center event at the target, without a list,
  * which rule 8 raises for the signature's own impacts alone, its value the flight's angle
- * (flightAngle). The repeats waiting for a counted impact follow it. `depth` and `origin` are the
- * hits' trigger depth and origin (0 and −1 for a drone). A drone's own impact (dash) works out
+ * (flightAngle). A counted impact's barrage rider fires from the drone's position (E10a,
+ * src/sim/systems/barrage.ts), and the repeats waiting for it follow. `depth` and `origin` are
+ * the hits' trigger depth and origin (0 and −1 for a drone). A drone's own impact (dash) works out
  * the same splash and scale itself, 自爆協議's and 蜂潮's on top (E5), and calls impact.
  */
 export function impactAt(
@@ -1164,7 +1166,13 @@ function impact(
     emitCenterEvent(ctx, DRONE_IMPACT, depth, origin, target, target.x, target.y, flags, angle);
   }
   endAttack(ctx);
-  if (counted !== null) drainRepeatCharges(ctx, counted);
+  if (counted !== null) {
+    // The barrage rider follows the impact, from the drone's position, which is inside its
+    // target: its shots skip the target and pass through it (E10a, lead ruling W15).
+    const rider = counted.barrage;
+    if (rider !== null) fireBarrage(ctx, rider, ds.x[s] as number, ds.y[s] as number, target);
+    drainRepeatCharges(ctx, counted);
+  }
   return n;
 }
 
@@ -1198,8 +1206,9 @@ function flightAngle(ctx: RunContext, s: number, target: Enemy): number {
  * turret payload, the later ones each at the nearest enemy worth a shot that the firing has not
  * picked yet, focus targets first (DronePool.turretAccept), else at the nearest alive one. Each
  * shot of a signature turret counts as a shot of the attack (nextShotSteady), a refused one too.
- * The turretFire event carries the shots the firing tried, PROJECTILE_CAP's refusals included,
- * and the repeats waiting for a counted firing follow it. Under 鎖定信標
+ * The turretFire event carries the shots the firing tried, PROJECTILE_CAP's refusals included;
+ * a counted firing's barrage rider fires from the seat (E10a, src/sim/systems/barrage.ts), and
+ * the repeats waiting for it follow. Under 鎖定信標
  * (BuildFlags.summonEliteFirst) its focus targets, for the first shot and the later ones alike,
  * are the elites and bosses at any distance (toughFocus) rather than those near the player
  * (focused). Under 集火指令 (BuildFlags.summonHighestHp), checked first, the firing's first shot
@@ -1254,7 +1263,11 @@ function turretStep(ctx: RunContext, ds: DronePool, s: number, em: EmitterRuntim
       targetId: first.id,
       count: fired,
     });
-    if (counted) drainRepeatCharges(ctx, em);
+    if (counted) {
+      // The barrage rider follows the firing, from the seat (E10a).
+      if (em.barrage !== null) fireBarrage(ctx, em.barrage, x, y);
+      drainRepeatCharges(ctx, em);
+    }
   }
 }
 

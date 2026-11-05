@@ -23,11 +23,11 @@ import {
   STRIKE_DEFAULTS,
   THORNS_DAMAGE_PCT,
 } from '../../data/emitters';
-import type { EmitterGrant, SegmentGrant } from '../../data/emitters';
+import type { BarrageGrant, EmitterGrant, SegmentGrant } from '../../data/emitters';
 import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { TargetSelector } from '../../data/triggers';
-import type { ArcParams, CompiledBuild } from '../build/compile';
+import type { ArcParams, CompiledBarrage, CompiledBuild } from '../build/compile';
 import { ailmentCredit, jumpCredit, rowKey } from '../build/sources';
 import { ORB_MEMORY } from '../caps';
 import type { CompiledSelector } from '../effects/select';
@@ -218,9 +218,12 @@ export type EmitterSpec =
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
  * never the signature attack, never chaining from an attack (a strike runs its own chain,
- * chainGeneral).
+ * chainGeneral). A barrage grant has none: it rides the signature (BarrageRider).
  */
-export function grantEmitter(source: string, grant: EmitterGrant): EmitterSpec {
+export function grantEmitter(
+  source: string,
+  grant: Exclude<EmitterGrant, BarrageGrant>,
+): EmitterSpec {
   switch (grant.kind) {
     case 'thorns':
       return {
@@ -594,6 +597,42 @@ function lobZonePayload(build: CompiledBuild, spec: LobSpec, rng: Rng): Payload 
   });
 }
 
+/**
+ * The barrage rider of a run (CompiledBarrage, src/sim/systems/barrage.ts): its shots an attack,
+ * at least 1, each hitting `hits` enemies at most and bouncing off the arena's edge `bounce`
+ * times, with their payload.
+ */
+export interface BarrageRider {
+  readonly count: number;
+  readonly hits: number;
+  readonly bounce: number;
+  readonly payload: Payload;
+}
+
+/**
+ * The rider of `build`'s barrage on `rng` (the barrage stream), which createRunContext gives the
+ * signature emitter alone; null for a build without one or with no shots an attack. Its payload
+ * is a plain hit's (lead ruling W8): the damage stat × damagePct, tagged hit and projectile with
+ * no element, credited to the grant's source, no SIGNATURE, no chain; it can crit and rolls
+ * ailments.
+ */
+export function barrageRider(build: CompiledBuild, rng: Rng): BarrageRider | null {
+  const barrage: CompiledBarrage | null = build.barrage;
+  if (barrage === null || barrage.count === 0) return null;
+  const payload = createPayload({
+    baseDamage: mul(num(build.values.damage), barrage.damagePct),
+    tags: TAG.hit | TAG.projectile,
+    source: build.sources.index(barrage.source),
+    flags: 0,
+    rng,
+    chains: false,
+    rollsAilments: true,
+    canCrit: true,
+    damageMode: ROWS,
+  });
+  return { count: barrage.count, hits: barrage.hits, bounce: barrage.bounce, payload };
+}
+
 /** Ticks between periodic events at `rate` per second: Infinity (never) at a rate ≤ 0. */
 export function periodTicks(rate: number): number {
   return rate > 0 ? TICK_RATE / rate : Infinity;
@@ -788,13 +827,20 @@ export interface EmitterRuntime {
    * run's orb count; null for the other kinds.
    */
   readonly orbs: OrbMemory | null;
+  /**
+   * The barrage rider (barrageRider) the signature emitter's counted attacks fire
+   * (src/sim/systems/barrage.ts); null for every other emitter and a build without one, which
+   * pays this one null test a counted attack.
+   */
+  readonly barrage: BarrageRider | null;
 }
 
 /**
  * The runtime of the emitter of `spec` at `index`, with its payload, its interval, for a strike
  * its compiled target selector, for a fan its icicle payload and for an aura its corona payload
- * (`alt`), and for an orbit its orb memory (all null for the other kinds): a strike's chain
- * payload and the target buffer of a strike, an aura and an orbit are made here, once.
+ * (`alt`), for an orbit its orb memory, and for the signature its barrage rider (all null for
+ * the other kinds): a strike's chain payload and the target buffer of a strike, an aura and an
+ * orbit are made here, once.
  */
 export function createEmitterRuntime(
   spec: EmitterSpec,
@@ -804,6 +850,7 @@ export function createEmitterRuntime(
   selector: CompiledSelector | null,
   alt: Payload | null,
   orbs: OrbMemory | null,
+  barrage: BarrageRider | null,
 ): EmitterRuntime {
   return {
     spec,
@@ -824,6 +871,7 @@ export function createEmitterRuntime(
     steadyAttack: false,
     cadence: 1,
     orbs,
+    barrage,
   };
 }
 

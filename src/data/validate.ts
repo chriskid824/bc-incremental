@@ -645,6 +645,13 @@ function grantIssues(grant: EmitterGrant): string[] {
       }
       break;
     }
+    case 'barrage': {
+      const pct = grant.damagePct;
+      if (pct !== undefined && !(Number.isFinite(pct) && pct > 0)) {
+        issues.push(`damagePct must be finite and > 0 (got ${pct})`);
+      }
+      break;
+    }
   }
   return issues;
 }
