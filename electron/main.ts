@@ -1,10 +1,11 @@
 /**
  * The Steam build's Electron main process (docs/v3 C9 design §1.5), run from source with
  * `npm run electron` (C9/F2). Before Electron is ready it sets userData, takes the single-instance
- * lock in it, starts Steam (App ID 480, Spacewar) with the overlay's Chromium switches, which only
- * take effect this early, and registers the bridge's channels; once ready it opens the game window
- * on dist-steam/index.html, the page `vite build --mode steam` makes. Without Steam the game plays
- * on, saving to files and keeping achievements locally (C9/F6).
+ * lock in it, starts Steam (App ID 480, Spacewar, or the demo's or the game's in a release build,
+ * ./release.ts) with the overlay's Chromium switches, which only take effect this early, and
+ * registers the bridge's channels; once ready it opens the game window on dist-steam/index.html
+ * (game.html in a release build), the page `vite build --mode steam` makes. Without Steam the
+ * game plays on, saving to files and keeping achievements locally (C9/F6).
  *
  * `--steam-check` (`npm run steam:check`) adds the check mode's channels for the page's check
  * panel (design §2.2): clearing the achievement, the overlay's dialogs, the save files, and the
@@ -33,7 +34,8 @@ import {
 } from './ipc';
 import { autoCloudRow, reportDirOf, saveDirOf, shownPath, userDataDir } from './paths';
 import { openSaveFiles, writeReport } from './saveFiles';
-import { SPACEWAR_APP_ID, startSteam } from './steam';
+import { builtRelease } from './release';
+import { startSteam } from './steam';
 import type { SteamworksModule } from './steam';
 
 /**
@@ -43,10 +45,17 @@ import type { SteamworksModule } from './steam';
 const PERMITTED = 'clipboard-sanitized-write';
 
 const args = parseShellArgs(process.argv.slice(1));
+/** Which Steam app this build is (BC_RELEASE at build time; ./release.ts). */
+const build = builtRelease();
 const appPath = app.getAppPath();
 
 // (1) userData, before anything reads it and before the lock, which lives in it.
-const userData = userDataDir(app.getPath('appData'), args.userDataDir);
+const userData = userDataDir(
+  app.getPath('appData'),
+  args.userDataDir,
+  process.platform,
+  build.folder,
+);
 mkdirSync(userData, { recursive: true });
 app.setPath('userData', userData);
 
@@ -61,7 +70,7 @@ function start(): void {
   // (4) Steam, then the overlay's switches only if it started (or --bc-overlay-switches).
   const appRequire = createRequire(join(appPath, 'package.json'));
   const steam = startSteam({
-    appId: SPACEWAR_APP_ID,
+    appId: build.appId,
     load: () => appRequire('steamworks.js') as SteamworksModule,
     clock: () => performance.now(),
     forceOverlaySwitches: args.overlaySwitches,
@@ -84,7 +93,7 @@ function start(): void {
       home: app.getPath('home'),
       appData: app.getPath('appData'),
     }),
-    autoCloud: autoCloudRow(),
+    autoCloud: autoCloudRow(process.platform, build.folder),
     versions: {
       app: app.getVersion(),
       electron: process.versions.electron,
@@ -141,9 +150,9 @@ function start(): void {
     );
     pages.setPermissionCheckHandler((_contents, permission) => permission === PERMITTED);
 
-    const page = join(pageDir, 'index.html');
+    const page = join(pageDir, build.page);
     if (!existsSync(page)) {
-      dialog.showErrorBox('bc-incremental', `${page} is missing: run npm run build:electron.`);
+      dialog.showErrorBox(build.title, `${page} is missing: run npm run build:electron.`);
       app.exit(1);
       return;
     }

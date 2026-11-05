@@ -28,13 +28,18 @@ function pathOf(platform: NodeJS.Platform): PlatformPath {
   return platform === 'win32' ? win32 : posix;
 }
 
-/** userData: `override` (an absolute `--bc-user-data-dir`), or appData/APP_FOLDER. */
+/**
+ * userData: `override` (an absolute `--bc-user-data-dir`), or appData/`folder`. `folder` is the
+ * release's own (electron/release.ts), so the demo and the full game never share saves, the
+ * single-instance lock or Chromium's storage; APP_FOLDER for the C9 check build.
+ */
 export function userDataDir(
   appData: string,
   override: string | null,
   platform: NodeJS.Platform = process.platform,
+  folder: string = APP_FOLDER,
 ): string {
-  return override ?? pathOf(platform).join(appData, APP_FOLDER);
+  return override ?? pathOf(platform).join(appData, folder);
 }
 
 /** The save files' folder in `userData`. */
@@ -100,10 +105,14 @@ function within(paths: PlatformPath, folder: string, path: string): string | nul
 /**
  * The Auto-Cloud path for this OS's saves (§1.4's table), configured on the App ID in M3: Windows'
  * is the cross-platform row, not recursive; macOS and Linux override its root. Linux assumes no
- * $XDG_CONFIG_HOME (else M3 moves Linux saves to LinuxXdgDataHome).
+ * $XDG_CONFIG_HOME (else M3 moves Linux saves to LinuxXdgDataHome). `folder` is the release's
+ * userData folder (userDataDir), so each App ID syncs only its own saves.
  */
-export function autoCloudRow(platform: NodeJS.Platform = process.platform): ShellInfo['autoCloud'] {
-  const saves = `${APP_FOLDER}/${SAVES_FOLDER}`;
+export function autoCloudRow(
+  platform: NodeJS.Platform = process.platform,
+  folder: string = APP_FOLDER,
+): ShellInfo['autoCloud'] {
+  const saves = `${folder}/${SAVES_FOLDER}`;
   switch (platform) {
     case 'win32':
       return { root: 'WinAppDataRoaming', subdirectory: saves, pattern: '*.json' };
