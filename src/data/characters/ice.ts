@@ -28,6 +28,8 @@ const C = 'ice.center.';
 
 /** The center's cone damage (碎裂's damage ranks): the fan's and its chains'. */
 const CONES = { scope: 'center' } as const;
+/** ◆凍土's own live-zone cap (E11): its zones keep their own count apart from the center's 16. */
+const PERMAFROST_MAX_LIVE = 8;
 
 /**
  * 預設 build (V25): a default player's purchase order, ranks by repetition. Cone damage and the
@@ -142,6 +144,8 @@ export const ICE = defineCharacter({
                   damagePctPerSec: 0,
                   addFrostPerSec: 0.2,
                   element: 'cold',
+                  // Its own cap (E11), so its zones never evict 暴風雪's.
+                  maxLive: PERMAFROST_MAX_LIVE,
                 },
               ],
             },
