@@ -577,12 +577,17 @@ export interface ExecuteSpec {
  * jumps, each from the enemy it last hit to the nearest one within the chain range it has not
  * hit, for damagePct of the damage stat (a jump's × the chain retention once per jump), tagged
  * hit, trigger, chain and lightning. Its first enemy is the event's (or the one the trigger's
- * selector picked) with from 'eventTarget' (the default), or the enemy nearest the event's
- * point within the chain range with from 'nearestToPoint'; without one it does nothing. Each of
- * its hits that leaves its enemy alive then adds `shockStacks` (default 0) of shock to it, with
- * no roll. Its hits crit and roll ailments as any hit does. It is an attack of its own, with its
- * own chain budget (CHAIN_HIT_CAP, its first hit counting 1), but no chain policy, and it
- * raises no chainJump.
+ * selector picked) with from 'eventTarget' (the default), the alive enemy nearest the event's
+ * point within the chain range with from 'nearestToPoint', or with from 'nearestOther' that
+ * nearest one but the event's own enemy (as 'nearestToPoint' on an event without one); without
+ * one it does nothing. Each of its hits that leaves its enemy alive then adds `shockStacks`
+ * (default 0) of shock to it, with no roll. Its hits crit and roll ailments as any hit does. It
+ * is an attack of its own, with its own chain budget (CHAIN_HIT_CAP, its first hit counting 1),
+ * but no chain policy, and it raises no chainJump. With `bolts` above 1 (a nearest from) it is
+ * that many such bolts, one on each of that many nearest enemies its from takes, nearest first,
+ * all picked before the first one fires: fewer enemies, fewer bolts, and a picked enemy an
+ * earlier bolt killed gets none. With `arc` each bolt's first hit comes from the event's point,
+ * where its hit event's arc is drawn from.
  */
 export interface ChainBoltSpec {
   readonly kind: 'chainBolt';
@@ -590,7 +595,35 @@ export interface ChainBoltSpec {
   readonly jumps: number;
   readonly damagePct: number;
   readonly shockStacks?: number;
-  readonly from?: 'eventTarget' | 'nearestToPoint';
+  readonly from?: 'eventTarget' | 'nearestToPoint' | 'nearestOther';
+  /** Bolts, each an attack of its own on a distinct enemy, 1 to 3 (default 1). */
+  readonly bolts?: number;
+  /** Each bolt's first hit carries the event's point as its from-position (default false). */
+  readonly arc?: boolean;
+}
+
+/** The most bolts one chainBolt sends, each to a distinct enemy (E7). */
+export const CHAIN_BOLT_BOLTS_MAX = 3;
+
+/**
+ * What is wrong with a chainBolt's bolts (E7): not a whole number in [1, CHAIN_BOLT_BOLTS_MAX],
+ * or above 1 from 'eventTarget' (the default), which starts on one enemy. Data validation asks
+ * it (src/data/validate.ts), and compileEffect for every chainBolt, which rule modules add
+ * unvalidated (lead ruling R8).
+ */
+export function chainBoltBoltsIssues(spec: ChainBoltSpec): string[] {
+  const { bolts } = spec;
+  if (bolts === undefined) return [];
+  const issues: string[] = [];
+  if (!(Number.isInteger(bolts) && bolts >= 1 && bolts <= CHAIN_BOLT_BOLTS_MAX)) {
+    issues.push(`bolts must be an integer in [1, ${CHAIN_BOLT_BOLTS_MAX}] (got ${bolts})`);
+  }
+  if ((spec.from ?? 'eventTarget') === 'eventTarget' && bolts > 1) {
+    issues.push(
+      `chainBolt from 'eventTarget' starts on one enemy; bolts ${bolts} needs from 'nearestToPoint' or 'nearestOther'`,
+    );
+  }
+  return issues;
 }
 
 /**
@@ -663,8 +696,8 @@ export interface BuffSpec {
  * - slashLine: a line from the event's point or enemy that hits every enemy it crosses
  *   (SlashLineSpec).
  * - coinHit: one hit of `multiplier` × the damage stat on the event's enemy (CoinHitSpec).
- * - chainBolt: a hit on the event's enemy, or the one nearest the event's point, and `jumps`
- *   chain jumps from it, each shocking its enemy (ChainBoltSpec).
+ * - chainBolt: a hit on the event's enemy, or the one nearest the event's point (or the nearest
+ *   few, one bolt each), and `jumps` chain jumps from it, each shocking its enemy (ChainBoltSpec).
  * - comboStack: `stacks` combo stacks, up to the run's cap (ComboStackSpec).
  * - buff: × (1 + more) on the cadence of the emitters that carry its tags, for a time (BuffSpec).
  * - execute: the event's enemy, if no boss, killed outright (ExecuteSpec).

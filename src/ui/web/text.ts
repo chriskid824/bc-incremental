@@ -758,13 +758,22 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
       if (spec.ignoreShield === true) extra('web.extra.ignoreShield');
       if (spec.ignoreArmour === true) extra('web.extra.ignoreArmour');
       return text({ mult: trim(spec.multiplier) });
-    case 'chainBolt':
+    case 'chainBolt': {
       if ((spec.shockStacks ?? 0) > 0) {
         const n = spec.shockStacks ?? 0;
         extra('web.extra.shock', { n, stack: word(lookup, 'stack', n) });
       }
-      if (spec.from === 'nearestToPoint') extra('web.extra.nearestToPoint');
+      // E7: the event's own enemy left out, and several bolts; arc has no text.
+      const n = spec.bolts ?? 1;
+      if (spec.from === 'nearestToPoint') {
+        if (n > 1) extra('web.extra.nearestBolts', { n });
+        else extra('web.extra.nearestToPoint');
+      } else if (spec.from === 'nearestOther') {
+        if (n > 1) extra('web.extra.nearestOtherBolts', { n });
+        else extra('web.extra.nearestOther');
+      }
       return text({ jumps: spec.jumps, damage: percent(spec.damagePct) });
+    }
     case 'comboStack':
       return text({ n: spec.stacks, stack: word(lookup, 'stack', spec.stacks) });
     case 'buff':

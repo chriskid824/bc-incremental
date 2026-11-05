@@ -536,6 +536,10 @@ describe('EffectSpecSchema', () => {
     { kind: 'chainBolt', jumps: 2, damagePct: 0.5 },
     { kind: 'chainBolt', jumps: 0, damagePct: 1, shockStacks: 1, from: 'eventTarget' },
     { kind: 'chainBolt', jumps: 31, damagePct: 0.2, shockStacks: 3, from: 'nearestToPoint' },
+    // E7: the nearest other enemy, several bolts and a drawn arc.
+    { kind: 'chainBolt', jumps: 0, damagePct: 0.5, from: 'nearestOther', bolts: 3, arc: true },
+    { kind: 'chainBolt', jumps: 2, damagePct: 0.5, from: 'nearestToPoint', bolts: 2, arc: false },
+    { kind: 'chainBolt', jumps: 1, damagePct: 0.5, bolts: 1, arc: true },
     { kind: 'comboStack', stacks: 1 },
     { kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2 },
     { kind: 'buff', stat: 'attackSpeed', more: -0.3, durationSec: 0.5, tags: ['minion', 'hit'] },
@@ -708,6 +712,23 @@ describe('EffectSpecSchema', () => {
     [
       'chainBolt with a chain policy field',
       { kind: 'chainBolt', jumps: 2, damagePct: 0.5, bounces: 1 },
+    ],
+    [
+      "chainBolt from 'nearest' (E7)",
+      { kind: 'chainBolt', jumps: 2, damagePct: 0.5, from: 'nearest' },
+    ],
+    [
+      'chainBolt with bolts as a string (E7)',
+      { kind: 'chainBolt', jumps: 2, damagePct: 0.5, bolts: '3' },
+    ],
+    [
+      'chainBolt with an infinite bolts (E7)',
+      { kind: 'chainBolt', jumps: 2, damagePct: 0.5, bolts: Infinity },
+    ],
+    ['chainBolt with arc 1 (E7)', { kind: 'chainBolt', jumps: 2, damagePct: 0.5, arc: 1 }],
+    [
+      'chainBolt with an arc undefined (E7)',
+      { kind: 'chainBolt', jumps: 2, damagePct: 0.5, arc: undefined },
     ],
     ['comboStack without stacks', { kind: 'comboStack' }],
     ['comboStack with a cap (C6b.2)', { kind: 'comboStack', stacks: 1, cap: 20 }],

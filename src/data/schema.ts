@@ -420,7 +420,9 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         jumps: finite,
         damagePct: finite,
         shockStacks: finite.exactOptional(),
-        from: z.enum(['eventTarget', 'nearestToPoint']).exactOptional(),
+        from: z.enum(['eventTarget', 'nearestToPoint', 'nearestOther']).exactOptional(),
+        bolts: finite.exactOptional(),
+        arc: z.boolean().exactOptional(),
       })
       .readonly(),
     z.strictObject({ kind: z.literal('comboStack'), stacks: finite }).readonly(),

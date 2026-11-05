@@ -56,6 +56,10 @@
  * counts 1 in its chain budget, then exactly `jumps` jumps on the general chain path
  * (chainGeneral, src/sim/combat/policy.ts) without a policy. Its payload shocks each enemy a
  * jump lands on and leaves alive (Payload.shockOnHit), and the executor its first one alike.
+ * With from 'nearestOther' the event's own enemy is left out, and with `bolts` above 1 it is that
+ * many such attacks on the nearest enemies, picked before the first one fires, nearest first
+ * (E7). With `arc` each first hit's event carries the event's point as its fromX and fromY,
+ * which only the hit event reads, so the renderer draws the bolt's arc from there.
  *
  * A comboStack adds its stacks to the run's combo, up to its cap, and a buff starts or extends
  * its window on the cadence of the emitters it takes (src/sim/systems/combo.ts).
@@ -69,7 +73,7 @@
 import type { Num } from '../../core/num';
 import { add, gt, mul, num, toNumber, ZERO } from '../../core/num';
 import type { SignatureId } from '../../data/rules';
-import type { AppliedAilment } from '../../data/triggers';
+import type { AppliedAilment, ChainBoltSpec } from '../../data/triggers';
 import {
   ailmentDps,
   applyBleed,
@@ -479,6 +483,34 @@ export function drainDelayedRepeats(ctx: RunContext): void {
   }
 }
 
+/**
+ * One chainBolt of entry's effect on `first`, an attack of its own: its first hit, counted in its
+ * budget, from the event's point with `arc` (null without, as every other first hit), and
+ * shockStacks on it if the hit landed and left it alive (R1); then exactly `jumps` jumps, no
+ * roll, each shocking its enemy alike (Payload.shockOnHit).
+ */
+function fireBolt(
+  ctx: RunContext,
+  spec: ChainBoltSpec,
+  entry: Readonly<EffectEntry>,
+  first: Enemy,
+): void {
+  const p = ctx.effectPayloads[entry.effect] as Payload;
+  const { depth, origin } = entry;
+  const arc = spec.arc === true;
+  beginAttack(ctx);
+  ctx.chainBudget.hits++;
+  const fromX = arc ? entry.x : null;
+  const fromY = arc ? entry.y : null;
+  const landed = hitWithPayload(ctx, first, p, 0, 1, fromX, fromY, false, depth, origin);
+  const stacks = spec.shockStacks ?? 0;
+  if (landed && stacks > 0 && first.alive) addShock(ctx, first, stacks, depth);
+  const roots = ctx.sys.chain.frontier;
+  roots[0] = first;
+  chainGeneral(ctx, p, roots, 1, spec.jumps, false, depth, origin);
+  endAttack(ctx);
+}
+
 const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   applyAilment(ctx, spec, fx, entry) {
     const ailment = spec.ailment;
@@ -851,27 +883,31 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const p = ctx.effectPayloads[entry.effect] as Payload;
     hitWithPayload(ctx, target, p, 0, 1, null, null, false, entry.depth, entry.origin);
   },
-  // An attack of its own on the live target, or on the alive enemy nearest the event's point
-  // within the chain range ('nearestToPoint'): its first hit, counted in its budget, and
-  // shockStacks on it if the hit landed and left it alive (R1); then exactly `jumps` jumps, no
-  // roll, each shocking its enemy alike (Payload.shockOnHit).
+  // A bolt (fireBolt) on the live target, or on the alive enemy nearest the event's point within
+  // the chain range ('nearestToPoint'). With 'nearestOther', or 'nearestToPoint' and `bolts`
+  // above 1, one bolt on each of the `bolts` nearest such enemies, the event's own (alive or
+  // dead) left out with 'nearestOther', nearest first and ties to the lower id: all picked into
+  // ctx.effectTargets before the first fires, which no bolt's hits write, and one killed by an
+  // earlier bolt passed over, not picked again.
   chainBolt(ctx, spec, _fx, entry) {
+    const from = spec.from;
+    if (from === 'nearestOther' || (from === 'nearestToPoint' && (spec.bolts ?? 1) > 1)) {
+      const picks = ctx.effectTargets;
+      const { x, y } = entry;
+      const found = ctx.grid.within(x, y, ctx.chainRangeSq, picks);
+      const skip = from === 'nearestOther' ? entry.target : null;
+      const n = orderNearest(picks, found, spec.bolts ?? 1, x, y, skip);
+      for (let i = 0; i < n; i++) {
+        const first = picks[i] as Enemy;
+        if (first.alive) fireBolt(ctx, spec, entry, first);
+      }
+      return;
+    }
     const first =
-      spec.from === 'nearestToPoint'
+      from === 'nearestToPoint'
         ? ctx.grid.nearest(entry.x, entry.y, ctx.chainRangeSq)
         : liveTarget(entry);
-    if (first === null) return;
-    const p = ctx.effectPayloads[entry.effect] as Payload;
-    const { depth, origin } = entry;
-    beginAttack(ctx);
-    ctx.chainBudget.hits++;
-    const landed = hitWithPayload(ctx, first, p, 0, 1, null, null, false, depth, origin);
-    const stacks = spec.shockStacks ?? 0;
-    if (landed && stacks > 0 && first.alive) addShock(ctx, first, stacks, depth);
-    const roots = ctx.sys.chain.frontier;
-    roots[0] = first;
-    chainGeneral(ctx, p, roots, 1, spec.jumps, false, depth, origin);
-    endAttack(ctx);
+    if (first !== null) fireBolt(ctx, spec, entry, first);
   },
   comboStack(ctx, spec) {
     addComboStacks(ctx, spec.stacks);

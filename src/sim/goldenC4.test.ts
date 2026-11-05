@@ -2594,6 +2594,73 @@ const guardsData = (): GameData =>
  */
 const SURGE_STATS = SWARM_STATS;
 
+/**
+ * E7's chain bolts (超導 gd:527, 放電 gd:410; lead rulings B1-B3, B6): M1's volley chills as
+ * freezeList's does (frostOnHit 0.5, no iceFan), and each freeze sends a fusion's three bolts,
+ * from 'nearestOther', 0 jumps and a shock stack each, at the three alive enemies nearest the
+ * frozen one within the chain range, the frozen one left out; half the kills send one 2-jump
+ * bolt from 'nearestToPoint' at the enemy nearest the victim's point, a shock stack a hit. Both
+ * arc. From wave 12 of the fixture waves; the volley shocks nothing, so every shock is a bolt's.
+ * It pins the picks (distinct, nearest first, never the frozen enemy, all in range), the arcs'
+ * from-positions (each first hit from its event's point, each jump from the enemy before) and
+ * the shocks.
+ */
+const CHAIN_BOLTS_TRIGGERS: readonly (readonly [string, TriggerSpec])[] = [
+  [
+    'fusion.ice.lightning',
+    {
+      on: 'freeze',
+      do: [
+        {
+          kind: 'chainBolt',
+          from: 'nearestOther',
+          bolts: 3,
+          jumps: 0,
+          arc: true,
+          damagePct: 0.3,
+          shockStacks: 1,
+        },
+      ],
+    },
+  ],
+  [
+    'outer.lightning',
+    {
+      on: 'kill',
+      when: [{ chance: 0.5 }],
+      do: [
+        {
+          kind: 'chainBolt',
+          from: 'nearestToPoint',
+          bolts: 1,
+          jumps: 2,
+          arc: true,
+          damagePct: 0.4,
+          shockStacks: 1,
+        },
+      ],
+    },
+  ],
+];
+const CHAIN_BOLTS_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    frostOnHit: 0.5,
+    chainCount: 1,
+    attackSpeed: 6,
+    projectileCount: 2,
+  },
+  maskProbeMods(),
+  {
+    triggers: CHAIN_BOLTS_TRIGGERS.map(([source, spec]) => ({ source, spec })),
+    conversions: [],
+    emitters: [],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3071,6 +3138,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [swarmFields({ drones: 6, surge: { periodSec: 8, damageMult: 2 } })],
     expected: ['dfbb0e7129a32dfd', 'd3a3f581aa9b9f5e'],
   },
+  {
+    name: 'chainBolts',
+    config: { stats: CHAIN_BOLTS_STATS, rules: [], startWave: 12 },
+    expected: ['8c4f28efce9228f0', '19e7da6f3f42c620'],
+  },
 ];
 
 /** [id, value] of each counter that is not 0, in COUNTER_IDS order. */
@@ -3178,8 +3250,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E5's guards and surge are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([63, 'guards', 'surge']);
+    // The count docs/ARCHITECTURE.md gives: E5's surge and E7's chainBolts are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([64, 'surge', 'chainBolts']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -5635,6 +5707,176 @@ describe('golden C4 runs', () => {
         surged: 12,
         onTarget: 12,
         cleared: 0,
+      },
+    });
+  });
+
+  it('sends chainBolts’ freeze bolts to the 3 nearest others and its kill bolts to the nearest, each from its event’s point, every hit a shock (E7)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'chainBolts') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        freezes: 0,
+        firings: 0,
+        sizes: [0, 0, 0],
+        killFirings: 0,
+        jumps: 0,
+        hits: 0,
+        kills: 0,
+        shocked: 0,
+        limited: 0,
+        lonely: 0,
+        crowded: 0,
+        ownBolt: 0,
+        unmatched: 0,
+        frozenPicked: 0,
+        repeated: 0,
+        unordered: 0,
+        outOfRange: 0,
+        badJump: 0,
+        unshocked: 0,
+      };
+      // Each enemy's position at its last hit, the points of the freezes and kills not yet
+      // answered, and the last bolt hit, which a jump comes from.
+      const at = new Map<number, [number, number]>();
+      const frozen = new Map<string, number>();
+      const kills = new Set<string>();
+      // The enemies whose last hit was a freeze bolt's, which raises no freeze bolt (rule 3).
+      const boltHit = new Set<number>();
+      const own = new Set<string>();
+      watchRun(entry, seed, (_now, events, ctx) => {
+        const ice = ctx.sources.index('fusion.ice.lightning');
+        const lightning = ctx.sources.index('outer.lightning');
+        const rangeSq = ctx.chainRangeSq;
+        const struck = new Set<number>();
+        let group: { key: string; frozen: number; ids: number[]; distSq: number } | null = null;
+        let last: [number, number] | null = null;
+        for (const event of events) {
+          if (event.type === 'freeze') {
+            c.freezes++;
+            const point = at.get(event.targetId) as [number, number];
+            frozen.set(point.join(), event.targetId);
+            if (boltHit.has(event.targetId)) own.add(point.join());
+          } else if (event.type === 'enemyKilled') {
+            kills.add([event.x, event.y].join());
+          }
+          if (event.type !== 'hit') continue;
+          at.set(event.targetId, [event.x, event.y]);
+          if (event.source === ice && (event.tags & TAG.trigger) !== 0) boltHit.add(event.targetId);
+          else boltHit.delete(event.targetId);
+          // A shatter of an enemy a bolt killed is credited to the bolt's source too.
+          if (event.source !== ice && event.source !== lightning) continue;
+          if ((event.tags & TAG.trigger) === 0) continue;
+          c.hits++;
+          struck.add(event.targetId);
+          if (event.chainIndex > 0) {
+            c.jumps++;
+            if (last === null || event.fromX !== last[0] || event.fromY !== last[1]) c.badJump++;
+            last = [event.x, event.y];
+            continue;
+          }
+          last = [event.x, event.y];
+          if (event.fromX === null || event.fromY === null) {
+            c.unmatched++;
+            continue;
+          }
+          const key = [event.fromX, event.fromY].join();
+          const dx = event.x - event.fromX;
+          const dy = event.y - event.fromY;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > rangeSq) c.outOfRange++;
+          if (event.source === lightning) {
+            c.killFirings++;
+            if (!kills.delete(key)) c.unmatched++;
+            continue;
+          }
+          if (group === null || group.key !== key) {
+            const id = frozen.get(key);
+            if (id === undefined) c.unmatched++;
+            frozen.delete(key);
+            c.firings++;
+            group = { key, frozen: id ?? -1, ids: [], distSq: -1 };
+          }
+          if (group.frozen === event.targetId) c.frozenPicked++;
+          if (group.ids.includes(event.targetId)) c.repeated++;
+          if (distSq < group.distSq) c.unordered++;
+          group.ids.push(event.targetId);
+          group.distSq = distSq;
+          // The group's size so far: one more of it, one fewer of the size before.
+          const n = group.ids.length;
+          c.sizes[n - 1] = (c.sizes[n - 1] as number) + 1;
+          if (n > 1) c.sizes[n - 2] = (c.sizes[n - 2] as number) - 1;
+        }
+        for (const event of events) {
+          if (event.type === 'enemyKilled' && struck.has(event.enemyId)) c.kills++;
+        }
+        // Every enemy a bolt hit and left alive is shocked as the tick ends.
+        for (const enemy of ctx.enemies) {
+          if (!enemy.alive || !struck.has(enemy.id)) continue;
+          if (enemy.shockStacks > 0 && enemy.shockUntil > ctx.now) c.shocked++;
+          else c.unshocked++;
+        }
+        // A freeze no bolt answered: no other enemy in range of its point, a freeze bolt's own
+        // freeze, or else rate-limited.
+        for (const [key, id] of frozen) {
+          const [x, y] = key.split(',').map(Number) as [number, number];
+          const near = ctx.enemies.some(
+            (e) => e.alive && e.id !== id && dist2(e, { x, y }) <= rangeSq,
+          );
+          if (!near) c.lonely++;
+          else if (own.has(key)) c.ownBolt++;
+          else c.crowded++;
+        }
+        frozen.clear();
+        own.clear();
+        c.limited = ctx.counters.freezePayloadsLimited;
+      });
+      bySeed[seed] = c;
+    }
+    // Every freeze is answered by one firing or is lonely, its own bolt's or limited (crowded at
+    // most limited); 8 + 10 · 2 + 21 · 3 + 19 + 27 = 137 hits, 15 + 19 · 2 + 13 · 3 + 26 + 27 = 145.
+    expect(bySeed).toEqual({
+      1: {
+        freezes: 72,
+        firings: 39,
+        sizes: [8, 10, 21],
+        limited: 10,
+        lonely: 10,
+        ownBolt: 14,
+        crowded: 9,
+        killFirings: 19,
+        hits: 137,
+        jumps: 27,
+        kills: 14,
+        shocked: 100,
+        unmatched: 0,
+        frozenPicked: 0,
+        repeated: 0,
+        unordered: 0,
+        outOfRange: 0,
+        badJump: 0,
+        unshocked: 0,
+      },
+      2: {
+        freezes: 72,
+        firings: 47,
+        sizes: [15, 19, 13],
+        limited: 2,
+        lonely: 6,
+        ownBolt: 18,
+        crowded: 1,
+        killFirings: 26,
+        hits: 145,
+        jumps: 27,
+        kills: 9,
+        shocked: 123,
+        unmatched: 0,
+        frozenPicked: 0,
+        repeated: 0,
+        unordered: 0,
+        outOfRange: 0,
+        badJump: 0,
+        unshocked: 0,
       },
     });
   });

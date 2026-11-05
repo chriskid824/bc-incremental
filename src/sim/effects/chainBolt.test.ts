@@ -5,6 +5,7 @@ import { jumpMask, TAG } from '../../data/tags';
 import type { ChainBoltSpec, TriggerSpec } from '../../data/triggers';
 import { liveBurnStacks } from '../ailments/records';
 import { activeShockStacks } from '../ailments/shock';
+import { compileBuild } from '../build/compile';
 import { CHAIN_HIT_CAP } from '../caps';
 import { beginAttack } from '../combat/chain';
 import { ROWS } from '../emitters/types';
@@ -539,5 +540,478 @@ describe('chainBolt: compile and payload', () => {
     fire(ctx, enemy(ctx, 1));
     expect(hitIds(ctx)).toEqual([1, 2, 3, 4, 5]);
     expect([events, ctx.chainBudget.centerEvents]).toEqual([0, 0]);
+  });
+});
+
+/** [target, chainIndex, fromX, fromY] of each hit of the last fire(). */
+const fromOf = (ctx: RunContext): (number | null)[][] =>
+  hits(ctx).map((hit) => [hit.targetId, hit.chainIndex, hit.fromX, hit.fromY]);
+
+/**
+ * Three enemies 50, 60 and 70 from the player (1, 2, 3), each with a partner 40 farther out on
+ * its own side (4, 5, 6), which its jump takes: every partner is nearer its own enemy than any
+ * other enemy is, and farther from the player than the three are.
+ */
+const PAIRS: PlacedEnemy[] = [at(50, 0), at(-60, 0), at(0, 70), at(90, 0), at(-100, 0), at(0, 110)];
+
+describe("chainBolt: from 'nearestOther' (E7, lead ruling B1)", () => {
+  it("never starts on the event's own enemy, where 'nearestToPoint' does when it is the nearest alive", () => {
+    const ctx = fixture(
+      [at(100, 0), at(130, 0), at(170, 0)],
+      [
+        onPrimary(bolt({ jumps: 0, from: 'nearestOther' })),
+        onPrimary(bolt({ jumps: 0, from: 'nearestToPoint' })),
+      ],
+    );
+    // The event's point is its enemy's.
+    fire(ctx, enemy(ctx, 1));
+    expect(hitIds(ctx)).toEqual([2]);
+    fire(ctx, enemy(ctx, 1), { i: FIRST + 1 });
+    expect(hitIds(ctx)).toEqual([1]);
+    fire(ctx, enemy(ctx, 2));
+    expect(hitIds(ctx)).toEqual([1]);
+    // The event's point next to 3, its enemy 3: the next nearest, 2, 35 away, not 1.
+    fire(ctx, enemy(ctx, 3), { x: PLAYER.x + 165, y: PLAYER.y });
+    expect(hitIds(ctx)).toEqual([2]);
+    fire(ctx, enemy(ctx, 3), { i: FIRST + 1, x: PLAYER.x + 165, y: PLAYER.y });
+    expect(hitIds(ctx)).toEqual([3]);
+  });
+
+  it("leaves out the event's enemy dead too, and the selector's pick in its place", () => {
+    const ctx = fixture(
+      [at(100, 0), at(130, 0), at(170, 0)],
+      [onPrimary(bolt({ jumps: 0, from: 'nearestOther', bolts: 3 }))],
+    );
+    const one = enemy(ctx, 1);
+    fireOne(ctx, FIRST, 0, -1, one, one.x, one.y, HIT_EVENT | PRIMARY, ZERO, -1);
+    removeEnemy(ctx, one);
+    ctx.events.length = 0;
+    runEffectQueue(ctx);
+    expect(hitIds(ctx)).toEqual([2, 3]);
+    // A periodic event's enemy is its selector's: the outermost, 3, is left out.
+    const picked = fixture(
+      [at(50, 0), at(80, 0), at(200, 0)],
+      [
+        {
+          on: 'periodic',
+          every: 1,
+          target: { pick: 'outermost' },
+          do: [bolt({ jumps: 0, from: 'nearestOther', bolts: 3 })],
+        },
+        {
+          on: 'periodic',
+          every: 1,
+          target: { pick: 'outermost' },
+          do: [bolt({ jumps: 0, from: 'nearestToPoint', bolts: 3 })],
+        },
+      ],
+    );
+    fire(picked, null);
+    expect(hitIds(picked)).toEqual([1, 2]);
+    fire(picked, null, { i: FIRST + 1 });
+    expect(hitIds(picked)).toEqual([1, 2, 3]);
+  });
+
+  it('takes only enemies within the chain range of the point, inclusive; none in range does nothing', () => {
+    const ctx = fixture(
+      [at(100, 0), at(200, 0), at(300, 0)],
+      [onPrimary(bolt({ jumps: 0, from: 'nearestOther', bolts: 3, shockStacks: 1 }))],
+      { chainRange: 100, critChance: 0.5 },
+    );
+    fire(ctx, enemy(ctx, 1));
+    expect(hitIds(ctx)).toEqual([2]);
+    const short = fixture(
+      [at(100, 0), at(200, 0), at(300, 0)],
+      [onPrimary(bolt({ jumps: 0, from: 'nearestOther', bolts: 3, shockStacks: 1 }))],
+      { chainRange: 99.9, critChance: 0.5 },
+    );
+    const serial = short.attackSerial;
+    const before = rngPositions(short);
+    fire(short, enemy(short, 1));
+    expect(short.events).toEqual([]);
+    expect(short.attackSerial).toBe(serial);
+    expect(rngPositions(short)).toEqual(before);
+    expect(shocks(short)).toEqual([0, 0, 0]);
+  });
+
+  it("on an event without an enemy takes what 'nearestToPoint' takes", () => {
+    const placed = [at(0, 120), at(-90, 0), at(200, 0), at(0, -100)];
+    const picks = (from: 'nearestOther' | 'nearestToPoint', bolts: number): number[] => {
+      const ctx = fixture(placed, [
+        { on: 'periodic', every: 1, do: [bolt({ jumps: 0, from, bolts })] },
+      ]);
+      fire(ctx, null);
+      return hitIds(ctx);
+    };
+    expect(picks('nearestOther', 1)).toEqual([2]);
+    expect(picks('nearestToPoint', 1)).toEqual([2]);
+    expect(picks('nearestOther', 3)).toEqual([2, 4, 1]);
+    expect(picks('nearestToPoint', 3)).toEqual([2, 4, 1]);
+  });
+});
+
+describe('chainBolt: several bolts (E7, lead ruling B2)', () => {
+  it('sends one bolt to each of the `bolts` nearest that pass its from, nearest first, each an attack', () => {
+    const placed = [at(0, 70), at(50, 0), at(-90, 0), at(0, -30), at(200, 0)];
+    const ctx = fixture(placed, [
+      { on: 'periodic', every: 1, do: [bolt({ jumps: 0, from: 'nearestToPoint', bolts: 3 })] },
+      onPrimary(bolt({ jumps: 0, from: 'nearestOther', bolts: 3 })),
+      onPrimary(bolt({ jumps: 0, from: 'nearestToPoint', bolts: 2 })),
+    ]);
+    const serial = ctx.attackSerial;
+    fire(ctx, null);
+    expect(hitIds(ctx)).toEqual([4, 2, 1]);
+    expect(ctx.attackSerial).toBe(serial + 3);
+    expect(ctx.counters.chainHitsPeak).toBe(1);
+    // The event's enemy 4 at the player's point: left out, the next three in order.
+    fire(ctx, enemy(ctx, 4), { i: FIRST + 1, x: PLAYER.x, y: PLAYER.y });
+    expect(hitIds(ctx)).toEqual([2, 1, 3]);
+    fire(ctx, enemy(ctx, 4), { i: FIRST + 2, x: PLAYER.x, y: PLAYER.y });
+    expect(hitIds(ctx)).toEqual([4, 2]);
+  });
+
+  it('breaks ties to the lower id, as grid.nearest does', () => {
+    // Four enemies exactly 60 from the player, and a fifth 10 from it, placed last.
+    const placed = [at(0, 60), at(-60, 0), at(60, 0), at(0, -60), at(10, 0)];
+    const picks = (bolts: number, event: number | null): number[] => {
+      const ctx = fixture(placed, [
+        onPrimary(bolt({ jumps: 0, from: 'nearestOther', bolts })),
+        { on: 'periodic', every: 1, do: [bolt({ jumps: 0, from: 'nearestToPoint', bolts })] },
+      ]);
+      if (event === null) fire(ctx, null, { i: FIRST + 1 });
+      else fire(ctx, enemy(ctx, event), { x: PLAYER.x, y: PLAYER.y });
+      return hitIds(ctx);
+    };
+    expect(picks(3, null)).toEqual([5, 1, 2]);
+    expect(picks(3, 5)).toEqual([1, 2, 3]);
+    expect(picks(2, 1)).toEqual([5, 2]);
+    expect(picks(3, 2)).toEqual([5, 1, 3]);
+    // The grid's own pick for one bolt agrees.
+    const ctx = fixture(placed.slice(0, 4), []);
+    expect(ctx.grid.nearest(PLAYER.x, PLAYER.y, Infinity)?.id).toBe(1);
+  });
+
+  it('sends fewer bolts to fewer enemies, and none to none', () => {
+    const placed = [at(40, 0), at(-80, 0)];
+    const run = (from: 'nearestOther' | 'nearestToPoint', event: number | null): number[] => {
+      const spec = bolt({ jumps: 0, from, bolts: 3 });
+      const ctx = fixture(placed, [onPrimary(spec), { on: 'periodic', every: 1, do: [spec] }]);
+      const serial = ctx.attackSerial;
+      if (event === null) fire(ctx, null, { i: FIRST + 1 });
+      else fire(ctx, enemy(ctx, event), { x: PLAYER.x, y: PLAYER.y });
+      expect(ctx.attackSerial - serial).toBe(hits(ctx).length);
+      return hitIds(ctx);
+    };
+    expect(run('nearestToPoint', null)).toEqual([1, 2]);
+    expect(run('nearestOther', 1)).toEqual([2]);
+    expect(run('nearestOther', 2)).toEqual([1]);
+    const alone = fixture(
+      [at(40, 0)],
+      [onPrimary(bolt({ jumps: 2, from: 'nearestOther', bolts: 3 }))],
+      { critChance: 0.5 },
+    );
+    const serial = alone.attackSerial;
+    const before = rngPositions(alone);
+    fire(alone, enemy(alone, 1));
+    expect(alone.events).toEqual([]);
+    expect(alone.attackSerial).toBe(serial);
+    expect(rngPositions(alone)).toEqual(before);
+  });
+
+  it('picks every enemy before the first bolt fires: a pick an earlier bolt killed gets none, and none is picked in its place', () => {
+    // 1 at 100, 2 at 120 with 1 hp, and on the other side 3 at 130 and 4 at 200, 70 from 3.
+    const ctx = fixture(
+      [at(100, 0), at(120, 0, { hp: 1 }), at(-130, 0), at(-200, 0)],
+      [{ on: 'periodic', every: 1, do: [bolt({ jumps: 1, from: 'nearestToPoint', bolts: 3 })] }],
+      { damage: 10 },
+    );
+    const serial = ctx.attackSerial;
+    fire(ctx, null);
+    // The first bolt's jump kills 2; the second bolt, 2's, is passed over; the third starts on 3
+    // and jumps to 4, which no bolt was picked for.
+    expect(hits(ctx).map((hit) => [hit.targetId, hit.chainIndex])).toEqual([
+      [1, 0],
+      [2, 1],
+      [3, 0],
+      [4, 1],
+    ]);
+    expect(enemy(ctx, 2).alive).toBe(false);
+    expect(ctx.attackSerial).toBe(serial + 2);
+  });
+
+  it('gives each bolt its own budget: 32 hits each, and the jumps past it refused, counted', () => {
+    const run = (jumps: number): number[] => {
+      const ctx = fixture(
+        rows(100),
+        [{ on: 'periodic', every: 1, do: [bolt({ jumps, from: 'nearestToPoint', bolts: 3 })] }],
+        { chainRange: 5000 },
+      );
+      const serial = ctx.attackSerial;
+      fire(ctx, null);
+      const firsts = hits(ctx).filter((hit) => hit.chainIndex === 0).length;
+      const counters = ctx.counters;
+      return [
+        hits(ctx).length,
+        firsts,
+        ctx.attackSerial - serial,
+        counters.chainHitCapped,
+        counters.chainHitsPeak,
+      ];
+    };
+    expect(run(31)).toEqual([96, 3, 3, 0, 32]);
+    // Unvalidated: 40 jumps, 31 dealt and 9 refused a bolt.
+    expect(run(40)).toEqual([96, 3, 3, 27, 32]);
+  });
+
+  it('lets each bolt hit what another hit: its jumps skip only its own attack’s enemies', () => {
+    const ctx = fixture(
+      [at(50, 0), at(70, 0), at(90, 0)],
+      [{ on: 'periodic', every: 1, do: [bolt({ jumps: 2, from: 'nearestToPoint', bolts: 2 })] }],
+    );
+    fire(ctx, null);
+    expect(hitIds(ctx)).toEqual([1, 2, 3, 2, 1, 3]);
+  });
+
+  it('makes every bolt its first hit, its shockStacks and exactly `jumps` jumps', () => {
+    const ctx = fixture(
+      PAIRS,
+      [
+        {
+          on: 'periodic',
+          every: 1,
+          do: [bolt({ jumps: 1, from: 'nearestToPoint', bolts: 3, shockStacks: 2 })],
+        },
+      ],
+      { damage: 10, chainRetention: 0.5, chainRange: 200 },
+    );
+    fire(ctx, null);
+    expect(hits(ctx).map((hit) => [hit.targetId, hit.chainIndex, toNumber(hit.amount)])).toEqual([
+      [1, 0, 10],
+      [4, 1, 5],
+      [2, 0, 10],
+      [5, 1, 5],
+      [3, 0, 10],
+      [6, 1, 5],
+    ]);
+    expect(shocks(ctx)).toEqual([2, 2, 2, 2, 2, 2]);
+    expect(ctx.counters.chainHitsPeak).toBe(2);
+  });
+
+  it('keeps its picks through what a bolt’s hit does at once: a freeze’s list, a kill’s spread', () => {
+    // 1, 2 and 3 are the three nearest the player; 3 and 4 are within 90 of 1, 2 is not. A
+    // freeze's list (FREEZE_LIST_RADIUS 90) and a burn spread of 90 at 1 list 1, 3 and 4, in
+    // buffers of their own, while the bolts' picks stay 1, 2 and 3.
+    const placed = [at(50, 0, { hp: 15 }), at(-60, 0), at(0, 70), at(100, 0)];
+    const three = bolt({ jumps: 0, from: 'nearestToPoint', bolts: 3 });
+    // A freeze inside the first bolt's hit, while an onCenterEvent hook needs the freeze's list.
+    const hook: TestModule = (b) => void b.hook('onCenterEvent', () => undefined);
+    const cold = fixture(
+      placed,
+      [{ on: 'periodic', every: 1, do: [three] }],
+      { damage: 1, frostOnHit: 1 },
+      [hook],
+    );
+    fire(cold, null);
+    const order = cold.events.flatMap((e) =>
+      e.type === 'hit' || e.type === 'freeze' ? [`${e.type} ${e.targetId}`] : [],
+    );
+    expect(order).toEqual(['hit 1', 'freeze 1', 'hit 2', 'freeze 2', 'hit 3', 'freeze 3']);
+    // A kill inside the first bolt's hit, whose burn spreads at once (an inline transfer).
+    const hot = fixture(
+      placed,
+      [
+        { on: 'periodic', every: 1, do: [{ kind: 'applyAilment', ailment: 'burn', radius: 300 }] },
+        { on: 'periodic', every: 1, do: [three] },
+        { on: 'kill', do: [{ kind: 'spreadAilment', ailment: 'burn', radius: 90 }] },
+      ],
+      { damage: 20 },
+    );
+    fire(hot, null);
+    fire(hot, null, { i: FIRST + 1 });
+    expect(enemy(hot, 1).alive).toBe(false);
+    expect(hot.events.some((e) => e.type === 'burnSpread' && e.enemyId === 1)).toBe(true);
+    expect(hitIds(hot)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('chainBolt: its arc (E7, lead ruling B3)', () => {
+  it("with arc, starts each bolt's first hit at the event's point, its jumps from the enemy before", () => {
+    const ctx = fixture(
+      PAIRS,
+      [
+        {
+          on: 'periodic',
+          every: 1,
+          do: [bolt({ jumps: 1, from: 'nearestToPoint', bolts: 3, arc: true })],
+        },
+        onPrimary(bolt({ jumps: 1, arc: true })),
+        onPrimary(bolt({ jumps: 0, from: 'nearestOther', arc: true })),
+      ],
+      { chainRange: 200 },
+    );
+    const [p1, p2, p3] = [enemy(ctx, 1), enemy(ctx, 2), enemy(ctx, 3)];
+    fire(ctx, null);
+    expect(fromOf(ctx)).toEqual([
+      [1, 0, PLAYER.x, PLAYER.y],
+      [4, 1, p1.x, p1.y],
+      [2, 0, PLAYER.x, PLAYER.y],
+      [5, 1, p2.x, p2.y],
+      [3, 0, PLAYER.x, PLAYER.y],
+      [6, 1, p3.x, p3.y],
+    ]);
+    // From 'eventTarget' at a point away from its enemy, and from 'nearestOther' on its own.
+    const x = PLAYER.x + 10;
+    const y = PLAYER.y - 20;
+    fire(ctx, p1, { i: FIRST + 1, x, y });
+    expect(fromOf(ctx)).toEqual([
+      [1, 0, x, y],
+      [4, 1, p1.x, p1.y],
+    ]);
+    fire(ctx, p1, { i: FIRST + 2, x, y });
+    expect(fromOf(ctx)).toEqual([[2, 0, x, y]]);
+  });
+
+  it('without arc (or arc false) starts every first hit from nowhere, as before', () => {
+    const run = (more: Partial<ChainBoltSpec>): (number | null)[][] => {
+      const ctx = fixture(
+        PAIRS,
+        [{ on: 'periodic', every: 1, do: [bolt({ jumps: 1, bolts: 3, ...more })] }],
+        { chainRange: 200 },
+      );
+      fire(ctx, null);
+      return fromOf(ctx);
+    };
+    const [p1, p2, p3] = PAIRS as [PlacedEnemy, PlacedEnemy, PlacedEnemy];
+    const expected = [
+      [1, 0, null, null],
+      [4, 1, p1.x, p1.y],
+      [2, 0, null, null],
+      [5, 1, p2.x, p2.y],
+      [3, 0, null, null],
+      [6, 1, p3.x, p3.y],
+    ];
+    expect(run({ from: 'nearestToPoint' })).toEqual(expected);
+    expect(run({ from: 'nearestOther', arc: false })).toEqual(expected);
+    const one = fixture(line(3), [onPrimary(bolt({ jumps: 1, from: 'nearestOther' }))]);
+    fire(one, enemy(one, 1));
+    expect(fromOf(one)).toEqual([
+      [2, 0, null, null],
+      [1, 1, enemy(one, 2).x, enemy(one, 2).y],
+    ]);
+  });
+
+  it('changes nothing but those two fields: the same hits, damage, shocks, kills and draws', () => {
+    const run = (arc: boolean): { events: SimEvent[]; rest: unknown } => {
+      const ctx = fixture(
+        [...PAIRS, at(30, 30, { hp: 1 }), at(-30, -30, { hp: 15 })],
+        [
+          {
+            on: 'periodic',
+            every: 1,
+            do: [bolt({ jumps: 2, from: 'nearestOther', bolts: 3, shockStacks: 1, arc })],
+          },
+        ],
+        { damage: 10, critChance: 0.5, igniteChance: 0.5, chainRange: 200 },
+      );
+      fire(ctx, null);
+      const events = ctx.events.map((event) =>
+        event.type === 'hit' && event.chainIndex === 0
+          ? { ...event, fromX: null, fromY: null }
+          : event,
+      );
+      const rest = {
+        rng: rngPositions(ctx),
+        hp: ctx.enemies.map((e) => [e.alive, toNumber(e.hp), e.shockStacks]),
+        counters: ctx.counters,
+      };
+      return { events, rest };
+    };
+    const on = run(true);
+    const off = run(false);
+    expect(on.events.filter((e) => e.type === 'hit').length).toBeGreaterThan(6);
+    expect(on.events.some((e) => e.type === 'hit' && !e.crit)).toBe(true);
+    expect(on.events.some((e) => e.type === 'hit' && e.crit)).toBe(true);
+    expect(on).toEqual(off);
+  });
+
+  it('keeps bolts and arc out of the coef, in the compiled spec as written', () => {
+    const fx = compileEffect(
+      bolt({ jumps: 0, damagePct: 0.4, from: 'nearestOther', bolts: 3, arc: true }),
+      3,
+      0.5,
+      100,
+    );
+    expect(fx.spec).toEqual({
+      kind: 'chainBolt',
+      jumps: 0,
+      damagePct: 0.2,
+      from: 'nearestOther',
+      bolts: 3,
+      arc: true,
+    });
+    expect(toNumber(fx.baseDamage)).toBeCloseTo(20, 12);
+    expect(compileEffect(bolt(), 0, 1, 10).spec).toEqual({
+      kind: 'chainBolt',
+      jumps: 2,
+      damagePct: 1,
+    });
+  });
+});
+
+describe('chainBolt: a rule module’s bolts (E7, lead ruling R8)', () => {
+  // A module's triggers and effects are not validated, so compileEffect checks every chainBolt's
+  // bolts, in data validation's words (chainBoltBoltsIssues).
+  const viaTrigger = (spec: ChainBoltSpec) => () =>
+    compileBuild(makeStats(), [], undefined, [
+      (b) => b.addTrigger('outer.lightning', { on: 'hit', do: [spec] }),
+    ]);
+  const viaEffect = (spec: ChainBoltSpec) => () =>
+    compileBuild(makeStats(), [], undefined, [(b) => void b.addEffect('outer.lightning', spec)]);
+  const range = (bolts: number): string => `bolts must be an integer in [1, 3] (got ${bolts})`;
+  const one = (bolts: number): string =>
+    `chainBolt from 'eventTarget' starts on one enemy; bolts ${bolts} needs from 'nearestToPoint' or 'nearestOther'`;
+
+  it("refuses bolts that are not a whole number in [1, 3], or above 1 from 'eventTarget', naming the effect", () => {
+    // Planted bugs: no guard, and its maximum off by one.
+    const cases: [ChainBoltSpec, string][] = [
+      ...[0, Number.NaN, -1, 1.5, 4].flatMap((bolts): [ChainBoltSpec, string][] => [
+        [bolt({ from: 'nearestOther', bolts }), range(bolts)],
+        [bolt({ from: 'nearestToPoint', bolts }), range(bolts)],
+      ]),
+      [bolt({ from: 'eventTarget', bolts: 2 }), one(2)],
+      [bolt({ bolts: 2 }), one(2)],
+      [bolt({ bolts: 4 }), `${range(4)}; ${one(4)}`],
+    ];
+    for (const [spec, issue] of cases) {
+      const message = `A chainBolt effect ${JSON.stringify(spec)}: ${issue}`;
+      expect(viaTrigger(spec), message).toThrow(message);
+      expect(viaEffect(spec), message).toThrow(message);
+    }
+  });
+
+  it('accepts bolts 1 to 3 from a nearest start, bolts 1 from any, and none, as written', () => {
+    const specs: ChainBoltSpec[] = [
+      ...(['nearestToPoint', 'nearestOther'] as const).flatMap((from) =>
+        [1, 2, 3].map((bolts) => bolt({ from, bolts })),
+      ),
+      bolt({ bolts: 1 }),
+      bolt({ from: 'eventTarget', bolts: 1, arc: true }),
+      bolt(),
+    ];
+    for (const spec of specs) {
+      const label = JSON.stringify(spec);
+      expect(viaTrigger(spec)().effects[0]?.spec, label).toEqual(spec);
+      expect(viaEffect(spec)().effects[0]?.spec, label).toEqual(spec);
+    }
+    // A module's bolts fire as data's do: three from 'nearestOther'.
+    const ctx = fixture([at(100, 0), at(130, 0), at(170, 0), at(200, 0)], [], {}, [
+      (b) =>
+        b.addTrigger(
+          'outer.lightning',
+          onPrimary(bolt({ jumps: 0, from: 'nearestOther', bolts: 3 })),
+        ),
+    ]);
+    fire(ctx, enemy(ctx, 1));
+    expect(hitIds(ctx)).toEqual([2, 3, 4]);
   });
 });

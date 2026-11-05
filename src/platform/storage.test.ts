@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { HIVE_SAVE_PREFIX } from '../app/devFlags';
+import { MUTED_KEY } from '../audio/prefs';
 import { ACHIEVEMENTS_KEY } from './achievements';
 import { INSTALL_ID_KEY, LOG_KEY, SENDING_KEY } from './analytics';
-import { LocalSaveStorage, MemorySaveStorage, PROFILE_SAVE_PREFIX } from './storage';
+import {
+  adoptSlots,
+  DEMO_PROFILE_SAVE_PREFIX,
+  LocalSaveStorage,
+  MemorySaveStorage,
+  PROFILE_SAVE_PREFIX,
+  profileSavePrefix,
+} from './storage';
 
 /** A Map-backed Storage, standing in for window.localStorage (the tests run in node). */
 class MapStorage implements Storage {
@@ -161,6 +169,130 @@ describe('the save prefixes (T11)', () => {
   it('puts no other key the code writes under the v3 prefix (the lead’s ruling P10)', () => {
     for (const key of [ACHIEVEMENTS_KEY, INSTALL_ID_KEY, SENDING_KEY, LOG_KEY]) {
       expect(key.startsWith(PROFILE_SAVE_PREFIX), key).toBe(false);
+    }
+  });
+});
+
+const FULL_MAIN = `${PROFILE_SAVE_PREFIX}main`;
+const FULL_BACKUP = `${PROFILE_SAVE_PREFIX}backup`;
+const DEMO_MAIN = `${DEMO_PROFILE_SAVE_PREFIX}main`;
+const DEMO_BACKUP = `${DEMO_PROFILE_SAVE_PREFIX}backup`;
+
+// Catches the Demo on the full game's prefix, or under it, where a Demo page's load of a full
+// build refunds every board outside DEMO_SCOPE_A and the next save writes that over the full save.
+describe("the Demo's save prefix (the lead's ruling R1)", () => {
+  it('gives the full game PROFILE_SAVE_PREFIX, unchanged, and the Demo its own', () => {
+    expect(profileSavePrefix('full')).toBe(PROFILE_SAVE_PREFIX);
+    expect(PROFILE_SAVE_PREFIX).toBe('bc-incremental.profile.');
+    expect(profileSavePrefix('demo')).toBe(DEMO_PROFILE_SAVE_PREFIX);
+    expect(DEMO_PROFILE_SAVE_PREFIX).toBe('bc-incremental.demo.profile.');
+    expect(profileSavePrefix('demo')).not.toBe(profileSavePrefix('full'));
+  });
+
+  it("keeps the Demo's apart from M1's, the hive's, the full game's and every other key", () => {
+    const prefixes = [m1Prefix(), HIVE_SAVE_PREFIX, PROFILE_SAVE_PREFIX, DEMO_PROFILE_SAVE_PREFIX];
+    expect(new Set(prefixes).size).toBe(4);
+    for (const other of prefixes.slice(0, 3)) {
+      expect(DEMO_PROFILE_SAVE_PREFIX.startsWith(other), other).toBe(false);
+      expect(other.startsWith(DEMO_PROFILE_SAVE_PREFIX), other).toBe(false);
+    }
+    for (const key of [ACHIEVEMENTS_KEY, INSTALL_ID_KEY, SENDING_KEY, LOG_KEY, MUTED_KEY]) {
+      expect(key.startsWith(DEMO_PROFILE_SAVE_PREFIX), key).toBe(false);
+    }
+  });
+});
+
+/**
+ * A Map-backed Storage that logs every getItem, setItem and removeItem by key, and whose getItem
+ * throws for the keys in `failing`, as a blocked storage does.
+ */
+class LoggedStorage extends MapStorage {
+  readonly log: string[] = [];
+  readonly failing = new Set<string>();
+
+  constructor(items: Readonly<Record<string, string>> = {}) {
+    super();
+    for (const [key, value] of Object.entries(items)) super.setItem(key, value);
+  }
+
+  override getItem(key: string): string | null {
+    this.log.push(`get ${key}`);
+    if (this.failing.has(key)) throw new Error(`SecurityError: ${key} is blocked`);
+    return super.getItem(key);
+  }
+
+  override setItem(key: string, value: string): void {
+    this.log.push(`set ${key}`);
+    super.setItem(key, value);
+  }
+
+  override removeItem(key: string): void {
+    this.log.push(`remove ${key}`);
+    super.removeItem(key);
+  }
+
+  /** The log's writes and removals. */
+  get changes(): string[] {
+    return this.log.filter((entry) => !entry.startsWith('get '));
+  }
+}
+
+const adopt = (storage: Storage): void =>
+  adoptSlots(storage, PROFILE_SAVE_PREFIX, DEMO_PROFILE_SAVE_PREFIX);
+
+// The lead's ruling R2's copy; src/app/v3/store.test.ts covers who runs it.
+describe("adoptSlots (the lead's ruling R2)", () => {
+  it("copies both old slots' texts as they are into the new prefix, the old keys only read", () => {
+    const items = { [FULL_MAIN]: 'full main', [FULL_BACKUP]: 'full backup', other: 'M1' };
+    const storage = new LoggedStorage(items);
+    adopt(storage);
+    expect(storage.changes).toEqual([`set ${DEMO_MAIN}`, `set ${DEMO_BACKUP}`]);
+    expect(Object.fromEntries(storage.items)).toEqual({
+      ...items,
+      [DEMO_MAIN]: 'full main',
+      [DEMO_BACKUP]: 'full backup',
+    });
+  });
+
+  it("copies only the backup when the old main holds nothing, and '' as ''", () => {
+    const backupOnly = new LoggedStorage({ [FULL_BACKUP]: 'full backup' });
+    adopt(backupOnly);
+    expect(backupOnly.changes).toEqual([`set ${DEMO_BACKUP}`]);
+    expect(Object.fromEntries(backupOnly.items)).toEqual({
+      [FULL_BACKUP]: 'full backup',
+      [DEMO_BACKUP]: 'full backup',
+    });
+    const empty = new LoggedStorage({ [FULL_MAIN]: '', [FULL_BACKUP]: 'full backup' });
+    adopt(empty);
+    expect([empty.getItem(DEMO_MAIN), empty.getItem(DEMO_BACKUP)]).toEqual(['', 'full backup']);
+    expect([empty.getItem(FULL_MAIN), empty.getItem(FULL_BACKUP)]).toEqual(['', 'full backup']);
+  });
+
+  it("copies nothing once the new prefix holds a main or a backup, '' included", () => {
+    for (const [key, value] of [
+      [DEMO_MAIN, 'demo main'],
+      [DEMO_BACKUP, 'demo backup'],
+      [DEMO_MAIN, ''],
+      [DEMO_BACKUP, ''],
+    ] as const) {
+      const items = { [FULL_MAIN]: 'full main', [FULL_BACKUP]: 'full backup', [key]: value };
+      const storage = new LoggedStorage(items);
+      adopt(storage);
+      expect(storage.changes, `${key} ${value}`).toEqual([]);
+      expect(Object.fromEntries(storage.items), `${key} ${value}`).toEqual(items);
+    }
+  });
+
+  it('copies nothing when the old prefix holds nothing, or when any of four reads fails', () => {
+    const none = new LoggedStorage({ other: 'M1' });
+    adopt(none);
+    expect(none.changes).toEqual([]);
+    for (const key of [DEMO_MAIN, DEMO_BACKUP, FULL_MAIN, FULL_BACKUP]) {
+      const storage = new LoggedStorage({ [FULL_MAIN]: 'full main', [FULL_BACKUP]: 'full backup' });
+      storage.failing.add(key);
+      adopt(storage);
+      expect(storage.changes, key).toEqual([]);
+      expect(storage.items.size, key).toBe(2);
     }
   });
 });

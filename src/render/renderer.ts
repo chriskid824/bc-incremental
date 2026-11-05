@@ -523,8 +523,10 @@ export class Renderer {
     const { x, y, crit } = event;
     const chain = event.chainIndex > 0;
     this.enemies.flash(event.targetId, crit ? CRIT_PUNCH : HIT_PUNCH_STRONG);
-    if (chain && event.fromX !== null && event.fromY !== null) {
-      this.arcs.add(event.fromX, event.fromY, x, y, event.chainIndex);
+    // A jump's hit comes from the enemy it jumped from, and a chainBolt's first hit with arc
+    // from its event's point (E7), drawn as a first jump's bolt; no other hit carries one.
+    if (event.fromX !== null && event.fromY !== null) {
+      this.arcs.add(event.fromX, event.fromY, x, y, Math.max(1, event.chainIndex));
       this.bursts.chain(x, y);
     } else if (!crit) {
       this.bursts.hit(x, y, x - CENTER_X, y - CENTER_Y);

@@ -12,7 +12,7 @@ import { stdHpAt } from '../../../src/data';
 import { OUTER_IDS } from '../../../src/data/sources';
 import type { OuterId } from '../../../src/data/sources';
 import type { AssembledWeb, BoardId, WebNode } from '../../../src/data/web';
-import { boardCounts, buy, PRICE_CURVE_OF, WEB_RULES } from '../../../src/meta/web';
+import { boardCounts, buy, nextPrice, PRICE_CURVE_OF, WEB_RULES } from '../../../src/meta/web';
 import type { BuyReason, CharacterProgress, Price } from '../../../src/meta/web';
 import { median } from '../../../src/meta/web/calibrate';
 import { GATED_KINDS, storedRank } from '../../../src/meta/web/counts';
@@ -195,13 +195,31 @@ function cheapestOf(v: Visit, nodes: readonly WebNode[]): string | null {
   return best;
 }
 
+/** Whether refusing `id` for `reason` ends the visit, saving for it; else the entry parks. */
+export type SaveRule = (v: Visit, id: string, reason: BuyReason) => boolean;
+
+/** `default`'s rule (§1.3): every wallet refusal saves. */
+export const savesOnWallet: SaveRule = (_v, _id, reason) => WALLET_REASONS.has(reason);
+
+/**
+ * `focus:<o>`'s rule, M1's (savingsFor, tools/balance/strategies.ts:5-8, :83-104): it saves only
+ * for a node short of shards alone, whose cores and 迴響 the wallet holds; one short of cores
+ * parks, as a core comes only from a kill and the shards kept for it bring it no nearer.
+ */
+export const savesForShards: SaveRule = (v, id, reason) => {
+  if (reason !== 'notEnoughShards') return false;
+  const { wallet } = v.progress();
+  const price = nextPrice(v.web, v.progress(), id, v.economy);
+  return price.cores <= wallet.cores && price.resonance <= wallet.resonance;
+};
+
 /**
  * Buys `order`'s entries not yet owned (ids, ranks by repetition: an id's k-th entry is its rank
- * k). A wallet refusal ends the visit, saving, and returns false; a structural one parks the entry,
- * which the next visit retries first, since every visit walks from the start. True when the walk
- * reached the order's end.
+ * k). A refusal `saves` says saves (a wallet refusal, by default) ends the visit and returns
+ * false; any other parks the entry, which the next visit retries first, since every visit walks
+ * from the start. True when the walk reached the order's end.
  */
-function walk(v: Visit, order: readonly string[]): boolean {
+function walk(v: Visit, order: readonly string[], saves: SaveRule = savesOnWallet): boolean {
   const entries = new Map<string, number>();
   for (const id of order) {
     const rank = (entries.get(id) ?? 0) + 1;
@@ -209,7 +227,7 @@ function walk(v: Visit, order: readonly string[]): boolean {
     if (storedRank(v.progress(), id) >= rank) continue;
     const check = v.check(id);
     if (check.ok) v.buy(id);
-    else if (WALLET_REASONS.has(check.reason)) return false;
+    else if (saves(v, id, check.reason)) return false;
   }
   return true;
 }
@@ -218,39 +236,81 @@ const notGated = (node: WebNode): boolean => !GATED_KINDS.has(node.kind);
 
 /**
  * Buys the route to `target` (planPath's: shortest, ties in web order, never through a gated
- * kind), one step at a time from what is owned now. False when a wallet refusal ended the visit;
- * a structural refusal, or no route, parks the target.
+ * kind), one step at a time from what is owned now. False when a refusal `saves` says saves (a
+ * wallet refusal, by default) ended the visit; any other refusal, or no route, parks the target.
  */
-function routeTo(v: Visit, target: string): boolean {
+function routeTo(v: Visit, target: string, saves: SaveRule = savesOnWallet): boolean {
   while (storedRank(v.progress(), target) === 0) {
     const route = shortestRoute(v.web, v.progress(), target, notGated);
     const id = route?.[0];
     if (id === undefined) return true;
     const check = v.check(id);
-    if (!check.ok) return !WALLET_REASONS.has(check.reason);
+    if (!check.ok) return !saves(v, id, check.reason);
     v.buy(id);
   }
   return true;
 }
 
 /**
+ * What greedy's rule keeps from visit to visit (one per strategy, as `evaluations`): each node
+ * whose last probe read no gain (gain ≤ 0, or none), with the rank and prestiges it was probed at
+ * and the number of the visit. Without it the candidates are a function of the progress (owned
+ * first, then web order), so a node with no gain kept its place in every visit, and a visit
+ * whose candidates all read none bought nothing, left the progress as it was and probed the same
+ * ones again: a stat the early waves do not read (蜂巢's drone and turret damage while they kill
+ * in one hit; 熔核's burn stacks and spread radius) held greedy at wave 3–5 for a whole session.
+ */
+export interface GreedyMemory {
+  /** Greedy's rule's visits so far. */
+  visits: number;
+  readonly passed: Map<
+    string,
+    { readonly rank: number; readonly prestiges: number; readonly visit: number }
+  >;
+}
+
+export const greedyMemory = (): GreedyMemory => ({ visits: 0, passed: new Map() });
+
+/**
  * Greedy's candidates: the nodes canBuy accepts now, at most GREEDY_PER_BOARD a board, owned ones
  * (their next rank) before new ones, each in web order; boards taken round-robin in web order up
- * to GREEDY_CANDIDATES.
+ * to GREEDY_CANDIDATES. A node passed in `memory` (its last probe, at the rank and prestiges it
+ * holds now, read no gain) comes after its board's other accepted nodes, the longest passed
+ * first; a board whose accepted nodes are all passed comes after the other boards, by its first
+ * candidate's visit. With nothing passed this is the order above.
  */
-function greedyCandidates(v: Visit): { readonly node: WebNode; readonly price: Price }[] {
+function greedyCandidates(
+  v: Visit,
+  memory: GreedyMemory,
+): { readonly node: WebNode; readonly price: Price }[] {
   const progress = v.progress();
-  const boards = new Map<BoardId, { node: WebNode; price: Price; owned: boolean }[]>();
+  /** The visit `node` was passed in at its rank now, or −1. */
+  const passedAt = (node: WebNode): number => {
+    const entry = memory.passed.get(node.id);
+    return entry !== undefined &&
+      entry.rank === storedRank(progress, node.id) &&
+      entry.prestiges === progress.prestiges
+      ? entry.visit
+      : -1;
+  };
+  type Candidate = { node: WebNode; price: Price; owned: boolean; at: number };
+  const boards = new Map<BoardId, Candidate[]>();
   for (const node of openNodes(v.web, progress)) {
     const check = v.check(node.id);
     if (!check.ok) continue;
     const list = boards.get(node.board) ?? [];
-    list.push({ node, price: check.price, owned: storedRank(progress, node.id) > 0 });
+    const owned = storedRank(progress, node.id) > 0;
+    list.push({ node, price: check.price, owned, at: passedAt(node) });
     boards.set(node.board, list);
   }
-  const lists = [...boards.values()].map((list) =>
-    [...list.filter((c) => c.owned), ...list.filter((c) => !c.owned)].slice(0, GREEDY_PER_BOARD),
-  );
+  // Sorts are stable, so ties keep web order.
+  const lists = [...boards.values()]
+    .map((list) =>
+      [...list]
+        .sort((a, b) => a.at - b.at || Number(!a.owned) - Number(!b.owned))
+        .slice(0, GREEDY_PER_BOARD),
+    )
+    .sort((a, b) => (a[0] as Candidate).at - (b[0] as Candidate).at);
   const picks: { node: WebNode; price: Price }[] = [];
   for (let k = 0; k < GREEDY_PER_BOARD; k++) {
     for (const list of lists) {
@@ -268,11 +328,14 @@ function greedyCandidates(v: Visit): { readonly node: WebNode; readonly price: P
  * stdHpAt(x now) − 1, from one probe of the progress now and one with the candidate bought; the best
  * ★ with a gain above 0 first, then the shard-priced candidates with a gain above 0 by gain per
  * shard, each bought if canBuy accepts it then. No re-probe, no saving. Every reading goes to
- * `evaluations`.
+ * `evaluations`, and `memory` passes each candidate that read no gain, so the next visits probe
+ * the others first.
  */
-function greedyRule(v: Visit, evaluations: GreedyEvaluation[]): void {
+function greedyRule(v: Visit, evaluations: GreedyEvaluation[], memory: GreedyMemory): void {
   const progress = v.progress();
-  const candidates = greedyCandidates(v);
+  const visit = memory.visits;
+  memory.visits += 1;
+  const candidates = greedyCandidates(v, memory);
   if (candidates.length === 0) return;
   const base = v.probe(progress);
   const order = webOrder(v.web);
@@ -281,6 +344,11 @@ function greedyRule(v: Visit, evaluations: GreedyEvaluation[]): void {
     const gain = median(xs.map((x, s) => stdHpAt(x) / stdHpAt(base[s] as number))) - 1;
     const shards = toNumber(price.shards);
     evaluations.push({ node: node.id, gain, shards, cores: price.cores, minutes: v.minutes });
+    if (gain > 0) memory.passed.delete(node.id);
+    else {
+      const rank = storedRank(progress, node.id);
+      memory.passed.set(node.id, { rank, prestiges: progress.prestiges, visit });
+    }
     return { node, gain, shards };
   });
   let star: (typeof scored)[number] | null = null;
@@ -308,12 +376,17 @@ function boardFrom(web: AssembledWeb, board: BoardId, start: string): string[] {
  * `focus:<o>` (§1.3): the 預設 order's center nodes, each once, while fewer than 8 center nodes are
  * counted (the fusion gate's, counts.ts); the route to o's entry; o's board breadth-first from the
  * entry, gated kinds bought once legal; o's fusion core, then its ranks; then the 預設 order; then
- * greedy's rule. Saves like `default`.
+ * greedy's rule. Saves like `default` for a node short of shards alone (savesForShards); a node
+ * short of cores parks like one not yet legal, so the visit goes on to the rest and in the end to
+ * the 預設 order and greedy, as it does past an outer not yet revealed. Saving for the cores of the
+ * center's seventh node, a ◆, held 熔核 and 蜂巢 at six rank-1 nodes, short of the wave-5 elite
+ * whose core it waited for, with thousands of shards banked.
  */
 function focusVisit(
   web: AssembledWeb,
   outer: OuterId,
   evaluations: GreedyEvaluation[],
+  memory: GreedyMemory,
 ): (v: Visit) => void {
   const preset = presetOrder(web);
   const center = `${web.character}.center`;
@@ -326,25 +399,41 @@ function focusVisit(
   const fusionIds = core === undefined ? [] : boardFrom(web, fusionBoard, core.id);
   const fusionOrder = [...fusionIds, ...rankPasses(web, fusionIds)];
 
+  const saves = savesForShards;
   const centerFirst = (v: Visit): boolean => {
     for (const id of centerIds) {
       if (boardCounts(v.web, v.progress()).center >= WEB_RULES.fusionCenter) return true;
       if (storedRank(v.progress(), id) > 0) continue;
       const check = v.check(id);
       if (check.ok) v.buy(id);
-      else if (WALLET_REASONS.has(check.reason)) return false;
+      else if (saves(v, id, check.reason)) return false;
     }
     return true;
   };
   return (v) => {
     if (!centerFirst(v)) return;
-    if (entry !== undefined && !routeTo(v, entry.id)) return;
-    if (!walk(v, outerOrder) || !walk(v, fusionOrder) || !walk(v, preset)) return;
-    greedyRule(v, evaluations);
+    if (entry !== undefined && !routeTo(v, entry.id, saves)) return;
+    if (!walk(v, outerOrder, saves) || !walk(v, fusionOrder, saves) || !walk(v, preset, saves)) {
+      return;
+    }
+    greedyRule(v, evaluations, memory);
   };
 }
 
-/** `balanced`: center, hub and the open outers in turn, each turn that board's cheapest accepted node. */
+/**
+ * The hub's ★, its 規則 spur (玻璃大砲, 巨大化): no character's and no outer's, the v3 kin of M1's
+ * generic keystones, which M1's bots never take blind (tools/balance/strategies.ts:61-62:
+ * 玻璃大砲's life of 1 is a gamble, impl:485 「玻璃大砲維持賭博」).
+ */
+export const isRulesKeystone = (node: WebNode): boolean =>
+  node.kind === 'keystone' && node.board === 'hub';
+
+/**
+ * `balanced`: center, hub and the open outers in turn, each turn that board's cheapest accepted
+ * node, the hub's 規則 ★ left out (isRulesKeystone): a ★ costs no shards, so it was the hub's
+ * cheapest the moment 3 cores were in the wallet, and 熔核 with 玻璃大砲 at wave 7 died to its
+ * first leak at the start wave 3 in every run after, never again reaching the wave-5 elite.
+ */
 function balancedVisit(web: AssembledWeb): (v: Visit) => void {
   const boards = web.boards
     .filter(
@@ -362,7 +451,9 @@ function balancedVisit(web: AssembledWeb): (v: Visit) => void {
       turn += 1;
       const id = cheapestOf(
         v,
-        openNodes(v.web, v.progress()).filter((node) => node.board === board),
+        openNodes(v.web, v.progress()).filter(
+          (node) => node.board === board && !isRulesKeystone(node),
+        ),
       );
       if (id === null) {
         misses += 1;
@@ -374,7 +465,14 @@ function balancedVisit(web: AssembledWeb): (v: Visit) => void {
   };
 }
 
-/** `might-only`: the route to the nearest might (planPath's), then might ranks only. */
+/**
+ * `might-only`: the route to the nearest might (planPath's), then might ranks only. Every route
+ * from the root to the hub runs through a center ◆, which takes a core, and a core comes only
+ * from a kill (the elite every 5 waves first): while the route's next step waits on one, the
+ * visit buys the cheapest accepted node that costs no cores (cheapestOf: the center's first
+ * ranks), the least build that earns it, then goes back to the route. The route's two rank-1
+ * nodes saving for the ◆ never reached wave 5; nor did those two at their last rank (熔核).
+ */
 function mightOnlyVisit(v: Visit): void {
   const mights = v.web.nodes.filter((node) => node.kind === 'might');
   for (;;) {
@@ -384,8 +482,19 @@ function mightOnlyVisit(v: Visit): void {
       if (found !== null && (route === null || found.length < route.length)) route = found;
     }
     const id = route?.[0];
-    if (id === undefined || !v.check(id).ok) return;
-    v.buy(id);
+    if (id === undefined) return;
+    const check = v.check(id);
+    if (check.ok) {
+      v.buy(id);
+      continue;
+    }
+    if (check.reason !== 'notEnoughCores') return;
+    const earner = cheapestOf(
+      v,
+      openNodes(v.web, v.progress()).filter((node) => v.economy.cores[node.kind] === 0),
+    );
+    if (earner === null) return;
+    v.buy(earner);
   }
 }
 
@@ -461,6 +570,7 @@ function ascendancyVisit(v: Visit): void {
 /** The strategy `id` for one session on `web`; it may keep state from visit to visit. */
 export function createStrategy(id: WebStrategyId, web: AssembledWeb): WebStrategy {
   const evaluations: GreedyEvaluation[] = [];
+  const memory = greedyMemory();
   const of = (visit: (v: Visit) => void): WebStrategy => ({
     id,
     visit: (v) => {
@@ -474,17 +584,17 @@ export function createStrategy(id: WebStrategyId, web: AssembledWeb): WebStrateg
     if (!openOuters(web).includes(outer)) {
       throw new Error(`${id}: outer '${outer}' is not open on web '${web.character}'`);
     }
-    return of(focusVisit(web, outer, evaluations));
+    return of(focusVisit(web, outer, evaluations, memory));
   }
   switch (id as BaseWebStrategyId) {
     case 'default': {
       const order = presetOrder(web);
       return of((v) => {
-        if (walk(v, order)) greedyRule(v, evaluations);
+        if (walk(v, order)) greedyRule(v, evaluations, memory);
       });
     }
     case 'greedy':
-      return of((v) => greedyRule(v, evaluations));
+      return of((v) => greedyRule(v, evaluations, memory));
     case 'random':
       return { id, visit: randomVisit, evaluations };
     case 'cheapest':

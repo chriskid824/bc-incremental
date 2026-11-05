@@ -25,7 +25,7 @@ import {
   TARGET_PICKS,
   TARGET_STATES,
 } from '../../data/triggers';
-import type { EffectKind, TriggerSpec } from '../../data/triggers';
+import type { ChainBoltSpec, EffectKind, TriggerSpec } from '../../data/triggers';
 import { assembleWeb, FULL_SCOPE } from '../../data/web';
 import type { AssembledWeb, BonusSpec, FusionKey, NodeEffects, WebNode } from '../../data/web';
 import { fixtureContent } from '../../data/web/testing';
@@ -431,6 +431,17 @@ function kitchenSink(): NodeEffects {
       target: { pick: 'nearest' },
       do: [{ kind: 'chainBolt', jumps: 2, damagePct: 0.4, shockStacks: 1, from: 'nearestToPoint' }],
     },
+    // E7's nearest other enemy and its several bolts.
+    ...(
+      [
+        { from: 'nearestOther' },
+        { from: 'nearestOther', bolts: 3, arc: true },
+        { from: 'nearestToPoint', bolts: 2 },
+      ] as const
+    ).map((more): TriggerSpec => ({
+      on: 'freeze',
+      do: [{ kind: 'chainBolt', jumps: 0, damagePct: 0.5, ...more }],
+    })),
     { on: 'hit', do: [{ kind: 'comboStack', stacks: 2 }] },
     {
       on: 'periodic',
@@ -1524,5 +1535,93 @@ describe('E3: spreadRadius and the spread mark', () => {
       'When burning enemies are killed: 1 burn stack, on the enemies within 90, at most 2 enemies, nearest first',
       '燃燒中的敵人死亡時：燃燒 1 層，對半徑 90 內的敵人，最多 2 隻，由近到遠',
     ]);
+  });
+});
+
+describe('E7: chainBolt from the nearest other enemy, several bolts and an arc (lead ruling B4)', () => {
+  const lines = (trigger: TriggerSpec, locale: Locale): readonly string[] =>
+    linesOf(withEffects(fire, NOTABLE, { triggers: [trigger] }), NOTABLE, locale);
+  const bolt = { kind: 'chainBolt', jumps: 0, damagePct: 0.4 } as const;
+  const onFreeze = (more: Partial<ChainBoltSpec>): TriggerSpec => ({
+    on: 'freeze',
+    do: [{ ...bolt, ...more }],
+  });
+
+  it('writes the nearest other enemy and the count of bolts in both locales, and nothing for arc', () => {
+    // Planted bugs: the count dropped, or the other enemy written as any enemy, in either locale.
+    const cases: [Partial<ChainBoltSpec>, string, string][] = [
+      [
+        { from: 'nearestOther' },
+        'On each freeze, at the target: a 0-jump bolt for 40% damage, starting at the nearest other enemy',
+        '凍結時，在目標：放一道 0 跳的電弧，40% 傷害，從最近的另一隻敵人開始',
+      ],
+      [
+        { from: 'nearestOther', bolts: 3 },
+        'On each freeze, at the target: a 0-jump bolt for 40% damage, one each to the 3 nearest other enemies',
+        '凍結時，在目標：放一道 0 跳的電弧，40% 傷害，朝最近的 3 隻其他敵人各一道',
+      ],
+      [
+        { from: 'nearestToPoint', bolts: 2, shockStacks: 1 },
+        'On each freeze, at the target: a 0-jump bolt for 40% damage, 1 shock stack on each hit, one each to the 2 nearest enemies',
+        '凍結時，在目標：放一道 0 跳的電弧，40% 傷害，帶 1 層感電，朝最近的 2 隻敵人各一道',
+      ],
+    ];
+    for (const [more, en, zh] of cases) {
+      expect(lines(onFreeze(more), 'en'), en).toEqual([en]);
+      expect(lines(onFreeze(more), 'zh-TW'), zh).toEqual([zh]);
+      // arc adds no text, and bolts 1 none either.
+      for (const locale of LOCALES) {
+        expect(lines(onFreeze({ ...more, arc: true }), locale)).toEqual(
+          lines(onFreeze(more), locale),
+        );
+      }
+    }
+    for (const locale of LOCALES) {
+      expect(lines(onFreeze({ from: 'nearestOther', bolts: 1, arc: false }), locale)).toEqual(
+        lines(onFreeze({ from: 'nearestOther' }), locale),
+      );
+    }
+  });
+
+  it('keeps every existing chainBolt text as it was', () => {
+    const existing: [Partial<ChainBoltSpec>, string, string][] = [
+      [
+        {},
+        'On each freeze, at the target: a 0-jump bolt for 40% damage',
+        '凍結時，在目標：放一道 0 跳的電弧，40% 傷害',
+      ],
+      [
+        { from: 'eventTarget', jumps: 2, shockStacks: 2 },
+        'On each freeze, at the target: a 2-jump bolt for 40% damage, 2 shock stacks on each hit',
+        '凍結時，在目標：放一道 2 跳的電弧，40% 傷害，帶 2 層感電',
+      ],
+      [
+        { from: 'nearestToPoint', jumps: 3 },
+        'On each freeze, at the target: a 3-jump bolt for 40% damage, starting at the nearest enemy',
+        '凍結時，在目標：放一道 3 跳的電弧，40% 傷害，從最近的敵人開始',
+      ],
+      [
+        { from: 'nearestToPoint', bolts: 1 },
+        'On each freeze, at the target: a 0-jump bolt for 40% damage, starting at the nearest enemy',
+        '凍結時，在目標：放一道 0 跳的電弧，40% 傷害，從最近的敵人開始',
+      ],
+    ];
+    for (const [more, en, zh] of existing) {
+      expect(lines(onFreeze(more), 'en')).toEqual([en]);
+      expect(lines(onFreeze(more), 'zh-TW')).toEqual([zh]);
+    }
+  });
+
+  it('quotes the count of bolts above 1 among its numbers, V17’s check, and only then', () => {
+    const numbers = (more: Partial<ChainBoltSpec>): string[][] => triggerNumbers(onFreeze(more));
+    expect(numbers({ from: 'nearestOther', bolts: 3 })).toEqual([['3'], ['40%']]);
+    expect(numbers({ from: 'nearestToPoint', bolts: 2, jumps: 4, shockStacks: 1 })).toEqual([
+      ['2'],
+      ['4'],
+      ['40%'],
+      ['1'],
+    ]);
+    expect(numbers({ from: 'nearestOther', bolts: 1, arc: true })).toEqual([['40%']]);
+    expect(numbers({})).toEqual([['40%']]);
   });
 });
