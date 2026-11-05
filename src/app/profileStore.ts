@@ -24,9 +24,10 @@
  * since a fresh profile written then would skip the import for good.
  *
  * B1 wires it on the page (the lead's ruling P3):
- * - storage: createPlatform({ savePrefix: PROFILE_SAVE_PREFIX, … }).storage, the slots in
- *   localStorage under that prefix on the web (in memory where the page may not use localStorage)
- *   and the Electron bridge's files on Steam, which ignore the prefix;
+ * - storage: createPlatform({ savePrefix: profileSavePrefix(FLAVOR), … }).storage, the slots in
+ *   localStorage under that prefix on the web (PROFILE_SAVE_PREFIX, or the Demo's own, which
+ *   adopts the old prefix's slots once: src/app/v3/store.ts; in memory where the page may not use
+ *   localStorage) and the Electron bridge's files on Steam, which ignore the prefix;
  * - v1: new LocalSaveStorage(pageLocalStorage()) on the web, under M1's default prefix
  *   (src/platform); null on Steam, and where the page has no localStorage (pageLocalStorage throws);
  * - context: profileContext(loadContent(), FULL_SCOPE); now: () => new Date().toISOString().
