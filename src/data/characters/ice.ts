@@ -176,16 +176,17 @@ export const ICE = defineCharacter({
       centerBranch('wall', {
         r1: ranked('maxLife', 0.1, 4),
         r2: ranked('lifeRegen', 0.003, 4, 'flat'),
-        // 冰霜新星: an enemy within 120 sets off a frost nova (4 s cooldown).
-        // TODO(engine B3): interim data until an enemy-enters-range event lands; until then the
-        // nova goes off every 4 s, which hits nothing when no enemy is within 120.
+        // 冰霜新星: an enemy within 120 sets off a frost nova (4 s cooldown): a presence poll
+        // every 0.25 s (lead ruling A5), the nova at you, damage and chill (Hoshi's A5 default).
         a: notable('frost-nova', {
           triggers: [
             {
               on: 'periodic',
-              every: 4,
+              every: 0.25,
+              when: [{ cooldownSec: 4 }],
+              target: { pick: 'nearest', from: 'player', range: 120 },
               do: [
-                { kind: 'nova', radius: 120, damagePct: 0.5, element: 'cold' },
+                { kind: 'nova', radius: 120, damagePct: 0.5, element: 'cold', at: 'player' },
                 { kind: 'addFrost', amount: 0.3, radius: 120, maxTargets: 64 },
               ],
             },
