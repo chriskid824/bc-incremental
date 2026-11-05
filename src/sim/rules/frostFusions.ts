@@ -8,8 +8,8 @@
  *   fans out over the freeze's list); a frozen enemy that is ignited takes one hit of hitPct of
  *   the damage stat. The docs' 「並解凍」 waits on the engine (TODO below): until then the enemy
  *   stays frozen and can still shatter.
- * - superconduct (冰雷「超導」): a freeze sends a chain bolt from the frozen enemy through `arcs`
- *   more enemies (arcDamagePct each, 1 shock stack), and the `arcs` enemies nearest it gain
+ * - superconduct (冰雷「超導」): a freeze sends `arcs` bolts (1-3, E7), one each to the nearest other
+ *   enemies, drawn from the frozen one (arcDamagePct each, 1 shock stack), and the `arcs` enemies nearest it gain
  *   frostPct chill; a shocked enemy's hits add shockFrostMore more frost (frostOnHit).
  * - frostSentry (冰靈「冰晶哨」): a shatter leaves, with `chance`, a timed sentry for lifeSec that
  *   shoots cones (damagePct a shot), at most maxLive at once. TODO(engine B3): the engine has no
@@ -58,9 +58,16 @@ export const superconduct: RuleModule<Extract<RuleSpec, { id: 'superconduct' }>>
     for (const spec of specs) {
       b.addTrigger(name, {
         on: 'freeze',
-        target: { pick: 'nearest', excludeEventTarget: true },
         do: [
-          { kind: 'chainBolt', jumps: spec.arcs - 1, damagePct: spec.arcDamagePct, shockStacks: 1 },
+          {
+            kind: 'chainBolt',
+            from: 'nearestOther',
+            bolts: spec.arcs,
+            jumps: 0,
+            arc: true,
+            damagePct: spec.arcDamagePct,
+            shockStacks: 1,
+          },
           {
             kind: 'addFrost',
             amount: spec.frostPct,

@@ -110,11 +110,19 @@ describe('thermalShock (冰火「熱震」)', () => {
 });
 
 describe('superconduct (冰雷「超導」)', () => {
-  it('compiles a freeze bolt through the nearest enemies, their chill and the shocked frost', () => {
+  it('compiles 3 freeze bolts to the nearest other enemies, their chill and the shocked frost', () => {
     const build = compileBuild(makeStats(), [SUPER], ICE);
     const specs = build.effects.map((fx) => fx.spec);
     expect(specs).toContainEqual(
-      expect.objectContaining({ kind: 'chainBolt', jumps: 2, damagePct: 0.5, shockStacks: 1 }),
+      expect.objectContaining({
+        kind: 'chainBolt',
+        from: 'nearestOther',
+        bolts: 3,
+        jumps: 0,
+        arc: true,
+        damagePct: 0.5,
+        shockStacks: 1,
+      }),
     );
     expect(specs).toContainEqual(
       expect.objectContaining({ kind: 'addFrost', amount: 0.2, maxTargets: 3 }),
@@ -150,10 +158,17 @@ describe('frostSentry (冰靈「冰晶哨」)', () => {
 });
 
 describe('plasma (火雷「電漿」)', () => {
-  it('compiles a one-jump bolt and the shocked burn more', () => {
+  it('compiles a bolt to the nearest other enemy and the shocked burn more', () => {
     const build = compileBuild(makeStats(), [PLASMA], MAGMA);
     expect(build.effects.map((fx) => fx.spec)).toContainEqual(
-      expect.objectContaining({ kind: 'chainBolt', jumps: 1, damagePct: 0.5, shockStacks: 1 }),
+      expect.objectContaining({
+        kind: 'chainBolt',
+        from: 'nearestOther',
+        jumps: 0,
+        arc: true,
+        damagePct: 0.5,
+        shockStacks: 1,
+      }),
     );
   });
 

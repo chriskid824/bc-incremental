@@ -55,9 +55,11 @@ export const LIGHTNING = defineOuter({
       b: notable('discharge', {
         triggers: [
           {
-            on: 'diedWithAilment',
+            on: 'kill',
             when: [{ victimHas: 'shock' }],
-            do: [{ kind: 'chainBolt', jumps: 0, damagePct: 0.5, from: 'nearestToPoint' }],
+            do: [
+              { kind: 'chainBolt', from: 'nearestToPoint', jumps: 0, arc: true, damagePct: 0.5 },
+            ],
           },
         ],
       }),

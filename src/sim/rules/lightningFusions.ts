@@ -2,7 +2,7 @@
  * The hand fusion cores of 熔核 and 蜂巢 with the lightning outer (docs/v3/game-design-v3.md §5.2;
  * B3), each from a spec the fusion's coefficient already scaled (RULE_COEF_FIELDS).
  * - plasma (火雷「電漿」): each signature bomb's explosion sends, from each burning enemy of its
- *   list (the first LIST_MAX it hit, alive), a one-jump chain bolt at the nearest enemy, at most
+ *   list (the first LIST_MAX it hit, alive), a bolt at the nearest other enemy (E7's nearestOther), at most
  *   arcsPerBlast a bomb (an onCenterEvent hook queueing the bolt at each such enemy,
  *   enqueueModuleEffect); a shocked enemy takes shockBurnMore more burn damage. A compile error in
  *   a run of another signature.
@@ -29,9 +29,12 @@ export const plasma: RuleModule<Extract<RuleSpec, { id: 'plasma' }>> = {
     const { name } = b.credit();
     let more = 0;
     for (const spec of specs) {
+      // E7: from each burning enemy a bolt to the nearest other enemy, drawn from the first.
       const bolt = b.addEffect(name, {
         kind: 'chainBolt',
-        jumps: 1,
+        from: 'nearestOther',
+        jumps: 0,
+        arc: true,
         damagePct: spec.arcDamagePct,
         shockStacks: 1,
       });
