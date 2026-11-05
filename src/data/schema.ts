@@ -711,7 +711,16 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         periodSec: finite,
         durationSec: finite,
         countMult: finite,
-        damagePct: finite,
+      })
+      .readonly(),
+    z.strictObject({ id: z.literal('barrageFan'), spreadDeg: finite }).readonly(),
+    z.strictObject({ id: z.literal('barrageRing'), every: finite, directions: finite }).readonly(),
+    z.strictObject({ id: z.literal('clusterShot'), count: finite, chance: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('barrageFocus'),
+        bonus: finite,
+        when: z.enum(['boss', 'lastAlive']),
       })
       .readonly(),
     z

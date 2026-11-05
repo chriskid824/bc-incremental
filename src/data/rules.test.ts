@@ -151,6 +151,10 @@ describe('tables the rule modules fill', () => {
       'royalJelly',
       'zoneTune',
       'bulletRain',
+      'barrageFan',
+      'barrageRing',
+      'clusterShot',
+      'barrageFocus',
       'shatterChain',
       'frozenNoSplit',
     ]);

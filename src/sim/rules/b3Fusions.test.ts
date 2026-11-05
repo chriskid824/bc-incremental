@@ -261,29 +261,41 @@ describe('hemorrhage (大出血)', () => {
 });
 
 describe('bulletRain (彈雨)', () => {
-  const RAIN: RuleSpec = {
-    id: 'bulletRain',
-    periodSec: 10,
-    durationSec: 2,
-    countMult: 3,
-    damagePct: 0.25,
-  };
+  const RAIN: RuleSpec = { id: 'bulletRain', periodSec: 10, durationSec: 2, countMult: 3 };
 
-  it('compiles the entry volley it repeats', () => {
-    const specs = compileBuild(makeStats(), [RAIN], ICE).effects.map((fx) => fx.spec);
-    expect(specs).toContainEqual(
-      expect.objectContaining({ kind: 'projectiles', aim: 'distinct', countStat: 'barrageCount' }),
-    );
+  it('sets the rider’s rain window', () => {
+    expect(compileBuild(makeStats(), [RAIN], ICE).flags.barrage.rain).toEqual({
+      periodSec: 10,
+      activeSec: 2,
+      countMult: 3,
+    });
+    expect(compileBuild(makeStats(), [], ICE).flags.barrage.rain).toBeNull();
   });
+});
 
-  it('sends small projectiles only in the last 2 s of every 10', () => {
-    const stats = { barrageCount: 2 };
-    const bullets = (events: readonly SimEvent[]): number =>
-      hitsWith(events, TAG.trigger | TAG.projectile);
-    // 7.5 s: before the first window; 10 s: through it.
-    expect(bullets(run(ICE, [RAIN], 450, stats))).toBe(0);
-    expect(bullets(run(ICE, [RAIN], 600, stats))).toBeGreaterThan(0);
-    expect(bullets(run(ICE, [], 600, stats))).toBe(0);
+describe('the barrage ◆ nodes (扇形, 環射, 子母彈, 聚焦)', () => {
+  it('write their rider params, and nothing without them', () => {
+    const rules: RuleSpec[] = [
+      { id: 'barrageFan', spreadDeg: 30 },
+      { id: 'barrageRing', every: 6, directions: 12 },
+      { id: 'clusterShot', count: 3, chance: 1 },
+      { id: 'barrageFocus', bonus: 0.2, when: 'boss' },
+    ];
+    const params = compileBuild(makeStats(), rules, ICE).flags.barrage;
+    expect(params).toMatchObject({
+      aim: 'fan',
+      spreadDeg: 30,
+      ring: { every: 6, directions: 12 },
+      split: { count: 3, chance: 1 },
+      focus: { bonus: 0.2, when: 'boss' },
+    });
+    const plain = compileBuild(makeStats(), [], ICE).flags.barrage;
+    expect([plain.aim, plain.ring, plain.split, plain.focus]).toEqual([
+      'distinct',
+      null,
+      null,
+      null,
+    ]);
   });
 });
 

@@ -37,24 +37,12 @@ export const BARRAGE = defineOuter({
     outerBranch('volley', {
       r1: ranked('barrageCount', 0.5, 4, 'flat'),
       r2: ranked('damage', 0.1, 4, 'increased', BULLETS),
-      // 扇形: the small projectiles fan out at one target.
-      // TODO(engine B3): interim data until a ◆ can turn the entry's aim to a fan; until then the
-      // small projectiles hit harder.
-      a: notable('fan', { modifiers: [inc('damage', 0.25, BULLETS)] }),
+      // 扇形: the small projectiles fan out (30°) at one target.
+      a: notable('fan', { rules: [{ id: 'barrageFan', spreadDeg: 30 }] }),
       r3: ranked('barrageCount', 0.5, 3, 'flat'),
       r4: ranked('damage', 0.1, 3, 'increased', BULLETS),
       // 環射: every 6th attack fires small projectiles in 12 directions.
-      b: notable('ring-shot', {
-        triggers: [
-          {
-            on: 'nthAttack',
-            every: 6,
-            do: [
-              { kind: 'projectiles', count: 12, damagePct: 0.25, aim: 'radial', from: 'player' },
-            ],
-          },
-        ],
-      }),
+      b: notable('ring-shot', { rules: [{ id: 'barrageRing', every: 6, directions: 12 }] }),
       mastery: mastery(),
     }),
     // 分裂: pierce and split. Pierce is the rider's dearest knob (E10a), so two ranks a pierce.
@@ -62,26 +50,14 @@ export const BARRAGE = defineOuter({
       r1: ranked('damage', 0.08, 4, 'increased', BULLETS),
       r2: ranked('barragePierce', 0.5, 4, 'flat'),
       // 子母彈: a small projectile that kills splits into 3 (the split ones do not split again).
-      // TODO(engine B3): interim data until a kill can tell a small projectile's; until then a
-      // kill by a hit splits 3 small projectiles a third of the time.
-      a: notable('cluster', {
-        triggers: [
-          {
-            on: 'kill',
-            when: [{ killedBy: 'hit' }, { chance: 0.33 }],
-            do: [{ kind: 'projectiles', count: 3, damagePct: 0.25, aim: 'radial' }],
-          },
-        ],
-      }),
+      a: notable('cluster', { rules: [{ id: 'clusterShot', count: 3, chance: 1 }] }),
       r3: ranked('damage', 0.08, 3, 'increased', BULLETS),
-      r4: ranked('barrageCount', 0.5, 3, 'flat'),
-      // 聚焦: with one target left every small projectile goes at it, +20% (答案：Boss).
-      // TODO(engine B3): interim data until a one-enemy-left condition lands; until then the
-      // small projectiles deal +20% to bosses.
+      // 分裂's split chance (A19 (a), E10b's barrageSplit): base 0, so 'flat'. It splits only
+      // under ◆子母彈 (split null without it), which this rank sits behind.
+      r4: ranked('barrageSplit', 0.15, 3, 'flat'),
+      // 聚焦: while a boss is alive every small projectile goes at it, +20% (答案：Boss; A20 (b)).
       b: answers(
-        notable('focus', {
-          modifiers: [inc('damage', 0.2, { ...BULLETS, when: [{ targetKind: 'boss' }] })],
-        }),
+        notable('focus', { rules: [{ id: 'barrageFocus', bonus: 0.2, when: 'boss' }] }),
         'boss',
       ),
       mastery: mastery(),
@@ -96,7 +72,7 @@ export const BARRAGE = defineOuter({
   }),
   // 彈雨: for 2 s in every 10, ×3 small projectiles (its own rule module, Q12 A).
   threshold: threshold({
-    rules: [{ id: 'bulletRain', periodSec: 10, durationSec: 2, countMult: 3, damagePct: 0.25 }],
+    rules: [{ id: 'bulletRain', periodSec: 10, durationSec: 2, countMult: 3 }],
   }),
   payload: {
     type: 'placement',

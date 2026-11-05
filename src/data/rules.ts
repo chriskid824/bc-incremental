@@ -325,16 +325,26 @@ export type RuleSpec =
   /** ◆粉碎 (霜晶's center, E6): an enemy that dies frozen does not split. */
   | { readonly id: 'frozenNoSplit' }
   /**
-   * 彈雨 (the barrage outer's threshold, gd §4.11, Q12 A): for the last durationSec of every
-   * periodSec, each attack sends countMult times the entry's small projectiles of damagePct
-   * (src/sim/rules/bulletRain.ts).
+   * 彈雨 (the barrage outer's threshold, gd §4.11, Q12 A): for the first durationSec of every
+   * periodSec, the barrage rider's small shots are ×countMult (src/sim/rules/bulletRain.ts).
    */
   | {
       readonly id: 'bulletRain';
       readonly periodSec: number;
       readonly durationSec: number;
       readonly countMult: number;
-      readonly damagePct: number;
+    }
+  /** ◆扇形 (the barrage outer, E10b): every small shot at one target, over spreadDeg. */
+  | { readonly id: 'barrageFan'; readonly spreadDeg: number }
+  /** ◆環射 (the barrage outer, E10b): every `every`-th attack fires `directions` shots round. */
+  | { readonly id: 'barrageRing'; readonly every: number; readonly directions: number }
+  /** ◆子母彈 (the barrage outer, E10b): a small shot's kill splits it into `count`, with `chance`. */
+  | { readonly id: 'clusterShot'; readonly count: number; readonly chance: number }
+  /** ◆聚焦 (the barrage outer, E10b): while `when` holds, every small shot at it, at 1 + bonus. */
+  | {
+      readonly id: 'barrageFocus';
+      readonly bonus: number;
+      readonly when: 'boss' | 'lastAlive';
     }
   | {
       readonly id: 'stormWeb';
@@ -391,6 +401,10 @@ export const RULE_IDS: readonly RuleId[] = [
   'stormWeb',
   'hemorrhage',
   'bulletRain',
+  'barrageFan',
+  'barrageRing',
+  'clusterShot',
+  'barrageFocus',
   'bulletHell',
   'shatterChain',
   'frozenNoSplit',
@@ -543,6 +557,10 @@ export const NOTABLE_RULES: readonly RuleId[] = [
   'royalJelly',
   'zoneTune',
   'bulletRain',
+  'barrageFan',
+  'barrageRing',
+  'clusterShot',
+  'barrageFocus',
   'shatterChain',
   'frozenNoSplit',
 ];

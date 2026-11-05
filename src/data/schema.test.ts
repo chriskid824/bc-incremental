@@ -108,7 +108,11 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   plasma: { id: 'plasma', arcsPerBlast: 3, arcDamagePct: 0.5, shockBurnMore: 0.3 },
   stormWeb: { id: 'stormWeb', damagePct: 0.1, periodSec: 0.25, pairPeriodSec: 0.5 },
   hemorrhage: { id: 'hemorrhage', maxStacks: 8 },
-  bulletRain: { id: 'bulletRain', periodSec: 10, durationSec: 2, countMult: 3, damagePct: 0.25 },
+  bulletRain: { id: 'bulletRain', periodSec: 10, durationSec: 2, countMult: 3 },
+  barrageFan: { id: 'barrageFan', spreadDeg: 30 },
+  barrageRing: { id: 'barrageRing', every: 6, directions: 12 },
+  clusterShot: { id: 'clusterShot', count: 3, chance: 1 },
+  barrageFocus: { id: 'barrageFocus', bonus: 0.2, when: 'boss' },
 };
 
 describe('ModifierSchema', () => {

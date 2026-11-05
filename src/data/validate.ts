@@ -1031,11 +1031,45 @@ function ruleIssues(rule: RuleSpec): string[] {
       if (!(rule.durationSec > 0 && rule.durationSec <= rule.periodSec)) {
         issues.push(`bulletRain.durationSec must be in (0, periodSec] (got ${rule.durationSec})`);
       }
-      if (!(isPositiveInt(rule.countMult) && rule.countMult >= 2)) {
-        issues.push(`bulletRain.countMult must be an integer >= 2 (got ${rule.countMult})`);
+      // E10b's rain param: a whole factor in [2, 4], and a window of a tick or more inside its period.
+      if (!(isPositiveInt(rule.countMult) && rule.countMult >= 2 && rule.countMult <= 4)) {
+        issues.push(`bulletRain.countMult must be an integer in [2, 4] (got ${rule.countMult})`);
       }
-      if (!(rule.damagePct > 0 && Number.isFinite(rule.damagePct))) {
-        issues.push(`bulletRain.damagePct must be finite and > 0 (got ${rule.damagePct})`);
+      if (!(
+        Math.round(rule.durationSec * TICKS_PER_SEC) >= 1 &&
+        Math.round(rule.durationSec * TICKS_PER_SEC) < Math.round(rule.periodSec * TICKS_PER_SEC)
+      )) {
+        issues.push(
+          `bulletRain.durationSec must be at least a tick and under periodSec (got ${rule.durationSec})`,
+        );
+      }
+      break;
+    case 'barrageFan':
+      if (!(rule.spreadDeg > 0 && rule.spreadDeg < 360)) {
+        issues.push(`barrageFan.spreadDeg must be in (0, 360) (got ${rule.spreadDeg})`);
+      }
+      break;
+    case 'barrageRing':
+      if (!(Number.isInteger(rule.every) && rule.every >= 1 && rule.every <= 60)) {
+        issues.push(`barrageRing.every must be an integer in [1, 60] (got ${rule.every})`);
+      }
+      if (!(Number.isInteger(rule.directions) && rule.directions >= 1 && rule.directions <= 64)) {
+        issues.push(
+          `barrageRing.directions must be an integer in [1, 64] (got ${rule.directions})`,
+        );
+      }
+      break;
+    case 'clusterShot':
+      if (!(Number.isInteger(rule.count) && rule.count >= 1 && rule.count <= 8)) {
+        issues.push(`clusterShot.count must be an integer in [1, 8] (got ${rule.count})`);
+      }
+      if (!(rule.chance >= 0 && rule.chance <= 1)) {
+        issues.push(`clusterShot.chance must be in [0, 1] (got ${rule.chance})`);
+      }
+      break;
+    case 'barrageFocus':
+      if (!(rule.bonus >= 0 && rule.bonus <= 4)) {
+        issues.push(`barrageFocus.bonus must be in [0, 4] (got ${rule.bonus})`);
       }
       break;
     case 'stormWeb':
@@ -1975,6 +2009,10 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'stormWeb':
     case 'hemorrhage':
     case 'bulletRain':
+    case 'barrageFan':
+    case 'barrageRing':
+    case 'clusterShot':
+    case 'barrageFocus':
     case 'shatterChain':
     case 'bulletHell':
     case 'frozenNoSplit':

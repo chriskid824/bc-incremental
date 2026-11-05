@@ -45,6 +45,7 @@ import { hemorrhage } from './hemorrhage';
 import { bulletRain } from './bulletRain';
 import { frozenNoSplit, shatterChain } from './shatterFlags';
 import { bulletHell } from './bulletHell';
+import { barrageFan, barrageFocus, barrageRing, clusterShot } from './barrageNodes';
 import { flameBee, frostBee } from './hiveFusions';
 import { plasma, stormWeb } from './lightningFusions';
 import { bugSea, cannon, lockBeacon, teslaTower } from './summonPolicies';
@@ -115,6 +116,10 @@ export const RULE_MODULES: {
   bulletRain,
   shatterChain,
   bulletHell,
+  barrageFan,
+  barrageRing,
+  clusterShot,
+  barrageFocus,
   frozenNoSplit,
 };
 

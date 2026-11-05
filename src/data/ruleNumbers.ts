@@ -140,6 +140,14 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
       return [[percent(rule.damagePct)]];
     case 'bulletRain':
       return [[String(rule.periodSec)], [String(rule.durationSec)], [String(rule.countMult)]];
+    case 'barrageFan':
+      return [[`${rule.spreadDeg}°`]];
+    case 'barrageRing':
+      return [[String(rule.every)], [String(rule.directions)]];
+    case 'clusterShot':
+      return [[String(rule.count)]];
+    case 'barrageFocus':
+      return [[signedPercent(rule.bonus)]];
   }
 }
 
