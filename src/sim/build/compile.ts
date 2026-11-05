@@ -35,6 +35,7 @@ import { BLEED_RING_MAX_STACKS } from '../ailments/rings';
 import { spreadSelector } from '../effects/select';
 import {
   compileEffect,
+  compileFire,
   compileTrigger,
   moduleTrigger,
   SHATTER_TRIGGER,
@@ -699,11 +700,21 @@ export function compileBuild(
   // The StatBlock's barrage count, read once a compile: a projectiles effect with countStat links
   // its count to it (compileEffect; docs/v3 C6 design §7.4 C6b.1), whoever adds the effect.
   const barrageCount = stats.values.barrageCount;
+  // A seated spawnDrone's fire (E8): its fires.do compiled once, with the row's source and coef,
+  // into an entry of its own after its trigger's effects, which stay one run of indices; the
+  // row's entry keeps its index (CompiledEffect.fire).
+  const addFire = (at: number, spec: EffectSpec, source: number, coef: number): void => {
+    if (spec.kind !== 'spawnDrone' || spec.fires === undefined) return;
+    effects[at] = { ...(effects[at] as CompiledEffect), fire: effects.length };
+    effects.push(compileFire(spec, source, coef, values.damage, barrageCount));
+  };
   const addTrigger = (source: number, spec: TriggerSpec, coef: number): void => {
-    triggers.push(compileTrigger(triggers.length, spec, source, coef, effects.length, sources));
+    const start = effects.length;
+    triggers.push(compileTrigger(triggers.length, spec, source, coef, start, sources));
     for (const effect of spec.do) {
       effects.push(compileEffect(effect, source, coef, values.damage, spec.target, barrageCount));
     }
+    spec.do.forEach((effect, k) => addFire(start + k, effect, source, coef));
   };
   // The module instance being compiled, its source and its trigger index (−1 until its first
   // hook or instanceTrigger call).
@@ -757,8 +768,10 @@ export function compileBuild(
     },
     addEffect(source: string, spec: EffectSpec, coef = 1) {
       const ix = sources.index(source);
+      const at = effects.length;
       effects.push(compileEffect(spec, ix, coef, values.damage, undefined, barrageCount));
-      return effects.length - 1;
+      addFire(at, spec, ix, coef);
+      return at;
     },
     addEmitter(source, grant) {
       grants.push({ source, grant });

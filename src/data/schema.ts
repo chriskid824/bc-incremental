@@ -33,9 +33,11 @@ import {
   TRIGGER_EVENTS,
 } from './triggers';
 import type {
+  ChainBoltSpec,
   Condition,
   ConversionSpec,
   EffectSpec,
+  ProjectilesSpec,
   ScalingSpec,
   TargetCondition,
   TargetSelector,
@@ -240,6 +242,39 @@ const damagePart = {
   element: z.enum(['cold', 'lightning']).exactOptional(),
 };
 
+/**
+ * A projectiles effect's and a chainBolt's: members of EffectSpecSchema, and what a seated row
+ * fires (SpawnDroneFires.do, E8).
+ */
+const ProjectilesSpecSchema = exact<ProjectilesSpec>()(
+  z
+    .strictObject({
+      kind: z.literal('projectiles'),
+      count: finite,
+      aim: z.enum(['target', 'distinct', 'radial', 'fan']),
+      from: z.enum(['event', 'player']).exactOptional(),
+      pierce: finite.exactOptional(),
+      bounce: finite.exactOptional(),
+      spreadDeg: finite.exactOptional(),
+      countStat: z.literal('barrageCount').exactOptional(),
+      ...damagePart,
+    })
+    .readonly(),
+);
+const ChainBoltSpecSchema = exact<ChainBoltSpec>()(
+  z
+    .strictObject({
+      kind: z.literal('chainBolt'),
+      jumps: finite,
+      damagePct: finite,
+      shockStacks: finite.exactOptional(),
+      from: z.enum(['eventTarget', 'nearestToPoint', 'nearestOther']).exactOptional(),
+      bolts: finite.exactOptional(),
+      arc: z.boolean().exactOptional(),
+    })
+    .readonly(),
+);
+
 export const EffectSpecSchema = exact<EffectSpec>()(
   z.discriminatedUnion('kind', [
     z
@@ -360,6 +395,16 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         ailmentDamagePct: finite.exactOptional(),
         tags: damagePart.tags,
         element: damagePart.element,
+        // A seated row (E8); validate.ts keeps the two together and the row's own terms out.
+        seat: z.literal(true).exactOptional(),
+        fires: z
+          .strictObject({
+            everySec: finite,
+            range: finite.exactOptional(),
+            do: z.discriminatedUnion('kind', [ProjectilesSpecSchema, ChainBoltSpecSchema]),
+          })
+          .readonly()
+          .exactOptional(),
       })
       .readonly(),
     z
@@ -381,19 +426,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         order,
       })
       .readonly(),
-    z
-      .strictObject({
-        kind: z.literal('projectiles'),
-        count: finite,
-        aim: z.enum(['target', 'distinct', 'radial', 'fan']),
-        from: z.enum(['event', 'player']).exactOptional(),
-        pierce: finite.exactOptional(),
-        bounce: finite.exactOptional(),
-        spreadDeg: finite.exactOptional(),
-        countStat: z.literal('barrageCount').exactOptional(),
-        ...damagePart,
-      })
-      .readonly(),
+    ProjectilesSpecSchema,
     z
       .strictObject({
         kind: z.literal('slashLine'),
@@ -415,17 +448,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         ignoreArmour: z.boolean().exactOptional(),
       })
       .readonly(),
-    z
-      .strictObject({
-        kind: z.literal('chainBolt'),
-        jumps: finite,
-        damagePct: finite,
-        shockStacks: finite.exactOptional(),
-        from: z.enum(['eventTarget', 'nearestToPoint', 'nearestOther']).exactOptional(),
-        bolts: finite.exactOptional(),
-        arc: z.boolean().exactOptional(),
-      })
-      .readonly(),
+    ChainBoltSpecSchema,
     z.strictObject({ kind: z.literal('comboStack'), stacks: finite }).readonly(),
     z
       .strictObject({

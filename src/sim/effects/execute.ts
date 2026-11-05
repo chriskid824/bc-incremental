@@ -68,6 +68,8 @@
  * at the event's point, each keeping the entry's effect, depth and origin and living its
  * effect's SpawnSpecs.lifeTicks; a row past the summon cap or its maxLive is refused and counted
  * (summonCapped). They first step in the next tick's drone stage, which runs before this phase.
+ * A seated one's rows (E8) are sentries, whose fires come back to this queue as the entries of
+ * their effect's fire (CompiledEffect.fire), at the row's depth and origin.
  *
  * A thaw (E6) ends the freeze of its live target, a normal enemy frozen now, and starts its frost
  * immunity there (thawEnemy, src/sim/ailments/frost.ts); it raises no event.
@@ -639,7 +641,7 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
   // `count` timed rows of the drone pool at the event's point, or on the enemy or player its
   // trigger's selector picked, living round(lifeSec × 60 × summonDuration) ticks (one at least,
   // SpawnSpecs.lifeTicks, which the fill reads once; E4), their hits on the effect's payload at
-  // the entry's depth and origin (src/sim/systems/drones.ts).
+  // the entry's depth and origin (src/sim/systems/drones.ts); a seated one's are sentries (E8).
   spawnDrone(ctx, spec, fx, entry) {
     spawnRows(
       ctx,

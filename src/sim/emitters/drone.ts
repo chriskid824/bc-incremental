@@ -244,7 +244,9 @@ export function droneLayout(
  * aim nearest), its speed × `speed` (the droneSpeed stat, as the drones') and its splash through
  * sizeOf as a drone's is, its cooldown DRONE_DEFAULTS', its life in ticks max(1, round(lifeSec ×
  * 60 × the summonDuration stat)), the stat read once here as max(0, summonDuration) (蜂王漿, E4);
- * its COEF fields are the compiled spec's, × the coefficient.
+ * its COEF fields are the compiled spec's, × the coefficient. A seated row's (E8) also gets its
+ * fire's effect (CompiledEffect.fire), its period round(everySec × 60) and its range squared,
+ * unsized: a range is a reach to pick within, not an area.
  */
 function spawnSpecs(build: CompiledBuild, speed: number): SpawnSpecs {
   const n = build.effects.length;
@@ -263,6 +265,9 @@ function spawnSpecs(build: CompiledBuild, speed: number): SpawnSpecs {
     stacks: new Int32Array(n),
     ailmentPct: new Float64Array(n),
     lifeTicks: new Float64Array(n),
+    fireEffect: new Int32Array(n).fill(-1),
+    fireTicks: new Float64Array(n),
+    fireRangeSq: new Float64Array(n),
   };
   build.effects.forEach((fx, f) => {
     const spec = fx.spec;
@@ -280,6 +285,12 @@ function spawnSpecs(build: CompiledBuild, speed: number): SpawnSpecs {
     specs.ailmentPct[f] = spec.ailmentDamagePct ?? 1;
     // × the stat before the rounding: at 1 the life is lifeSec × 60's, bit for bit.
     specs.lifeTicks[f] = Math.max(1, Math.round(spec.lifeSec * TICK_RATE * duration));
+    // A seated row's fire (E8): its effect, period and range, which no stat sizes.
+    const fires = spec.fires;
+    if (fires === undefined) return;
+    specs.fireEffect[f] = fx.fire;
+    specs.fireTicks[f] = Math.round(fires.everySec * TICK_RATE);
+    specs.fireRangeSq[f] = fires.range === undefined ? Infinity : fires.range * fires.range;
   });
   return specs;
 }

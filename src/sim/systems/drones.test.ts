@@ -209,6 +209,7 @@ const PER_SLOT = [
   'roleDamage',
   'roleSpeed',
   'surging',
+  'fireLeft',
 ] as const;
 /** The pool's per-emitter arrays, by name. */
 const PER_EMITTER = [

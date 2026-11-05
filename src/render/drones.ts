@@ -13,7 +13,11 @@
  * (DroneViewState.size, E4: the swarm's sizeMult × its role's) about its centre; its trail keeps
  * its width. A guard (攔截守衛, E5) on its orbit (DRONE_GUARD) is a drone's kite and trail at its
  * position on the guards' ring, nose along its orbit, and is out of the comb (dockedFraction);
- * 蜂潮's droneSurge draws nothing yet. Reads the simulation state and never writes it.
+ * 蜂潮's droneSurge draws nothing yet. A sentry (E8: a seated row, 冰晶哨 or 電蜂) is drawn as
+ * a turret where it stands, its barrel facing out from the player and never recoiling (it has
+ * no turret track), until it has its own sprite: the one branch of DroneLayer.update that reads
+ * its kind is where that goes; its fires are drawn by the layers of the effects they run.
+ * Reads the simulation state and never writes it.
  */
 
 import { Container, Graphics, Particle, ParticleContainer } from 'pixi.js';
@@ -22,6 +26,7 @@ import {
   DRONE_DASH,
   DRONE_DOCKED,
   DRONE_KIND_DRONE,
+  DRONE_KIND_SENTRY,
   DRONE_KIND_SPIRIT,
   DRONE_KIND_TURRET,
 } from '../sim';
@@ -653,7 +658,8 @@ export class DroneLayer {
     let resized = false;
     for (let s = 0; s < count; s++) {
       const kind = ds.kind[s];
-      if (kind === DRONE_KIND_TURRET) {
+      // A sentry (E8) wears the turret's look until it has its own sprite.
+      if (kind === DRONE_KIND_TURRET || kind === DRONE_KIND_SENTRY) {
         this.drawTurret(state, s, turretCount++);
         continue;
       }
@@ -692,17 +698,22 @@ export class DroneLayer {
     this.drawBrackets(ds, count, enemies);
   }
 
-  /** Turret slot s as the nth turret drawn: its base in its seat, facing out, and its barrel. */
+  /**
+   * Turret slot s as the nth turret drawn: its base in its seat, facing out, and its barrel. A
+   * sentry (E8) has no turret track: its barrel faces out too and never recoils.
+   */
   private drawTurret(state: Readonly<SimState>, s: number, n: number): void {
     const ds = state.drones;
-    const track = this.turrets.get(ds.id[s] as number) as TurretTrack;
+    const track = this.turrets.get(ds.id[s] as number);
     const x = ds.x[s] as number;
     const y = ds.y[s] as number;
     const base = this.turretSprite(this.bases, this.baseSprites, this.baseTexture, n, 0.5, 0.5);
     base.x = x;
     base.y = y;
-    base.rotation = dockedHeading(x, y, state.player.x, state.player.y);
-    const back = recoilOffset(track.sinceFireMs);
+    const out = dockedHeading(x, y, state.player.x, state.player.y);
+    base.rotation = out;
+    const angle = track === undefined ? out : track.angle;
+    const back = track === undefined ? 0 : recoilOffset(track.sinceFireMs);
     const barrel = this.turretSprite(
       this.barrels,
       this.barrelSprites,
@@ -711,9 +722,9 @@ export class DroneLayer {
       this.barrelAnchorX,
       this.barrelAnchorY,
     );
-    barrel.x = x - back * Math.cos(track.angle);
-    barrel.y = y - back * Math.sin(track.angle);
-    barrel.rotation = track.angle;
+    barrel.x = x - back * Math.cos(angle);
+    barrel.y = y - back * Math.sin(angle);
+    barrel.rotation = angle;
   }
 
   /** Streaks `width` wide from the drawn position back through the trail, fading with age. */

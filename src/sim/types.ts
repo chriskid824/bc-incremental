@@ -213,17 +213,21 @@ export interface SegmentViewState {
 /**
  * DroneViewState.kind: a drone, a turret (a slot that stays in its seat and fires), or a spirit,
  * a timed row a spawnDrone effect appended (C5.7): it dashes and impacts as a drone does, but
- * has no emitter, dock or seat, and leaves when its time is up or its impacts are spent.
+ * has no emitter, dock or seat, and leaves when its time is up or its impacts are spent; or a
+ * sentry, a seated row (E8: 冰晶哨, 電蜂), a timed row that stands where it appeared, in
+ * DRONE_FIXED, and fires its effect's fires.do at the enemy nearest to it until its time is up.
+ * The timed rows' kinds come last (≥ DRONE_KIND_SPIRIT).
  */
 export const DRONE_KIND_DRONE = 0;
 export const DRONE_KIND_TURRET = 1;
 export const DRONE_KIND_SPIRIT = 2;
+export const DRONE_KIND_SENTRY = 3;
 /**
  * DroneViewState.mode: a drone docked at its dock, dashing at its target, hovering where it lost
  * its target, or under 蟲海 where its spent sortie ended, until it may pick again, or flying home
- * to dock; a turret fixed in its seat; a guard (攔截守衛, E5) orbiting the player on its orbit
- * point, its docked state, which it enters again where it left its orbit. A spirit only dashes or
- * hovers.
+ * to dock; a turret fixed in its seat, as a sentry where it stands (E8); a guard (攔截守衛, E5)
+ * orbiting the player on its orbit point, its docked state, which it enters again where it left
+ * its orbit. A spirit only dashes or hovers.
  */
 export const DRONE_DOCKED = 0;
 export const DRONE_DASH = 1;
@@ -254,11 +258,11 @@ export interface DroneViewState {
    * under 蟲海, hovers to pick again, or of a turret's last firing's first target; −1 none.
    */
   readonly targetId: Int32Array;
-  /** Its emitter's index in CompiledBuild.emitters; −1 for a spirit. */
+  /** Its emitter's index in CompiledBuild.emitters; −1 for a timed row (a spirit or sentry). */
   readonly owner: Int16Array;
   /**
    * A drone's dock index k of its emitter's drones, or a turret's index j of its turrets; −1 for
-   * a spirit.
+   * a timed row.
    */
   readonly seat: Int16Array;
   /**

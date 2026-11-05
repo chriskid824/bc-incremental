@@ -46,9 +46,10 @@ export function highestHpId(ctx: RunContext): number {
 }
 
 /**
- * The live timed rows of the drone pool (minionCount): its spirits (DRONE_KIND_SPIRIT, which only
- * spawnRows appends) whose time is not up, DronePool.until being the first tick a row is gone; its
- * fixed drones and turrets never count. One pass over the pool's rows, at most its summon cap.
+ * The live timed rows of the drone pool (minionCount): its spirits and sentries (kind at least
+ * DRONE_KIND_SPIRIT, which only spawnRows appends) whose time is not up, DronePool.until being the
+ * first tick a row is gone; its fixed drones and turrets never count. One pass over the pool's
+ * rows, at most its summon cap.
  */
 export function minionCount(ctx: RunContext): number {
   const ds = ctx.sys.drones;
@@ -57,7 +58,7 @@ export function minionCount(ctx: RunContext): number {
   const until = ds.until;
   let n = 0;
   for (let s = 0; s < ds.count; s++) {
-    if (kind[s] === DRONE_KIND_SPIRIT && (until[s] as number) > now) n++;
+    if ((kind[s] as number) >= DRONE_KIND_SPIRIT && (until[s] as number) > now) n++;
   }
   return n;
 }
