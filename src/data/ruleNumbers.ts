@@ -145,10 +145,17 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
 
 /**
  * The number a behaviour modifier's node text must quote: its value as a signed percentage
- * (chances, damage more/increased). An *Always stat has none: "always" is the whole message.
+ * (chances, damage more/increased), and an unscaled more modifier's also as the factor it
+ * multiplies by, as the rules' factors are quoted (more 3 is +300% or ×4: 加農砲's ×4, which its
+ * notTags makes a behaviour modifier, A12), to 12 significant digits (more −0.7 is ×0.3). A scaled
+ * more adds its value per step (1 + value × steps), so ×(1 + value) is not its factor. An *Always
+ * stat has none: "always" is the whole message.
  */
 export function modifierNumbers(mod: Modifier): string[][] {
   if ((ALWAYS_STATS as readonly StatId[]).includes(mod.stat)) return [];
+  if (mod.kind === 'more' && mod.scaling === undefined) {
+    return [[signedPercent(mod.value), `×${Number((1 + mod.value).toPrecision(12))}`]];
+  }
   return [[signedPercent(mod.value)]];
 }
 

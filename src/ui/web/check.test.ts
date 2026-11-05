@@ -4,16 +4,23 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { CHARACTERS } from '../../data/characters';
+import { CALIBRATED } from '../../data/fusion/calibrated';
+import { ACCEPTED_FAILS, OVERRIDES } from '../../data/fusion/overrides';
+import { HUB } from '../../data/hub';
+import { OUTERS } from '../../data/outer';
 import { CHARACTER_IDS, OUTER_IDS } from '../../data/sources';
+import { isBehaviourModifier } from '../../data/stats';
 import { inc } from '../../data/templates';
 import type { TriggerSpec } from '../../data/triggers';
 import { assembleWeb, FULL_SCOPE, SCOPES, scopeHolds } from '../../data/web';
 import type { AssembledWeb, FusionKey, WebNode } from '../../data/web';
 import { fixtureContent } from '../../data/web/testing';
-import { getLocale, setLocale } from '../../i18n';
+import { getLocale, MESSAGES, setLocale } from '../../i18n';
 import type { Locale } from '../../i18n';
 import { textIssues } from './check';
 import { fixtureLookups, fixtureMessages, shippedMessages } from './testing';
+import { messageLookup } from './text';
 
 /** The shipped messages without the registered content's keys, which name B1's nodes. */
 const shippedLookups = () =>
@@ -468,5 +475,40 @@ describe('V20', () => {
     expect(issuesWith({ en: { 'web.fusion.fire.bleed.title': 'Plague Bomb' } })).toEqual([
       `fusion 'fire.bleed' (${EN}): title 'Plague Bomb' is also fusion 'fire.poison''s; titles are unique per character`,
     ]);
+  });
+});
+
+describe("the registered content's 加農砲 (A12)", () => {
+  // E8 scoped its ×4 with notTags (a sentry's shots carry 'trigger'), which makes it a behaviour
+  // modifier, so V17 asks its hand text, all the talent screen shows for it, for +300% or ×4.
+  const registered = assembleWeb(
+    {
+      characters: CHARACTERS,
+      outers: OUTERS,
+      hub: HUB,
+      overrides: OVERRIDES,
+      calibrated: CALIBRATED,
+      acceptedFails: ACCEPTED_FAILS,
+    },
+    'fire',
+    FULL_SCOPE,
+  );
+  const id = 'outer.summon.emplacement.cannon';
+
+  it('passes V17 on its ×4, which it writes as a factor', () => {
+    const cannon = registered.byId.get(id);
+    expect(cannon?.effects.modifiers.filter(isBehaviourModifier)).toEqual([
+      {
+        stat: 'damage',
+        kind: 'more',
+        value: 3,
+        tags: ['minion', 'projectile'],
+        notTags: ['trigger'],
+      },
+    ]);
+    const lookups = { en: messageLookup(MESSAGES.en), 'zh-TW': messageLookup(MESSAGES['zh-TW']) };
+    expect(lookups.en.get(`web.node.${id}.desc`)).toContain('×4');
+    expect(lookups['zh-TW'].get(`web.node.${id}.desc`)).toContain('×4');
+    expect(textIssues([registered], lookups).filter((issue) => issue.includes(id))).toEqual([]);
   });
 });
