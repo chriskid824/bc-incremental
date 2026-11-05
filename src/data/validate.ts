@@ -808,6 +808,8 @@ function ruleIssues(rule: RuleSpec): string[] {
       break;
     case 'lockBeacon':
     case 'focusFire':
+    case 'shatterChain':
+    case 'frozenNoSplit':
       break;
     case 'cannon':
       // The engine refuses a turret rate factor that is not finite and above 0, and a negative splash.
@@ -1860,6 +1862,8 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'stormWeb':
     case 'hemorrhage':
     case 'bulletRain':
+    case 'shatterChain':
+    case 'frozenNoSplit':
       return [];
   }
 }

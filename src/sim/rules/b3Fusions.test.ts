@@ -88,8 +88,15 @@ describe('thermalShock (冰火「熱震」)', () => {
       expect.objectContaining({ kind: 'applyAilment', ailment: 'burn', stacks: 2 }),
     );
     expect(specs).toContainEqual(
-      expect.objectContaining({ kind: 'explode', radius: 1, maxTargets: 1, damagePct: 2 }),
+      expect.objectContaining({
+        kind: 'explode',
+        radius: 1,
+        maxTargets: 1,
+        order: 'nearest',
+        damagePct: 2,
+      }),
     );
+    expect(specs).toContainEqual({ kind: 'thaw' });
   });
 
   it('ignites the enemies it freezes and hits them while they are frozen', () => {
@@ -127,6 +134,7 @@ describe('superconduct (冰雷「超導」)', () => {
     expect(specs).toContainEqual(
       expect.objectContaining({ kind: 'addFrost', amount: 0.2, maxTargets: 3 }),
     );
+    expect(build.flags.frostGainShocked).toBe(0.5);
   });
 
   it('arcs from each freeze', () => {
@@ -135,6 +143,21 @@ describe('superconduct (冰雷「超導」)', () => {
     const arcs = run(ICE, [SUPER], 900, stats);
     expect(hitsWith(plain, TAG.trigger)).toBe(0);
     expect(hitsWith(arcs, TAG.trigger)).toBeGreaterThan(0);
+  });
+});
+
+describe('shatterChain and frozenNoSplit (◆連鎖碎裂, ◆粉碎)', () => {
+  it('set their build flags', () => {
+    const plain = compileBuild(makeStats(), [], ICE).flags;
+    expect(plain.shatterChain).toBe(false);
+    expect(plain.frozenNoSplit).toBe(false);
+    const flags = compileBuild(
+      makeStats(),
+      [{ id: 'shatterChain' }, { id: 'frozenNoSplit' }],
+      ICE,
+    ).flags;
+    expect(flags.shatterChain).toBe(true);
+    expect(flags.frozenNoSplit).toBe(true);
   });
 });
 

@@ -154,15 +154,11 @@ export const ICE = defineCharacter({
         r1: ranked('damage', 0.3, 4, 'increased', CONES),
         r2: ranked('shatterDamage', 0.15, 4),
         // 連鎖碎裂: an enemy a shatter kills shatters too.
-        // TODO(engine B3): interim data until the shatter chain lands (an enemy killed by a
-        // shatter does not shatter, src/data/triggers.ts); until then a wider shatter.
-        a: notable('chain-shatter', { modifiers: [inc('shatterRadius', 0.3)] }),
+        a: notable('chain-shatter', { rules: [{ id: 'shatterChain' }] }),
         r3: ranked('damage', 0.3, 3, 'increased', CONES),
         r4: ranked('shatterRadius', 0.08, 3),
         // 粉碎: a pentagon that dies frozen does not split.
-        // TODO(engine B3): interim data until the no-split-when-frozen hook lands; until then
-        // harder shatters.
-        b: notable('pulverize', { modifiers: [inc('shatterDamage', 0.3)] }),
+        b: notable('pulverize', { rules: [{ id: 'frozenNoSplit' }] }),
         r5: ranked('damage', 0.3, 3, 'increased', CONES),
         r6: ranked('shatterDamage', 0.15, 3),
         // 冰柱: every 4th round fires one cone of 400% instead (答案：盾兵).

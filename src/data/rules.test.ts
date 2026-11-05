@@ -151,6 +151,8 @@ describe('tables the rule modules fill', () => {
       'royalJelly',
       'zoneTune',
       'bulletRain',
+      'shatterChain',
+      'frozenNoSplit',
     ]);
   });
 });

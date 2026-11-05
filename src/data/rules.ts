@@ -270,7 +270,7 @@ export type RuleSpec =
   /**
    * 超導 (霜晶's 冰雷 hand core, gd §5.2): a freeze sends a chain bolt through `arcs` enemies near
    * the frozen one (arcDamagePct each, 1 shock stack) and adds frostPct chill to the `arcs`
-   * nearest; a shocked enemy's hits add shockFrostMore more frost.
+   * nearest; a shocked enemy gains shockFrostMore more frost (the largest entry's).
    */
   | {
       readonly id: 'superconduct';
@@ -311,6 +311,10 @@ export type RuleSpec =
    * and a moving enemy no longer bleeds ×3 (src/sim/rules/hemorrhage.ts).
    */
   | { readonly id: 'hemorrhage'; readonly maxStacks: number }
+  /** ◆連鎖碎裂 (霜晶's center, E6): an enemy a shatter kills shatters too (src/sim/rules/shatterFlags.ts). */
+  | { readonly id: 'shatterChain' }
+  /** ◆粉碎 (霜晶's center, E6): an enemy that dies frozen does not split. */
+  | { readonly id: 'frozenNoSplit' }
   /**
    * 彈雨 (the barrage outer's threshold, gd §4.11, Q12 A): for the last durationSec of every
    * periodSec, each attack sends countMult times the entry's small projectiles of damagePct
@@ -378,6 +382,8 @@ export const RULE_IDS: readonly RuleId[] = [
   'stormWeb',
   'hemorrhage',
   'bulletRain',
+  'shatterChain',
+  'frozenNoSplit',
 ];
 
 /**
@@ -527,4 +533,6 @@ export const NOTABLE_RULES: readonly RuleId[] = [
   'royalJelly',
   'zoneTune',
   'bulletRain',
+  'shatterChain',
+  'frozenNoSplit',
 ];

@@ -6,11 +6,10 @@
  * (RULE_COEF_FIELDS). A compile error in a run of another signature.
  * - thermalShock (冰火「熱震」): a freeze ignites burnStacks on the frozen enemy (a status, so it
  *   fans out over the freeze's list); a frozen enemy that is ignited takes one hit of hitPct of
- *   the damage stat. The docs' 「並解凍」 waits on the engine (TODO below): until then the enemy
- *   stays frozen and can still shatter.
+ *   the damage stat, then thaws (「並解凍」, E6's thaw): the hit lands on the frozen enemy first.
  * - superconduct (冰雷「超導」): a freeze sends `arcs` bolts (1-3, E7), one each to the nearest other
  *   enemies, drawn from the frozen one (arcDamagePct each, 1 shock stack), and the `arcs` enemies nearest it gain
- *   frostPct chill; a shocked enemy's hits add shockFrostMore more frost (frostOnHit).
+ *   frostPct chill; a shocked enemy gains shockFrostMore more frost (BuildFlags.frostGainShocked, E6).
  * - frostSentry (冰靈「冰晶哨」): a shatter leaves, with `chance`, a timed sentry for lifeSec that
  *   shoots cones (damagePct a shot), at most maxLive at once. TODO(engine B3): the engine has no
  *   standing summon that shoots yet; until it lands the sentry is a timed drone (spawnDrone) of
@@ -43,7 +42,16 @@ export const thermalShock: RuleModule<Extract<RuleSpec, { id: 'thermalShock' }>>
       b.addTrigger(name, {
         on: 'ailmentApplied',
         when: [{ ailment: 'burn' }, { targetHas: 'frozen' }],
-        do: [{ kind: 'explode', radius: 1, maxTargets: 1, damagePct: spec.hitPct }],
+        do: [
+          {
+            kind: 'explode',
+            radius: 1,
+            maxTargets: 1,
+            order: 'nearest',
+            damagePct: spec.hitPct,
+          },
+          { kind: 'thaw' },
+        ],
       });
     }
   },
@@ -54,7 +62,6 @@ export const superconduct: RuleModule<Extract<RuleSpec, { id: 'superconduct' }>>
   compile(b, specs) {
     iceOnly(b, 'superconduct');
     const { name } = b.credit();
-    let more = 0;
     for (const spec of specs) {
       b.addTrigger(name, {
         on: 'freeze',
@@ -77,17 +84,7 @@ export const superconduct: RuleModule<Extract<RuleSpec, { id: 'superconduct' }>>
           },
         ],
       });
-      more += spec.shockFrostMore;
-    }
-    if (more > 0) {
-      b.addModifier({
-        stat: 'frostOnHit',
-        kind: 'more',
-        value: more,
-        // Every hit adds its frost; tagged so the modifier reads per hit, as conditions need.
-        tags: ['hit'],
-        when: [{ targetHas: 'shock' }],
-      });
+      b.flags.frostGainShocked = Math.max(b.flags.frostGainShocked, spec.shockFrostMore);
     }
   },
 };
