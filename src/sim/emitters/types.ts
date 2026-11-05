@@ -626,11 +626,11 @@ export interface BarrageRider {
 }
 
 /**
- * A rider's splits (◆子母彈, E10b): a generation-0 shot whose hit kills its enemy splits with
- * `chance` into `count` children (× the rain's factor at the spawn). The projectile stage
- * records each split, in hit order, as the victim's id and position and the killing shot's
- * velocity, `pending` of them (at most SMALL_SHOT_CAP), and they spawn once it has compacted
- * (spawnSplits, src/sim/systems/barrage.ts).
+ * A rider's splits (◆子母彈 or the 分裂 rank, E10b): a generation-0 shot whose hit kills its
+ * enemy splits with `chance` into `count` children (× the rain's factor at the spawn). The
+ * projectile stage records each split, in hit order, as the victim's id and position and the
+ * killing shot's velocity, `pending` of them (at most SMALL_SHOT_CAP), and they spawn once it
+ * has compacted (spawnSplits, src/sim/systems/barrage.ts).
  */
 export interface BarrageSplits {
   readonly count: number;

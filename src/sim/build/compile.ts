@@ -314,7 +314,9 @@ export interface BarrageParams {
    * ◆子母彈 (gd:490 「小彈擊殺時分裂成 3 發（分裂出來的不再分裂）」) and the 分裂 rank (A19, E10b): a
    * small shot whose hit kills its enemy splits, with chance min(1, chance + max(0,
    * barrageSplit)), into `count` × countMult children that never split; `count` a whole number in
-   * [1, 8], `chance` finite in [0, 1]. Null: nothing splits, whatever barrageSplit.
+   * [1, 8], `chance` finite in [0, 1]. Null: the rank alone splits, with chance min(1, max(0,
+   * barrageSplit)) into DEFAULT_SPLIT_COUNT × countMult children; nothing splits unless the
+   * chance is above 0.
    */
   split: { count: number; chance: number } | null;
   /**
@@ -344,6 +346,12 @@ export const DEFAULT_BARRAGE_PARAMS: Readonly<BarrageParams> = {
   focus: null,
   rain: null,
 };
+
+/**
+ * The children of a split when no module wrote the split param (gd:490's 「分裂成 3 發」): the
+ * count the 分裂 rank's chance splits into on its own (compileBarrage).
+ */
+export const DEFAULT_SPLIT_COUNT = 3;
 
 /**
  * The combo's cap (gd:419's 「上限 20」): BuildFlags.comboCap's default, and comboFull's when a
@@ -586,8 +594,9 @@ export interface CompiledBarrage {
   readonly ring: { readonly every: number; readonly count: number } | null;
   /**
    * ◆子母彈 and the 分裂 rank: a killing small shot splits with `chance`, min(1, split.chance +
-   * max(0, barrageSplit)), into `count`, split.count × countMult, children; null without the
-   * split param or at chance 0, which splits nothing.
+   * max(0, barrageSplit)), into `count`, split.count × countMult, children; without the split
+   * param, with min(1, max(0, barrageSplit)) into DEFAULT_SPLIT_COUNT × countMult; null unless
+   * the chance is above 0 (0, or NaN from a module), which splits nothing.
    */
   readonly split: { readonly count: number; readonly chance: number } | null;
   /** ◆聚焦: its bonus and condition; null without the focus param. */
@@ -605,7 +614,8 @@ export interface CompiledBarrage {
  * reads the compiled barrageCount, halved by 巨大化 as the other counts are (countOf), then ×
  * countMult; the C6b.1 count link of a projectiles effect reads the StatBlock's value and never
  * this. The ◆ params compile once here: the ring's directions as the count (countOf, ×
- * countMult), the split's chance with barrageSplit's compiled value, the rain's seconds as ticks.
+ * countMult), the split's chance with barrageSplit's compiled value (the rank alone splitting into
+ * DEFAULT_SPLIT_COUNT), the rain's seconds as ticks.
  */
 function compileBarrage(
   grants: readonly SourcedEmitter[],
@@ -615,8 +625,11 @@ function compileBarrage(
   for (const { source, grant } of grants) {
     if (grant.kind !== 'barrage') continue;
     const { countMult, bounce, aim, spreadDeg, ring, split, focus, rain } = flags.barrage;
-    const chance =
-      split === null ? 0 : Math.min(1, split.chance + Math.max(0, values.barrageSplit));
+    const chance = Math.min(
+      1,
+      (split === null ? 0 : split.chance) + Math.max(0, values.barrageSplit),
+    );
+    const children = split === null ? DEFAULT_SPLIT_COUNT : split.count;
     return {
       source,
       damagePct: grant.damagePct ?? BARRAGE_DAMAGE_PCT,
@@ -629,7 +642,7 @@ function compileBarrage(
         ring === null
           ? null
           : { every: ring.every, count: countOf({ flags }, ring.directions) * countMult },
-      split: split === null || chance === 0 ? null : { count: split.count * countMult, chance },
+      split: chance > 0 ? { count: children * countMult, chance } : null,
       focus: focus === null ? null : { bonus: focus.bonus, when: focus.when },
       rain:
         rain === null

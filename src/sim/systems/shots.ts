@@ -24,9 +24,10 @@
  * follows, as at a volley projectile's arrival (chainAttack, src/sim/combat/chain.ts). A granted
  * turret's shot is one too under 特斯拉塔's jumps, and every turret shot's arrival hits the
  * splash around its target under 加農砲 (turretArrival, C5.9). The volley's projectiles and the
- * pool share PROJECTILE_CAP (src/sim/caps.ts). A barrage rider that splits (◆子母彈, E10b) fires
- * its shots at round SPLIT_ROUND: each hit of theirs that kills its enemy records a split
- * (splitOnKill, src/sim/systems/barrage.ts), whose children spawn once the stage is over.
+ * pool share PROJECTILE_CAP (src/sim/caps.ts). A barrage rider that splits (◆子母彈 or the 分裂
+ * rank, E10b) fires its shots at round SPLIT_ROUND: each hit of theirs that kills its enemy
+ * records a split (splitOnKill, src/sim/systems/barrage.ts), whose children spawn once the stage
+ * is over.
  */
 
 import type { FanParams } from '../build/compile';
@@ -55,9 +56,10 @@ const ROUND_SLOTS = 256;
 const ROUND_MASK = ROUND_SLOTS - 1;
 
 /**
- * ShotPool.round of a generation-0 small shot of a barrage rider that splits (◆子母彈, E10b):
- * below −1, every other shot's round when it is no fan cone, so the straight step's one round
- * test a step tells the three apart. Its children and every other shot have −1 and never split.
+ * ShotPool.round of a generation-0 small shot of a barrage rider that splits (◆子母彈 or the 分裂
+ * rank, E10b): below −1, every other shot's round when it is no fan cone, so the straight step's
+ * one round test a step tells the three apart. Its children and every other shot have −1 and
+ * never split.
  */
 export const SPLIT_ROUND = -2;
 

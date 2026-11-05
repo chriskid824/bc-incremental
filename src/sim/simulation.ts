@@ -166,8 +166,8 @@ export function createSimulation(
   const minions = flags.minionCount;
   const globals = held || inAura || top || minions;
   const wallet = config.walletShards ?? ZERO;
-  // So is whether the barrage rider splits (◆子母彈, E10b): its kills' children spawn once the
-  // projectile stage has compacted.
+  // So is whether the barrage rider splits (◆子母彈 or the 分裂 rank, E10b): its kills' children
+  // spawn once the projectile stage has compacted.
   const rider = (ctx.emitters[0] as EmitterRuntime).barrage;
   const splits = rider !== null && rider.split !== null;
 
@@ -218,8 +218,9 @@ export function createSimulation(
    *    pool's shots move and hit, all in id order (projectiles.ts, shots.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
    *    triggers, onKill hooks, drops and splits (death.ts) resolve inline. In a run whose barrage
-   *    rider splits (◆子母彈, E10b), the children of the splits its small shots' kills recorded
-   *    then spawn, in hit order, once the pool has compacted (spawnSplits, barrage.ts).
+   *    rider splits (◆子母彈 or the 分裂 rank, E10b), the children of the splits its small shots'
+   *    kills recorded then spawn, in hit order, once the pool has compacted (spawnSplits,
+   *    barrage.ts).
    * 8. segments: the segment emitters due judge, in emitter order, linking their endpoints (the
    *    shocked enemies, or the drone pool's drones or rows) and hitting the enemies on the links
    *    (segments.ts).
