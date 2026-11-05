@@ -3028,8 +3028,9 @@ const BARRAGE_RING_MODULES = (): TestModule[] => [
  * E10b's ◆子母彈 (gd:490 「小彈擊殺時分裂成 3 發（分裂出來的不再分裂）」, lead ruling X5): barrage's
  * build with split { count 3, chance 1 }, from wave 3: each kill by a rider shot leaves 3 children
  * at the victim after the projectile stage, the first along the killing shot, which never split;
- * then (`also`) A19 (a)'s 分裂 rank alone, split { count 3, chance 0 } and barrageSplit 0.5: half
- * the kills split, rolled on the barrage stream. It pins the splits, the children and their
+ * then (`also`) A19 (a)'s 分裂 rank alone, barrageSplit 0.5 with no split param (EB; it reads the
+ * hashes split { count 3, chance 0 } read under E10b): half the kills split, rolled on the barrage
+ * stream. It pins the splits, the children and their
  * origins.
  */
 const BARRAGE_SPLIT_STATS = makeStats(
@@ -3618,7 +3619,7 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [barrageShape({ split: { count: 3, chance: 1 } })],
     also: {
       config: { stats: BARRAGE_SPLIT_STATS, rules: [], startWave: 3 },
-      modules: () => [barrageShape({ split: { count: 3, chance: 0 } })],
+      modules: () => [],
     },
     expected: ['c16bc740bd44e345', 'b02b7cb19b31d532'],
   },

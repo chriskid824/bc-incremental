@@ -16,7 +16,7 @@ import type { SourcedEmitter } from '../../data/emitters';
 import type { RuleSpec, SignatureSpec } from '../../data/rules';
 import type { StatId } from '../../data/stats';
 import type { EffectSpec, SpawnDroneSpec, TriggerSpec } from '../../data/triggers';
-import { compileBuild, DEFAULT_BARRAGE_PARAMS } from '../build/compile';
+import { compileBuild, DEFAULT_BARRAGE_PARAMS, DEFAULT_SPLIT_COUNT } from '../build/compile';
 import type { BarrageParams, CompiledBarrage } from '../build/compile';
 import { SHOT_MEMORY, SMALL_PROJECTILE_TICKS, SMALL_SHOT_CAP } from '../caps';
 import { hitWithPayload } from '../combat/hit';
@@ -476,10 +476,36 @@ describe('the ◆ params compile (lead rulings X1, X2)', () => {
     expect(
       barrageOf({ modules: [SPLIT], rules: [GIGANTISM], values: { barrageCount: 4 } }).split,
     ).toEqual({ count: 3, chance: 1 });
-    // At chance 0 nothing splits; without the param nothing splits, whatever the stat.
+    // At chance 0 nothing splits.
     expect(split(0, 0)).toBeNull();
     expect(split(0, -1)).toBeNull();
-    expect(barrageOf({ values: { barrageSplit: 1 } }).split).toBeNull();
+  });
+
+  it('compiles the 分裂 rank alone, without the param, as DEFAULT_SPLIT_COUNT × countMult children at min(1, max(0, barrageSplit))', () => {
+    // Killed: the rank inert without the param, its chance unclamped or a negative stat taken,
+    // the count not DEFAULT_SPLIT_COUNT, not × countMult, or halved by 巨大化.
+    const alone = (
+      barrageSplit: number,
+      modules: readonly TestModule[] = [],
+      rules: readonly RuleSpec[] = [],
+    ) => barrageOf({ values: { barrageSplit }, modules, rules }).split;
+    expect(DEFAULT_SPLIT_COUNT).toBe(3);
+    expect(alone(0.15)).toEqual({ count: 3, chance: 0.15 });
+    expect(alone(0.45)).toEqual({ count: 3, chance: 0.45 });
+    expect(alone(1)).toEqual({ count: 3, chance: 1 });
+    expect(alone(3)).toEqual({ count: 3, chance: 1 });
+    expect(alone(0.15, [STAR])).toEqual({ count: 6, chance: 0.15 });
+    expect(alone(0.15, [], [GIGANTISM])).toEqual({ count: 3, chance: 0.15 });
+    // No rank, or a negative one, splits nothing.
+    expect(alone(0)).toBeNull();
+    expect(alone(-0.5)).toBeNull();
+    expect(barrageOf({}).split).toBeNull();
+    // A stat a module made NaN is not above 0 either.
+    const nan: TestModule = (b) => b.offsetStat('barrageSplit', NaN);
+    expect(barrageOf({ modules: [nan] }).split).toBeNull();
+    // A param's own count wins over the default.
+    const one = barrage({ split: { count: 1, chance: 0 } });
+    expect(alone(0.15, [one])).toEqual({ count: 1, chance: 0.15 });
   });
 
   it('compiles the aim’s spread in radians, the focus as written and the rain’s seconds as ticks', () => {
@@ -1042,7 +1068,7 @@ describe('子母彈: a generation-0 kill splits after the stage (X5)', () => {
     expect(shell(1)).toEqual({ alive: false, left: 0, children: 3 });
   });
 
-  it('rolls the split’s chance on the barrage stream, drawing nothing at 1 or without the param', () => {
+  it('rolls the split’s chance on the barrage stream, drawing nothing at 1 or without the param and the rank', () => {
     // Killed: the roll on the combat stream, or a draw at chance 1.
     const run = (modules: readonly TestModule[], barrageSplit = 0) => {
       const ctx = arena([NEAR_KILL, at(-450, 0)], {
@@ -1059,12 +1085,14 @@ describe('子母彈: a generation-0 kill splits after the stage (X5)', () => {
     const rank = run([barrage({ split: { count: 3, chance: 0 } })], 1);
     const half = run([barrage({ split: { count: 3, chance: 0.5 } })]);
     const never = run([barrage({ split: { count: 3, chance: 0 } })]);
+    const alone = run([], 1);
     const stream = createStreams(1).barrage;
     const fresh = stream.snapshot();
     const drew = stream.chance(0.5);
     expect([plain.children, sure.children, rank.children, never.children]).toEqual([0, 3, 3, 0]);
+    expect(alone.children).toBe(3);
     expect(half.children).toBe(drew ? 3 : 0);
-    for (const r of [sure, rank, never]) expect(r.positions).toEqual(plain.positions);
+    for (const r of [sure, rank, never, alone]) expect(r.positions).toEqual(plain.positions);
     expect(plain.positions.barrage).toEqual(fresh);
     const { barrage: halfBarrage, ...halfRest } = half.positions;
     const { barrage: plainBarrage, ...plainRest } = plain.positions;
@@ -1095,6 +1123,29 @@ describe('子母彈: a generation-0 kill splits after the stage (X5)', () => {
     expect(at0.filter((n) => n === 1).length).toBeGreaterThan(5);
     expect(at0.filter((n) => n === 0).length).toBeGreaterThan(5);
     expect(seeds.map((seed) => kills(0.5, 0.75, seed))).toEqual(seeds.map(() => 1));
+  });
+
+  it('splits the 分裂 rank alone, without the param, into DEFAULT_SPLIT_COUNT children on the same roll', () => {
+    // Killed: the rank inert without the param, or its roll other than chance(barrageSplit).
+    const children = (barrageSplit: number, modules: readonly TestModule[], seed: number) => {
+      const ctx = arena([NEAR_KILL, at(-450, 0)], {
+        values: { barrageCount: 1, barrageSplit },
+        modules,
+        seed,
+      });
+      fireBarrage(ctx, riderOf(ctx), P.x, P.y);
+      tick(ctx);
+      return riderSlots(ctx).length;
+    };
+    const seeds = Array.from({ length: 40 }, (_, i) => i + 1);
+    const param = seeds.map((seed) =>
+      children(0.5, [barrage({ split: { count: 3, chance: 0 } })], seed),
+    );
+    const alone = seeds.map((seed) => children(0.5, [], seed));
+    expect(alone).toEqual(param);
+    expect(alone.filter((n) => n === DEFAULT_SPLIT_COUNT).length).toBeGreaterThan(5);
+    expect(alone.filter((n) => n === 0).length).toBeGreaterThan(5);
+    expect(alone.every((n) => n === 0 || n === DEFAULT_SPLIT_COUNT)).toBe(true);
   });
 
   it('counts the children the reserve refuses in barrageCapped, the pool as it stands after the stage', () => {
@@ -1429,12 +1480,41 @@ describe('a grant without the ◆ params, and determinism (X9)', () => {
     for (const signature of [VOLLEY, SWARM]) {
       const options: Options = {
         signature,
-        values: { barrageCount: 3, barragePierce: 1, critChance: 0.3, barrageSplit: 0.5 },
+        values: { barrageCount: 3, barragePierce: 1, critChance: 0.3 },
       };
       const base = runHash(options);
       expect(runHash({ ...options, modules: [defaults] }).hash, signature.id).toBe(base.hash);
       expect(runHash({ ...options, modules: [inert] }).hash, signature.id).toBe(base.hash);
       expect(toNumber(base.result.damageBySource['outer.barrage'] ?? ZERO)).toBeGreaterThan(0);
+    }
+  });
+
+  it('plays the 分裂 rank alone event for event as split { 3, 0 } at its chance, ★ and 巨大化 included', () => {
+    // Killed: the rank alone inert, its count not DEFAULT_SPLIT_COUNT, not × countMult, or halved.
+    const zero = barrage({ split: { count: 3, chance: 0 } });
+    for (const signature of [VOLLEY, SWARM]) {
+      for (const [modules, rules] of [
+        [[], []],
+        [[STAR], []],
+        [[], [GIGANTISM]],
+      ] as [TestModule[], RuleSpec[]][]) {
+        const options: Options = {
+          signature,
+          rules,
+          values: { damage: 60, barrageCount: 3, barragePierce: 1, barrageSplit: 0.5 },
+        };
+        const label = `${signature.id} ${modules.length} ${rules.length}`;
+        const alone = runHash({ ...options, modules });
+        const param = runHash({ ...options, modules: [zero, ...modules] });
+        const none = runHash({
+          ...options,
+          values: { ...options.values, barrageSplit: 0 },
+          modules,
+        });
+        expect(alone.hash, label).toBe(param.hash);
+        // It splits: the rank alone is not inert.
+        expect(alone.hash, label).not.toBe(none.hash);
+      }
     }
   });
 

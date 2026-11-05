@@ -215,7 +215,8 @@ export const STAT_IDS = [
    * chance that a small shot of the barrage rider whose hit kills its enemy splits, added to the
    * split param's own chance (BuildFlags.barrage.split): min(1, split.chance + max(0,
    * barrageSplit)). Read once a compile (src/sim/build/compile.ts compileBarrage); without the
-   * split param nothing splits, whatever its value.
+   * split param the rank splits on its own, with chance min(1, max(0, barrageSplit)) into
+   * DEFAULT_SPLIT_COUNT (3) × countMult children.
    */
   'barrageSplit',
 ] as const;
