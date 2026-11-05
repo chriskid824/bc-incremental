@@ -49,6 +49,15 @@ const TRAIL_WIDTH = 7;
 /** Each streak reaches a little past the older point, so the trail reads as one stroke. */
 const TRAIL_OVERLAP = 1.3;
 const TRAIL_ALPHA = 0.55;
+/**
+ * 冰晶哨 (E8's seated sentry, gd:528 「地上長出小冰柱，頂端一點黃綠光」): a small ice pillar seen from
+ * above, a long hexagonal crystal standing still, with a yellow-green spark at its tip. Every
+ * sentry wears it: 霜晶's is the only one before B4's 電蜂, which will need its own look (the view
+ * state carries only the kind).
+ */
+const SENTRY_COLORS = { body: 0xbfeaff, edge: 0x5fb4e6, core: 0xe8f8ff, spark: 0xc8ff5a } as const;
+const SENTRY_LENGTH = 22;
+const SENTRY_WIDTH = 9;
 /** A spirit's kite and trail width, as a share of a drone's. */
 export const SPIRIT_SCALE = 0.6;
 /** Shorter trail pieces (a drone at rest) are not drawn. */
@@ -506,6 +515,9 @@ export class DroneLayer {
   private readonly kiteSprites: Particle[] = [];
   private readonly spirits: ParticleContainer;
   private readonly spiritSprites: Particle[] = [];
+  private readonly sentries: ParticleContainer;
+  private readonly sentrySprites: Particle[] = [];
+  private readonly sentryTexture: Texture;
   private readonly tracks = new DroneTracks();
   private chased = new Int32Array(8);
   private readonly bases: ParticleContainer;
@@ -598,6 +610,33 @@ export class DroneLayer {
       texture: this.kiteTexture,
       dynamicProperties: { position: true, rotation: true, color: false, vertex: true },
     });
+    const l = SENTRY_LENGTH / 2;
+    const w = SENTRY_WIDTH / 2;
+    const pillar = [0, -l, w, -l * 0.55, w, l * 0.7, 0, l, -w, l * 0.7, -w, -l * 0.55];
+    const icicle = new Graphics()
+      .poly(pillar)
+      .stroke({ width: 3.2, color: SENTRY_COLORS.edge, alpha: 0.35, join: 'round' })
+      .poly(pillar)
+      .fill({ color: SENTRY_COLORS.body, alpha: 0.9 })
+      .stroke({ width: 1.2, color: SENTRY_COLORS.edge, alpha: 1, join: 'round' })
+      .moveTo(0, -l * 0.8)
+      .lineTo(0, l * 0.8)
+      .stroke({ width: 1, color: SENTRY_COLORS.core, alpha: 0.9 })
+      .circle(0, -l, 4)
+      .fill({ color: SENTRY_COLORS.spark, alpha: 0.35 })
+      .circle(0, -l, 2)
+      .fill({ color: SENTRY_COLORS.spark, alpha: 1 });
+    this.sentryTexture = renderer.generateTexture({
+      target: icicle,
+      resolution: KITE_RESOLUTION,
+      antialias: true,
+    });
+    icicle.destroy();
+    this.sentries = new ParticleContainer({
+      label: 'sentry-icicles',
+      texture: this.sentryTexture,
+      dynamicProperties: { position: true, rotation: false, color: false, vertex: false },
+    });
     this.view.addChild(
       this.trails,
       this.brackets,
@@ -605,6 +644,7 @@ export class DroneLayer {
       this.bases,
       this.barrels,
       this.spirits,
+      this.sentries,
     );
   }
 
@@ -623,6 +663,8 @@ export class DroneLayer {
     this.barrels.update();
     this.spirits.particleChildren.length = 0;
     this.spirits.update();
+    this.sentries.particleChildren.length = 0;
+    this.sentries.update();
     this.brackets.clear();
   }
 
@@ -650,6 +692,8 @@ export class DroneLayer {
     const previousKites = kites.length;
     const previousSpirits = spirits.length;
     const previousTurrets = this.bases.particleChildren.length;
+    const previousSentries = this.sentries.particleChildren.length;
+    let sentryCount = 0;
     let streakCount = 0;
     let kiteCount = 0;
     let spiritCount = 0;
@@ -658,9 +702,15 @@ export class DroneLayer {
     let resized = false;
     for (let s = 0; s < count; s++) {
       const kind = ds.kind[s];
-      // A sentry (E8) wears the turret's look until it has its own sprite.
-      if (kind === DRONE_KIND_TURRET || kind === DRONE_KIND_SENTRY) {
+      if (kind === DRONE_KIND_TURRET) {
         this.drawTurret(state, s, turretCount++);
+        continue;
+      }
+      // A sentry (E8) stands still: ds.x and ds.y never change.
+      if (kind === DRONE_KIND_SENTRY) {
+        const icicle = this.sentry(sentryCount++);
+        icicle.x = ds.x[s] as number;
+        icicle.y = ds.y[s] as number;
         continue;
       }
       const spirit = kind === DRONE_KIND_SPIRIT;
@@ -689,6 +739,8 @@ export class DroneLayer {
     if (kiteCount !== previousKites || resized) this.kites.update();
     spirits.length = spiritCount;
     if (spiritCount !== previousSpirits) this.spirits.update();
+    this.sentries.particleChildren.length = sentryCount;
+    if (sentryCount !== previousSentries) this.sentries.update();
     this.bases.particleChildren.length = turretCount;
     this.barrels.particleChildren.length = turretCount;
     if (turretCount !== previousTurrets) {
@@ -699,8 +751,8 @@ export class DroneLayer {
   }
 
   /**
-   * Turret slot s as the nth turret drawn: its base in its seat, facing out, and its barrel. A
-   * sentry (E8) has no turret track: its barrel faces out too and never recoils.
+   * Turret slot s as the nth turret drawn: its base in its seat, facing out, and its barrel; one
+   * with no turret track faces out too and never recoils.
    */
   private drawTurret(state: Readonly<SimState>, s: number, n: number): void {
     const ds = state.drones;
@@ -825,6 +877,17 @@ export class DroneLayer {
       this.kiteSprites.push(sprite);
     }
     this.kites.particleChildren[n] = sprite;
+    return sprite;
+  }
+
+  /** The nth sentry's icicle (E8). */
+  private sentry(n: number): Particle {
+    let sprite = this.sentrySprites[n];
+    if (sprite === undefined) {
+      sprite = new Particle({ texture: this.sentryTexture, anchorX: 0.5, anchorY: 0.5 });
+      this.sentrySprites.push(sprite);
+    }
+    this.sentries.particleChildren[n] = sprite;
     return sprite;
   }
 

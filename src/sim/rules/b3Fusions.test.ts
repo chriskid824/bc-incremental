@@ -30,9 +30,12 @@ const SENTRY: RuleSpec = {
   id: 'frostSentry',
   chance: 1,
   lifeSec: 5,
-  shots: 5,
-  damagePct: 0.4,
   maxLive: 4,
+  everySec: 0.5,
+  range: 300,
+  count: 3,
+  spreadDeg: 30,
+  damagePct: 0.3,
 };
 const PLASMA: RuleSpec = { id: 'plasma', arcsPerBlast: 3, arcDamagePct: 0.5, shockBurnMore: 0.3 };
 const WEB: RuleSpec = { id: 'stormWeb', damagePct: 0.1, periodSec: 0.25, pairPeriodSec: 0.5 };
@@ -162,10 +165,22 @@ describe('shatterChain and frozenNoSplit (◆連鎖碎裂, ◆粉碎)', () => {
 });
 
 describe('frostSentry (冰靈「冰晶哨」)', () => {
-  it('compiles a shatter-chance timed sentry', () => {
+  it('compiles a shatter-chance seated sentry that fires a cold fan', () => {
     const specs = compileBuild(makeStats(), [SENTRY], ICE).effects.map((fx) => fx.spec);
     expect(specs).toContainEqual(
-      expect.objectContaining({ kind: 'spawnDrone', lifeSec: 5, impacts: 5, maxLive: 4 }),
+      expect.objectContaining({
+        kind: 'spawnDrone',
+        lifeSec: 5,
+        damagePct: 0,
+        maxLive: 4,
+        seat: true,
+        element: 'cold',
+        fires: {
+          everySec: 0.5,
+          range: 300,
+          do: { kind: 'projectiles', count: 3, aim: 'fan', spreadDeg: 30, damagePct: 0.3 },
+        },
+      }),
     );
   });
 
@@ -175,8 +190,10 @@ describe('frostSentry (冰靈「冰晶哨」)', () => {
     const plain = run(ICE, [], 900, stats, data);
     const sentry = run(ICE, [SENTRY], 900, stats, data);
     expect(count(plain, 'shatter')).toBeGreaterThan(0);
-    expect(count(plain, 'impact')).toBe(0);
-    expect(count(sentry, 'impact')).toBeGreaterThan(0);
+    expect(hitsWith(plain, TAG.minion | TAG.projectile)).toBe(0);
+    // Seated: no dash, so no impacts; its cones are minion projectiles.
+    expect(count(sentry, 'impact')).toBe(0);
+    expect(hitsWith(sentry, TAG.minion | TAG.projectile | TAG.cold)).toBeGreaterThan(0);
   });
 });
 

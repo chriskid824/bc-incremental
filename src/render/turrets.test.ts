@@ -181,6 +181,7 @@ describe('turrets in the drone layer', () => {
       'turret-bases',
       'turret-barrels',
       'spirit-kites',
+      'sentry-icicles',
     ]);
     // A docked drone (id 1) and the turret above the core (id 2); enemy 7 level with the seat.
     const seat = { kind: DRONE_KIND_TURRET, mode: DRONE_FIXED, x: CENTER.x, y: CENTER.y - 90 };
@@ -229,15 +230,14 @@ describe('turrets in the drone layer', () => {
     expect([bases.particleChildren.length, barrels.particleChildren.length]).toEqual([0, 0]);
   });
 
-  it('draws a sentry (E8) as a turret where it stands, facing out from the core, its barrel never turning or recoiling', () => {
-    // Planted bugs: the sentry left undrawn, or drawn as a kite; its barrel read from a turret
-    // track it does not have.
+  it('draws a sentry (E8) as an icicle where it stands, not as a turret or a kite, and clears it at reset', () => {
+    // Planted bugs: the sentry left undrawn, drawn as a turret or a kite, or kept after reset.
     const layer = new DroneLayer(renderer, Texture.WHITE);
-    const [kites, spirits, bases, barrels] = [
+    const [kites, spirits, bases, icicles] = [
       'drone-kites',
       'spirit-kites',
       'turret-bases',
-      'turret-barrels',
+      'sentry-icicles',
     ].map((label) => part(layer, label)) as [
       ParticleContainer,
       ParticleContainer,
@@ -248,25 +248,16 @@ describe('turrets in the drone layer', () => {
     const sentry = { kind: DRONE_KIND_SENTRY, mode: DRONE_FIXED, x: CENTER.x + 300, y: CENTER.y };
     const enemies = locator(new Map([[7, { x: CENTER.x - 200, y: turret.y, radius: 20 }]]));
     layer.update(sim(1, [turret, sentry]), 0.5, enemies, 16);
-    expect([kites, spirits, bases, barrels].map((c) => c.particleChildren.length)).toEqual([
-      0, 0, 2, 2,
+    expect([kites, spirits, bases, icicles].map((c) => c.particleChildren.length)).toEqual([
+      0, 0, 1, 1,
     ]);
-    const base = bases.particleChildren[1];
-    const barrel = barrels.particleChildren[1];
-    expect([base?.x, base?.y, barrel?.x, barrel?.y]).toEqual([
-      sentry.x,
-      sentry.y,
-      sentry.x,
-      sentry.y,
-    ]);
-    expectAngle(base?.rotation ?? NaN, 0);
-    expectAngle(barrel?.rotation ?? NaN, 0);
-    // The turret fires and recoils; the sentry's barrel stays as it was.
-    layer.turretFired(1, 7);
-    layer.update(sim(2, [turret, sentry]), 0.5, enemies, 16);
-    expectAngle(barrels.particleChildren[0]?.rotation ?? NaN, Math.PI);
-    expect([barrel?.x, barrel?.y]).toEqual([sentry.x, sentry.y]);
-    expectAngle(barrel?.rotation ?? NaN, 0);
+    const icicle = icicles.particleChildren[0];
+    expect([icicle?.x, icicle?.y]).toEqual([sentry.x, sentry.y]);
+    layer.update(sim(2, [turret]), 0.5, enemies, 16);
+    expect(icicles.particleChildren.length).toBe(0);
+    layer.update(sim(3, [sentry]), 0.5, enemies, 16);
+    layer.reset();
+    expect(icicles.particleChildren.length).toBe(0);
   });
 
   it('starts the next run’s turrets afresh at reset: out from the core and home, whatever the last run’s aimed at', () => {

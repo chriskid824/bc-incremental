@@ -673,9 +673,12 @@ export const RuleSpecSchema = exact<RuleSpec>()(
         id: z.literal('frostSentry'),
         chance: finite,
         lifeSec: finite,
-        shots: finite,
-        damagePct: finite,
         maxLive: finite,
+        everySec: finite,
+        range: finite,
+        count: finite,
+        spreadDeg: finite,
+        damagePct: finite,
       })
       .readonly(),
     z

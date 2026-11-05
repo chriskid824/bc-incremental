@@ -280,16 +280,20 @@ export type RuleSpec =
       readonly shockFrostMore: number;
     }
   /**
-   * 冰晶哨 (霜晶's 冰靈 hand core, gd §5.2): a shatter leaves, with `chance`, a sentry for lifeSec
-   * that shoots `shots` cones of damagePct, at most maxLive at once.
+   * 冰晶哨 (霜晶's 冰靈 hand core, gd §5.2): a shatter leaves, with `chance`, a sentry standing where
+   * it shattered for lifeSec (E8's seated row), at most maxLive at once; every everySec it fires a
+   * fan of `count` cones (spreadDeg) of damagePct each at the nearest enemy within `range`.
    */
   | {
       readonly id: 'frostSentry';
       readonly chance: number;
       readonly lifeSec: number;
-      readonly shots: number;
-      readonly damagePct: number;
       readonly maxLive: number;
+      readonly everySec: number;
+      readonly range: number;
+      readonly count: number;
+      readonly spreadDeg: number;
+      readonly damagePct: number;
     }
   /**
    * 電漿 (熔核's 火雷 hand core, gd §5.2): each bomb explosion sends a one-jump chain bolt of

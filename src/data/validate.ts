@@ -983,8 +983,20 @@ function ruleIssues(rule: RuleSpec): string[] {
       if (!(rule.chance > 0 && rule.chance <= 1)) {
         issues.push(`frostSentry.chance must be in (0, 1] (got ${rule.chance})`);
       }
-      if (!isPositiveInt(rule.shots)) {
-        issues.push(`frostSentry.shots must be a positive integer (got ${rule.shots})`);
+      // E8's seated row: a clock of at least one tick, a finite range, a fan of 1-8.
+      if (!(Number.isFinite(rule.everySec) && Math.round(rule.everySec * TICKS_PER_SEC) >= 1)) {
+        issues.push(
+          `frostSentry.everySec must be finite and at least a tick (got ${rule.everySec})`,
+        );
+      }
+      if (!(rule.range > 0 && Number.isFinite(rule.range))) {
+        issues.push(`frostSentry.range must be finite and > 0 (got ${rule.range})`);
+      }
+      if (!(isPositiveInt(rule.count) && rule.count <= 8)) {
+        issues.push(`frostSentry.count must be an integer in [1, 8] (got ${rule.count})`);
+      }
+      if (!(rule.spreadDeg >= 0 && rule.spreadDeg <= 180)) {
+        issues.push(`frostSentry.spreadDeg must be in [0, 180] (got ${rule.spreadDeg})`);
       }
       issues.push(...timedDroneIssues('frostSentry', rule.lifeSec, rule.damagePct, rule.maxLive));
       break;

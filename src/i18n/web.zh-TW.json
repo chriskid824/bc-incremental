@@ -557,7 +557,7 @@
   "web.fusion.ice.barrage.title": "霰彈",
   "web.node.fusion.ice.fire.core.desc": "凍結事件點燃目標 2 層；凍結中的敵人被點燃時，挨一次 {hitPct} 傷害的擊中",
   "web.node.fusion.ice.lightning.core.desc": "凍結事件朝最近的 3 隻敵人放電弧（{arcDamagePct} 傷害，每道冰冷 {frostPct}）；感電的敵人冰冷累積 ×1.5",
-  "web.node.fusion.ice.summon.core.desc": "碎裂時 {chance} 機率留下 5 秒的冰晶哨，會射 {damagePct} 傷害的冰錐（最多 4 座）",
+  "web.node.fusion.ice.summon.core.desc": "碎裂時 {chance} 機率留下 5 秒的冰晶哨，每 0.5 秒向附近敵人射出 3 支扇形冰錐，每支 {damagePct} 傷害（最多 4 座）",
   "web.fusion.fire.bleed.title": "血焰",
   "web.fusion.fire.lightning.title": "電漿",
   "web.fusion.fire.barrage.title": "散火",

@@ -142,10 +142,10 @@ export const CALIBRATED: Readonly<Partial<Record<FusionKey, CalibrationEntry>>> 
     status: 'insensitive',
     median: 1,
     min: 1,
-    max: 1,
+    max: 1.0055,
     seeds: 8,
     startWave: 1,
-    digest: 'd8efb9f3c152e066',
+    digest: '28e9d59f60c6658a',
   },
   'summon.barrage': {
     coef: 10,

@@ -10,10 +10,10 @@
  * - superconduct (冰雷「超導」): a freeze sends `arcs` bolts (1-3, E7), one each to the nearest other
  *   enemies, drawn from the frozen one (arcDamagePct each, 1 shock stack), and the `arcs` enemies nearest it gain
  *   frostPct chill; a shocked enemy gains shockFrostMore more frost (BuildFlags.frostGainShocked, E6).
- * - frostSentry (冰靈「冰晶哨」): a shatter leaves, with `chance`, a timed sentry for lifeSec that
- *   shoots cones (damagePct a shot), at most maxLive at once. TODO(engine B3): the engine has no
- *   standing summon that shoots yet; until it lands the sentry is a timed drone (spawnDrone) of
- *   `shots` impacts that dashes at the nearest enemy.
+ * - frostSentry (冰靈「冰晶哨」): a shatter leaves, with `chance`, a sentry standing where it
+ *   shattered for lifeSec (E8's seated row), at most maxLive at once, that every everySec fires a
+ *   fan of `count` cones (damagePct each) at the nearest enemy within `range`. Its clock reads the
+ *   global attack speed only.
  */
 
 import type { RuleSpec } from '../../data/rules';
@@ -102,11 +102,21 @@ export const frostSentry: RuleModule<Extract<RuleSpec, { id: 'frostSentry' }>> =
           {
             kind: 'spawnDrone',
             lifeSec: spec.lifeSec,
-            impacts: spec.shots,
-            damagePct: spec.damagePct,
+            damagePct: 0,
             maxLive: spec.maxLive,
+            seat: true,
             element: 'cold',
-            tags: ['trigger'],
+            fires: {
+              everySec: spec.everySec,
+              range: spec.range,
+              do: {
+                kind: 'projectiles',
+                count: spec.count,
+                aim: 'fan',
+                spreadDeg: spec.spreadDeg,
+                damagePct: spec.damagePct,
+              },
+            },
           },
         ],
       });

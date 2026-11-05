@@ -56,7 +56,17 @@ export const OVERRIDES: Readonly<Partial<Record<FusionKey, FusionOverride>>> = {
   // 冰靈「冰晶哨」 (gd §5.2): a shatter leaves, 25% of the time, a 5 s ice sentry that shoots
   // cones, at most 4. Its cones (5 shots of 40%) are B3's initial values.
   'ice.summon': {
-    rule: { id: 'frostSentry', chance: 0.25, lifeSec: 5, shots: 5, damagePct: 0.4, maxLive: 4 },
+    rule: {
+      id: 'frostSentry',
+      chance: 0.25,
+      lifeSec: 5,
+      maxLive: 4,
+      everySec: 0.5,
+      range: 300,
+      count: 3,
+      spreadDeg: 30,
+      damagePct: 0.3,
+    },
   },
   // 火雷「電漿」 (gd §5.2): each explosion arcs from every burning enemy in it at the nearest enemy,
   // at most 3 a bomb; shocked enemies take +30% burn damage. The arc's hit (50%) is B3's.

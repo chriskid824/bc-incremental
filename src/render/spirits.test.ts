@@ -139,7 +139,9 @@ describe('spirits in the drone layer', () => {
     const spirits = part<ParticleContainer>(layer, 'spirit-kites');
     const trails = part<ParticleContainer>(layer, 'drone-trails');
     const brackets = part<Graphics>(layer, 'drone-brackets');
-    expect(layer.view.children.at(-1)).toBe(spirits);
+    // Over the turrets; only the sentries' icicles (E8) go over the spirits.
+    expect(layer.view.children.at(-2)).toBe(spirits);
+    expect(layer.view.children.at(-1)?.label).toBe('sentry-icicles');
     // A drone dashing along x beside the spirit, both +10 px a tick.
     const dash = (tick: number): Slot => ({ ...spirit(2, tick, 600), kind: DRONE_KIND_DRONE });
     for (let tick = 1; tick <= 7; tick++) {

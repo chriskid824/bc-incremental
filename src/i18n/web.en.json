@@ -557,7 +557,7 @@
   "web.fusion.ice.barrage.title": "Grapeshot",
   "web.node.fusion.ice.fire.core.desc": "A freeze ignites 2 burn stacks; a frozen enemy that is ignited takes a hit of {hitPct} of your damage.",
   "web.node.fusion.ice.lightning.core.desc": "A freeze arcs to the 3 nearest enemies for {arcDamagePct} of your damage, each arc adding {frostPct} chill; shocked enemies build chill ×1.5.",
-  "web.node.fusion.ice.summon.core.desc": "A shatter has a {chance} chance to leave an ice sentry for 5 s that shoots ice cones for {damagePct} of your damage; at most 4 at once.",
+  "web.node.fusion.ice.summon.core.desc": "A shatter has a {chance} chance to leave an ice sentry for 5 s that fires a fan of 3 ice cones every 0.5 s at enemies nearby, each for {damagePct} of your damage; at most 4 at once.",
   "web.fusion.fire.bleed.title": "Blood Flame",
   "web.fusion.fire.lightning.title": "Plasma",
   "web.fusion.fire.barrage.title": "Scatterfire",
