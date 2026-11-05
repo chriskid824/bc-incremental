@@ -29,4 +29,17 @@ export const ACCEPTED_CHECK_FAILS: Readonly<Record<string, string>> = acceptedFa
   // against the hook, then drops this entry (蜂巢 passes at 60 min since E5).
   'pacing:fire @ 60 min':
     'real prestige landed in PR #6; post-prestige climb back to be re-tuned by B1',
+  // B3 (PR #8) adds 霜晶, pending Hoshi's call on its late game: its runs stall near wave 40
+  // (the 180 s run cap and the wave-40 onion), and it has no ascendancy before B5, which carries
+  // 熔核's and 蜂巢's late damage. Its first run also lasts to wave 5 on the faster fan.
+  'pacing:ice @ 0 min':
+    'B3: the faster fan (3.75 rounds/s) holds the first waves; first run reaches wave 5',
+  'pacing:ice @ 60 min': 'B3: post-prestige climb back, as fire @ 60 min',
+  'pacing:ice @ 180 min':
+    'B3: late game stalls near wave 40 without ascendancies (B5); pending Hoshi',
+  'pacing:ice @ 300 min':
+    'B3: late game stalls near wave 40 without ascendancies (B5); pending Hoshi',
+  // With 霜晶 the median front at 30 min is 24 (霜晶 and 蜂巢), and 熔核's 27 sits 12.5 % above it.
+  'newbie:all @ 30 min':
+    'B3: 熔核 runs 12.5 % ahead of 霜晶 and 蜂巢 at 30 min; re-tune with the late game',
 });
