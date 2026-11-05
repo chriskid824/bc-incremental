@@ -12,6 +12,7 @@ import { fire as fireTriggers } from '../effects/dispatch';
 import { drainRepeatCharges } from '../effects/execute';
 import { EVENT } from '../effects/types';
 import { pickTargetInGrid } from '../targeting';
+import { fireBarrage } from '../systems/barrage';
 import { gainComboOnAttack } from '../systems/combo';
 import { focused, rollCount } from '../systems/context';
 import type { Enemy, Projectile, RunContext } from '../systems/context';
@@ -19,10 +20,10 @@ import { liveProjectiles } from '../systems/shots';
 import type { EmitterRuntime, Payload } from './types';
 
 /**
- * Fires every due attack of `em`, each followed by the repeats waiting for it. The accumulator
- * gains the emitter's cadence per tick; an attack is due each time it reaches the emitter's
- * interval. Without a target the emitter stays ready without banking attacks: it fires on the
- * tick a target appears.
+ * Fires every due attack of `em`, each followed by its barrage rider's shots from the player
+ * (src/sim/systems/barrage.ts) and the repeats waiting for it. The accumulator gains the emitter's
+ * cadence per tick; an attack is due each time it reaches the emitter's interval. Without a target
+ * the emitter stays ready without banking attacks: it fires on the tick a target appears.
  */
 export function runVolley(ctx: RunContext, em: EmitterRuntime): void {
   const grid = ctx.grid;
@@ -38,6 +39,8 @@ export function runVolley(ctx: RunContext, em: EmitterRuntime): void {
     em.acc -= interval;
     countAttack(ctx, em, target);
     fireAttack(ctx, em, target, 0, -1);
+    // The barrage rider follows the attack's own projectiles (E10a).
+    if (em.barrage !== null) fireBarrage(ctx, em.barrage, player.x, player.y);
     drainRepeatCharges(ctx, em);
   }
 }

@@ -164,7 +164,9 @@ export const STAT_IDS = [
    * The barrage outer's extra small projectiles an attack (docs/v3/game-design-v3.md §4.11: 2
    * from its entry); its whole part counts. A projectiles effect with countStat 'barrageCount'
    * reads it once a compile and fires one more for each past BARRAGE_ENTRY_SHOTS
-   * (src/data/triggers.ts; src/sim/effects/types.ts compileEffect).
+   * (src/data/triggers.ts; src/sim/effects/types.ts compileEffect). A barrage grant's rider
+   * fires that many small shots after each signature attack, × BuildFlags.barrage.countMult
+   * (src/sim/build/compile.ts compileBarrage).
    */
   'barrageCount',
   /**
@@ -201,6 +203,13 @@ export const STAT_IDS = [
    * shot or dock time.
    */
   'summonDuration',
+  /**
+   * 小彈穿透 (the barrage outer's 分裂 ranks, docs/v3/game-design-v3.md §4.11): the barrage
+   * rider's small shots' extra pierce; its whole part counts, so a small shot hits
+   * floor(barragePierce) + 1 enemies at most. Read once a compile (src/sim/build/compile.ts
+   * compileBarrage); it reaches no other shot.
+   */
+  'barragePierce',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -270,6 +279,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   spreadRadius: 1,
   droneSpeed: 1,
   summonDuration: 1,
+  barragePierce: 0,
 };
 
 /**

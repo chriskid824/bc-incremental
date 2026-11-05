@@ -3,7 +3,8 @@
  * run beside the signature attack. A node grants each of its emitters once, whatever its rank
  * (src/meta/stats.ts collectExtras), credited to the node's source; compileBuild
  * (src/sim/build/compile.ts) puts them after the signature, in data order, and keeps the first
- * grant of each kind, source and key (grantKey). Their schemas are in src/data/schema.ts
+ * grant of each kind, source and key (grantKey). A barrage grant is no emitter of its own: it
+ * rides the signature's attacks (BarrageGrant). Their schemas are in src/data/schema.ts
  * (GRANT_SCHEMAS), their checks in src/data/validate.ts.
  */
 
@@ -162,8 +163,23 @@ export interface OrbitGrant {
   readonly orbRadius?: number;
 }
 
+/**
+ * The barrage rider (副彈, docs/v3/game-design-v3.md §4.11): after each counted attack of the
+ * signature (a bomb thrown, a cone round, a discharge, a drone's impact or a turret's firing),
+ * floor(barrageCount) small shots, × BuildFlags.barrage.countMult, fly straight from the attack's
+ * origin, one at each of the nearest distinct alive enemies; each hits floor(barragePierce) + 1
+ * enemies at most and bounces off the arena's edge BuildFlags.barrage.bounce times
+ * (src/sim/systems/barrage.ts). A run has one rider: the build keeps the first barrage grant,
+ * whatever source grants it. The hits are tagged hit and projectile, can crit and roll ailments.
+ */
+export interface BarrageGrant {
+  readonly kind: 'barrage';
+  /** Base damage of a small shot's hit as a fraction of the damage stat; BARRAGE_DAMAGE_PCT. */
+  readonly damagePct?: number;
+}
+
 export type EmitterGrant =
-  ThornsGrant | SegmentGrant | StrikeGrant | DroneGrant | AuraGrant | OrbitGrant;
+  ThornsGrant | SegmentGrant | StrikeGrant | DroneGrant | AuraGrant | OrbitGrant | BarrageGrant;
 export type GrantKind = EmitterGrant['kind'];
 
 /** A thorns hit's base damage when its grant names none: 300% of the damage stat. */
@@ -225,6 +241,9 @@ export const ORBIT_DEFAULTS = {
   orbRadius: 12,
 } as const;
 
+/** A small shot's base damage when its barrage grant names none: 25% of the damage stat (副彈). */
+export const BARRAGE_DAMAGE_PCT = 0.25;
+
 /** An emitter grant of an allocated node, with the source of its node (sourceOfNode). */
 export interface SourcedEmitter {
   /** Source id (src/data/sources.ts) its damage is credited to. */
@@ -237,7 +256,7 @@ export interface SourcedEmitter {
  * the build keeps the first. A source has one thorns emitter and one aura, so neither has a key;
  * it has one segment emitter per kind of endpoint, one strike per name, one drone emitter per
  * name ('' for a grant without one), and one orbit emitter per ring ('0' for a grant without
- * one).
+ * one). A barrage grant has no key: the build keeps one rider in all (compileBuild).
  */
 export function grantKey(grant: EmitterGrant): string {
   switch (grant.kind) {
@@ -253,5 +272,7 @@ export function grantKey(grant: EmitterGrant): string {
       return '';
     case 'orbit':
       return String(grant.ring ?? ORBIT_DEFAULTS.ring);
+    case 'barrage':
+      return '';
   }
 }

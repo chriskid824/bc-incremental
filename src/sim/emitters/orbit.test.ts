@@ -374,8 +374,8 @@ describe('orbit: its emitter', () => {
       'orbit',
     ]);
     const keys = Object.keys(ctx.emitters[0] as EmitterRuntime);
-    expect(keys).toHaveLength(18);
-    expect(keys.at(-1)).toBe('orbs');
+    expect(keys).toHaveLength(19);
+    expect(keys.slice(-2)).toEqual(['orbs', 'barrage']);
     for (const em of ctx.emitters) {
       expect(Object.keys(em), em.spec.kind).toEqual(keys);
       expect(em.orbs === null, em.spec.kind).toBe(em.spec.kind !== 'orbit');

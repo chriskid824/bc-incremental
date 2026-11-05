@@ -784,6 +784,10 @@ export const GRANT_SCHEMAS = {
       orbRadius: finite.exactOptional(),
     })
     .readonly(),
+  // validate.ts holds the share above 0.
+  barrage: z
+    .strictObject({ kind: z.literal('barrage'), damagePct: finite.exactOptional() })
+    .readonly(),
 } as const satisfies { readonly [K in GrantKind]: z.ZodType<Extract<EmitterGrant, { kind: K }>> };
 
 export const EmitterGrantSchema = exact<EmitterGrant>()(
@@ -794,6 +798,7 @@ export const EmitterGrantSchema = exact<EmitterGrant>()(
     GRANT_SCHEMAS.drone,
     GRANT_SCHEMAS.aura,
     GRANT_SCHEMAS.orbit,
+    GRANT_SCHEMAS.barrage,
   ]),
 );
 

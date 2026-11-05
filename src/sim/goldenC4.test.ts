@@ -33,7 +33,7 @@ import { KILLED, REPEAT } from './effects/flags';
 import { MAX_DEPTH } from './effects/types';
 import { enemiesInAura } from './emitters/aura';
 import { createPayload, ROWS } from './emitters/types';
-import type { EmitterRuntime, Payload, SegmentSpec } from './emitters/types';
+import type { BarrageRider, EmitterRuntime, Payload, SegmentSpec } from './emitters/types';
 import { enqueueModuleEffect } from './rules';
 import type { BuildCompiler, TestModule } from './rules';
 import { createSimulation } from './simulation';
@@ -2890,6 +2890,62 @@ const ICE_SENTRY_STATS = makeStats(FREEZE_LIST_STATS.values, maskProbeMods(), {
   emitters: [],
 });
 
+/** A barrage grant on outer.barrage (E10a, lead ruling W1), at its default share of 25%. */
+const BARRAGE_GRANT = { source: 'outer.barrage', grant: { kind: 'barrage' } } as const;
+
+/**
+ * E10a's barrage rider (副彈, gd §4.11 「小彈是跟著你的攻擊一起射出的小投射物，每發是一次小擊中」;
+ * lead rulings W4-W8): M1's volley as chainBolts' (attackSpeed 6, projectileCount 2, a chain
+ * jump) with crits and ignites, a barrage grant, barrageCount 3 and barragePierce 1, from wave 3
+ * of the fixture waves, whose enemies arrive one by one and thin out: each attack's 3 small shots
+ * fly straight from the player at the 3 nearest alive enemies, a shot past the enemies there are
+ * is lost, and each hits 2 enemies at most, a plain hit of outer.barrage that crits and ignites
+ * on the barrage stream and never chains. It pins the shots, the lost ones, the aims and the
+ * pierce.
+ */
+const BARRAGE_STATS = makeStats(
+  {
+    damage: 6,
+    maxLife: 1e6,
+    critChance: 0.2,
+    critMultiplier: 2,
+    igniteChance: 0.3,
+    chainCount: 1,
+    attackSpeed: 6,
+    projectileCount: 2,
+    barrageCount: 3,
+    barragePierce: 1,
+  },
+  maskProbeMods(),
+  { triggers: [], conversions: [], emitters: [BARRAGE_GRANT] },
+);
+
+/**
+ * E10a's barrage rider on 蜂巢 (lead rulings W3-W6, W9): the swarm and its turret over
+ * SWARM_STATS' values and poison, with a barrage grant, barrageCount 2 and a test module standing
+ * in for ★子彈地獄's (BuildFlags.barrage { countMult 2, bounce 2 }, its −40% a scoped more damage
+ * on outer.barrage), from wave 12 of the fixture waves: each impact sends 4 small shots from the
+ * drone's position, which is its target's, at 4 others and through it (lead ruling W15), and
+ * each firing of the turret 4 from its seat, each hitting one enemy and bouncing off the arena's
+ * edge twice at most. It pins the impact-point and seat origins, the bounces and barrageCapped.
+ */
+const BARRAGE_HIVE_STATS = makeStats(
+  { ...SWARM_VALUES, barrageCount: 2 },
+  [...maskProbeMods(), { stat: 'damage', kind: 'more', value: -0.4, scope: 'outer.barrage' }],
+  {
+    triggers: [{ source: 'center', spec: SWARM_POISON }],
+    conversions: [],
+    emitters: [BARRAGE_GRANT],
+  },
+);
+/** A test module standing in for ★子彈地獄's BuildFlags.barrage (E10a, lead ruling W3). */
+const barrageParams =
+  (countMult: number, bounce: number): TestModule =>
+  (b) => {
+    b.flags.barrage.countMult = countMult;
+    b.flags.barrage.bounce = bounce;
+  };
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3406,6 +3462,17 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: ICE_SENTRY_STATS, rules: [], startWave: 12 },
     expected: ['0591d0fdc929cdfc', '856dd71b40f5bc2e'],
   },
+  {
+    name: 'barrage',
+    config: { stats: BARRAGE_STATS, rules: [], startWave: 3 },
+    expected: ['0cea11c9b718e01c', 'b970227da7f82190'],
+  },
+  {
+    name: 'barrageHive',
+    config: { stats: BARRAGE_HIVE_STATS, rules: [], signature: { id: 'swarm' }, startWave: 12 },
+    modules: () => [barrageParams(2, 2)],
+    expected: ['bf4990aecc74c84e', '335888c3efad9746'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3517,8 +3584,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E11's zoneCap and E8's iceSentry are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([70, 'zoneCap', 'iceSentry']);
+    // The count docs/ARCHITECTURE.md gives: E10a's barrage and barrageHive are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([72, 'barrage', 'barrageHive']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -6584,6 +6651,285 @@ describe('golden C4 runs', () => {
     expect(bySeed).toEqual({
       1: run([8, 12], [1, 2], [86, 180], 18),
       2: run([10, 12], [1], [115, 168], 19),
+    });
+  });
+
+  /**
+   * `entry` with a tick hook beside its modules: `hook` sees the context after the emitter stage,
+   * before the drone and projectile stages (E10a).
+   */
+  const withHook = (entry: GoldenC4Entry, hook: (ctx: RunContext) => void): GoldenC4Entry => ({
+    ...entry,
+    modules: () => [...(entry.modules?.() ?? []), (b) => void b.hook('tick', hook)],
+  });
+
+  /** The slots of the shot pool that hold `rider`'s shots. */
+  const riderSlots = (ctx: RunContext, rider: BarrageRider): number[] => {
+    const slots: number[] = [];
+    for (let s = 0; s < ctx.shots.count; s++) {
+      if (ctx.shots.payload[s] === rider.payload) slots.push(s);
+    }
+    return slots;
+  };
+
+  it('fires barrage’s 3 small shots from the player at the 3 nearest alive enemies after each attack, losing those past the enemies there are, each hitting 2 at most (E10a)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'barrage') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        attacks: 0,
+        shots: 0,
+        short: 0,
+        lost: 0,
+        hits: 0,
+        crits: 0,
+        spent: 0,
+        tags: [] as number[],
+        capped: 0,
+        miscounted: 0,
+        misaimed: 0,
+        offOrigin: 0,
+        stray: 0,
+        chained: 0,
+        overPierced: 0,
+        unaccounted: 0,
+      };
+      let attacks = 0;
+      // Each rider shot as the projectile stage begins: its hits so far, its next position and
+      // its last tick, by id.
+      const before = new Map<number, { pierced: number; x: number; y: number; until: number }>();
+      const hook = (ctx: RunContext): void => {
+        const em = ctx.emitters[0] as EmitterRuntime;
+        const rider = em.barrage as BarrageRider;
+        const shots = ctx.shots;
+        const fired = em.attacks - attacks;
+        attacks = em.attacks;
+        const fresh = riderSlots(ctx, rider).filter((s) => shots.launched[s] === ctx.now);
+        if (fired === 0) {
+          c.stray += fresh.length;
+        } else {
+          const { x: px, y: py } = ctx.player;
+          const order = ctx.enemies
+            .filter((e) => e.alive)
+            .sort((a, b) => dist2(a, ctx.player) - dist2(b, ctx.player) || a.id - b.id);
+          const want = Math.min(3, order.length);
+          c.attacks += fired;
+          c.shots += fresh.length;
+          if (order.length < 3) {
+            c.short++;
+            c.lost += 3 - order.length;
+          }
+          if (fired !== 1 || fresh.length !== want) c.miscounted++;
+          fresh.forEach((s, i) => {
+            if (shots.x[s] !== px || shots.y[s] !== py) c.offOrigin++;
+            const e = order[i] as Enemy;
+            const vx = shots.vx[s] as number;
+            const vy = shots.vy[s] as number;
+            const dx = e.x - px;
+            const dy = e.y - py;
+            const cross = Math.abs(vx * dy - vy * dx);
+            if (cross > 1e-9 * Math.hypot(vx, vy) * Math.hypot(dx, dy) || vx * dx + vy * dy <= 0) {
+              c.misaimed++;
+            }
+          });
+        }
+        before.clear();
+        for (const s of riderSlots(ctx, rider)) {
+          before.set(shots.id[s] as number, {
+            pierced: shots.pierced[s] as number,
+            x: (shots.x[s] as number) + (shots.vx[s] as number),
+            y: (shots.y[s] as number) + (shots.vy[s] as number),
+            until: shots.until[s] as number,
+          });
+        }
+      };
+      const tags = new Set<number>();
+      watchRun(withHook(entry, hook), seed, (now, events, ctx) => {
+        const source = ctx.sources.index('outer.barrage');
+        const rider = (ctx.emitters[0] as EmitterRuntime).barrage as BarrageRider;
+        const shots = ctx.shots;
+        let hits = 0;
+        for (const event of events) {
+          if (event.type !== 'hit' || event.source !== source) continue;
+          hits++;
+          if (event.crit) c.crits++;
+          if (event.chainIndex !== 0) c.chained++;
+          tags.add(event.tags);
+        }
+        c.hits += hits;
+        // The hits of the shots that ended this tick: the tick's, less the survivors'.
+        let ended = hits;
+        const alive = new Set<number>();
+        for (const s of riderSlots(ctx, rider)) {
+          const id = shots.id[s] as number;
+          const pierced = shots.pierced[s] as number;
+          alive.add(id);
+          if (pierced > 1) c.overPierced++;
+          ended -= pierced - (before.get(id)?.pierced ?? 0);
+        }
+        // An ended shot inside the arena before its last tick spent its 2 hits; the others hit
+        // 2 at most.
+        let least = 0;
+        let most = 0;
+        for (const [id, shot] of before) {
+          if (alive.has(id)) continue;
+          const inside =
+            shot.x >= 0 && shot.x <= ARENA_WIDTH && shot.y >= 0 && shot.y <= ARENA_HEIGHT;
+          most += 2 - shot.pierced;
+          if (inside && now < shot.until) {
+            c.spent++;
+            least += 2 - shot.pierced;
+          }
+        }
+        if (ended < least || ended > most) c.unaccounted++;
+        c.capped = ctx.counters.barrageCapped;
+      });
+      c.tags = [...tags].sort((a, b) => a - b);
+      bySeed[seed] = c;
+    }
+    // 120 attacks of 3 shots: 317 + 43 lost and 307 + 53; the small hits are hit and projectile,
+    // crit or not.
+    const seen = { capped: 0, chained: 0, misaimed: 0, miscounted: 0, offOrigin: 0, stray: 0 };
+    const tags = [TAG.hit | TAG.projectile, TAG.hit | TAG.crit | TAG.projectile];
+    expect(bySeed).toEqual({
+      1: {
+        ...seen,
+        attacks: 120,
+        shots: 317,
+        short: 28,
+        lost: 43,
+        hits: 121,
+        crits: 21,
+        spent: 4,
+        tags,
+        overPierced: 0,
+        unaccounted: 0,
+      },
+      2: {
+        ...seen,
+        attacks: 120,
+        shots: 307,
+        short: 36,
+        lost: 53,
+        hits: 104,
+        crits: 24,
+        spent: 2,
+        tags,
+        overPierced: 0,
+        unaccounted: 0,
+      },
+    });
+  });
+
+  it('fires barrageHive’s 4 small shots from each impact’s point past its target and each counted turret firing’s seat, each bouncing twice at most (E10a)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'barrageHive') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        impacts: 0,
+        turretFirings: 0,
+        spawned: 0,
+        fromImpact: 0,
+        fromSeat: 0,
+        ended: 0,
+        onTarget: 0,
+        hits: 0,
+        bounced: [0, 0, 0],
+        capped: 0,
+        projectilesCapped: 0,
+        unmatched: 0,
+      };
+      let ids = 0;
+      const bounces = new Map<number, number>();
+      const hook = (ctx: RunContext): void => {
+        ids = ctx.nextProjectileId;
+      };
+      watchRun(withHook(entry, hook), seed, (now, events, ctx) => {
+        const source = ctx.sources.index('outer.barrage');
+        const rider = (ctx.emitters[0] as EmitterRuntime).barrage as BarrageRider;
+        const shots = ctx.shots;
+        const impacts: [number, number][] = [];
+        const seats: [number, number][] = [];
+        const targets = new Set<number>();
+        let tried = 0;
+        for (const event of events) {
+          if (event.type === 'impact' && event.droneId >= 0) {
+            c.impacts++;
+            impacts.push([event.x, event.y]);
+            targets.add(event.targetId);
+          } else if (event.type === 'turretFire') {
+            c.turretFirings++;
+            seats.push([event.x, event.y]);
+            tried += event.count;
+          } else if (event.type === 'hit' && event.source === source) {
+            c.hits++;
+            if (targets.has(event.targetId)) c.onTarget++;
+          }
+        }
+        // The drone stage's spawns: the turrets' shots and the rider's (none refused here).
+        const spawned = ctx.nextProjectileId - ids - tried;
+        c.spawned += spawned;
+        let fresh = 0;
+        for (const s of riderSlots(ctx, rider)) {
+          const id = shots.id[s] as number;
+          const x = shots.x[s] as number;
+          const y = shots.y[s] as number;
+          const taken = 2 - (shots.bounce[s] as number);
+          bounces.set(id, taken);
+          if (shots.launched[s] !== now) continue;
+          fresh++;
+          // Its first step, undone: a bounce on it turned the velocity on the axes it left.
+          const outX = taken > 0 && (x < 0 || x > ARENA_WIDTH);
+          const outY = taken > 0 && (y < 0 || y > ARENA_HEIGHT);
+          const ox = x - (outX ? -1 : 1) * (shots.vx[s] as number);
+          const oy = y - (outY ? -1 : 1) * (shots.vy[s] as number);
+          const near = ([px, py]: [number, number]): boolean =>
+            Math.abs(px - ox) < 1e-6 && Math.abs(py - oy) < 1e-6;
+          if (impacts.some(near)) c.fromImpact++;
+          else if (seats.some(near)) c.fromSeat++;
+          else c.unmatched++;
+        }
+        c.ended += spawned - fresh;
+        c.capped = ctx.counters.barrageCapped;
+        c.projectilesCapped = ctx.counters.projectilesCapped;
+      });
+      for (const taken of bounces.values()) c.bounced[taken] = (c.bounced[taken] as number) + 1;
+      bySeed[seed] = c;
+    }
+    // (54 + 40) · 4 = 326 shots + 50 lost and (53 + 40) · 4 = 328 + 44; 180 + 139 + 7 = 326 and
+    // 177 + 129 + 22 = 328. An impact's shots pass through its target (lead ruling W15), so the
+    // few that end on their first step hit an enemy within a step of their origin, and the one
+    // small hit on a tick's impact target (seed 1, tick 1151) comes from a shot already in
+    // flight; the reserve never binds.
+    expect(bySeed).toEqual({
+      1: {
+        impacts: 54,
+        turretFirings: 40,
+        spawned: 326,
+        fromImpact: 180,
+        fromSeat: 139,
+        ended: 7,
+        onTarget: 1,
+        hits: 259,
+        bounced: [231, 32, 56],
+        capped: 0,
+        projectilesCapped: 0,
+        unmatched: 0,
+      },
+      2: {
+        impacts: 53,
+        turretFirings: 40,
+        spawned: 328,
+        fromImpact: 177,
+        fromSeat: 129,
+        ended: 22,
+        onTarget: 0,
+        hits: 250,
+        bounced: [212, 36, 58],
+        capped: 0,
+        projectilesCapped: 0,
+        unmatched: 0,
+      },
     });
   });
 

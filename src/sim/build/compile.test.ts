@@ -120,6 +120,7 @@ describe('compileBuild', () => {
       frozenNoSplit: false,
       frostGainShocked: 0,
       frostGainBoss: 0,
+      barrage: { countMult: 1, bounce: 0 },
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

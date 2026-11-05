@@ -282,6 +282,7 @@
   "web.grant.turret": "+{n} {turrets}砲台，每發 {damage} 傷害",
   "web.grant.aura": "光環：每次脈衝，你周圍的敵人受到 {damage} 傷害{extra}",
   "web.grant.orbit": "環繞球 +{count}（{ring}），每顆 {damage} 傷害，冷卻 {cooldown} 秒",
+  "web.grant.barrage": "小彈：每次攻擊後，小彈直線射向不同的敵人（近的先），每發 {damage} 傷害",
   "web.ring.0": "內圈",
   "web.ring.1": "外圈",
   "web.buy.unknown": "沒有這個節點",

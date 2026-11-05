@@ -21,7 +21,7 @@
  * centerDamage) and never pass one into a run.
  */
 
-import { grantKey } from '../../data/emitters';
+import { BARRAGE_DAMAGE_PCT, grantKey } from '../../data/emitters';
 import type { SourcedEmitter } from '../../data/emitters';
 import { M1_SIGNATURE, RULE_COEF_FIELDS, scaleRuleSpec } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
@@ -54,7 +54,7 @@ import type { CharacterRun } from '../types';
 import { readsTargetIs, statAt, staticInput } from './eval';
 import { compileConversions, compileMods, ModTable, rowValues } from './modTable';
 import type { CompiledConversion, CompiledMod } from './modTable';
-import { sizeOf } from './size';
+import { countOf, sizeOf } from './size';
 import {
   CENTER,
   createAttribution,
@@ -273,6 +273,15 @@ export interface BuildFlags {
    */
   frostGainShocked: number;
   frostGainBoss: number;
+  /**
+   * The barrage rider's (BarrageGrant, E10a; gd §4.11's ★子彈地獄 「小彈數量 ×2 … 小彈會在場地邊緣反彈
+   * （最多 2 次）」): the factor on its shots an attack, a whole number in [1, 4], and the arena-edge
+   * bounces of each shot, a whole number in [0, 4] (compileBarrage, src/sim/systems/barrage.ts).
+   * A module writes them in place (`b.flags.barrage.countMult = 2`); compileBuild refuses any
+   * other value. { countMult: 1, bounce: 0 }, a fresh object each compile; without a barrage
+   * grant they do nothing. ★'s −40% is a `more` damage scoped 'outer.barrage', not a param.
+   */
+  barrage: { countMult: number; bounce: number };
 }
 
 /**
@@ -483,6 +492,53 @@ export interface CompiledBuild {
    * createRunContext compiles it once per run for the signature payload and its repeats.
    */
   readonly chainPolicy: ChainPolicySpec | null;
+  /** The barrage rider (compileBarrage); null for a build without a barrage grant. */
+  readonly barrage: CompiledBarrage | null;
+}
+
+/**
+ * The barrage rider of a build with a barrage grant (BarrageGrant, src/data/emitters.ts): its
+ * small shots after each counted attack of the signature emitter (src/sim/systems/barrage.ts).
+ */
+export interface CompiledBarrage {
+  /** Source id its hits are credited to: the first barrage grant's. */
+  readonly source: string;
+  /** Base damage of a hit as a fraction of the damage stat (BARRAGE_DAMAGE_PCT when omitted). */
+  readonly damagePct: number;
+  /**
+   * Shots an attack: countOf(floor(values.barrageCount)) × BuildFlags.barrage.countMult, at least
+   * 0; 0 fires none.
+   */
+  readonly count: number;
+  /** Enemies a shot hits at most: floor(values.barragePierce) + 1, at least 1. */
+  readonly hits: number;
+  /** Arena-edge bounces of a shot: BuildFlags.barrage.bounce. */
+  readonly bounce: number;
+}
+
+/**
+ * The barrage rider of `grants` (lead rulings W1, W4): the first barrage grant in grant order,
+ * credited to its source, whatever other sources grant one; null for none. Its count reads the
+ * compiled barrageCount, halved by 巨大化 as the other counts are (countOf), then × countMult;
+ * the C6b.1 count link of a projectiles effect reads the StatBlock's value and never this.
+ */
+function compileBarrage(
+  grants: readonly SourcedEmitter[],
+  values: Readonly<Record<StatId, number>>,
+  flags: BuildFlags,
+): CompiledBarrage | null {
+  for (const { source, grant } of grants) {
+    if (grant.kind !== 'barrage') continue;
+    const { countMult, bounce } = flags.barrage;
+    return {
+      source,
+      damagePct: grant.damagePct ?? BARRAGE_DAMAGE_PCT,
+      count: Math.max(0, countOf({ flags }, Math.floor(values.barrageCount))) * countMult,
+      hits: Math.max(0, Math.floor(values.barragePierce)) + 1,
+      bounce,
+    };
+  }
+  return null;
 }
 
 function compileRule<K extends RuleId>(
@@ -535,12 +591,14 @@ function compileSignature<K extends SignatureId>(
 /**
  * The emitters of the grants, in grant order, the first of each kind, source and key
  * (grantKey): a node grants each emitter once, and nodes of one source that grant the same one
- * agree on its fields (data validation), so dropping the others loses nothing.
+ * agree on its fields (data validation), so dropping the others loses nothing. A barrage grant
+ * is no emitter: it rides the signature (compileBarrage).
  */
 function grantEmitters(grants: readonly SourcedEmitter[]): EmitterSpec[] {
   const seen = new Set<string>();
   const emitters: EmitterSpec[] = [];
   for (const { source, grant } of grants) {
+    if (grant.kind === 'barrage') continue;
     const id = `${grant.kind}|${source}|${grantKey(grant)}`;
     if (seen.has(id)) continue;
     seen.add(id);
@@ -666,6 +724,7 @@ export function compileBuild(
     frozenNoSplit: false,
     frostGainShocked: 0,
     frostGainBoss: 0,
+    barrage: { countMult: 1, bounce: 0 },
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -968,6 +1027,15 @@ export function compileBuild(
   if (!(Number.isFinite(flags.frostGainBoss) && flags.frostGainBoss >= 0)) {
     throw new Error(`frostGainBoss: ${flags.frostGainBoss} must be finite and >= 0`);
   }
+  // The barrage rider's params (E10a), which only modules write, checked with or without a
+  // grant so a module's slip shows on every build.
+  const { countMult, bounce } = flags.barrage;
+  if (!(Number.isInteger(countMult) && countMult >= 1 && countMult <= 4)) {
+    throw new Error(`barrage.countMult: ${countMult} must be a whole number in [1, 4]`);
+  }
+  if (!(Number.isInteger(bounce) && bounce >= 0 && bounce <= 4)) {
+    throw new Error(`barrage.bounce: ${bounce} must be a whole number in [0, 4]`);
+  }
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
   );
@@ -1005,6 +1073,7 @@ export function compileBuild(
     effects,
     conversions,
     chainPolicy,
+    barrage: compileBarrage(grants, values, flags),
   };
 }
 

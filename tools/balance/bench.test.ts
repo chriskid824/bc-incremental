@@ -12,7 +12,9 @@ import { loadGameData, parseGameData, validateGameData } from '../../src/data';
 import { AFFIX_IDS } from '../../src/data/affixes';
 import type { GameData, TalentNode } from '../../src/data';
 import type { DroneGrant } from '../../src/data/emitters';
+import { toNumber, ZERO } from '../../src/core/num';
 import { createSimulation, DRONE_KIND_DRONE, DRONE_KIND_TURRET, NO_INPUT } from '../../src/sim';
+import { compileBuild } from '../../src/sim/build/compile';
 import type { RunConfig } from '../../src/sim';
 import { SUMMON_CAP, ZONE_CAP, ZONE_SOURCE_CAP } from '../../src/sim/caps';
 import { BASE_ATTACK_SPEED } from '../../src/sim/emitters/types';
@@ -32,6 +34,8 @@ import {
 import {
   aliveTwin,
   ALIVE_TWIN_DELTA,
+  BARRAGE_COUNT,
+  BARRAGE_PIERCE,
   CHECK_ENTRIES,
   checkLines,
   checkRecord,
@@ -793,9 +797,9 @@ describe('grants (docs/v3 C4 design §7.3, §8.3 C4.21)', () => {
 describe('v3fire (docs/v3 C6 design §5.4, §8 C6.6)', () => {
   it('is a scenario with no alive band, before enemies in SCENARIO_IDS and CHECK_ENTRIES, on GOLDEN-C4’s v3fire: a fire character run', () => {
     const v3fire = SCENARIOS.v3fire;
-    // C7.6 appended enemies, so v3fire is now the one before it.
-    expect(SCENARIO_IDS.at(-2)).toBe('v3fire');
-    expect(CHECK_ENTRIES.at(-2)).toBe('v3fire');
+    // C7.6 appended enemies, so v3fire is now the one before it; E10a appended barrage after it.
+    expect(SCENARIO_IDS.slice(-3)).toEqual(['v3fire', 'enemies', 'barrage']);
+    expect(CHECK_ENTRIES.slice(-3)).toEqual(['v3fire', 'enemies', 'barrage']);
     expect([v3fire.runs, v3fire.warmup, v3fire.seconds, v3fire.targetMs, v3fire.startWave]).toEqual(
       [50, 5, 20, 50, 12],
     );
@@ -887,10 +891,11 @@ describe('v3fire (docs/v3 C6 design §5.4, §8 C6.6)', () => {
 });
 
 describe('enemies (docs/v3 C7 design §2.7, §8 C7.6)', () => {
-  it('is a crowd scenario with no alive band, last in SCENARIO_IDS and CHECK_ENTRIES, on the v3 crowd fixture', () => {
+  it('is a crowd scenario with no alive band, before barrage in SCENARIO_IDS and CHECK_ENTRIES, on the v3 crowd fixture', () => {
     const enemies = SCENARIOS.enemies;
-    expect(SCENARIO_IDS.at(-1)).toBe('enemies');
-    expect(CHECK_ENTRIES.at(-1)).toBe('enemies');
+    // E10a appended barrage, so enemies is now the one before it.
+    expect(SCENARIO_IDS.at(-2)).toBe('enemies');
+    expect(CHECK_ENTRIES.at(-2)).toBe('enemies');
     // The stress family's runs, length and start wave, with §6's 50 ms budget printed.
     expect([
       enemies.runs,
@@ -1244,5 +1249,95 @@ describe('renderStress’s workload (src/app/replay/presets.ts, docs/v3 C10 desi
     });
     expect(preset.testModules.slice(0, 3)).toEqual(v4.testModules);
     expect(preset.testModules).toHaveLength(4);
+  });
+});
+
+describe('barrage (E10a, lead ruling W12)', () => {
+  const barrage = SCENARIOS.barrage;
+
+  it('is hive’s run with a barrage grant, barrageCount 6, barragePierce 1 and ★子彈地獄’s params, last in SCENARIO_IDS and CHECK_ENTRIES', () => {
+    expect(SCENARIO_IDS.at(-1)).toBe('barrage');
+    expect(CHECK_ENTRIES.at(-1)).toBe('barrage');
+    expect([barrage.runs, barrage.warmup, barrage.seconds, barrage.targetMs]).toEqual([
+      hive.runs,
+      hive.warmup,
+      hive.seconds,
+      hive.targetMs,
+    ]);
+    expect([barrage.data, barrage.startWave, barrage.stress, barrage.summons]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      true,
+    ]);
+    const config = barrage.config(3, 30, '');
+    const base = hive.config(3, 30, '');
+    expect({ ...config, stats: base.stats }).toEqual(base);
+    expect([BARRAGE_COUNT, BARRAGE_PIERCE]).toEqual([6, 1]);
+    expect(config.stats.values).toEqual({
+      ...base.stats.values,
+      barrageCount: BARRAGE_COUNT,
+      barragePierce: BARRAGE_PIERCE,
+    });
+    expect(config.stats.emitters).toEqual([
+      { source: 'outer.barrage', grant: { kind: 'barrage' } },
+    ]);
+    expect(config.stats.base).toEqual({
+      ...base.stats.base,
+      barrageCount: BARRAGE_COUNT,
+      barragePierce: BARRAGE_PIERCE,
+    });
+    expect({ ...config.stats, values: {}, base: {}, emitters: [] }).toEqual({
+      ...base.stats,
+      values: {},
+      base: {},
+      emitters: [],
+    });
+    const modules = barrage.testModules ?? [];
+    expect(modules.slice(0, 2)).toEqual(hive.testModules);
+    expect(modules).toHaveLength(3);
+    // 6 shots × countMult 2, each through 2 enemies and off the edge twice.
+    const build = compileBuild(config.stats, config.rules, config.signature, modules);
+    expect(build.barrage).toEqual({
+      source: 'outer.barrage',
+      damagePct: 0.25,
+      count: 12,
+      hits: 2,
+      bounce: 2,
+    });
+    expect(build.flags.barrage).toEqual({ countMult: 2, bounce: 2 });
+  });
+
+  it('gives no other scenario a rider, so normal, shots and hive time what they did', () => {
+    for (const id of SCENARIO_IDS) {
+      if (id === 'barrage') continue;
+      const scenario: Scenario = SCENARIOS[id];
+      const variant = scenario.variants?.[0] ?? '';
+      const config = scenario.config(1, scenario.startWave ?? 30, variant);
+      const build = compileBuild(
+        config.stats,
+        config.rules,
+        config.signature,
+        scenario.testModules ?? [],
+        config.character ?? null,
+      );
+      expect(build.barrage, id).toBeNull();
+      expect(build.flags.barrage, id).toEqual({ countMult: 1, bounce: 0 });
+    }
+  });
+
+  it('runs the rider on the swarm’s impacts and firings: its hits are outer.barrage’s', () => {
+    const config = { ...barrage.config(1, 30, ''), maxTicks: 600 };
+    const sim = createSimulation(config, data, barrage.testModules);
+    while (!sim.state.finished) sim.step(NO_INPUT);
+    const result = sim.result();
+    expect(toNumber(result.damageBySource['outer.barrage'] ?? ZERO)).toBeGreaterThan(0);
+    const plain = createSimulation(
+      { ...hive.config(1, 30, ''), maxTicks: 600 },
+      data,
+      hive.testModules,
+    );
+    while (!plain.state.finished) plain.step(NO_INPUT);
+    expect(plain.result().damageBySource['outer.barrage']).toBeUndefined();
   });
 });

@@ -588,8 +588,11 @@ function remembers(shots: ShotPool, s: number, id: number): boolean {
   return false;
 }
 
-/** Remembers a hit of the shot in slot `s` on enemy `id`, over its oldest one. */
-function remember(shots: ShotPool, s: number, id: number): void {
+/**
+ * Remembers a hit of the shot in slot `s` on enemy `id`, over its oldest one; the barrage
+ * rider seeds an impact shot's memory with the impact's target (src/sim/systems/barrage.ts).
+ */
+export function remember(shots: ShotPool, s: number, id: number): void {
   const head = shots.memHead[s] as number;
   shots.memory[(shots.memBase[s] as number) + head] = id;
   shots.memHead[s] = head + 1 === SHOT_MEMORY ? 0 : head + 1;

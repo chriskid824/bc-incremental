@@ -560,6 +560,7 @@ function kitchenSink(): NodeEffects {
     { kind: 'aura', everyNth: { n: 4, mult: 4 }, corona: { periodSec: 2, damagePct: 1 } },
     { kind: 'orbit', ring: 1, count: 2 },
     { kind: 'orbit' },
+    { kind: 'barrage' },
   ];
   return effects({
     modifiers,
@@ -839,6 +840,39 @@ describe('every template, through one node (§4.7)', () => {
             pairPeriodSec: 0,
           },
         ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        '+2 Small projectiles',
+        '+1 Small projectile pierce',
+        'Small projectiles: after each attack, they fly straight at different enemies, nearest first; 25% damage each',
+        'Small projectiles: after each attack, they fly straight at different enemies, nearest first; 60% damage each',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '小彈數量 +2',
+        '小彈穿透 +1',
+        '小彈：每次攻擊後，小彈直線射向不同的敵人（近的先），每發 25% 傷害',
+        '小彈：每次攻擊後，小彈直線射向不同的敵人（近的先），每發 60% 傷害',
+      ],
+    ],
+  ] as const)(
+    'writes 副彈’s barrage grant beside its count and pierce, its share at its default, in %s (E10a)',
+    (locale, expected) => {
+      const web = withEffects(fire, NOTABLE, {
+        modifiers: [
+          { stat: 'barrageCount', kind: 'flat', value: 2 },
+          { stat: 'barragePierce', kind: 'flat', value: 1 },
+        ],
+        emitters: [{ kind: 'barrage' }, { kind: 'barrage', damagePct: 0.6 }],
       });
       expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
     },

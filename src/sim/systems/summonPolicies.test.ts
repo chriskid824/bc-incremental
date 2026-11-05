@@ -220,7 +220,9 @@ describe('the summon policies at their defaults (lead ruling P8)', () => {
   // Every flag at its default, the stat at its base: each build plays as the base 9cdd887 did,
   // event for event, its result and its pool's rows at the end alike. The hashes were recorded
   // on the base by the same runs (c59-bench/scripts/defaults-digest.mts); each case shows its
-  // drones, turrets and spirits at work, so a leak on any path moves its hash.
+  // drones, turrets and spirits at work, so a leak on any path moves its hash. E10a re-recorded
+  // them for its counter barrageCapped (0 here), whose key the hashed result.counters gained:
+  // without it they are the base's ed0d876d…, 6ee72af6… and 984fa12e….
   const VALUES = {
     damage: 1,
     maxLife: 1e9,
@@ -242,9 +244,9 @@ describe('the summon policies at their defaults (lead ruling P8)', () => {
     droneGrant: {
       emitters: [drone({ drones: 3, turrets: 2 })],
       triggers: [],
-      base: 'ed0d876d543b047e',
+      base: 'e9e472874a3e3118',
     },
-    swarm: { emitters: [], triggers: [], signature: SWARM, base: '6ee72af629aa0ab8' },
+    swarm: { emitters: [], triggers: [], signature: SWARM, base: '11e319437f344d75' },
     spirits: {
       emitters: [drone({ turrets: 1 })],
       triggers: [
@@ -261,7 +263,7 @@ describe('the summon policies at their defaults (lead ruling P8)', () => {
           do: [spawnSpec({ lifeSec: 2, damagePct: 0.5, count: 2, aim: 'outer', maxLive: 6 })],
         },
       ],
-      base: '984fa12e4303f0e8',
+      base: 'b3d3dbcf85dd4eb9',
     },
   };
   /** [impacts, turret firings, spirit row-ticks] of each case. */

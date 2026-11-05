@@ -83,8 +83,10 @@ export function deriveSeed(seed: number, stream: string): number {
  * happens. `effects`: rolls inside the hits of triggered effects. A build without triggers never
  * draws from the last two, so the other sequences do not depend on them. `affixes`: an elite's
  * affix picks alone (docs/v3 C7 design §1.5), so that what an elite draws does not depend on the
- * fight before it, and only a v3 run draws from it. Each stream's seed comes from its own name,
- * so a new one shifts no other.
+ * fight before it, and only a v3 run draws from it. `barrage`: rolls inside the barrage rider's
+ * small hits alone (src/sim/systems/barrage.ts), so that a build's rider moves no other stream's
+ * sequence; only a build with a barrage grant draws from it. Each stream's seed comes from its
+ * own name, so a new one shifts no other.
  */
 export const RNG_STREAMS = [
   'spawn',
@@ -94,6 +96,7 @@ export const RNG_STREAMS = [
   'trigger',
   'effects',
   'affixes',
+  'barrage',
 ] as const;
 export type RngStreamName = (typeof RNG_STREAMS)[number];
 export type RngStreams = Readonly<Record<RngStreamName, Rng>>;
@@ -107,5 +110,6 @@ export function createStreams(seed: number): RngStreams {
     trigger: createRng(deriveSeed(seed, 'trigger')),
     effects: createRng(deriveSeed(seed, 'effects')),
     affixes: createRng(deriveSeed(seed, 'affixes')),
+    barrage: createRng(deriveSeed(seed, 'barrage')),
   };
 }

@@ -49,6 +49,7 @@ import { drainRepeatCharges } from '../effects/execute';
 import { PRIMARY, REPEAT } from '../effects/flags';
 import { EVENT } from '../effects/types';
 import { enqueueModuleEffect } from '../rules/api';
+import { fireBarrage } from '../systems/barrage';
 import { rollCount } from '../systems/context';
 import type { Enemy, RunContext } from '../systems/context';
 import { ORBITING, orbitTurn } from '../systems/enemyRecord';
@@ -95,7 +96,8 @@ export function isFar(lob: LobParams, s: number): boolean {
 }
 
 /**
- * Fires every due firing of `em`, a lob, each followed by the repeats waiting for it. The
+ * Fires every due firing of `em`, a lob, each followed by its barrage rider's shots from the
+ * player at the throw (src/sim/systems/barrage.ts) and the repeats waiting for it. The
  * accumulator gains the emitter's cadence per tick; a firing is due each time it reaches the
  * emitter's interval. With no enemy alive the emitter stays ready without banking firings, as
  * the volley does (runVolley): it fires on the tick an enemy appears.
@@ -129,6 +131,8 @@ export function runLob(ctx: RunContext, em: EmitterRuntime): void {
       const form = giant ? LOB_VOLCANO : far ? LOB_FAR : LOB_NORMAL;
       launch(ctx, em, em.payload, form, nextShotSteady(ctx, em), 0, -1);
     }
+    // The barrage rider follows the throw, from the player (E10a).
+    if (em.barrage !== null) fireBarrage(ctx, em.barrage, ctx.player.x, ctx.player.y);
     drainRepeatCharges(ctx, em);
   }
 }

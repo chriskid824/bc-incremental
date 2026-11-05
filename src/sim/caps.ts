@@ -27,6 +27,13 @@ export const CHAIN_JUMP_EVENT_CAP = 3;
  * projectilesCapped.
  */
 export const PROJECTILE_CAP = 512;
+/**
+ * The barrage rider's reserve (src/sim/systems/barrage.ts): a small shot is refused while
+ * PROJECTILE_CAP − SMALL_SHOT_CAP or fewer slots are left, and counted in barrageCapped, so the
+ * rider never starves the signature's own shots and the effects' of the last 128. Every other
+ * spawn keeps PROJECTILE_CAP alone.
+ */
+export const SMALL_SHOT_CAP = 384;
 /** Enemies a shot remembers having hit; it passes through them without hitting them again. */
 export const SHOT_MEMORY = 16;
 /** Ticks a small projectile lives: 2 s. */

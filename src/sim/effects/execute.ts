@@ -303,10 +303,17 @@ function shatterPayload(ctx: RunContext, fx: CompiledEffect, source: number): Pa
 }
 
 /**
- * The alive enemies nearest to (x, y), at most `max`, nearest first, ties to the lower id, into
- * ctx.shots.distinct; returns how many it holds.
+ * The alive enemies nearest to (x, y) but `skip`, at most `max` (at least 1), nearest first,
+ * ties to the lower id, into ctx.shots.distinct; returns how many it holds. A projectiles
+ * effect's 'distinct' aim (no skip) and the barrage rider's picks (src/sim/systems/barrage.ts).
  */
-function nearestAlive(ctx: RunContext, max: number, x: number, y: number): number {
+export function nearestAlive(
+  ctx: RunContext,
+  max: number,
+  x: number,
+  y: number,
+  skip: Enemy | null = null,
+): number {
   const out = ctx.shots.distinct;
   const enemies = ctx.enemies;
   let n = 0;
@@ -314,7 +321,7 @@ function nearestAlive(ctx: RunContext, max: number, x: number, y: number): numbe
     const enemy = enemies[i] as Enemy;
     if (enemy.alive) out[n++] = enemy;
   }
-  return orderNearest(out, n, max, x, y);
+  return orderNearest(out, n, max, x, y, skip);
 }
 
 /**

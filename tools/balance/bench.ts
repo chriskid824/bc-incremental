@@ -87,6 +87,11 @@
  *   is not of the family: no alive band, no stress report. Its report adds its crowd workload
  *   from one untimed run: its median against §6's 50 ms for a 30 s stress run (impl:517), its
  *   average alive and its peak, printed and never a failure.
+ * - barrage: hive's runs (E10a) with the barrage rider (src/sim/systems/barrage.ts) on the
+ *   swarm's every drone impact and turret firing: a barrage grant on outer.barrage, barrageCount
+ *   6 and barragePierce 1, and ★子彈地獄's params at a few ranks (twice the shots, two edge
+ *   bounces), so 12 small shots an attack while enemies last, under SMALL_SHOT_CAP's reserve. A
+ *   summon scenario like hive, with its report.
  *
  * hiveStress (C5.6, docs/v3 C5 design §7.4) is print-only: the stress fixture under 蜂巢's swarm
  * at 24 units with 螢火's pulse zones, timed only by --share and printed beside stress v4. It is
@@ -95,7 +100,7 @@
  *
  *   npm run bench --
  *     [--scenario normal|hits|ailments|effects|poisonBoss|stressM1|stress|shots|fan|arc|hive|
- *       stressBase|grants|v3fire|enemies]
+ *       stressBase|grants|v3fire|enemies|barrage]
  *     [--runs 50]
  *     [--warmup 5] [--seed 1] [--start-wave 30]
  *   npm run bench -- --check [--write] [--scenario <id>] [--json <file>]
@@ -149,7 +154,7 @@ import { loadGameData, targetDamage } from '../../src/data';
 import type { GameData, StatBlock } from '../../src/data';
 import type { SourcedEmitter } from '../../src/data/emitters';
 import { sourceClass } from '../../src/data/sources';
-import type { Modifier, SourcedTrigger, StatExtras } from '../../src/data/stats';
+import type { Modifier, SourcedTrigger, StatExtras, StatId } from '../../src/data/stats';
 import type { TriggerSpec } from '../../src/data/triggers';
 import {
   COUNTER_IDS,
@@ -209,6 +214,7 @@ export const SCENARIO_IDS = [
   'grants',
   'v3fire',
   'enemies',
+  'barrage',
 ] as const;
 /** Length of a stress-scenario run (docs/v3/implementation-plan-v3.md §6). */
 const STRESS_SECONDS = 30;
@@ -457,14 +463,33 @@ const HIVE_LISTENER: TestModule = (b) =>
     if (ev.event === EVENT.droneImpact) hiveListened.impacts++;
   });
 
+/**
+ * The barrage scenario's rider (E10a, src/sim/systems/barrage.ts): a barrage grant on
+ * outer.barrage at its default share, barrageCount 6 and barragePierce 1, and ★子彈地獄's params
+ * at a few ranks, as its module would write them: twice the shots, two edge bounces each.
+ */
+const BARRAGE_EMITTERS: readonly SourcedEmitter[] = [
+  { source: 'outer.barrage', grant: { kind: 'barrage' } },
+];
+export const BARRAGE_COUNT = 6;
+export const BARRAGE_PIERCE = 1;
+const BARRAGE_PARAMS: TestModule = (b) => {
+  b.flags.barrage.countMult = 2;
+  b.flags.barrage.bounce = 2;
+};
+
 /** The poisonBoss scenario's poison chance per variant. */
 const POISON_BOSS_CHANCE: Readonly<Record<string, number>> = {
   '500 stacks': 0.99,
   '5 stacks': 0.01,
 };
 
-/** normal's build at `startWave`, with these triggers and conversions. */
-function normalStats(startWave: number, extras?: StatExtras): StatBlock {
+/** normal's build at `startWave`, with these triggers and conversions, and these other values. */
+function normalStats(
+  startWave: number,
+  extras?: StatExtras,
+  values: Partial<Record<StatId, number>> = {},
+): StatBlock {
   return makeStats(
     {
       damage: targetDamage(startWave + 10) / 2.5,
@@ -474,6 +499,7 @@ function normalStats(startWave: number, extras?: StatExtras): StatBlock {
       igniteChance: 0.4,
       chainCount: 2,
       maxLife: 1e12,
+      ...values,
     },
     [],
     extras,
@@ -960,6 +986,28 @@ export const SCENARIOS: Readonly<Record<ScenarioId, Scenario>> = {
     data: v3StressData,
     crowd: true,
     config: (seed) => stressConfig(seed, CROWD_BUILD),
+  },
+  // E10a: hive's runs with the barrage rider on the swarm's every impact and turret firing,
+  // ★子彈地獄 at a few ranks (W12). A summon scenario, as hive.
+  barrage: {
+    runs: 50,
+    warmup: 5,
+    seconds: MAX_RUN_SECONDS,
+    targetMs: 50,
+    testModules: [HIVE_SWARM, HIVE_LISTENER, BARRAGE_PARAMS],
+    summons: true,
+    config: (seed, startWave) => ({
+      seed,
+      stats: normalStats(
+        startWave,
+        { triggers: [], conversions: [], emitters: BARRAGE_EMITTERS },
+        { barrageCount: BARRAGE_COUNT, barragePierce: BARRAGE_PIERCE },
+      ),
+      rules: [],
+      signature: { id: 'swarm' },
+      startWave,
+      mode: 'auto',
+    }),
   },
 };
 
