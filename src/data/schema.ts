@@ -436,6 +436,7 @@ export const EffectSpecSchema = exact<EffectSpec>()(
       })
       .readonly(),
     z.strictObject({ kind: z.literal('execute') }).readonly(),
+    z.strictObject({ kind: z.literal('thaw') }).readonly(),
   ]),
 );
 

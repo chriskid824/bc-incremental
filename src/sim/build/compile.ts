@@ -251,6 +251,27 @@ export interface BuildFlags {
    * data.
    */
   summonHighestHp: boolean;
+  /**
+   * ◆連鎖碎裂 (gd:105 「被碎裂打死的敵人也會碎裂」, E6): an enemy a shatter's damage kills shatters
+   * too, frozen or not, credited to the killing shatter's source, its damage one depth deeper, so
+   * MAX_DEPTH ends the cascade (recordPendingKills, src/sim/effects/dispatch.ts). False: a kill
+   * by a shatter shatters nothing.
+   */
+  shatterChain: boolean;
+  /**
+   * ◆粉碎 (gd:106 「凍結中死亡的五角不分裂」, E6): an enemy frozen at its death leaves no split
+   * children and draws nothing for them (split, src/sim/systems/spawn.ts); 增殖's children still
+   * appear. False: every split-capable death splits.
+   */
+  frozenNoSplit: boolean;
+  /**
+   * The frost gain (超導's gd:527 「感電的敵人冰冷累積 ×1.5」, B5's 霜蝕 gd:119, E6): addFrost
+   * (src/sim/ailments/frost.ts) multiplies every frost amount, a hit's, a zone's or an effect's,
+   * by 1 + frostGainShocked on a shocked enemy + frostGainBoss on a boss, before the ward. 0 is
+   * none; compileBuild refuses a value that is not finite and >= 0.
+   */
+  frostGainShocked: number;
+  frostGainBoss: number;
 }
 
 /**
@@ -640,6 +661,10 @@ export function compileBuild(
     turretChains: 0,
     minionCount: false,
     summonHighestHp: false,
+    shatterChain: false,
+    frozenNoSplit: false,
+    frostGainShocked: 0,
+    frostGainBoss: 0,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -922,6 +947,13 @@ export function compileBuild(
     throw new Error(
       `surge: periodSec ${surge.periodSec} and damageMult ${surge.damageMult} must be finite and above 0`,
     );
+  }
+  // 霜晶's frost gain (E6), which only modules write: addFrost reads it as it is.
+  if (!(Number.isFinite(flags.frostGainShocked) && flags.frostGainShocked >= 0)) {
+    throw new Error(`frostGainShocked: ${flags.frostGainShocked} must be finite and >= 0`);
+  }
+  if (!(Number.isFinite(flags.frostGainBoss) && flags.frostGainBoss >= 0)) {
+    throw new Error(`frostGainBoss: ${flags.frostGainBoss} must be finite and >= 0`);
   }
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),

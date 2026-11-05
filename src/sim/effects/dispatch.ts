@@ -15,7 +15,8 @@
  * (CompiledTrigger.inline) run their effects at once, while the victim still holds its
  * ailments; the others are recorded as pending kills and dispatched at the tick's death step,
  * sorted by victim id and trigger index, so their effects run in the next tick's effect phase.
- * A frozen victim's shatter (SHATTER_TRIGGER) and the shatter triggers are pending kills too.
+ * A frozen victim's shatter (SHATTER_TRIGGER) and the shatter triggers are pending kills too, as
+ * is, under ◆連鎖碎裂 (E6), the shatter of any enemy a shatter kills.
  *
  * Transfer triggers skip the depth gate and fire at any kill depth, as M1's Pandemic spread did
  * (Hoshi's call, 2026-10-14): they deal no damage, and the stacks they move keep their end and
@@ -286,7 +287,15 @@ export function fireInlineKill(
  * victim's shard drop, the value of triggers with gainShards; a trigger with a detonate carries
  * the damage its ailment had left on the victim instead (killValue). SHATTER_TRIGGER is recorded
  * only for a frozen victim, with its max life as the value and the credit of the frost that
- * froze it as the source, and the shatter triggers with it; a kill by a shatter records neither.
+ * froze it as the source, and the shatter triggers with it; a kill by a shatter records neither,
+ * but under ◆連鎖碎裂 (BuildFlags.shatterChain, E6): then its victim, frozen or not, records both
+ * as a frozen victim's, credited to the killing shatter's source (a victim that was not frozen
+ * holds a stale frostApplier). That source is the effect phase's entry, ctx.effectEntry: a kill
+ * by a shatter's damage happens only in the shatter executor's hits, which the phase runs from
+ * it (SHATTER_TRIGGER never runs inline, and no data or module names its effect). The chained
+ * SHATTER_TRIGGER entry carries origin −1, so rule 3 lets it fire on its own kill; it is
+ * recorded at the victim's killDepth, the killing shatter's depth, so its damage is one deeper
+ * and MAX_DEPTH ends the cascade: a depth-0 kill's shatter and two chained ones deal damage.
  * Called before the kill releases the victim's ailments (killEnemy, src/sim/systems/death.ts).
  */
 export function recordPendingKills(
@@ -300,12 +309,19 @@ export function recordPendingKills(
   const triggers = ctx.build.triggers;
   for (let n = 0; n < list.length; n++) {
     const i = list[n] as number;
-    if (i === origin) continue;
-    const t = triggers[i] as CompiledTrigger;
     if (i === SHATTER_TRIGGER) {
-      if (victim.frozenUntil > ctx.now) recordShatter(ctx, victim, origin, flags, drop);
+      if (origin !== SHATTER_TRIGGER) {
+        if (victim.frozenUntil > ctx.now) {
+          const credit = ailmentCredit(ctx.sources, ctx.attribution, 'frost', victim.frostApplier);
+          recordShatter(ctx, victim, origin, origin, flags, drop, credit);
+        }
+      } else if (ctx.build.flags.shatterChain) {
+        recordShatter(ctx, victim, -1, origin, flags, drop, ctx.effectEntry.source);
+      }
       continue;
     }
+    if (i === origin) continue;
+    const t = triggers[i] as CompiledTrigger;
     if (t.on === EVENT.diedWithAilment && (flags & HELD_MASK) === 0) continue;
     record(ctx, i, victim, origin, flags, killValue(ctx, t, victim, drop), -1);
   }
@@ -323,16 +339,20 @@ function killValue(ctx: RunContext, t: CompiledTrigger, victim: Enemy, drop: Num
   return t.takesDrop ? drop : ZERO;
 }
 
-/** The shatter of a frozen victim: SHATTER_TRIGGER's pending kill, then the shatter triggers'. */
+/**
+ * The shatter of a frozen victim, or a chained one's (E6): SHATTER_TRIGGER's pending kill with
+ * origin `own` and source `credit`, then the shatter triggers', with the kill's `origin`.
+ */
 function recordShatter(
   ctx: RunContext,
   victim: Enemy,
+  own: number,
   origin: number,
   flags: number,
   drop: Num,
+  credit: number,
 ): void {
-  const credit = ailmentCredit(ctx.sources, ctx.attribution, 'frost', victim.frostApplier);
-  record(ctx, SHATTER_TRIGGER, victim, origin, flags, victim.maxHp, credit);
+  record(ctx, SHATTER_TRIGGER, victim, own, flags, victim.maxHp, credit);
   const list = ctx.shatterTriggers;
   const triggers = ctx.build.triggers;
   for (let n = 0; n < list.length; n++) {

@@ -54,7 +54,9 @@ import type { CompiledSelector } from './select';
  * trigger listed only when the build can freeze. Only a frozen victim's kill records it, with
  * the victim's max life as its value and the credit of the frost that froze it as its source
  * (recordPendingKills in dispatch.ts). Its damage carries this index as its origin, so a kill by
- * a shatter does not shatter.
+ * a shatter does not shatter, but under ◆連鎖碎裂 (BuildFlags.shatterChain, E6), where it does:
+ * its victim, frozen or not, records this trigger with the killing shatter's source, at the
+ * killing damage's depth, so MAX_DEPTH ends the cascade.
  */
 export const SHATTER_TRIGGER = 0;
 
@@ -186,9 +188,9 @@ export interface CompiledEffect {
   /** Its trigger's selector picks 'player': the effect centers on the player, with no target. */
   readonly atPlayer: boolean;
   /**
-   * It acts on its target alone (applyAilment, addFrost and detonate without a radius): on a
-   * center event with a list, a trigger without a selector queues it once per alive enemy of
-   * the list (fireOne in dispatch.ts).
+   * It acts on its target alone (applyAilment, addFrost and detonate without a radius, and
+   * thaw): on a center event with a list, a trigger without a selector queues it once per alive
+   * enemy of the list (fireOne in dispatch.ts).
    */
   readonly fanout: boolean;
 }
@@ -469,6 +471,9 @@ export function compileEffect(
       tags = TAG[scaled.ailment] | TAG.trigger | (scaled.radius === undefined ? 0 : TAG.area);
       baseDamage = ONE;
       fanout = scaled.radius === undefined;
+      break;
+    case 'thaw':
+      fanout = true;
       break;
     default:
       break;

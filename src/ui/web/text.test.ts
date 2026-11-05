@@ -448,6 +448,12 @@ function kitchenSink(): NodeEffects {
       every: 10,
       do: [{ kind: 'buff', stat: 'attackSpeed', more: 2, durationSec: 2, tags: ['minion'] }],
     },
+    // E6: 熱震's 解凍.
+    {
+      on: 'ailmentApplied',
+      when: [{ ailment: 'burn' }, { targetHas: 'frozen' }],
+      do: [{ kind: 'thaw' }],
+    },
     // Each center event's fan-outs (status, self, placement) and a selector's.
     ...CENTER_EVENTS.flatMap((on): TriggerSpec[] => [
       { on, do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
@@ -1623,5 +1629,33 @@ describe('E7: chainBolt from the nearest other enemy, several bolts and an arc (
     ]);
     expect(numbers({ from: 'nearestOther', bolts: 1, arc: true })).toEqual([['40%']]);
     expect(numbers({})).toEqual([['40%']]);
+  });
+});
+
+describe('E6: thaw', () => {
+  it("writes 熱震's thaw in both locales, and a freeze's thaw on its list as an addFrost's", () => {
+    // Plants a locale without the thaw, or a thaw whose fan-out the line leaves out.
+    const heatShock: TriggerSpec = {
+      on: 'ailmentApplied',
+      when: [{ ailment: 'burn' }, { targetHas: 'frozen' }],
+      do: [{ kind: 'thaw' }],
+    };
+    const onFreeze: TriggerSpec = { on: 'freeze', do: [{ kind: 'thaw' }] };
+    const chill: TriggerSpec = { on: 'freeze', do: [{ kind: 'addFrost', amount: 0.2 }] };
+    const web = withEffects(fire, NOTABLE, { triggers: [heatShock, onFreeze, chill] });
+    expect(LOCALES.map((locale) => linesOf(web, NOTABLE, locale))).toEqual([
+      [
+        'When frozen enemies are ignited: thaw at once',
+        'On each freeze: thaw at once on the target and the enemies within 90, at most 5',
+        'On each freeze: +20% chill on the target and the enemies within 90, at most 5',
+      ],
+      [
+        '凍結中的敵人被點燃時：立刻解凍',
+        '凍結時，對目標與半徑 90 內最多 5 隻敵人：立刻解凍',
+        '凍結時，對目標與半徑 90 內最多 5 隻敵人：冰冷 +20%',
+      ],
+    ]);
+    expect(MESSAGES.en['web.effect.thaw']).toBe('thaw at once{extra}');
+    expect(MESSAGES['zh-TW']['web.effect.thaw']).toBe('立刻解凍{extra}');
   });
 });

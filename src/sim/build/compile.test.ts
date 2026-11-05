@@ -116,6 +116,10 @@ describe('compileBuild', () => {
       turretChains: 0,
       minionCount: false,
       summonHighestHp: false,
+      shatterChain: false,
+      frozenNoSplit: false,
+      frostGainShocked: 0,
+      frostGainBoss: 0,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,

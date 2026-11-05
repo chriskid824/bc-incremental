@@ -2470,6 +2470,43 @@ describe('trigger validation', () => {
       [`${at} killShards must be in (0, 1] (got -Infinity)`],
     ]);
   });
+
+  it('accepts thaw on the events whose enemy lives when it runs, and with a selector on the others (E6)', () => {
+    const thaw = { kind: 'thaw' } as const;
+    expect(
+      triggerIssues(
+        { on: 'hit', do: [thaw] },
+        // 熱震's: on igniting a frozen enemy.
+        { on: 'ailmentApplied', when: [{ ailment: 'burn' }, { targetHas: 'frozen' }], do: [thaw] },
+        { on: 'freeze', do: [thaw] },
+        { on: 'nthAttack', every: 3, do: [thaw] },
+        { on: 'kill', target: { pick: 'nearest' }, do: [thaw] },
+        { on: 'shatter', target: { pick: 'nearest' }, do: [thaw] },
+        { on: 'periodic', every: 1, target: { pick: 'highestHp' }, do: [thaw] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects thaw on events without a live enemy, and with a 'player' pick (E6)", () => {
+    const thaw = { kind: 'thaw' } as const;
+    const problem = (on: string): string =>
+      `${at} do[0] thaw needs a live enemy, which '${on}' events do not give; add target {pick}`;
+    const events: TriggerSpec[] = [
+      { on: 'periodic', every: 1, do: [thaw] },
+      { on: 'waveStart', do: [thaw] },
+      { on: 'heroHit', do: [thaw] },
+      { on: 'kill', do: [thaw] },
+      { on: 'diedWithAilment', do: [thaw] },
+      { on: 'shatter', do: [thaw] },
+      { on: 'contact', do: [thaw] },
+    ];
+    for (const trigger of events) {
+      expect(triggerIssues(trigger), trigger.on).toEqual([problem(trigger.on)]);
+    }
+    expect(
+      triggerIssues({ on: 'periodic', every: 1, target: { pick: 'player' }, do: [thaw] }),
+    ).toEqual([`${at} do[0] thaw needs an enemy, which target.pick 'player' does not give`]);
+  });
 });
 
 describe('conversion validation', () => {
