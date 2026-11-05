@@ -279,7 +279,7 @@ describe('the nightly plan', () => {
     expect(new Set(seeds)).toEqual(new Set([11_260_404]));
   });
 
-  it("plans 熔核's and 蜂巢's shards and the globals on the registered content from B2, as Plan JSON v1 (OWN 6)", () => {
+  it("plans 熔核's, 霜晶's and 蜂巢's shards and the globals on the registered content from B3, as Plan JSON v1 (OWN 6)", () => {
     for (const set of ['nightly', 'weekly'] as const) {
       const plan = nightlyPlan({ set, quick: false, content: 'registered', commit: SHA });
       expect(plan.json).toEqual({
@@ -290,7 +290,7 @@ describe('the nightly plan', () => {
         commit: SHA,
         fuzzSeed: 11_260_404,
         // The weekly adds each character's triples (three outers from B1's ice).
-        shards: (['fire', 'summon'] as const)
+        shards: (['fire', 'ice', 'summon'] as const)
           .flatMap((c) => [
             { id: `${c}-sessions`, kind: 'sessions', character: c },
             { id: `${c}-probes`, kind: 'probes', character: c },
@@ -583,7 +583,7 @@ describe('npm run nightly', () => {
     expect(await main(['--json'], io, fixed())).toBe(2);
     expect(await main(['--shard', 'nowhere', '--out', join(root, 'x')], io, fixed())).toBe(2);
     expect(io.lines).toContain(
-      "No shard 'nowhere' in the plan: fire-sessions, fire-probes, fire-doubles, summon-sessions, summon-probes, summon-doubles, global-m1, global-fuzz",
+      "No shard 'nowhere' in the plan: fire-sessions, fire-probes, fire-doubles, ice-sessions, ice-probes, ice-doubles, summon-sessions, summon-probes, summon-doubles, global-m1, global-fuzz",
     );
     const plan = capture();
     expect(

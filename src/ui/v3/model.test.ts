@@ -88,7 +88,8 @@ describe('outerStates (gd §2.4)', () => {
     expect(states.get('poison')).toBe('collapsed');
     expect(states.get('ice')).toBe('collapsed');
     expect(states.get('summon')).toBe('collapsed');
-    expect(states.get('lightning')).toBe('absent');
+    expect(states.get('lightning')).toBe('collapsed');
+    expect(states.get('thorns')).toBe('absent');
     expect(states.get('greed')).toBe('hidden');
   });
 });

@@ -191,7 +191,7 @@ describe('iceFan', () => {
       chains: true,
       rollsAilments: true,
       canCrit: true,
-      baseRate: 2.5,
+      baseRate: 3.75,
       spreadDeg: 30,
       pierce: 1,
       lifeTicks: 120,
@@ -223,14 +223,14 @@ describe('iceFan', () => {
     expect(keyedStat(build, rowKey(CONE_TAGS, outer), FROST)).toBe(0);
   });
 
-  it('rounds 2.5 times a second at the base attack speed, every 24 ticks, and 7.5 at 12 (D4)', () => {
+  it('rounds 3.75 times a second at the base attack speed, every 16 ticks, and 11.25 at 12 (D4)', () => {
     const ctx = fans([ahead(300)]);
     const em = fanOf(ctx);
-    expect(em.interval).toBe(24);
-    for (let tick = 0; tick < 120; tick++) runFan(ctx, em);
-    expect(em.attacks).toBe(5);
-    expect(fanOf(fans([], { values: { attackSpeed: 12 } })).interval).toBe(8);
-    expect(fanOf(fans([], { values: { attackSpeed: 6 } })).interval).toBe(TICK_RATE / 3.75);
+    expect(em.interval).toBe(16);
+    for (let tick = 0; tick < 240; tick++) runFan(ctx, em);
+    expect(em.attacks).toBe(15);
+    expect(fanOf(fans([], { values: { attackSpeed: 12 } })).interval).toBe(TICK_RATE / 11.25);
+    expect(fanOf(fans([], { values: { attackSpeed: 6 } })).interval).toBe(TICK_RATE / 5.625);
   });
 
   it('fires nothing and banks nothing while no enemy is alive', () => {

@@ -8,7 +8,9 @@
  * the web that says which ascendancy is chosen (the chains are bought on the web, with 迴響).
  * The rules are src/meta/web's; the panel only draws them and hands each new progress to the host.
  *
- * Search, filters, loadouts, the DPS preview and suggested nodes are later batches.
+ * The last death's suggested nodes are ringed (gd §8 item 8), and a node's tooltip previews its
+ * DPS change (gd §8 item 7). Search, filters and loadouts are
+ * later batches.
  */
 
 import { formatNum } from '../../core/format';
@@ -19,6 +21,9 @@ import { MESSAGES } from '../../i18n';
 import type { Locale, MessageKey } from '../../i18n';
 import { buy, buyPath, outerView, prestige, refundAll, refundNode } from '../../meta/web';
 import type { AccountProgress, CharacterProgress } from '../../meta/web';
+import { readDps, withRanks } from '../../meta/web/dps';
+import type { DpsReading } from '../../meta/web/dps';
+import type { GameData } from '../../data/types';
 import { previewCard } from '../web/card';
 import { say } from '../web/names';
 import { messageLookup } from '../web/text';
@@ -26,6 +31,7 @@ import type { TextLookup } from '../web/text';
 import type { ClickPlan, WebModel } from './model';
 import {
   ascendancyLine,
+  maxRankOf,
   nodeTip,
   planClick,
   prestigeLines,
@@ -59,6 +65,10 @@ export interface WebPanelOptions {
   readonly onStartRun: () => void;
   /** Back to the character select. */
   readonly onBack: () => void;
+  /** The last death's suggested nodes (gd §8 item 8): ringed until maxed or the next run ends. */
+  readonly suggested?: readonly string[];
+  /** The run's game data: with it the tooltip previews the node's DPS change (gd §8 item 7). */
+  readonly data?: GameData;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -123,6 +133,13 @@ export class WebPanel {
   private prestigeOpen = false;
   private drag: { x: number; y: number; camera: Camera; moved: boolean } | null = null;
   private destroyed = false;
+  /** The DPS preview's readings for one progress: before, and after one more rank of a node. */
+  private dps: {
+    readonly progress: CharacterProgress;
+    before: DpsReading | null;
+    readonly after: Map<string, DpsReading>;
+  } | null = null;
+  private dpsTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(parent: HTMLElement, options: WebPanelOptions) {
     this.options = options;
@@ -237,6 +254,7 @@ export class WebPanel {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (this.dpsTimer !== null) clearTimeout(this.dpsTimer);
     this.resize?.disconnect();
     for (const cleanup of this.cleanups) cleanup();
     this.root.remove();
@@ -272,6 +290,7 @@ export class WebPanel {
       scale,
       lookup: this.lookup,
       path: new Set(this.pending?.ids ?? []),
+      suggested: new Set(this.options.suggested ?? []),
     });
     this.applyCamera();
     this.drawWallet();
@@ -412,6 +431,8 @@ export class WebPanel {
     const kind = tip.rank === null ? tip.kind : `${tip.kind} · ${tip.rank}`;
     rows.push(el(this.doc, 'div', 'v3p-tip-kind', kind));
     for (const line of tip.lines) rows.push(el(this.doc, 'div', 'v3p-tip-line', line));
+    const dps = this.dpsLine(id);
+    if (dps !== null) rows.push(el(this.doc, 'div', 'v3p-tip-dps', dps));
     if (tip.price !== null) rows.push(el(this.doc, 'div', 'v3p-tip-price', tip.price));
     const pending = this.pending?.id === id;
     const actionText = pending ? this.t('panel.tip.pathPending') : tip.action;
@@ -424,6 +445,45 @@ export class WebPanel {
     this.tip.replaceChildren(...rows);
     this.tip.hidden = false;
     this.placeTip();
+  }
+
+  /**
+   * 「對一般怪 1.2K → 1.9K、對 Boss 8K → 9K」 (gd §8 item 7) for a node that can take a rank: the
+   * probes (src/meta/web/dps.ts) run a moment after the hover settles, and the tip redraws.
+   */
+  private dpsLine(id: string): string | null {
+    const data = this.options.data;
+    if (data === undefined || id === this.web.root) return null;
+    const max = maxRankOf(this.web, id);
+    if (max !== null && (this.progress.ranks[id] ?? 0) >= max) return null;
+    if (this.dps?.progress !== this.progress) {
+      this.dps = { progress: this.progress, before: null, after: new Map() };
+    }
+    const before = this.dps.before;
+    const after = this.dps.after.get(id);
+    if (before === null || after === undefined) {
+      this.scheduleDps(id, data);
+      return this.t('panel.tip.dpsPending');
+    }
+    const f = (value: DpsReading['crowd']): string => formatNum(value, FORMAT);
+    return this.t('panel.tip.dps', {
+      crowd: f(before.crowd),
+      crowdAfter: f(after.crowd),
+      boss: f(before.boss),
+      bossAfter: f(after.boss),
+    });
+  }
+
+  private scheduleDps(id: string, data: GameData): void {
+    if (this.dpsTimer !== null) clearTimeout(this.dpsTimer);
+    this.dpsTimer = setTimeout(() => {
+      this.dpsTimer = null;
+      const cache = this.dps;
+      if (this.destroyed || this.hovered !== id || cache?.progress !== this.progress) return;
+      cache.before ??= readDps(this.web, this.progress, data);
+      cache.after.set(id, readDps(this.web, withRanks(this.progress, [id]), data));
+      this.drawTip();
+    }, 120);
   }
 
   private placeTip(): void {

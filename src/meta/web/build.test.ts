@@ -304,6 +304,7 @@ describe('webRunConfig', () => {
       'src/app/replay/build.ts webRunConfig',
       'src/app/v3/run.ts webRunConfig',
       'src/meta/web/calibrate.ts webRunConfig',
+      'src/meta/web/dps.ts webRunConfig',
       'src/meta/web/fuzz.ts webRunConfig',
       'tools/balance/v3/checks/c7.ts cappedRunConfig',
       'tools/balance/v3/measures.ts webRunConfig',

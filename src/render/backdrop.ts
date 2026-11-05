@@ -76,10 +76,12 @@ const HEAT_RADIUS = 520;
  * The arena of a v3 character run (CharacterDef.arena): 熔核's ('fire') is charcoal with a forge
  * grate, concentric rings and spokes around the player, and a faint heat at its center; the
  * scorch marks are a layer of their own (src/render/magma.ts). 蜂巢's ('summon') is its comb
- * (createHiveBackdrop). Any other arena is M1's backdrop until its batch draws it.
+ * (createHiveBackdrop), 霜晶's ('ice') its frozen lattice (createFrostBackdrop). Any other arena
+ * is M1's backdrop until its batch draws it.
  */
 export function createArenaBackdrop(arena: string): Container {
   if (arena === 'summon') return createHiveBackdrop();
+  if (arena === 'ice') return createFrostBackdrop();
   if (arena !== 'fire') return createBackdrop();
   const A = ARENA_COLORS.fire;
   const root = new Container({ label: 'backdrop-fire' });
@@ -202,6 +204,84 @@ function createHiveBackdrop(): Container {
     seats.stroke({ width: radius === SEAT_RADII[0] ? 2 : 1.4, color: A.seat, alpha: 0.55 });
   }
   root.addChild(seats);
+
+  const vignette = new Sprite(createVignetteTexture());
+  vignette.width = ARENA_WIDTH;
+  vignette.height = ARENA_HEIGHT;
+  root.addChild(vignette);
+  return root;
+}
+
+/** The triangle lattice's spacing between parallel lines. */
+const LATTICE_STEP = 72;
+/** Every LATTICE_HOT_EVERY-th line of each family is a little brighter. */
+const LATTICE_HOT_EVERY = 3;
+/** How far the frost rim reaches in from the arena's edges, and its bands. */
+const FROST_REACH = 150;
+const FROST_BANDS = 10;
+const CRYSTAL_GLOW_RADIUS = 380;
+
+/**
+ * 霜晶's arena ('ice', gd §11.5): deep blue under a triangle lattice (three families of parallel
+ * lines, 60° apart, through the center), a cold glow over the crystal, and frost that grows in
+ * from the arena's edges as bands of fading white-blue; drawn once.
+ */
+function createFrostBackdrop(): Container {
+  const A = ARENA_COLORS.ice;
+  const root = new Container({ label: 'backdrop-ice' });
+  const cx = ARENA_WIDTH / 2;
+  const cy = ARENA_HEIGHT / 2;
+  root.addChild(new Graphics().rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT).fill(A.floor));
+
+  const glow = new Sprite(createGlowTexture());
+  glow.anchor.set(0.5);
+  glow.position.set(cx, cy);
+  glow.width = CRYSTAL_GLOW_RADIUS * 2;
+  glow.height = CRYSTAL_GLOW_RADIUS * 2;
+  glow.tint = A.glow;
+  glow.alpha = 0.6;
+  glow.blendMode = 'add';
+  root.addChild(glow);
+
+  const lattice = new Graphics();
+  const hot = new Graphics();
+  const reach = Math.hypot(cx, cy);
+  for (let family = 0; family < 3; family++) {
+    const angle = (family * Math.PI) / 3;
+    // The family's direction and its normal; each line is offset k steps along the normal.
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    const steps = Math.ceil(reach / LATTICE_STEP);
+    for (let k = -steps; k <= steps; k++) {
+      const ox = cx - dy * k * LATTICE_STEP;
+      const oy = cy + dx * k * LATTICE_STEP;
+      const g = k % LATTICE_HOT_EVERY === 0 ? hot : lattice;
+      g.moveTo(ox - dx * reach, oy - dy * reach).lineTo(ox + dx * reach, oy + dy * reach);
+    }
+  }
+  lattice.stroke({ width: 1, color: A.lattice, alpha: 0.8 });
+  hot.stroke({ width: 1.5, color: A.latticeHot, alpha: 0.8 });
+  const clip = new Graphics().rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT).fill(0xffffff);
+  const lines = new Container();
+  lines.addChild(lattice, hot);
+  lines.mask = clip;
+  root.addChild(clip, lines);
+
+  const frost = new Graphics();
+  for (let b = 0; b < FROST_BANDS; b++) {
+    const inset = (b / FROST_BANDS) * FROST_REACH;
+    const width = FROST_REACH / FROST_BANDS;
+    frost
+      .rect(inset, inset, ARENA_WIDTH - inset * 2, ARENA_HEIGHT - inset * 2)
+      .stroke({ width, color: A.frost, alpha: 0.11 * (1 - b / FROST_BANDS) ** 2, alignment: 0 });
+  }
+  frost.rect(0, 0, ARENA_WIDTH, ARENA_HEIGHT).stroke({
+    width: 2,
+    color: A.edge,
+    alpha: 0.9,
+    alignment: 1,
+  });
+  root.addChild(frost);
 
   const vignette = new Sprite(createVignetteTexture());
   vignette.width = ARENA_WIDTH;

@@ -105,6 +105,18 @@ export const ARENA_COLORS = {
     /** A faint glow over the nest, far dimmer than M1's light pool. */
     glow: 0x1b5e52,
   },
+  ice: {
+    /** Deep blue. */
+    floor: 0x060d1c,
+    /** The triangle lattice, and every third line of each family a little brighter. */
+    lattice: 0x12274a,
+    latticeHot: 0x1d3c66,
+    edge: 0x2a5784,
+    /** The frost that grows in from the arena's edges. */
+    frost: 0xbfeaff,
+    /** A faint cold light over the crystal, far dimmer than M1's light pool. */
+    glow: 0x1d4f7a,
+  },
 } as const;
 
 /**

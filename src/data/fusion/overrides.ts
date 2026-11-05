@@ -45,6 +45,39 @@ export const OVERRIDES: Readonly<Partial<Record<FusionKey, FusionOverride>>> = {
   // 冰召喚「霜蜂」 (gd §5.2): drone impacts add 12% chill; an impact on a frozen enemy (no boss)
   // shatters it.
   'summon.ice': { rule: { id: 'frostBee', frostPct: 0.12 } },
+  // 冰火「熱震」 (gd §5.2): a freeze ignites the target 2 stacks; a frozen enemy that is ignited
+  // takes one 200% hit (the thaw waits on the engine, src/sim/rules/frostFusions.ts).
+  'ice.fire': { rule: { id: 'thermalShock', burnStacks: 2, hitPct: 2 } },
+  // 冰雷「超導」 (gd §5.2): a freeze arcs to the 3 nearest enemies, each arc +20% chill; a shocked
+  // enemy's chill builds ×1.5. The arcs' hit (50%) is B3's initial value.
+  'ice.lightning': {
+    rule: { id: 'superconduct', arcs: 3, arcDamagePct: 0.5, frostPct: 0.2, shockFrostMore: 0.5 },
+  },
+  // 冰靈「冰晶哨」 (gd §5.2): a shatter leaves, 25% of the time, a 5 s ice sentry that shoots
+  // cones, at most 4. Its cones (5 shots of 40%) are B3's initial values.
+  'ice.summon': {
+    rule: {
+      id: 'frostSentry',
+      chance: 0.25,
+      lifeSec: 5,
+      maxLive: 4,
+      everySec: 0.5,
+      range: 300,
+      count: 3,
+      spreadDeg: 30,
+      damagePct: 0.3,
+    },
+  },
+  // 火雷「電漿」 (gd §5.2): each explosion arcs from every burning enemy in it at the nearest enemy,
+  // at most 3 a bomb; shocked enemies take +30% burn damage. The arc's hit (50%) is B3's.
+  'fire.lightning': {
+    rule: { id: 'plasma', arcsPerBlast: 3, arcDamagePct: 0.5, shockBurnMore: 0.3 },
+  },
+  // 雷召喚「雷網蜂」 (gd §5.2): every 0.5 s each drone links to its nearest other drone; every
+  // 0.25 s each enemy on a link takes a 10% hit and a shock stack.
+  'summon.lightning': {
+    rule: { id: 'stormWeb', damagePct: 0.1, periodSec: 0.25, pairPeriodSec: 0.5 },
+  },
 };
 
 /** Fusions accepted outside the band, each with the reason the batch PR quotes (F21). */
@@ -72,6 +105,36 @@ export const ACCEPTED_FAILS: Readonly<Partial<Record<FusionKey, string>>> = {
     'B2: insensitive at the probe: drone impacts kill their targets, so 毒泡 has nothing left to poison; the template keeps coef 1',
   'summon.crit':
     'B2: insensitive at the probe (median 1.01): the probe is held by leaks, not damage per target, so 刃翼 cannot move it; the template keeps coef 1',
+  // B3: the probes (8 center nodes at rank 1 + 6 outer) sit at waves ~4-10 as B1's and B2's do.
+  // 霜晶's freeze needs about 10 cone hits on one enemy, and at waves 4-7 most enemies die to the
+  // cones before they freeze, so the freeze payloads have few freezes to ride; 熔核's and 蜂巢's
+  // targets die to the bomb or the impact before a bleed or an arc can matter.
+  'ice.fire':
+    'B3: spread at coef 2.09 (median 1.20, seeds 1.03–1.74): at the probe (wave ~5) few enemies live to freeze, so a seed reads 0 or several 熱震 hits',
+  'ice.lightning':
+    'B3: insensitive at the probe (wave ~5): few freezes, and the arcs land on enemies the cones kill anyway; 超導 keeps the gd numbers',
+  'ice.summon':
+    'B3: insensitive at the probe (wave ~9): a shatter needs a kill while frozen, which the probe barely makes; 冰晶哨 keeps the gd numbers',
+  'ice.poison':
+    'B3: spread at coef 4.18 (median 1.07): few freezes at the probe (wave ~5), so poison on freeze reads mostly nothing',
+  'ice.bleed':
+    'B3: spread at coef 2.35 (median 1.26, seeds 1.02–1.68): few freezes at the probe (wave ~5); the seeds that freeze early read high',
+  'ice.crit':
+    'B3: spread at coef 5.55 (median 1.19, seeds 1.00–1.38): few freezes at the probe (wave ~5), so the slash fires rarely',
+  'ice.barrage':
+    'B3: insensitive at the probe (wave ~6): few freezes, and 4 small projectiles at 25% kill nothing the cones do not',
+  'fire.lightning':
+    'B3: insensitive at the probe (wave ~4): every enemy a bomb reaches dies to its hit, so 電漿 finds no burning target left',
+  'fire.bleed':
+    'B3: insensitive at the probe (wave ~4): every enemy a bomb reaches dies to its hit before a bleed ticks',
+  'fire.barrage':
+    'B3: spread at coef 1.04 (median 1.12, seeds 0.95–1.73): at the probe (wave ~4) the bombs hold the frontier by coverage, and the radial bullets reach the few that slip by',
+  'summon.lightning':
+    'B3: insensitive at the probe (wave ~10): with 3 drones the web links few enemies, and the impacts kill them anyway; 雷網蜂 keeps the gd numbers',
+  'summon.bleed':
+    'B3: insensitive at the probe (wave ~4): drone impacts kill their targets, so 血蛭 has nothing left to bleed; the template keeps coef 1',
+  'summon.barrage':
+    'B3: weak at coef 10 (median 1.07): the probe is held by leaks, not damage per target; the bullets help a little at any coef',
 };
 
 /**

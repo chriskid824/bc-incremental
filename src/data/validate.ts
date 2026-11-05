@@ -816,6 +816,9 @@ function ruleIssues(rule: RuleSpec): string[] {
       break;
     case 'lockBeacon':
     case 'focusFire':
+    case 'shatterChain':
+    case 'bulletHell':
+    case 'frozenNoSplit':
       break;
     case 'cannon':
       // The engine refuses a turret rate factor that is not finite and above 0, and a negative splash.
@@ -958,6 +961,125 @@ function ruleIssues(rule: RuleSpec): string[] {
     case 'frostBee':
       if (!(rule.frostPct > 0 && rule.frostPct <= 1)) {
         issues.push(`frostBee.frostPct must be in (0, 1] (got ${rule.frostPct})`);
+      }
+      break;
+    case 'thermalShock':
+      if (!isPositiveInt(rule.burnStacks)) {
+        issues.push(`thermalShock.burnStacks must be a positive integer (got ${rule.burnStacks})`);
+      }
+      if (!(rule.hitPct > 0 && Number.isFinite(rule.hitPct))) {
+        issues.push(`thermalShock.hitPct must be finite and > 0 (got ${rule.hitPct})`);
+      }
+      break;
+    case 'superconduct':
+      if (!(isPositiveInt(rule.arcs) && rule.arcs <= 32)) {
+        issues.push(`superconduct.arcs must be an integer in [1, 32] (got ${rule.arcs})`);
+      }
+      if (!(rule.arcDamagePct >= 0 && Number.isFinite(rule.arcDamagePct))) {
+        issues.push(`superconduct.arcDamagePct must be finite and >= 0 (got ${rule.arcDamagePct})`);
+      }
+      if (!(rule.frostPct > 0 && rule.frostPct <= 1)) {
+        issues.push(`superconduct.frostPct must be in (0, 1] (got ${rule.frostPct})`);
+      }
+      if (!(rule.shockFrostMore >= 0 && Number.isFinite(rule.shockFrostMore))) {
+        issues.push(
+          `superconduct.shockFrostMore must be finite and >= 0 (got ${rule.shockFrostMore})`,
+        );
+      }
+      break;
+    case 'frostSentry':
+      if (!(rule.chance > 0 && rule.chance <= 1)) {
+        issues.push(`frostSentry.chance must be in (0, 1] (got ${rule.chance})`);
+      }
+      // E8's seated row: a clock of at least one tick, a finite range, a fan of 1-8.
+      if (!(Number.isFinite(rule.everySec) && Math.round(rule.everySec * TICKS_PER_SEC) >= 1)) {
+        issues.push(
+          `frostSentry.everySec must be finite and at least a tick (got ${rule.everySec})`,
+        );
+      }
+      if (!(rule.range > 0 && Number.isFinite(rule.range))) {
+        issues.push(`frostSentry.range must be finite and > 0 (got ${rule.range})`);
+      }
+      if (!(isPositiveInt(rule.count) && rule.count <= 8)) {
+        issues.push(`frostSentry.count must be an integer in [1, 8] (got ${rule.count})`);
+      }
+      if (!(rule.spreadDeg >= 0 && rule.spreadDeg <= 180)) {
+        issues.push(`frostSentry.spreadDeg must be in [0, 180] (got ${rule.spreadDeg})`);
+      }
+      issues.push(...timedDroneIssues('frostSentry', rule.lifeSec, rule.damagePct, rule.maxLive));
+      break;
+    case 'plasma':
+      if (!isPositiveInt(rule.arcsPerBlast)) {
+        issues.push(`plasma.arcsPerBlast must be a positive integer (got ${rule.arcsPerBlast})`);
+      }
+      if (!(rule.arcDamagePct > 0 && Number.isFinite(rule.arcDamagePct))) {
+        issues.push(`plasma.arcDamagePct must be finite and > 0 (got ${rule.arcDamagePct})`);
+      }
+      if (!(rule.shockBurnMore >= 0 && Number.isFinite(rule.shockBurnMore))) {
+        issues.push(`plasma.shockBurnMore must be finite and >= 0 (got ${rule.shockBurnMore})`);
+      }
+      break;
+    case 'hemorrhage':
+      if (!(isPositiveInt(rule.maxStacks) && rule.maxStacks <= 8)) {
+        issues.push(`hemorrhage.maxStacks must be an integer in [1, 8] (got ${rule.maxStacks})`);
+      }
+      break;
+    case 'bulletRain':
+      if (!(rule.periodSec > 0 && Number.isFinite(rule.periodSec))) {
+        issues.push(`bulletRain.periodSec must be finite and > 0 (got ${rule.periodSec})`);
+      }
+      if (!(rule.durationSec > 0 && rule.durationSec <= rule.periodSec)) {
+        issues.push(`bulletRain.durationSec must be in (0, periodSec] (got ${rule.durationSec})`);
+      }
+      // E10b's rain param: a whole factor in [2, 4], and a window of a tick or more inside its period.
+      if (!(isPositiveInt(rule.countMult) && rule.countMult >= 2 && rule.countMult <= 4)) {
+        issues.push(`bulletRain.countMult must be an integer in [2, 4] (got ${rule.countMult})`);
+      }
+      if (!(
+        Math.round(rule.durationSec * TICKS_PER_SEC) >= 1 &&
+        Math.round(rule.durationSec * TICKS_PER_SEC) < Math.round(rule.periodSec * TICKS_PER_SEC)
+      )) {
+        issues.push(
+          `bulletRain.durationSec must be at least a tick and under periodSec (got ${rule.durationSec})`,
+        );
+      }
+      break;
+    case 'barrageFan':
+      if (!(rule.spreadDeg > 0 && rule.spreadDeg < 360)) {
+        issues.push(`barrageFan.spreadDeg must be in (0, 360) (got ${rule.spreadDeg})`);
+      }
+      break;
+    case 'barrageRing':
+      if (!(Number.isInteger(rule.every) && rule.every >= 1 && rule.every <= 60)) {
+        issues.push(`barrageRing.every must be an integer in [1, 60] (got ${rule.every})`);
+      }
+      if (!(Number.isInteger(rule.directions) && rule.directions >= 1 && rule.directions <= 64)) {
+        issues.push(
+          `barrageRing.directions must be an integer in [1, 64] (got ${rule.directions})`,
+        );
+      }
+      break;
+    case 'clusterShot':
+      if (!(Number.isInteger(rule.count) && rule.count >= 1 && rule.count <= 8)) {
+        issues.push(`clusterShot.count must be an integer in [1, 8] (got ${rule.count})`);
+      }
+      if (!(rule.chance >= 0 && rule.chance <= 1)) {
+        issues.push(`clusterShot.chance must be in [0, 1] (got ${rule.chance})`);
+      }
+      break;
+    case 'barrageFocus':
+      if (!(rule.bonus >= 0 && rule.bonus <= 4)) {
+        issues.push(`barrageFocus.bonus must be in [0, 4] (got ${rule.bonus})`);
+      }
+      break;
+    case 'stormWeb':
+      if (!(rule.damagePct > 0 && Number.isFinite(rule.damagePct))) {
+        issues.push(`stormWeb.damagePct must be finite and > 0 (got ${rule.damagePct})`);
+      }
+      for (const field of ['periodSec', 'pairPeriodSec'] as const) {
+        if (!(rule[field] > 0 && Number.isFinite(rule[field]))) {
+          issues.push(`stormWeb.${field} must be finite and > 0 (got ${rule[field]})`);
+        }
       }
       break;
   }
@@ -1880,6 +2002,20 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'zoneTune':
     case 'flameBee':
     case 'frostBee':
+    case 'thermalShock':
+    case 'superconduct':
+    case 'frostSentry':
+    case 'plasma':
+    case 'stormWeb':
+    case 'hemorrhage':
+    case 'bulletRain':
+    case 'barrageFan':
+    case 'barrageRing':
+    case 'clusterShot':
+    case 'barrageFocus':
+    case 'shatterChain':
+    case 'bulletHell':
+    case 'frozenNoSplit':
       return [];
   }
 }

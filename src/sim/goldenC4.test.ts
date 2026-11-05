@@ -3188,7 +3188,7 @@ const ENTRIES: readonly GoldenC4Entry[] = [
       signature: { id: 'iceFan' },
       startWave: 12,
     },
-    expected: ['527efef683bfb207', '992e37c19000ccfb'],
+    expected: ['14dedd6f169ceb48', '7829cf2f26697092'],
   },
   {
     name: 'triphaseArc',
@@ -3280,7 +3280,7 @@ const ENTRIES: readonly GoldenC4Entry[] = [
       },
       startWave: 12,
     },
-    expected: ['75d7b40db114dfc0', 'cb670b31d3706200'],
+    expected: ['4a34a2934cc00d99', '643e54b1517f13ef'],
   },
   {
     name: 'v3lightning',

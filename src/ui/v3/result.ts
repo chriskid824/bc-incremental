@@ -3,7 +3,8 @@
  * B1's bullet lines, Q11), how far it got, the shards and cores it earned and the character's best
  * wave, one tip on a death, and the way back to the talent web or straight into the next run; on
  * the account's first 3 runs, once a second character is playable, 「換一個角色試試」 back to the
- * select screen (gd §1.1). It waits for the player: no countdown, since the web is where the
+ * select screen (gd §1.1); after a death, 建議: the nodes the web rings and one outer (gd §8
+ * items 8 and 14). It waits for the player: no countdown, since the web is where the
  * shards go.
  */
 
@@ -38,6 +39,18 @@ export interface V3ResultInfo extends V3RunEndFacts {
   readonly damage: DamageBreakdownView;
   /** 控場: the run's freezes and shatters. */
   readonly control: ControlCounts;
+  /** 建議 (gd §8 items 8 and 14, A.4), after a death: null otherwise. */
+  readonly suggestions?: V3Suggestions | null;
+}
+
+/** The death review's suggestions, named: the web rings the nodes. */
+export interface V3Suggestions {
+  readonly nodes: readonly string[];
+  readonly outer: {
+    readonly outer: string;
+    readonly enemy: string;
+    readonly cover: 'answer' | 'helps';
+  } | null;
 }
 
 export interface V3ResultActions {
@@ -140,6 +153,10 @@ export class V3ResultPanel {
     if (info.control.freezes > 0 || info.control.slowedShare > 0) {
       parts.push(this.controlSection(info.control));
     }
+    if (info.suggestions !== undefined && info.suggestions !== null) {
+      const section = this.suggestSection(info.suggestions);
+      if (section !== null) parts.push(section);
+    }
     const tips = [text.lowerStart, text.tip].filter((line): line is string => line !== null);
     if (tips.length > 0) {
       const tip = el(doc, 'div', 'bc-result-tip');
@@ -180,6 +197,30 @@ export class V3ResultPanel {
     };
     list(t('v3.result.damageSources'), view.sources);
     list(t('v3.result.damageKinds'), view.kinds);
+    return section;
+  }
+
+  /** 建議: the nodes the web rings, and one outer that covers the main threat. */
+  private suggestSection(suggestions: V3Suggestions): HTMLElement | null {
+    const doc = this.doc;
+    const lines: string[] = [];
+    if (suggestions.nodes.length > 0) {
+      lines.push(
+        t('v3.result.suggestNodes', { nodes: suggestions.nodes.join(t('web.join.list')) }),
+      );
+    }
+    const outer = suggestions.outer;
+    if (outer !== null) {
+      const key =
+        outer.cover === 'answer' ? 'v3.result.suggestOuter' : 'v3.result.suggestOuterHelps';
+      lines.push(t(key, { outer: outer.outer, enemy: outer.enemy }));
+    }
+    if (lines.length === 0) return null;
+    const section = el(doc, 'div', 'bc-result-tip bc-result-suggest');
+    section.append(...lines.map((line) => el(doc, 'div', 'bc-result-tip-line', line)));
+    section.firstElementChild?.prepend(
+      el(doc, 'span', 'bc-result-tip-label', t('v3.result.suggestLabel')),
+    );
     return section;
   }
 

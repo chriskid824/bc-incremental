@@ -45,6 +45,8 @@ export type { BuyReason } from './rules';
 export { buyPath, planPath } from './path';
 export type { PathPlan } from './path';
 export { outerView, revealedOuters } from './reveal';
+export { suggest, SUGGESTED_NODES, threatsOf } from './suggest';
+export type { SuggestedNode, SuggestedOuter, Suggestions, ThreatTallies } from './suggest';
 export { settleWebRun, webBuild, webRunConfig, webStartWave } from './build';
 export type { WebRun } from './build';
 export { defaultProgress, progressFromOrder, unlockInvestment } from './invest';

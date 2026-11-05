@@ -1,5 +1,5 @@
 /**
- * iceFan: 霜晶's attack as a signature emitter (src/sim/emitters/fan.ts). It fires 2.5 rounds a
+ * iceFan: 霜晶's attack as a signature emitter (src/sim/emitters/fan.ts). It fires 3.75 rounds a
  * second at the base attack speed, each round projectileCount + 3 cones (five at the base 2; the
  * fraction the chance of one more), spread evenly over 30° about the round's target: straight
  * shots of 40% of the damage stat, tagged hit, projectile and cold, that fly at projectileSpeed
@@ -24,7 +24,7 @@ export const iceFan: SignatureModule<Extract<SignatureSpec, { id: 'iceFan' }>> =
     chains: true,
     rollsAilments: true,
     canCrit: true,
-    baseRate: 2.5,
+    baseRate: 3.75,
     spreadDeg: 30,
     pierce: 1,
     lifeTicks: 120,

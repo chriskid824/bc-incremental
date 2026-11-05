@@ -82,7 +82,15 @@ describe('the characters (D14, F44)', () => {
     },
   );
 
-  it.each(CHARACTER_IDS.filter((c) => c !== 'fire' && c !== 'summon'))(
+  it('builds ice (B3) with its center and its 預設 build; its ascendancies are B5s', () => {
+    const def = CHARACTERS.ice;
+    expect(def.center?.nodes).toHaveLength(40);
+    expect(def.ascendancies).toBeNull();
+    expect(def.defaultOrder.length).toBeGreaterThan(0);
+    expect(CharacterDefSchema.safeParse(def).success).toBe(true);
+  });
+
+  it.each(CHARACTER_IDS.filter((c) => c === 'lightning'))(
     'builds %s as 「製作中」: no center, no ascendancies, no 預設 build',
     (c) => {
       const def = CHARACTERS[c];

@@ -668,6 +668,69 @@ export const RuleSpecSchema = exact<RuleSpec>()(
       })
       .readonly(),
     z.strictObject({ id: z.literal('frostBee'), frostPct: finite }).readonly(),
+    z
+      .strictObject({ id: z.literal('thermalShock'), burnStacks: finite, hitPct: finite })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('superconduct'),
+        arcs: finite,
+        arcDamagePct: finite,
+        frostPct: finite,
+        shockFrostMore: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('frostSentry'),
+        chance: finite,
+        lifeSec: finite,
+        maxLive: finite,
+        everySec: finite,
+        range: finite,
+        count: finite,
+        spreadDeg: finite,
+        damagePct: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('plasma'),
+        arcsPerBlast: finite,
+        arcDamagePct: finite,
+        shockBurnMore: finite,
+      })
+      .readonly(),
+    z.strictObject({ id: z.literal('hemorrhage'), maxStacks: finite }).readonly(),
+    z.strictObject({ id: z.literal('shatterChain') }).readonly(),
+    z.strictObject({ id: z.literal('bulletHell') }).readonly(),
+    z.strictObject({ id: z.literal('frozenNoSplit') }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('bulletRain'),
+        periodSec: finite,
+        durationSec: finite,
+        countMult: finite,
+      })
+      .readonly(),
+    z.strictObject({ id: z.literal('barrageFan'), spreadDeg: finite }).readonly(),
+    z.strictObject({ id: z.literal('barrageRing'), every: finite, directions: finite }).readonly(),
+    z.strictObject({ id: z.literal('clusterShot'), count: finite, chance: finite }).readonly(),
+    z
+      .strictObject({
+        id: z.literal('barrageFocus'),
+        bonus: finite,
+        when: z.enum(['boss', 'lastAlive']),
+      })
+      .readonly(),
+    z
+      .strictObject({
+        id: z.literal('stormWeb'),
+        damagePct: finite,
+        periodSec: finite,
+        pairPeriodSec: finite,
+      })
+      .readonly(),
   ]),
 );
 

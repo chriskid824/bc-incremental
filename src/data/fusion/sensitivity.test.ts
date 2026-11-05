@@ -228,7 +228,16 @@ describe('coefRange', () => {
     };
 
     it('has none without a RULE_COEF_FIELDS entry, as every fixture hand core', () => {
-      expect(Object.keys(RULE_COEF_FIELDS)).toEqual(['frostflame', 'flameBee', 'frostBee']);
+      expect(Object.keys(RULE_COEF_FIELDS)).toEqual([
+        'frostflame',
+        'flameBee',
+        'frostBee',
+        'thermalShock',
+        'superconduct',
+        'frostSentry',
+        'plasma',
+        'stormWeb',
+      ]);
       expect(coefRange(fusion('ice.fire'))).toBeNull();
       expect(
         coefRange(fusion('fire.lightning'), { steadyAim: { critMultiplierMore: 'pct' } }),

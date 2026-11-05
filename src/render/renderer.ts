@@ -130,6 +130,9 @@ const SHELL_BREAK_MS = 420;
 
 const CENTER_X = ARENA_WIDTH / 2;
 const CENTER_Y = ARENA_HEIGHT / 2;
+/** 血河's red trail (gd §4.3): the bleed outer's crimson, #D7263D. */
+const BLOOD_TRAIL_COLOR = 0xd7263d;
+const BLOOD_TRAIL_WIDTH = 6;
 
 export class Renderer {
   private readonly world = new Container({ label: 'world' });
@@ -160,6 +163,8 @@ export class Renderer {
   private readonly swarm: SwarmLayer | null;
   /** The crit slash lines; only on a character run. */
   private readonly slashes: SlashLayer | null;
+  /** 血河 (E9): each bleed spread that reached an enemy draws a red trail outward. */
+  private readonly bloodTrails: SlashLayer | null;
   /**
    * The segment emitters' links, under the enemies; made by the first render() of a state with
    * a segment emitter (a non-empty SimState.segments.lines), null until then.
@@ -257,6 +262,7 @@ export class Renderer {
       look === null
         ? null
         : new SlashLayer(textures.streak, fusionSkin(look, 'crit')?.accent ?? MAGMA_COLORS.slash);
+    this.bloodTrails = look === null ? null : new SlashLayer(textures.streak, BLOOD_TRAIL_COLOR);
     if (look !== null) this.numbers.setHitColor(hitNumberColor(look));
     // An M1 run has no bullet and no shield: on M1 data neither layer exists.
     const v3 = data.waves.v3 !== undefined;
@@ -286,6 +292,7 @@ export class Renderer {
       ...(this.bullets === null ? [] : [this.bullets.view]),
       ...(this.magma === null ? [] : [this.magma.airView]),
       ...(this.slashes === null ? [] : [this.slashes.view]),
+      ...(this.bloodTrails === null ? [] : [this.bloodTrails.view]),
       this.arcs.view,
       this.fx.view,
       this.shards.view,
@@ -316,6 +323,7 @@ export class Renderer {
     this.magma?.reset();
     this.swarm?.reset();
     this.slashes?.clear();
+    this.bloodTrails?.clear();
     this.segmentLines?.clear();
     this.coreHits.reset();
     this.shake.reset();
@@ -432,10 +440,11 @@ export class Renderer {
         case 'ailmentApplied':
           if (this.magma !== null && event.ailment === 'poison') this.onPoisoned(event.targetId);
           break;
-        // A bleed spread (血河, E9) draws nothing yet: its red trail is content batch B3's.
         case 'ailmentSpread':
           if (event.ailment === 'poison') {
             this.magma?.poisonSpread(event.x, event.y, event.radius, event.targets);
+          } else if (event.ailment === 'bleed' && event.targets > 0) {
+            this.bloodTrail(event.x, event.y, event.radius);
           }
           break;
         case 'waveCleared':
@@ -446,6 +455,19 @@ export class Renderer {
       }
     }
     this.magma?.flushTick();
+  }
+
+  /**
+   * 血河's trail: from the bleeding enemy at (x, y) outward, away from the centre, `radius` long
+   * (the spread's copies go only to enemies farther out). The event names no targets.
+   */
+  private bloodTrail(x: number, y: number, radius: number): void {
+    if (this.bloodTrails === null) return;
+    const dx = x - CENTER_X;
+    const dy = y - CENTER_Y;
+    const d = Math.hypot(dx, dy);
+    if (d < 1e-6) return;
+    this.bloodTrails.add(x, y, x + (dx / d) * radius, y + (dy / d) * radius, BLOOD_TRAIL_WIDTH);
   }
 
   /** Draws the state, interpolating positions by `alpha` between the last two ticks. */
@@ -489,6 +511,7 @@ export class Renderer {
       dt,
     );
     this.slashes?.update(dt);
+    this.bloodTrails?.update(dt);
     this.arcs.update(dt);
     this.rings.update(dt);
     this.flames.update(dt);

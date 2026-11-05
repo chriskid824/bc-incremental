@@ -260,7 +260,98 @@ export type RuleSpec =
    * and an impact on a frozen enemy that is no boss shatters it (an execute: the kill while
    * frozen is the shatter).
    */
-  | { readonly id: 'frostBee'; readonly frostPct: number };
+  | { readonly id: 'frostBee'; readonly frostPct: number }
+  /**
+   * 熱震 (霜晶's 冰火 hand core, gd §5.2): a freeze ignites burnStacks burn stacks on the frozen
+   * enemy (over the freeze's list), and a frozen enemy that is ignited takes a hit of hitPct of
+   * the damage stat (src/sim/rules/frostFusions.ts).
+   */
+  | { readonly id: 'thermalShock'; readonly burnStacks: number; readonly hitPct: number }
+  /**
+   * 超導 (霜晶's 冰雷 hand core, gd §5.2): a freeze sends a chain bolt through `arcs` enemies near
+   * the frozen one (arcDamagePct each, 1 shock stack) and adds frostPct chill to the `arcs`
+   * nearest; a shocked enemy gains shockFrostMore more frost (the largest entry's).
+   */
+  | {
+      readonly id: 'superconduct';
+      readonly arcs: number;
+      readonly arcDamagePct: number;
+      readonly frostPct: number;
+      readonly shockFrostMore: number;
+    }
+  /**
+   * 冰晶哨 (霜晶's 冰靈 hand core, gd §5.2): a shatter leaves, with `chance`, a sentry standing where
+   * it shattered for lifeSec (E8's seated row), at most maxLive at once; every everySec it fires a
+   * fan of `count` cones (spreadDeg) of damagePct each at the nearest enemy within `range`.
+   */
+  | {
+      readonly id: 'frostSentry';
+      readonly chance: number;
+      readonly lifeSec: number;
+      readonly maxLive: number;
+      readonly everySec: number;
+      readonly range: number;
+      readonly count: number;
+      readonly spreadDeg: number;
+      readonly damagePct: number;
+    }
+  /**
+   * 電漿 (熔核's 火雷 hand core, gd §5.2): each bomb explosion sends a one-jump chain bolt of
+   * arcDamagePct from each burning enemy it hit at the nearest enemy, at most arcsPerBlast a bomb;
+   * a shocked enemy takes shockBurnMore more burn damage (src/sim/rules/lightningFusions.ts).
+   */
+  | {
+      readonly id: 'plasma';
+      readonly arcsPerBlast: number;
+      readonly arcDamagePct: number;
+      readonly shockBurnMore: number;
+    }
+  /**
+   * 雷網蜂 (蜂巢's 雷召喚 hand core, gd §5.2): every pairPeriodSec each drone links to its nearest
+   * other drone; every periodSec each enemy on a link takes a hit of damagePct and a shock stack.
+   */
+  /**
+   * 大出血 (the bleed outer's ★, gd §4.3): bleeds stack, at most maxStacks an enemy (bleed rings),
+   * and a moving enemy no longer bleeds ×3 (src/sim/rules/hemorrhage.ts).
+   */
+  | { readonly id: 'hemorrhage'; readonly maxStacks: number }
+  /** ◆連鎖碎裂 (霜晶's center, E6): an enemy a shatter kills shatters too (src/sim/rules/shatterFlags.ts). */
+  | { readonly id: 'shatterChain' }
+  /**
+   * ★子彈地獄 (the barrage outer's keystone, gd §4.11, E10a): the rider sends ×2 small shots and
+   * they bounce off the arena's edge twice (src/sim/rules/bulletHell.ts).
+   */
+  | { readonly id: 'bulletHell' }
+  /** ◆粉碎 (霜晶's center, E6): an enemy that dies frozen does not split. */
+  | { readonly id: 'frozenNoSplit' }
+  /**
+   * 彈雨 (the barrage outer's threshold, gd §4.11, Q12 A): for the first durationSec of every
+   * periodSec, the barrage rider's small shots are ×countMult (src/sim/rules/bulletRain.ts).
+   */
+  | {
+      readonly id: 'bulletRain';
+      readonly periodSec: number;
+      readonly durationSec: number;
+      readonly countMult: number;
+    }
+  /** ◆扇形 (the barrage outer, E10b): every small shot at one target, over spreadDeg. */
+  | { readonly id: 'barrageFan'; readonly spreadDeg: number }
+  /** ◆環射 (the barrage outer, E10b): every `every`-th attack fires `directions` shots round. */
+  | { readonly id: 'barrageRing'; readonly every: number; readonly directions: number }
+  /** ◆子母彈 (the barrage outer, E10b): a small shot's kill splits it into `count`, with `chance`. */
+  | { readonly id: 'clusterShot'; readonly count: number; readonly chance: number }
+  /** ◆聚焦 (the barrage outer, E10b): while `when` holds, every small shot at it, at 1 + bonus. */
+  | {
+      readonly id: 'barrageFocus';
+      readonly bonus: number;
+      readonly when: 'boss' | 'lastAlive';
+    }
+  | {
+      readonly id: 'stormWeb';
+      readonly damagePct: number;
+      readonly periodSec: number;
+      readonly pairPeriodSec: number;
+    };
 
 export type RuleId = RuleSpec['id'];
 
@@ -303,6 +394,20 @@ export const RULE_IDS: readonly RuleId[] = [
   'zoneTune',
   'flameBee',
   'frostBee',
+  'thermalShock',
+  'superconduct',
+  'frostSentry',
+  'plasma',
+  'stormWeb',
+  'hemorrhage',
+  'bulletRain',
+  'barrageFan',
+  'barrageRing',
+  'clusterShot',
+  'barrageFocus',
+  'bulletHell',
+  'shatterChain',
+  'frozenNoSplit',
 ];
 
 /**
@@ -388,6 +493,16 @@ export const RULE_COEF_FIELDS: {
   flameBee: { blastDamagePct: 'pct' },
   // 霜蜂: the chill scales; the shatter on a frozen enemy is all or nothing.
   frostBee: { frostPct: 'chance' },
+  // 熱震: the ignited frozen enemy's hit scales; the burn stacks are a whole count.
+  thermalShock: { hitPct: 'pct' },
+  // 超導: the bolt and the chill scale; the arc count and the shocked frost factor do not.
+  superconduct: { arcDamagePct: 'pct', frostPct: 'chance' },
+  // 冰晶哨: the chance and the sentry's cones scale; its life and cap do not.
+  frostSentry: { chance: 'chance', damagePct: 'pct' },
+  // 電漿: the bolts and the shocked burn bonus scale; the arc cap is a whole count.
+  plasma: { arcDamagePct: 'pct', shockBurnMore: 'pct' },
+  // 雷網蜂: the link's hit scales; its timing does not.
+  stormWeb: { damagePct: 'pct' },
 };
 
 /**
@@ -441,4 +556,11 @@ export const NOTABLE_RULES: readonly RuleId[] = [
   'swarmSurge',
   'royalJelly',
   'zoneTune',
+  'bulletRain',
+  'barrageFan',
+  'barrageRing',
+  'clusterShot',
+  'barrageFocus',
+  'shatterChain',
+  'frozenNoSplit',
 ];

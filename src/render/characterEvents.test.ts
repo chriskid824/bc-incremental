@@ -80,14 +80,20 @@ describe('the renderer on a character run', () => {
     expect(source).toMatch(/this\.magma\?\.flushTick\(\);/);
   });
 
-  it('pops the green ring for a poison spread only: a bleed one (血河, E9) draws nothing yet', () => {
-    // Planted bug: the poison pop drawn for every spread. B3 draws 血河's red trail.
+  it('pops the green ring for a poison spread only, and draws 血河’s red trail (E9) for a bleed one that reached an enemy', () => {
+    // Planted bugs: the poison pop drawn for every spread; a trail for a spread that reached none.
     const spread = /case 'ailmentSpread':([\s\S]*?)break;/.exec(source)?.[1] ?? '';
     expect(spread.replace(/\s+/g, ' ').trim()).toBe(
       "if (event.ailment === 'poison') { " +
-        'this.magma?.poisonSpread(event.x, event.y, event.radius, event.targets); }',
+        'this.magma?.poisonSpread(event.x, event.y, event.radius, event.targets); ' +
+        "} else if (event.ailment === 'bleed' && event.targets > 0) { " +
+        'this.bloodTrail(event.x, event.y, event.radius); }',
     );
     expect(source.match(/poisonSpread\(/g)).toHaveLength(1);
+    const trail = /private bloodTrail\([^)]*\): void \{([\s\S]*?)\n {2}\}/.exec(source)?.[1] ?? '';
+    // Outward from the centre, `radius` long.
+    expect(trail).toMatch(/x - CENTER_X/);
+    expect(trail).toMatch(/\(dx \/ d\) \* radius/);
   });
 
   it('draws a nova at the player as 火環, an explode as a small blast', () => {

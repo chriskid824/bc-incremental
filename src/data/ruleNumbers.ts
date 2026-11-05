@@ -97,6 +97,9 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
     case 'hammerRole':
       return [[`×${rule.damageMult}`], [`×${rule.speedMult}`]];
     case 'focusFire':
+    case 'shatterChain':
+    case 'bulletHell':
+    case 'frozenNoSplit':
       return [];
     case 'outpost':
       return [[String(rule.turretRadius)]];
@@ -123,6 +126,28 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
       return [[String(rule.burnStacks)], [String(rule.blastRadius)]];
     case 'frostBee':
       return [[percent(rule.frostPct), signedPercent(rule.frostPct)]];
+    case 'thermalShock':
+      return [[String(rule.burnStacks)], [percent(rule.hitPct)]];
+    case 'superconduct':
+      return [[String(rule.arcs)], [percent(rule.frostPct), signedPercent(rule.frostPct)]];
+    case 'frostSentry':
+      return [[percent(rule.chance)], [String(rule.lifeSec)], [String(rule.maxLive)]];
+    case 'plasma':
+      return [[String(rule.arcsPerBlast)], [signedPercent(rule.shockBurnMore)]];
+    case 'hemorrhage':
+      return [[String(rule.maxStacks)]];
+    case 'stormWeb':
+      return [[percent(rule.damagePct)]];
+    case 'bulletRain':
+      return [[String(rule.periodSec)], [String(rule.durationSec)], [String(rule.countMult)]];
+    case 'barrageFan':
+      return [[`${rule.spreadDeg}°`]];
+    case 'barrageRing':
+      return [[String(rule.every)], [String(rule.directions)]];
+    case 'clusterShot':
+      return [[String(rule.count)]];
+    case 'barrageFocus':
+      return [[signedPercent(rule.bonus)]];
   }
 }
 
