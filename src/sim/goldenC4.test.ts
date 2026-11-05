@@ -3110,6 +3110,26 @@ const CHAIN_END_MODULES = (): TestModule[] => [
   ),
 ];
 
+/**
+ * E14's ◆爆發 (gd:421 「滿層時每第 5 次攻擊多打一次」, lead rulings Z1–Z4) as inline data on M1's
+ * volley and combo's waves, from wave 12: the comboCap stat at 10 (動能's 層數上限 below gd's 20,
+ * so the stacks fill within the run's first waves) and an nthAttack trigger every 5 with
+ * comboAtLeast 'full' that repeats the attack once at its full damage. The condition alone keeps
+ * the stacks (BuildFlags.combo): no modifier reads them and nothing else adds them. It pins the
+ * fold, 滿層 at the stat, and the condition at the attack's own stack.
+ */
+const COMBO_BURST_TRIGGER: TriggerSpec = {
+  on: 'nthAttack',
+  every: 5,
+  when: [{ comboAtLeast: 'full' }],
+  do: [{ kind: 'repeatAttack', count: 1, damagePct: 1 }],
+};
+const COMBO_BURST_STATS = makeStats({ damage: 10, maxLife: 1e6, comboCap: 10 }, [], {
+  triggers: [{ source: 'center', spec: COMBO_BURST_TRIGGER }],
+  conversions: [],
+  emitters: [],
+});
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3690,6 +3710,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: CHAIN_END_MODULES,
     expected: ['7b2d8981479590a6', 'd1af12f58df76bea'],
   },
+  {
+    name: 'comboBurst',
+    config: { stats: COMBO_BURST_STATS, rules: [], startWave: 12 },
+    data: comboData,
+    expected: ['0053be478e9621e8', 'd5c7e24912cc450f'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3801,8 +3827,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E10b's barrageRain and E13's chainEnd are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([80, 'barrageRain', 'chainEnd']);
+    // The count docs/ARCHITECTURE.md gives: E13's chainEnd and E14's comboBurst are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([81, 'chainEnd', 'comboBurst']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -7998,6 +8024,118 @@ describe('golden C4 runs', () => {
         extra: 14,
         detonations: 50,
         total: 926.637,
+      },
+    });
+  });
+
+  it('repeats comboBurst’s attack on every 5th counted attack at full combo, 10 stacks, and on no other, through its leaks’ halvings (E14)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'comboBurst') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        attacks: 0,
+        atFull: 0,
+        fifthsAtFull: 0,
+        fired: 0,
+        offBeat: 0,
+        missed: 0,
+        repeats: 0,
+        repeatHits: 0,
+        highest: 0,
+        firstFull: '',
+        bursts: [] as number[],
+        halved: [] as string[],
+        cleared: [] as string[],
+      };
+      // The attack's stacks as its nthAttack triggers see them: after its own stack (onAttack
+      // runs between the two, src/sim/emitters/volley.ts countAttack).
+      let due = false;
+      let attacks = 0;
+      let prev = 0;
+      const watch: TestModule = (b) => {
+        b.hook('onAttack', (ctx, em) => {
+          const stacks = ctx.sys.combo.stacks;
+          c.highest = Math.max(c.highest, stacks);
+          const full = stacks >= (ctx.build.flags.comboFull as number);
+          if (full) c.atFull++;
+          if (full && c.firstFull === '') {
+            c.firstFull = `attack ${em.attacks}, ${ctx.now} (wave ${ctx.current?.wave ?? 0})`;
+          }
+          due = full && em.attacks % 5 === 0;
+          if (due) c.fifthsAtFull++;
+        });
+        // After the emitter stage, before the effect phase: this tick's queued effects are its
+        // attack's trigger firings, one effect each (the build has no other trigger).
+        b.hook('tick', (ctx) => {
+          const em = ctx.emitters[0] as EmitterRuntime;
+          const stacks = ctx.sys.combo.stacks;
+          // A leak's halving, then this tick's attack, if any, and its stack.
+          if (ctx.events.some((e) => e.type === 'playerHit') && stacks < prev) {
+            c.halved.push(`${ctx.now} (attack ${em.attacks}): ${prev} → ${stacks}`);
+          }
+          // 60 ticks without a target clear them (comboIdleKeep 0).
+          const idle = ctx.sys.combo.idle;
+          if (idle > 0 && idle % 60 === 0 && prev > 0) {
+            c.cleared.push(`${ctx.now} (attack ${em.attacks}): ${prev} → ${stacks}`);
+          }
+          prev = stacks;
+          c.highest = Math.max(c.highest, stacks);
+          if (em.attacks === attacks) return;
+          attacks = em.attacks;
+          const queued = ctx.effectQueue.size;
+          c.fired += queued;
+          if (queued > 0) c.bursts.push(em.attacks);
+          if (queued > 0 && !due) c.offBeat++;
+          if (queued === 0 && due) c.missed++;
+          due = false;
+        });
+        b.hook('onHit', (_ctx, hit) => {
+          if ((hit.flags & REPEAT) !== 0 && hit.chainIndex === 0) c.repeatHits++;
+        });
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [watch]);
+      while (!sim.state.finished) sim.step(NO_INPUT);
+      const result = sim.result();
+      c.attacks = attacks;
+      // Every effect the run ran is a burst's repeat: the build has no other.
+      c.repeats = result.counters.effectsRun;
+      bySeed[seed] = c;
+    }
+    // Both seeds fill the 10 stacks on their 10th attack in wave 12 and burst on it, the attack
+    // that fills them (its trigger reads its own stack); then on every 5th attack that finds
+    // them full, and on no other. A 5th attack while they refill bursts not: after a square
+    // walks in and halves them (seed 1's 60th; seed 2's 25th, in the tick of the halving, and
+    // its 65th) and after a gap between releases clears them (seed 1's 40th, seed 2's 35th and
+    // 40th). The stacks never pass the stat's 10, and each burst is one repeat of the attack,
+    // whose hits carry REPEAT.
+    const beat = { highest: 10, missed: 0, offBeat: 0 };
+    expect(bySeed).toEqual({
+      1: {
+        ...beat,
+        attacks: 65,
+        atFull: 39,
+        fifthsAtFull: 10,
+        fired: 10,
+        repeats: 10,
+        repeatHits: 14,
+        firstFull: 'attack 10, 150 (wave 12)',
+        bursts: [10, 15, 20, 25, 30, 35, 45, 50, 55, 65],
+        halved: ['376 (attack 25): 10 → 5', '964 (attack 57): 10 → 5'],
+        cleared: ['644 (attack 35): 10 → 0'],
+      },
+      2: {
+        ...beat,
+        attacks: 70,
+        atFull: 44,
+        fifthsAtFull: 9,
+        fired: 9,
+        repeats: 9,
+        repeatHits: 14,
+        firstFull: 'attack 10, 181 (wave 12)',
+        bursts: [10, 15, 20, 30, 45, 50, 55, 60, 70],
+        halved: ['406 (attack 25): 10 → 6', '1100 (attack 64): 10 → 5'],
+        cleared: ['647 (attack 34): 10 → 0'],
       },
     });
   });

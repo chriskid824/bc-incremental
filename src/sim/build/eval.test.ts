@@ -34,7 +34,7 @@ import {
   statAt,
   staticInput,
 } from './eval';
-import type { EvalInput } from './eval';
+import type { CompiledCondition, EvalInput } from './eval';
 import { compileMods, ModTable, modTableFor, SCOPED_INDEX } from './modTable';
 import { CENTER, createSourceTable, rowKey } from './sources';
 
@@ -656,5 +656,118 @@ describe('statAt with conditions (Modifier.when)', () => {
     expect(statAt(table, row, DAMAGE, on(ctx, target))).toBe(1);
     target.hp = mul(target.maxHp, 0.25);
     expect(statAt(table, row, DAMAGE, on(ctx, target))).toBe(1 + 0.1 * 3);
+  });
+});
+
+describe('comboAtLeast (E14, lead ruling Z3)', () => {
+  /** comboAtLeast compiled as a trigger's condition, which it alone can be. */
+  const combo = (stacks: number | 'full'): CompiledCondition[] => [
+    compileCondition({ comboAtLeast: stacks }, 'nthAttack'),
+  ];
+  /** A run with one enemy and its stacks at `stacks` (the combo system's own state). */
+  const run = (stacks: number, options: { stats?: StatBlock; modules?: TestModule[] } = {}) => {
+    const ctx = placedEnemies([{ x: 1300, y: 540 }], options);
+    ctx.sys.combo.stacks = stacks;
+    return ctx;
+  };
+  const holdsIn = (ctx: RunContext, conds: CompiledCondition[], withTarget = true): boolean =>
+    conditionsMet(conds, withTarget ? (ctx.enemies[0] as Enemy) : null, ctx.now, 0, ctx);
+
+  it('compiles a count to code 10, after targetIs’ 9, with the count as a, and full to a = −1', () => {
+    expect(combo(1)).toEqual([{ code: 10, a: 1, b: 0 }]);
+    expect(combo(15)).toEqual([{ code: 10, a: 15, b: 0 }]);
+    expect(combo('full')).toEqual([{ code: 10, a: -1, b: 0 }]);
+    expect(compileCondition({ targetIs: 'highestHp' }).code).toBe(9);
+  });
+
+  it('holds at n stacks and above, never below: n − 1, n and n + 1 for n = 1, 5 and 20', () => {
+    // Plants `>` for `>=`: it would fail at n itself.
+    for (const n of [1, 5, 20]) {
+      const seen = [n - 1, n, n + 1].map((stacks) => holdsIn(run(stacks), combo(n)));
+      expect(seen, `n = ${n}`).toEqual([false, true, true]);
+    }
+  });
+
+  it('reads full as BuildFlags.comboFull: 25 with the comboCap stat at 25, 20 under a module’s Infinity cap', () => {
+    // Plants 'full' read as comboCap: under ★無盡連擊's Infinity it would never hold, and at 25
+    // it would read the same 25 (so the Infinity case kills it).
+    const stat = (stacks: number) => run(stacks, { stats: makeStats({ comboCap: 25 }) });
+    expect(stat(0).build.flags.comboFull).toBe(25);
+    expect([24, 25, 26].map((stacks) => holdsIn(stat(stacks), combo('full')))).toEqual([
+      false,
+      true,
+      true,
+    ]);
+    const endless: TestModule = (b) => {
+      b.flags.comboCap = Infinity;
+    };
+    const lifted = (stacks: number) =>
+      run(stacks, { stats: makeStats({ comboCap: 30 }), modules: [endless] });
+    expect([lifted(0).build.flags.comboCap, lifted(0).build.flags.comboFull]).toEqual([
+      Infinity,
+      20,
+    ]);
+    expect([19, 20, 45].map((stacks) => holdsIn(lifted(stacks), combo('full')))).toEqual([
+      false,
+      true,
+      true,
+    ]);
+  });
+
+  it('needs no target: it holds on an event without an enemy as on one with an enemy', () => {
+    // Plants the condition checked after the target-null return: without a target it would
+    // never hold (a periodic or waveStart trigger never fires).
+    for (const conds of [combo(3), combo('full')]) {
+      expect([holdsIn(run(20), conds, false), holdsIn(run(20), conds, true)]).toEqual([true, true]);
+      expect([holdsIn(run(2), conds, false), holdsIn(run(2), conds, true)]).toEqual([false, false]);
+    }
+    // Beside a target condition, which still needs the target.
+    const both = [...combo(3), compileCondition({ targetKind: 'normal' })];
+    expect([holdsIn(run(5), both, false), holdsIn(run(5), both, true)]).toEqual([false, true]);
+    // And beside a flags condition, which does not.
+    const flagged = [compileCondition({ hitIs: 'crit' }, 'hit'), ...combo(3)];
+    const ctx = run(5);
+    expect(conditionsMet(flagged, null, ctx.now, HIT_EVENT | CRIT_HIT, ctx)).toBe(true);
+    expect(conditionsMet(flagged, null, ctx.now, HIT_EVENT, ctx)).toBe(false);
+  });
+
+  it('never holds outside a run (ctx null), whatever the stacks, with or without a target', () => {
+    // Plants the condition met with ctx null: the estimates (staticInput, ctx null) would meet it.
+    const ctx = run(20);
+    const target = ctx.enemies[0] as Enemy;
+    for (const conds of [combo(1), combo('full')]) {
+      expect(conditionsMet(conds, target, ctx.now, 0, null)).toBe(false);
+      expect(conditionsMet(conds, null, ctx.now, 0, null)).toBe(false);
+      expect(conditionsMet(conds, target, ctx.now, 0)).toBe(false);
+      expect(conditionsMet(conds, target, ctx.now, 0, ctx)).toBe(true);
+    }
+    expect(staticInput().ctx).toBeNull();
+  });
+
+  it('refuses at compile a modifier’s comboAtLeast and a count that is not a whole number of at least 1', () => {
+    // Plants the condition taken on a modifier (compileMods passes no event), and a count of 0.
+    expect(() => compileCondition({ comboAtLeast: 5 })).toThrow(
+      "comboAtLeast is a trigger's condition, not a modifier's (got 5)",
+    );
+    expect(() => compileCondition({ comboAtLeast: 'full' })).toThrow(/not a modifier's/);
+    const sources = createSourceTable();
+    const mod = {
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      when: [{ comboAtLeast: 5 }],
+    } as unknown as Modifier;
+    expect(() => compileMods([mod], sources)).toThrow(/not a modifier's/);
+    for (const [stacks, shown] of [
+      [0, '0'],
+      [1.5, '1.5'],
+      [-1, '-1'],
+      [Number.NaN, 'NaN'],
+      [Infinity, 'Infinity'],
+    ] as const) {
+      expect(() => compileCondition({ comboAtLeast: stacks }, 'periodic')).toThrow(
+        `comboAtLeast: ${shown} must be a whole number >= 1 or 'full'`,
+      );
+    }
   });
 });

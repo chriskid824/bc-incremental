@@ -219,6 +219,15 @@ export const STAT_IDS = [
    * DEFAULT_SPLIT_COUNT (3) × countMult children.
    */
   'barrageSplit',
+  /**
+   * 連擊層數上限 (the combo outer's 動能 ranks and the 連擊 fusion payload's r2, docs/v3/
+   * game-design-v3.md §4.5 「上限 20」): the most combo stacks a run keeps. Read once a compile,
+   * before any rule module runs, into BuildFlags.comboCap as max(1, floor(comboCap))
+   * (src/sim/build/compile.ts), so a module's own cap (★無盡連擊's Infinity) wins; 滿層
+   * (BuildFlags.comboFull) is that cap unless a module sets it, and DEFAULT_COMBO_CAP under a
+   * cap that is not finite. Its base is DEFAULT_COMBO_CAP; flat ranks add stacks.
+   */
+  'comboCap',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -290,6 +299,8 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   summonDuration: 1,
   barragePierce: 0,
   barrageSplit: 0,
+  // DEFAULT_COMBO_CAP (src/sim/build/compile.ts), which src/sim/systems/combo.test.ts pins equal.
+  comboCap: 20,
 };
 
 /**

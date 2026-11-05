@@ -170,6 +170,8 @@ export const ConditionSchema = exact<Condition>()(
     z.strictObject({ victimHas: z.enum(HELD_AILMENTS) }).readonly(),
     z.strictObject({ killedBy: z.enum(KILL_KINDS) }).readonly(),
     z.strictObject({ ailment: z.enum(APPLIED_AILMENTS) }).readonly(),
+    // Validation keeps a number whole and at least 1.
+    z.strictObject({ comboAtLeast: z.union([finite, z.literal('full')]) }).readonly(),
   ]),
 );
 

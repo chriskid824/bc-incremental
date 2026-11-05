@@ -159,6 +159,7 @@ export const CONDITION_TEXT: Readonly<Record<ConditionKey, MessageKey>> = {
   victimHas: 'web.cond.victimHas',
   killedBy: 'web.cond.killedBy',
   ailment: 'web.cond.ailment',
+  comboAtLeast: 'web.cond.comboAtLeast',
 };
 
 /**
@@ -415,6 +416,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   summonDuration: 'percent',
   barragePierce: 'number',
   barrageSplit: 'percent',
+  comboCap: 'number',
 };
 
 /**
@@ -545,6 +547,13 @@ function conditionText(lookup: TextLookup, condition: Condition, coef: number): 
     return say(lookup, key, { hit: say(lookup, `web.hit.${condition.hitIs}`) });
   if ('killedBy' in condition)
     return say(lookup, key, { kind: say(lookup, `web.killedBy.${condition.killedBy}`) });
+  // E14: the run's stacks, or 滿層, whatever the cap (BuildFlags.comboFull).
+  if ('comboAtLeast' in condition) {
+    const stacks = condition.comboAtLeast;
+    return stacks === 'full'
+      ? say(lookup, 'web.cond.comboAtLeast.full')
+      : say(lookup, key, { n: stacks });
+  }
   return say(lookup, key, { ailment: say(lookup, `web.ailment.${condition.ailment}`) });
 }
 

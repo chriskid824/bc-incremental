@@ -16,13 +16,14 @@ import { AFFIX_FROST } from '../../data/affixes';
 import type { SourcedEmitter } from '../../data/emitters';
 import { M1_SIGNATURE } from '../../data/rules';
 import type { RuleSpec, SignatureSpec } from '../../data/rules';
+import { BASE_STATS, NO_EXTRAS } from '../../data/stats';
 import type { Modifier, StatId } from '../../data/stats';
 import { TAG } from '../../data/tags';
 import type { DamageTag } from '../../data/tags';
 import type { EffectSpec, TriggerSpec } from '../../data/triggers';
 import type { GameData } from '../../data/types';
 import { computeStatBlock } from '../../meta/stats';
-import { compileBuild } from '../build/compile';
+import { compileBuild, DEFAULT_COMBO_CAP } from '../build/compile';
 import type { BuildFlags } from '../build/compile';
 import type * as Dispatch from '../effects/dispatch';
 import { runEffect, runEffectQueue } from '../effects/execute';
@@ -34,6 +35,7 @@ import { runVolley } from '../emitters/volley';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
 import {
+  afterimageModule,
   centerTriggers,
   damageRow,
   makeConfig,
@@ -1083,5 +1085,278 @@ describe('the cadence (lead rulings K5–K7)', () => {
     expect(sped.dock).toBeCloseTo(plain.dock * 3, 10);
     expect(sped.dash).toBeCloseTo(plain.dash * 3, 10);
     expect(sped.turret).toBe(3);
+  });
+});
+
+/**
+ * The flags the base (8ac24f4, before the comboCap stat) compiled for 節拍's two per-stack
+ * modifiers with 殘影 (afterimageModule), recorded there: a build at the base stat compiles to
+ * them still (lead ruling Z2).
+ */
+const BASE_BEAT_FLAGS: BuildFlags = {
+  randomCrits: true,
+  maxLife: null,
+  burnRings: false,
+  bleedMoveMult: 3,
+  bleedRings: false,
+  bleedMaxStacks: 8,
+  frostImmuneTicks: 180,
+  bossLockTicks: 252,
+  bossMinGapTicks: 0,
+  globalSlow: 0,
+  frostBurnCap: 0,
+  shatterMult: 1,
+  combo: true,
+  comboCap: 20,
+  comboIdleTicks: 60,
+  comboIdleKeep: 0,
+  comboHitKeep: 0.5,
+  shardsHeld: false,
+  enemiesInAura: false,
+  comboFull: 20,
+  comboEcho: { delaySec: 0.3, damagePct: 0.5 },
+  sizeFactor: 1,
+  halveCounts: false,
+  areaFactor: 1,
+  spawnsDrones: false,
+  highestHp: false,
+  poisonSlowStacks: 0,
+  poisonSlowPer: 0,
+  poisonSlowMax: 0,
+  spreadFactor: 1,
+  summonEliteFirst: false,
+  droneCountMult: 1,
+  dronesStay: false,
+  turretRateMult: 1,
+  turretSplash: 0,
+  turretChains: 0,
+  minionCount: false,
+  summonHighestHp: false,
+  shatterChain: false,
+  frozenNoSplit: false,
+  frostGainShocked: 0,
+  frostGainBoss: 0,
+  barrage: {
+    countMult: 1,
+    bounce: 0,
+    aim: 'distinct',
+    spreadDeg: 30,
+    ring: null,
+    split: null,
+    focus: null,
+    rain: null,
+  },
+};
+
+/** ★無盡連擊's two flags, as its module would write them. */
+const ENDLESS = flagsOf({ comboCap: Infinity, comboHitKeep: 0 });
+
+describe('the comboCap stat (E14, lead ruling Z2)', () => {
+  /** The stacks after `attacks` counted attacks of a build kept by KEEP with `values`. */
+  const capped = (
+    values: Partial<Record<StatId, number>>,
+    attacks: number,
+    extra: TestModule[] = [],
+  ) => {
+    const ctx = run([at(300)], { values, modules: [KEEP, ...extra] });
+    for (let i = 0; i < attacks; i++) attack(ctx);
+    return { ctx, stacks: stacksOf(ctx), flags: ctx.build.flags };
+  };
+
+  it('has DEFAULT_COMBO_CAP, 20, as its base', () => {
+    // Plants the base and the flag's literal apart: a build at the base would move.
+    expect([BASE_STATS.comboCap, DEFAULT_COMBO_CAP]).toEqual([20, 20]);
+  });
+
+  it('folds a stat of 30 into the cap: 35 attacks stop at 30, a comboStack too, and 滿層 is 30', () => {
+    // Plants the stat left unread: the stacks would stop at 20.
+    const { ctx, stacks, flags } = capped({ comboCap: 30 }, 35);
+    expect([stacks, flags.comboCap, flags.comboFull]).toEqual([30, 30, 30]);
+    expect(ctx.evalInput.comboStacks).toBe(30);
+    // A comboStack from 27 stops at the stat's 30, not at 20 and not at 32.
+    const below = capped({ comboCap: 30 }, 27);
+    addComboStacks(below.ctx, 5);
+    expect(stacksOf(below.ctx)).toBe(30);
+  });
+
+  it('folds a stat of 5: the stacks stop at 5, and 滿層 is 5', () => {
+    const { stacks, flags } = capped({ comboCap: 5 }, 8);
+    expect([stacks, flags.comboCap, flags.comboFull]).toEqual([5, 5, 5]);
+  });
+
+  it('floors the stat and keeps it at least 1: 25.9 → 25, 0.5 → 1 and −3 → 1', () => {
+    // Plants the fold without floor (25.9 stacks at most, 滿層 never reached by whole stacks)
+    // and without max(1, …) (0 and −3: an attack's stack would be refused, or the stacks go
+    // negative).
+    expect(capped({ comboCap: 25.9 }, 30).stacks).toBe(25);
+    expect(capped({ comboCap: 25.9 }, 30).flags.comboFull).toBe(25);
+    for (const comboCap of [0.5, -3]) {
+      const { stacks, flags } = capped({ comboCap }, 4);
+      expect([stacks, flags.comboCap, flags.comboFull], `${comboCap}`).toEqual([1, 1, 1]);
+    }
+  });
+
+  it('lets a module’s cap win: ★無盡連擊’s Infinity beats a stat of 30 (40 attacks, 40 stacks), and 滿層 is then 20', () => {
+    // Plants the fold after the rule modules: the module's Infinity would be overwritten by 30.
+    const { stacks, flags } = capped({ comboCap: 30 }, 40, [ENDLESS]);
+    expect([stacks, flags.comboCap, flags.comboFull]).toEqual([40, Infinity, DEFAULT_COMBO_CAP]);
+    // A module's finite cap wins too, and 滿層 follows it.
+    const own = capped({ comboCap: 30 }, 40, [flagsOf({ comboCap: 12 })]);
+    expect([own.stacks, own.flags.comboCap, own.flags.comboFull]).toEqual([12, 12, 12]);
+  });
+
+  it('leaves the cap to the fold: a module’s offsetStat or scaleStat on comboCap moves the stat alone (D7)', () => {
+    // Plants the fold after the modules, or reading the stat once they have run: a module's
+    // offsetStat or scaleStat would reach the cap. A module sets the cap by writing it.
+    const offset: TestModule = (b) => {
+      b.offsetStat('comboCap', 5);
+    };
+    const scale: TestModule = (b) => {
+      b.scaleStat('comboCap', 2);
+    };
+    const moved = [offset, scale].map((module) => {
+      const { ctx, stacks, flags } = capped({}, 30, [module]);
+      return [ctx.build.values.comboCap, stacks, flags.comboCap, flags.comboFull];
+    });
+    expect(moved).toEqual([
+      [25, 20, 20, 20],
+      [40, 20, 20, 20],
+    ]);
+  });
+
+  it('makes 滿層 the stat with no module: 25 → 25, which a module’s own comboFull overrides', () => {
+    const at25 = compileBuild(makeStats({ comboCap: 25 }), []).flags;
+    expect([at25.comboCap, at25.comboFull]).toEqual([25, 25]);
+    const set = compileBuild(makeStats({ comboCap: 25 }), [], M1_SIGNATURE, [
+      flagsOf({ comboFull: 20 }),
+    ]).flags;
+    expect([set.comboCap, set.comboFull]).toEqual([25, 20]);
+  });
+
+  it('compiles a build at the base stat, written or not, to the flags the base recorded', () => {
+    // Plants a fold that moves the base: 20 must stay 20, bit for bit, with every other flag.
+    const beat = (values: Partial<Record<StatId, number>>, ...modules: TestModule[]) =>
+      compileBuild(makeStats(values, [SPEED_PER_STACK, DAMAGE_PER_STACK]), [], M1_SIGNATURE, [
+        afterimageModule(),
+        ...modules,
+      ]).flags;
+    expect(beat({})).toEqual(BASE_BEAT_FLAGS);
+    expect(beat({ comboCap: 20 })).toEqual(BASE_BEAT_FLAGS);
+    expect(beat({}, ENDLESS)).toEqual({
+      ...BASE_BEAT_FLAGS,
+      comboCap: Infinity,
+      comboHitKeep: 0,
+    });
+    // Through computeStatBlock too, as the meta layer builds stats.
+    const block = computeStatBlock([SPEED_PER_STACK, DAMAGE_PER_STACK], NO_EXTRAS);
+    expect(compileBuild(block, [], M1_SIGNATURE, [afterimageModule()]).flags).toEqual(
+      BASE_BEAT_FLAGS,
+    );
+  });
+});
+
+/** ◆爆發 (gd:421 「滿層時每第 5 次攻擊多打一次」) as B4 writes it: data, no module. */
+const BURST: TriggerSpec = {
+  on: 'nthAttack',
+  every: 5,
+  when: [{ comboAtLeast: 'full' }],
+  do: [{ kind: 'repeatAttack', count: 1, damagePct: 1 }],
+};
+
+describe('comboAtLeast in a run (E14, lead rulings Z3, Z4)', () => {
+  /** Effects the attack queued: its triggers' firings, each of one effect here. */
+  const queuedBy = (ctx: RunContext): number => {
+    const before = ctx.effectQueue.size;
+    attack(ctx);
+    return ctx.effectQueue.size - before;
+  };
+
+  it('turns BuildFlags.combo on from a trigger’s comboAtLeast alone, a module’s included, and leaves it off without one', () => {
+    // Plants the condition left out of the flag, or read only as a trigger's first condition:
+    // the stacks would stay 0 and it would never hold.
+    const flagged = (triggers: readonly TriggerSpec[], modules: readonly TestModule[] = []) =>
+      compileBuild(makeStats({}, [], centerTriggers(triggers)), [], M1_SIGNATURE, modules).flags
+        .combo;
+    expect(flagged([BURST])).toBe(true);
+    expect(flagged([idle(buff(1, 1))].map((t) => ({ ...t, when: [{ comboAtLeast: 3 }] })))).toBe(
+      true,
+    );
+    const adds: TestModule = (b) => {
+      b.addTrigger('center', BURST);
+    };
+    expect(flagged([], [adds])).toBe(true);
+    expect(flagged([{ ...BURST, when: [{ targetKind: 'normal' }, { comboAtLeast: 3 }] }])).toBe(
+      true,
+    );
+    // Every other condition, and ◆爆發 without its condition, keep it off.
+    expect(flagged([{ ...BURST, when: [{ targetKind: 'boss' }] }])).toBe(false);
+    expect(flagged([{ ...BURST, when: [] }])).toBe(false);
+    expect(flagged([{ on: 'hit', when: [{ chance: 0.5 }, { hitIs: 'crit' }], do: [] }])).toBe(
+      false,
+    );
+    // And a run of the condition alone counts its stacks.
+    const ctx = run([at(300)], { triggers: [BURST] });
+    for (let i = 0; i < 3; i++) attack(ctx);
+    expect([ctx.build.flags.combo, stacksOf(ctx), ctx.evalInput.comboStacks]).toEqual([true, 3, 3]);
+  });
+
+  it('fires a periodic trigger, which has no target, at its first due tick once its stacks reach n, and full under a stat of 3', () => {
+    // Plants the condition checked after the target-null return, or the stacks left uncounted:
+    // the periodic trigger would never fire.
+    for (const comboAtLeast of [3, 'full'] as const) {
+      const ctx = run([at(300)], {
+        values: { comboCap: 3 },
+        triggers: [{ on: 'periodic', every: 0.25, when: [{ comboAtLeast }], do: [buff(1, 0.1)] }],
+      });
+      const cs = ctx.sys.combo;
+      const fired: string[] = [];
+      // An attack every 10 ticks; the trigger is due at 16, 31, 46, 61 and 76 (15 ticks, from
+      // its period plus its index, 1).
+      for (let tick = 2; tick <= 80; tick++) {
+        ctx.now = tick;
+        if (tick % 10 === 0) attack(ctx);
+        const end = cs.buffEnd[0];
+        runEffectQueue(ctx);
+        if (cs.buffEnd[0] !== end) fired.push(`${tick}: ${stacksOf(ctx)}`);
+      }
+      expect(fired, `${comboAtLeast}`).toEqual(['31: 3', '46: 3', '61: 3', '76: 3']);
+    }
+  });
+
+  it('sees the attack’s own stack on nthAttack: a comboAtLeast 1 fires on the run’s first attack, and ◆爆發 on the 20th, the one that fills the combo', () => {
+    // countAttack (src/sim/emitters/volley.ts) gains the stack before it raises nthAttack, and
+    // dispatch checks the conditions as the event is raised: from 0, the first attack's trigger
+    // reads 1 and the 20th's reads 20, full. Reordering them would read 0 and 19.
+    const first = run([at(300)], {
+      triggers: [{ on: 'nthAttack', every: 1, when: [{ comboAtLeast: 1 }], do: [buff(1, 1)] }],
+    });
+    expect([queuedBy(first), stacksOf(first)]).toEqual([1, 1]);
+    const ctx = run([at(300)], { triggers: [BURST] });
+    const seen = Array.from({ length: 20 }, () => queuedBy(ctx));
+    expect(seen.slice(0, 19).every((n) => n === 0)).toBe(true);
+    expect([seen[19], stacksOf(ctx), signatureOf(ctx).attacks]).toEqual([1, 20, 20]);
+  });
+
+  it('◆爆發 as data: no repeat below full, one on every 5th counted attack at full, none after a hit halves the stacks until they are full again', () => {
+    // Plants `>` for `>=` (no repeat at exactly 20) and the stacks uncounted (none ever).
+    const ctx = run([at(300)], { triggers: [BURST] });
+    const fired: string[] = [];
+    let repeats = 0;
+    const step = (n: number): void => {
+      for (let i = 0; i < n; i++) {
+        const queued = queuedBy(ctx);
+        const shots = ctx.projectiles.length;
+        runEffectQueue(ctx);
+        // The repeat fires the attack's one projectile again, as no attack of its own.
+        repeats += ctx.projectiles.length - shots;
+        if (queued > 0) fired.push(`${signatureOf(ctx).attacks}: ${stacksOf(ctx)}`);
+      }
+    };
+    step(30);
+    leak(ctx, addSquare(ctx, 200));
+    expect(stacksOf(ctx)).toBe(10);
+    step(15);
+    expect(fired).toEqual(['20: 20', '25: 20', '30: 20', '40: 20', '45: 20']);
+    expect([repeats, signatureOf(ctx).attacks]).toEqual([5, 45]);
   });
 });

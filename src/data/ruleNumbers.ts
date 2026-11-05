@@ -152,6 +152,11 @@ export function conditionNumbers(condition: Condition): string[][] {
     const stacks = condition.stacksAtLeast.stacks;
     return stacks === 'max' ? [] : [[String(stacks)]];
   }
+  // So is comboAtLeast's 'full' (滿層, whatever the cap); a count of stacks is a number (E14).
+  if ('comboAtLeast' in condition) {
+    const stacks = condition.comboAtLeast;
+    return stacks === 'full' ? [] : [[String(stacks)]];
+  }
   return [];
 }
 

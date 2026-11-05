@@ -5,7 +5,15 @@ import { loadGameData, parseGameData } from './index';
 import { TALENTS } from './talents';
 import { isBehaviourModifier } from './stats';
 import type { Modifier } from './stats';
-import type { ConversionSpec, ScalingSpec, SlashLineSpec, TriggerSpec } from './triggers';
+import { CONDITION_CONTEXTS, TRIGGER_EVENTS } from './triggers';
+import type {
+  Condition,
+  ConditionKey,
+  ConversionSpec,
+  ScalingSpec,
+  SlashLineSpec,
+  TriggerSpec,
+} from './triggers';
 import type { GameData, TalentNode, V3WaveRules } from './types';
 import { MAX_KEYSTONES, needsDescKey, starArchetypeIssues, validateGameData } from './validate';
 import { WAVES } from './waves';
@@ -1024,6 +1032,102 @@ describe('trigger validation', () => {
     expect(
       triggerIssues({ on: 'periodic', every: 5, when: [{ targetKind: 'boss' }], do: [heal] }),
     ).toEqual([`${at} when[0] targetKind does not apply to 'periodic' events`]);
+  });
+
+  it('takes comboAtLeast, a whole number of at least 1 or full, on every trigger event and never on a modifier (E14, lead ruling Z3)', () => {
+    // Plants 'modifier' among its contexts, or the targeted events alone (a periodic or
+    // waveStart ◆ could not ask for the stacks).
+    expect(CONDITION_CONTEXTS.comboAtLeast).toEqual(TRIGGER_EVENTS);
+    const named: Partial<Record<TriggerSpec['on'], Condition[]>> = {
+      ailmentApplied: [{ ailment: 'burn' }],
+      ailmentTick: [{ ailment: 'burn' }],
+    };
+    for (const stacks of [1, 15, 'full'] as const) {
+      const triggers = TRIGGER_EVENTS.map((on): TriggerSpec => ({
+        on,
+        ...(on === 'periodic' ? { every: 1 } : {}),
+        when: [...(named[on] ?? []), { comboAtLeast: stacks }],
+        do: [heal],
+      }));
+      expect(triggerIssues(...triggers), `${stacks}`).toEqual([]);
+    }
+  });
+
+  it('refuses a comboAtLeast of 0, 1.5, −1, NaN or max, and one on a modifier (E14)', () => {
+    // Plants a count of 0 accepted, and the condition taken on a modifier.
+    const counts = [0, 1.5, -1, Number.NaN, 'max'];
+    expect(
+      triggerIssues({
+        on: 'nthAttack',
+        every: 5,
+        when: counts.map((n) => ({ comboAtLeast: n }) as unknown as Condition),
+        do: [heal],
+      }),
+    ).toEqual(
+      ['0', '1.5', '-1', 'NaN', "'max'"].map(
+        (got, i) =>
+          `${at} when[${i}] comboAtLeast must be a whole number >= 1 or 'full' (got ${got})`,
+      ),
+    );
+    let index = -1;
+    const onModifier = issuesAfter((d) => {
+      const node = talent(d, 'vitality');
+      index = node.modifiers.length;
+      node.modifiers.push({
+        stat: 'damage',
+        kind: 'more',
+        value: 1,
+        when: [{ comboAtLeast: 'full' }],
+      } as unknown as Mutable<Modifier>);
+      node.descKey = 'talent.vitality.desc';
+    });
+    expect(onModifier).toEqual([
+      `talent 'vitality': modifiers[${index}] when[0] comboAtLeast does not apply to modifiers`,
+    ]);
+  });
+
+  it('refuses on a modifier every condition CONDITION_CONTEXTS keeps off modifiers, not comboAtLeast alone (E14)', () => {
+    // Plants the modifier check made for comboAtLeast alone: data checked without the schema
+    // could carry any trigger condition on a modifier, where it would never hold.
+    const off = (Object.keys(CONDITION_CONTEXTS) as ConditionKey[]).filter(
+      (key) => !CONDITION_CONTEXTS[key].includes('modifier'),
+    );
+    expect(off).toEqual([
+      'chance',
+      'cooldownSec',
+      'hitIs',
+      'victimHas',
+      'killedBy',
+      'ailment',
+      'comboAtLeast',
+    ]);
+    const when: Condition[] = [
+      { chance: 0.5 },
+      { cooldownSec: 1 },
+      { hitIs: 'crit' },
+      { victimHas: 'burn' },
+      { killedBy: 'burn' },
+      { ailment: 'burn' },
+      { comboAtLeast: 3 },
+    ];
+    let index = -1;
+    const issues = issuesAfter((d) => {
+      const node = talent(d, 'vitality');
+      index = node.modifiers.length;
+      node.modifiers.push({
+        stat: 'damage',
+        kind: 'more',
+        value: 1,
+        when,
+      } as unknown as Mutable<Modifier>);
+      node.descKey = 'talent.vitality.desc';
+    });
+    expect(issues).toEqual(
+      off.map(
+        (key, i) =>
+          `talent 'vitality': modifiers[${index}] when[${i}] ${key} does not apply to modifiers`,
+      ),
+    );
   });
 
   it('rejects condition values out of range and repeated chance or cooldown', () => {

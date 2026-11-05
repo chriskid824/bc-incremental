@@ -95,6 +95,26 @@ describe('rule descriptions', () => {
     expect(pandemic.modifiers.filter(isBehaviourModifier)).toEqual([]);
   });
 
+  it('reads a comboAtLeast count as a number to quote, and its full as a word (E14)', () => {
+    // ◆爆發 at a count of 15, then at 滿層: a hand description quotes 15 as it quotes 5.
+    const burst = {
+      on: 'nthAttack',
+      every: 5,
+      do: [{ kind: 'repeatAttack', count: 1, damagePct: 1 }],
+    } as const;
+    expect(triggerNumbers({ ...burst, when: [{ comboAtLeast: 15 }] })).toEqual([
+      ['5'],
+      ['15'],
+      ['1'],
+      ['100%'],
+    ]);
+    expect(triggerNumbers({ ...burst, when: [{ comboAtLeast: 'full' }] })).toEqual([
+      ['5'],
+      ['1'],
+      ['100%'],
+    ]);
+  });
+
   it('reads the numbers of triggers', () => {
     expect(
       triggerNumbers({

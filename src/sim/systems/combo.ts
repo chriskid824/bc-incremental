@@ -19,7 +19,11 @@
  *   raises heroHit too.
  * Every change writes the stacks into the run's EvalInput (comboStacks, src/sim/build/eval.ts),
  * so a hit reads them as they are at that hit, and recomputes the combo factor of each emitter
- * whose hit row has an attackSpeed entry scaled on them.
+ * whose hit row has an attackSpeed entry scaled on them. The cap is the comboCap stat, as
+ * max(1, floor(·)), unless a rule module sets it (src/sim/build/compile.ts). A trigger's
+ * comboAtLeast condition reads the stacks when the trigger is checked: an nthAttack trigger's
+ * as countAttack raises the event, after its own attack's stack is in, so ◆爆發 can fire on the
+ * attack that fills them; a kill's pending triggers' at the tick's death step (dispatch.ts).
  *
  * 殘影 (BuildFlags.comboEcho, gd §4.5's threshold): a counted attack of the signature emitter
  * that leaves the stacks full, at or above BuildFlags.comboFull once its own stack is in,

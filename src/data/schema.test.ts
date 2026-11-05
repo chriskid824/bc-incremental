@@ -409,6 +409,44 @@ describe('ConditionSchema', () => {
   ])('rejects the enemy state condition %o', (condition) => {
     expect(ConditionSchema.safeParse(condition).success).toBe(false);
   });
+
+  it.each([{ comboAtLeast: 1 }, { comboAtLeast: 15 }, { comboAtLeast: 'full' }])(
+    'accepts the combo condition %o (E14; validation keeps a count whole and at least 1)',
+    (condition) => {
+      expect(ConditionSchema.parse(condition)).toEqual(condition);
+    },
+  );
+
+  it.each([
+    { comboAtLeast: 'max' },
+    { comboAtLeast: Number.NaN },
+    { comboAtLeast: Infinity },
+    { comboAtLeast: '5' },
+    { comboAtLeast: 5, stacks: 5 },
+    { comboAtLeast: { stacks: 5 } },
+  ])('rejects the combo condition %o', (condition) => {
+    expect(ConditionSchema.safeParse(condition).success).toBe(false);
+  });
+
+  it('keeps comboAtLeast off a modifier: Modifier.when takes target conditions only (E14)', () => {
+    // Plants the condition among the target conditions, which a modifier's when takes.
+    const result = ModifierSchema.safeParse({
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      when: [{ comboAtLeast: 'full' }],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.path)).toEqual([['when', 0]]);
+    expect(
+      ModifierSchema.safeParse({
+        stat: 'damage',
+        kind: 'more',
+        value: 1,
+        when: [{ targetHas: 'burn' }],
+      }).success,
+    ).toBe(true);
+  });
 });
 
 describe('EffectSpecSchema', () => {

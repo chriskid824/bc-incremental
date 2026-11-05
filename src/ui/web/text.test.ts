@@ -486,6 +486,9 @@ function kitchenSink(): NodeEffects {
     })),
     { on: 'hit', when: [{ targetFrostAtLeast: 0.3 }], do: [heal] },
     { on: 'hit', when: [{ targetIs: 'highestHp' }], do: [heal] },
+    // E14's combo condition: a count, and 滿層 (◆爆發's).
+    { on: 'periodic', every: 1, when: [{ comboAtLeast: 15 }], do: [heal] },
+    { on: 'nthAttack', every: 5, when: [{ comboAtLeast: 'full' }], do: [heal] },
     ...TARGET_PICKS.map((pick): TriggerSpec => ({ on: 'hit', target: { pick }, do: [heal] })),
     ...(['outward', 'nearest', 'eventTarget', 'along', 'flight'] as const).map(
       (toward): TriggerSpec => ({
@@ -892,6 +895,62 @@ describe('every template, through one node (§4.7)', () => {
         ],
       });
       expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        '+2 Combo stack cap',
+        'Every 5 attacks (at full combo): repeat the signature attack 1 time at 100% damage',
+        'Every 1 s (at 15+ combo stacks, 50% chance): heal 1% of max life',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '連擊層數上限 +2',
+        '每 5 次攻擊（連擊滿層時）：重複招牌攻擊 1 次，每次 100% 傷害',
+        '每 1 秒（連擊 15 層以上時，50% 機率）：回復 1% 生命',
+      ],
+    ],
+  ] as const)(
+    'writes a comboCap modifier, ◆爆發’s full combo and a count of stacks on a notable, in %s (E14)',
+    (locale, expected) => {
+      // Plants the condition's text missing (the registry's key unfilled), or 'full' as a count.
+      const web = withEffects(fire, NOTABLE, {
+        modifiers: [{ stat: 'comboCap', kind: 'flat', value: 2 }],
+        triggers: [
+          {
+            on: 'nthAttack',
+            every: 5,
+            when: [{ comboAtLeast: 'full' }],
+            do: [{ kind: 'repeatAttack', count: 1, damagePct: 1 }],
+          },
+          {
+            on: 'periodic',
+            every: 1,
+            when: [{ comboAtLeast: 15 }, { chance: 0.5 }],
+            do: [{ kind: 'heal', lifePct: 0.01 }],
+          },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    ['en', '+2 Combo stack cap per rank (2/3: +4)'],
+    ['zh-TW', '每級連擊層數上限 +2（2/3：+4）'],
+  ] as const)(
+    'writes 動能’s 層數上限 on a ranked node, a flat count a rank with its total, in %s (E14)',
+    (locale, line) => {
+      // ranked('comboCap', 2, 3, 'flat') at rank 2: stacks, never a percentage.
+      const web = withEffects(fire, 'fire.center.alpha.r1', {
+        modifiers: [{ stat: 'comboCap', kind: 'flat', value: 2 }],
+      });
+      expect(linesOf(web, 'fire.center.alpha.r1', locale, 2)).toEqual([line]);
     },
   );
 

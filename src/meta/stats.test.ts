@@ -321,9 +321,8 @@ describe('computeStatBlock', () => {
     expect(() => block([scoped])).toThrow(/Tags/);
   });
 
-  it("appends E10b's barrageSplit: last of 64, base 0, an unscoped chance that flat adds to", () => {
-    expect(STAT_IDS).toHaveLength(64);
-    expect(STAT_IDS.slice(-2)).toEqual(['barragePierce', 'barrageSplit']);
+  it("appends E10b's barrageSplit: the 64th, base 0, an unscoped chance that flat adds to", () => {
+    expect(STAT_IDS.slice(62, 64)).toEqual(['barragePierce', 'barrageSplit']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.barrageSplit).toBe(0);
     expect(isScopedStat('barrageSplit')).toBe(false);
@@ -354,6 +353,54 @@ describe('computeStatBlock', () => {
     expect(ModifierSchema.safeParse(scoped).success).toBe(false);
     const flat = { stat: 'barrageSplit', kind: 'flat', value: 0.1 };
     expect(ModifierSchema.safeParse(flat).success).toBe(true);
+  });
+
+  it("appends E14's comboCap: last of 65, base 20, an unscoped count that flat adds to", () => {
+    expect(STAT_IDS).toHaveLength(65);
+    expect(STAT_IDS.slice(-2)).toEqual(['barrageSplit', 'comboCap']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.comboCap).toBe(20);
+    expect(isScopedStat('comboCap')).toBe(false);
+    expect(block([]).values.comboCap).toBe(20);
+    // 動能's 層數上限 ranks: flat stacks on the base 20, which compileBuild folds into the cap.
+    const stats = block([
+      { stat: 'comboCap', kind: 'flat', value: 2 },
+      { stat: 'comboCap', kind: 'flat', value: 3 },
+    ]);
+    expect(stats.values.comboCap).toBe(25);
+    expect(stats.scoped).toEqual([]);
+    expect(compileBuild(stats, []).flags.comboCap).toBe(25);
+    // Plants comboCap's tags, notTags or scope taken: refused by computeStatBlock, and at load
+    // by the modifier schema, on their fields, as barrageSplit's are.
+    const bad = [
+      { stat: 'comboCap', kind: 'flat', value: 2, tags: ['hit'] },
+      { stat: 'comboCap', kind: 'flat', value: 2, notTags: ['crit'] },
+      { stat: 'comboCap', kind: 'flat', value: 2, scope: 'outer.combo' },
+    ] as const satisfies readonly Modifier[];
+    for (const mod of bad) {
+      expect(() => block([mod])).toThrow(
+        'Tags, scopes, conditions and scalings are only allowed on scoped stats, not flat ' +
+          `damage: ${JSON.stringify(mod)}`,
+      );
+    }
+    expect(
+      bad.map((mod) => ModifierSchema.safeParse(mod).error?.issues.map((i) => i.message)),
+    ).toEqual([
+      ['tags are only allowed on scoped stats, and not on flat damage'],
+      ['notTags are only allowed on scoped stats, and not on flat damage'],
+      ['scope is only allowed on scoped stats, and not on flat damage'],
+    ]);
+    expect(ModifierSchema.safeParse({ stat: 'comboCap', kind: 'flat', value: 2 }).success).toBe(
+      true,
+    );
+    // And a module's addModifier, which takes scoped stats alone.
+    expect(() =>
+      compileBuild(block([]), [], undefined, [
+        (b) => {
+          b.addModifier({ stat: 'comboCap', kind: 'flat', value: 2, tags: ['hit'] });
+        },
+      ]),
+    ).toThrow('is not a scoped stat; use scaleStat or offsetStat');
   });
 
   it('passes the triggers and conversions through', () => {

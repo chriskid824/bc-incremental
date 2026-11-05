@@ -52,7 +52,7 @@ import { NO_POLICY_SPEC } from '../systems/systemState';
 import type { ChainPolicySpec } from '../systems/systemState';
 import { TICK_RATE } from '../types';
 import type { CharacterRun } from '../types';
-import { readsTargetIs, statAt, staticInput } from './eval';
+import { readsCombo, readsTargetIs, statAt, staticInput } from './eval';
 import { compileConversions, compileMods, ModTable, rowValues } from './modTable';
 import type { CompiledConversion, CompiledMod } from './modTable';
 import { countOf, sizeOf } from './size';
@@ -112,16 +112,18 @@ export interface BuildFlags {
    * The run keeps the combo stacks (RunContext.sys.combo, src/sim/systems/combo.ts;
    * docs/v3/game-design-v3.md §4.5): compileBuild sets it once the modules have run when a
    * modifier scales on comboStacks, an effect is a comboStack, the build has 殘影's comboEcho
-   * (C6b.4) or bulletDodgeCombo is above 0 (節奏閃避, C7b); a module that reads the stacks
-   * otherwise sets it itself. False: the stacks stay 0 and nothing counts them.
+   * (C6b.4), bulletDodgeCombo is above 0 (節奏閃避, C7b) or a trigger's condition is a
+   * comboAtLeast (E14); a module that reads the stacks otherwise sets it itself. False: the
+   * stacks stay 0 and nothing counts them.
    */
   combo: boolean;
   /**
-   * The stacks' cap (Infinity: 「層數沒有上限」, ★無盡連擊); the idle ticks, without a target
-   * for the signature emitter, after which the stacks keep floor(stacks × comboIdleKeep)
-   * (0: all go; ◆慣性's 0.75, which keeps at least 1: 「不會歸零」), again at each further
-   * multiple; and what a hit on the player keeps of them, floor(stacks × comboHitKeep)
-   * (★無盡連擊's 0: 「被擊中時歸零」).
+   * The stacks' cap (Infinity: 「層數沒有上限」, ★無盡連擊), which compileBuild folds from the
+   * comboCap stat before the modules run, max(1, floor(comboCap)), so a module's write wins
+   * (E14); the idle ticks, without a target for the signature emitter, after which the stacks
+   * keep floor(stacks × comboIdleKeep) (0: all go; ◆慣性's 0.75, which keeps at least 1:
+   * 「不會歸零」), again at each further multiple; and what a hit on the player keeps of them,
+   * floor(stacks × comboHitKeep) (★無盡連擊's 0: 「被擊中時歸零」).
    */
   comboCap: number;
   comboIdleTicks: number;
@@ -354,8 +356,8 @@ export const DEFAULT_BARRAGE_PARAMS: Readonly<BarrageParams> = {
 export const DEFAULT_SPLIT_COUNT = 3;
 
 /**
- * The combo's cap (gd:419's 「上限 20」): BuildFlags.comboCap's default, and comboFull's when a
- * module lifts the cap.
+ * The combo's cap (gd:419's 「上限 20」): the comboCap stat's base (BASE_STATS, src/data/stats.ts),
+ * BuildFlags.comboCap's literal before the fold, and comboFull's when a module lifts the cap.
  */
 export const DEFAULT_COMBO_CAP = 20;
 
@@ -1034,6 +1036,10 @@ export function compileBuild(
   const centerJump =
     character === null || character.id === 'lightning' ? -1 : sources.index('outer.lightning');
   const jumpCreditOfCenter = centerJump >= 0 ? centerJump : CENTER;
+  // 動能's 層數上限 (lead ruling Z2): the comboCap stat, folded once before any module runs, so
+  // a module's own cap (★無盡連擊's Infinity) wins; whole stacks, at least 1. At its base, 20,
+  // the flag is the literal's DEFAULT_COMBO_CAP.
+  flags.comboCap = Math.max(1, Math.floor(values.comboCap));
   // The signature's changes come before the rules', whose scaleStat calls then scale them too.
   compileInstance(CENTER, () => compileSignature(signature.id, signature, compiler, CENTER));
   if (character === null) {
@@ -1101,12 +1107,14 @@ export function compileBuild(
   }
   // The run counts the combo stacks only for a build that reads or adds them (lead ruling K1),
   // 殘影 included, which reads them for 「滿層」, so every other build's run stays the same bit
-  // for bit. 節奏閃避 reads them (C7b).
+  // for bit. 節奏閃避 reads them (C7b), and so does a trigger's comboAtLeast (E14, lead ruling
+  // Z3), a module's addTrigger included.
   flags.combo ||=
     scoped.some((mod) => mod.scaling?.per === 'comboStacks') ||
     effects.some((fx) => fx.spec.kind === 'comboStack') ||
     flags.comboEcho !== null ||
-    values.bulletDodgeCombo > 0;
+    values.bulletDodgeCombo > 0 ||
+    triggers.some((t) => readsCombo(t.conds));
   // So too the per-tick variables (lead ruling G2).
   flags.shardsHeld ||= scoped.some((mod) => mod.scaling?.per === 'shardsHeld');
   flags.enemiesInAura ||= scoped.some((mod) => mod.scaling?.per === 'enemiesInAura');

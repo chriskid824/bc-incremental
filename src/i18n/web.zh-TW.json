@@ -162,6 +162,8 @@
   "web.cond.victimHas": "{held}",
   "web.cond.killedBy": "被{kind}殺死",
   "web.cond.ailment": "{ailment}",
+  "web.cond.comboAtLeast": "連擊 {n} 層以上時",
+  "web.cond.comboAtLeast.full": "連擊滿層時",
   "web.hit.crit": "暴擊",
   "web.hit.nonCrit": "非暴擊",
   "web.hit.primary": "主要擊中",

@@ -162,6 +162,8 @@
   "web.cond.victimHas": "{held}",
   "web.cond.killedBy": "killed by {kind}",
   "web.cond.ailment": "{ailment}",
+  "web.cond.comboAtLeast": "at {n}+ combo stacks",
+  "web.cond.comboAtLeast.full": "at full combo",
   "web.hit.crit": "crits",
   "web.hit.nonCrit": "non-crits",
   "web.hit.primary": "primary hits",

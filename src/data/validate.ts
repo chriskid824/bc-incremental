@@ -989,6 +989,9 @@ function timedDroneIssues(
  * Ranges of a modifier's conditions and scaling (src/data/triggers.ts); the simulation relies on
  * them. An enemyRegen modifier carries no tags, notTags or scope: the simulation reads it on the
  * untagged center row (src/sim/systems/enemyAi.ts), which none of them would select as written.
+ * A condition is refused unless CONDITION_CONTEXTS allows it on a modifier: the schema's
+ * Modifier.when takes target conditions alone, but data checked without the schema can carry a
+ * trigger's chance, cooldownSec, hitIs, victimHas, killedBy, ailment or comboAtLeast.
  */
 function modifierIssues(mod: Modifier): string[] {
   const issues: string[] = [];
@@ -1002,6 +1005,10 @@ function modifierIssues(mod: Modifier): string[] {
   }
   issues.push(...attackSpeedIssues(mod));
   (mod.when ?? []).forEach((condition, i) => {
+    const key = conditionKey(condition);
+    if (!CONDITION_CONTEXTS[key].includes('modifier')) {
+      issues.push(`when[${i}] ${key} does not apply to modifiers`);
+    }
     for (const problem of conditionIssues(condition)) issues.push(`when[${i}] ${problem}`);
   });
   const scaling = mod.scaling;
@@ -1051,6 +1058,14 @@ function conditionIssues(condition: Condition): string[] {
       }
     } else if (!isPositiveInt(stacks)) {
       issues.push(`stacksAtLeast.stacks must be a positive integer (got ${stacks})`);
+    }
+  }
+  // A whole number of stacks, at least 1, or 'full' (滿層): the compile reads no other (E14).
+  if ('comboAtLeast' in condition) {
+    const stacks: unknown = condition.comboAtLeast;
+    if (stacks !== 'full' && !(typeof stacks === 'number' && isPositiveInt(stacks))) {
+      const got = typeof stacks === 'string' ? `'${stacks}'` : String(stacks);
+      issues.push(`comboAtLeast must be a whole number >= 1 or 'full' (got ${got})`);
     }
   }
   // Sources are numbered as a run first meets them, so a class has no fixed set to expand to;

@@ -247,7 +247,12 @@ export type TargetCondition =
  * kind of hit the event comes from. victimHas, killedBy: what the dying enemy held when it died,
  * and what killed it. ailment: on ailmentApplied, the ailment applied; on ailmentTick, an
  * ailment dealing damage over time that the ticking enemy holds. Each trigger on those two
- * events has exactly one, so none fires for every ailment or every enemy.
+ * events has exactly one, so none fires for every ailment or every enemy. comboAtLeast (E14,
+ * gd §4.5's ◆爆發 「滿層時」): the run's combo stacks, as they are when the trigger is checked
+ * (as its event is raised; a kill's pending triggers, at the tick's death step), are at least
+ * this whole number (1 or more), or with 'full' at least BuildFlags.comboFull (滿層); it needs
+ * no enemy, so every event takes it, and it never holds outside a run. A trigger's condition
+ * only, never a modifier's.
  */
 export type Condition =
   | TargetCondition
@@ -256,7 +261,8 @@ export type Condition =
   | { readonly hitIs: HitKind }
   | { readonly victimHas: HeldAilment }
   | { readonly killedBy: KillKind }
-  | { readonly ailment: AppliedAilment };
+  | { readonly ailment: AppliedAilment }
+  | { readonly comboAtLeast: number | 'full' };
 
 type KeysOf<T> = T extends unknown ? keyof T : never;
 export type ConditionKey = KeysOf<Condition>;
@@ -302,6 +308,7 @@ export const CONDITION_CONTEXTS: Readonly<
   victimHas: KILLS,
   killedBy: KILLS,
   ailment: ['ailmentApplied', 'ailmentTick'],
+  comboAtLeast: TRIGGER_EVENTS,
 };
 
 /**

@@ -65,7 +65,8 @@
       "droneSpeed": 1,
       "summonDuration": 1,
       "barragePierce": 0,
-      "barrageSplit": 0
+      "barrageSplit": 0,
+      "comboCap": 20
     },
     "values": {
       "damage": 450.22067097931824,
@@ -131,7 +132,8 @@
       "droneSpeed": 1,
       "summonDuration": 1,
       "barragePierce": 0,
-      "barrageSplit": 0
+      "barrageSplit": 0,
+      "comboCap": 20
     },
     "scoped": [
       {

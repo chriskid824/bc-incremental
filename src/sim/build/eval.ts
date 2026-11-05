@@ -272,6 +272,14 @@ const TARGET_FROST_AT_LEAST = 8;
  * highestHp, EvalInput.highestHpId. Never met outside a run.
  */
 const TARGET_IS = 9;
+/**
+ * The run's combo stacks (ctx.sys.combo.stacks) are at least `a`, or, with `a` COMBO_FULL, at
+ * least BuildFlags.comboFull (滿層): comboAtLeast (E14). It reads no target, so it holds on
+ * events without one, and never outside a run.
+ */
+const COMBO_AT_LEAST = 10;
+/** comboAtLeast 'full''s operand: below every count compileCondition takes, which starts at 1. */
+const COMBO_FULL = -1;
 
 /** The EnemyV3.state bit of each targetState (src/sim/systems/enemyRecord.ts). */
 const STATE_BITS: Readonly<Record<TargetState, number>> = { dashing: DASHING, stopped: STOPPED };
@@ -280,10 +288,11 @@ const STATE_BITS: Readonly<Record<TargetState, number>> = { dashing: DASHING, st
  * A condition compiled for checking: a code and two operands. Target conditions read the
  * target (held ailment ordinal; TARGET_KINDS ordinal; hp fraction; stack ailment ordinal and
  * stacks, or for 'max' that ordinal alone; zone source index; state bit; chill fraction;
- * TARGET_IS_PICKS ordinal); hitIs, victimHas and killedBy read the event's flags.
+ * TARGET_IS_PICKS ordinal); hitIs, victimHas and killedBy read the event's flags; comboAtLeast
+ * reads the run's stacks against `a`, its count or COMBO_FULL.
  */
 export interface CompiledCondition {
-  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   readonly a: number;
   readonly b: number;
 }
@@ -300,6 +309,8 @@ const flagsCondition = (all: number, none = 0): CompiledCondition => ({
  * (src/sim/effects/types.ts), not conditions here; they throw. The ailment condition reads the
  * applied ailment from the flags of ailmentApplied events, and whether the target holds it on
  * ailmentTick events. inZone numbers its source in `sources`, and throws without them.
+ * comboAtLeast is a trigger's condition alone: it throws without `on` (a modifier's), and on a
+ * count that is not a whole number of at least 1, as data validation does.
  */
 export function compileCondition(
   condition: Condition,
@@ -335,6 +346,17 @@ export function compileCondition(
   }
   if ('targetIs' in condition) {
     return { code: TARGET_IS, a: TARGET_IS_PICKS.indexOf(condition.targetIs), b: 0 };
+  }
+  if ('comboAtLeast' in condition) {
+    const stacks = condition.comboAtLeast;
+    if (on === undefined) {
+      throw new Error(`comboAtLeast is a trigger's condition, not a modifier's (got ${stacks})`);
+    }
+    if (stacks === 'full') return { code: COMBO_AT_LEAST, a: COMBO_FULL, b: 0 };
+    if (!(Number.isInteger(stacks) && stacks >= 1)) {
+      throw new Error(`comboAtLeast: ${stacks} must be a whole number >= 1 or 'full'`);
+    }
+    return { code: COMBO_AT_LEAST, a: stacks, b: 0 };
   }
   if ('ailment' in condition) {
     if (on === 'ailmentApplied') {
@@ -378,9 +400,23 @@ export const readsTargetIs = (conditions: readonly CompiledCondition[] | null): 
   conditions !== null && conditions.some((c) => c.code === TARGET_IS);
 
 /**
+ * Some condition of `conditions` is a comboAtLeast (COMBO_AT_LEAST): a run of a build with one
+ * counts the combo stacks (BuildFlags.combo, lead ruling Z3).
+ */
+export const readsCombo = (conditions: readonly CompiledCondition[]): boolean =>
+  conditions.some((c) => c.code === COMBO_AT_LEAST);
+
+/** comboAtLeast's operand `a` holds in run `ctx`: its stacks against `a` or 滿層. */
+const comboMet = (a: number, ctx: RunContext | null): boolean =>
+  ctx !== null &&
+  ctx.sys.combo.stacks >= (a === COMBO_FULL ? (ctx.build.flags.comboFull as number) : a);
+
+/**
  * Every condition holds for an event or instance on `target` (null: none, and then no target
  * condition holds) at tick `now`, carrying `flags`, in run `ctx` (null: none, and then no
- * stacksAtLeast 'max' or targetIs holds).
+ * stacksAtLeast 'max', targetIs or comboAtLeast holds). The flags' conditions and comboAtLeast
+ * need no target; comboAtLeast's case in the switch serves the events that have one, so a build
+ * without it reads nothing new on them.
  */
 export function conditionsMet(
   conditions: readonly CompiledCondition[],
@@ -395,7 +431,10 @@ export function conditionsMet(
       if ((flags & c.a) !== c.a || (flags & c.b) !== 0) return false;
       continue;
     }
-    if (target === null) return false;
+    if (target === null) {
+      if (c.code !== COMBO_AT_LEAST || !comboMet(c.a, ctx)) return false;
+      continue;
+    }
     switch (c.code) {
       case TARGET_HAS:
         if (!(heldReader[c.a] as HeldReader)(target, now, ctx)) return false;
@@ -429,6 +468,9 @@ export function conditionsMet(
       case TARGET_IS:
         // highestHp, TARGET_IS_PICKS' only pick: the globals step's id, never 0 for an enemy.
         if (ctx === null || target.id !== ctx.evalInput.highestHpId) return false;
+        break;
+      case COMBO_AT_LEAST:
+        if (!comboMet(c.a, ctx)) return false;
         break;
     }
   }
