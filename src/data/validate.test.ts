@@ -1207,6 +1207,62 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it('takes 血河 (E9) and checks a bleed spread as a poison one, with behind its own', () => {
+    // B3's data, on the ailmentTick it is written for.
+    const bloodRiver = {
+      on: 'ailmentTick',
+      when: [{ ailment: 'bleed' }],
+      every: 0.5,
+      do: [{ kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true }],
+    } as const;
+    const capped = {
+      kind: 'spreadAilment',
+      ailment: 'bleed',
+      radius: 60,
+      effect: 0.5,
+      behind: false,
+      maxTargets: 2,
+      order: 'nearest',
+    } as const;
+    expect(
+      triggerIssues(bloodRiver, { on: 'kill', when: [{ victimHas: 'bleed' }], do: [capped] }),
+    ).toEqual([]);
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { kind: 'spreadAilment', ailment: 'bleed', radius: 0, maxTargets: 0 },
+          { kind: 'spreadAilment', ailment: 'bleed', radius: 60, effect: 1.5, maxTargets: 2.5 },
+          { kind: 'spreadAilment', ailment: 'bleed', radius: -1, effect: -0.5 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] radius must be > 0 (got 0)`,
+      `${at} do[0] maxTargets must be a positive integer (got 0)`,
+      `${at} do[1] effect must be in [0, 1] (got 1.5)`,
+      `${at} do[1] maxTargets must be a positive integer (got 2.5)`,
+      `${at} do[2] radius must be > 0 (got -1)`,
+      `${at} do[2] effect must be in [0, 1] (got -0.5)`,
+    ]);
+    // A spread needs the event's enemy: 'periodic' has none to spread from.
+    expect(triggerIssues({ ...bloodRiver, on: 'periodic', when: [], every: 1 })).toEqual([
+      `${at} do[0] spreadAilment needs the event's enemy, which 'periodic' events have not`,
+    ]);
+    // The schema takes `behind` on a bleed spread alone; data checked without it still gets
+    // the issue, on a burn or a poison spread.
+    const behindOn = (ailment: 'burn' | 'poison'): TriggerSpec['do'][number] =>
+      ({
+        kind: 'spreadAilment',
+        ailment,
+        radius: 60,
+        behind: true,
+      }) as unknown as TriggerSpec['do'][number];
+    expect(triggerIssues({ on: 'hit', do: [behindOn('burn'), behindOn('poison')] })).toEqual([
+      `${at} do[0] behind filters a bleed spread only`,
+      `${at} do[1] behind filters a bleed spread only`,
+    ]);
+  });
+
   it('takes toSplitChildren in (0, 1] on a poison spread that runs at the kill only', () => {
     const toChildren = (toSplitChildren: number) =>
       ({ kind: 'spreadAilment', ailment: 'poison', radius: 100, toSplitChildren }) as const;

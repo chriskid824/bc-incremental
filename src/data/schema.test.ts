@@ -525,6 +525,18 @@ describe('EffectSpecSchema', () => {
     { kind: 'buff', stat: 'attackSpeed', more: -0.3, durationSec: 0.5, tags: ['minion', 'hit'] },
     // E6: 熱震's 解凍.
     { kind: 'thaw' },
+    // E9: 血河's bleed spread, behind the event enemy, with poison's cap and order.
+    { kind: 'spreadAilment', ailment: 'bleed', radius: 60 },
+    { kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true },
+    {
+      kind: 'spreadAilment',
+      ailment: 'bleed',
+      radius: 80,
+      effect: 0.5,
+      behind: false,
+      maxTargets: 2,
+      order: 'nearest',
+    },
   ])('accepts %o', (effect) => {
     expect(EffectSpecSchema.parse(effect)).toEqual(effect);
   });
@@ -546,10 +558,36 @@ describe('EffectSpecSchema', () => {
       `applyAilment ${ailment}`,
       { kind: 'applyAilment', ailment },
     ]),
-    ...['bleed', 'shock', 'frost'].map((ailment): [string, unknown] => [
+    ...['shock', 'frost'].map((ailment): [string, unknown] => [
       `spreadAilment ${ailment}`,
       { kind: 'spreadAilment', ailment, radius: 100 },
     ]),
+    // E9: behind is the bleed spread's alone, which moves no stack count and splits nothing.
+    ...['burn', 'poison'].map((ailment): [string, unknown] => [
+      `spreadAilment ${ailment} with behind`,
+      { kind: 'spreadAilment', ailment, radius: 100, behind: true },
+    ]),
+    [
+      'spreadAilment bleed with stacks',
+      { kind: 'spreadAilment', ailment: 'bleed', radius: 60, stacks: 0.5 },
+    ],
+    [
+      'spreadAilment bleed with toSplitChildren',
+      { kind: 'spreadAilment', ailment: 'bleed', radius: 60, toSplitChildren: 0.5 },
+    ],
+    [
+      'spreadAilment bleed with behind not a boolean',
+      { kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: 1 },
+    ],
+    [
+      'spreadAilment bleed with behind undefined',
+      { kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: undefined },
+    ],
+    ['spreadAilment bleed without a radius', { kind: 'spreadAilment', ailment: 'bleed' }],
+    [
+      'spreadAilment bleed at an unknown order',
+      { kind: 'spreadAilment', ailment: 'bleed', radius: 60, order: 'farthest' },
+    ],
     [
       'spreadAilment poison with an unknown key',
       { kind: 'spreadAilment', ailment: 'poison', radius: 100, targets: 3 },
@@ -825,6 +863,10 @@ describe('the spread mark (E3)', () => {
     [
       'a spreadAilment poison',
       { kind: 'spreadAilment', ailment: 'poison', radius: 90, spread: true },
+    ],
+    [
+      'a spreadAilment bleed (E9)',
+      { kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true, spread: true },
     ],
     ['an explode', { kind: 'explode', radius: 90, damagePct: 0.5, spread: true }],
     [

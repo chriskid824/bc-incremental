@@ -1693,3 +1693,64 @@ describe('E6: thaw', () => {
     expect(MESSAGES['zh-TW']['web.effect.thaw']).toBe('立刻解凍{extra}');
   });
 });
+
+describe('E9: 血河’s bleed spread (lead ruling S7)', () => {
+  const lines = (trigger: TriggerSpec, locale: Locale): readonly string[] =>
+    linesOf(withEffects(fire, NOTABLE, { triggers: [trigger] }), NOTABLE, locale);
+  /** B3's data. */
+  const bloodRiver: TriggerSpec = {
+    on: 'ailmentTick',
+    when: [{ ailment: 'bleed' }],
+    every: 0.5,
+    do: [{ kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true }],
+  };
+  const withSpread = (more: object): TriggerSpec => ({
+    ...bloodRiver,
+    do: [{ kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true, ...more }],
+  });
+  const EVERY_EN = 'Every 0.5 s while enemies take bleed damage: ';
+  const EVERY_ZH = '敵人受到流血傷害時，每 0.5 秒：';
+
+  it('writes a bleed spread as a poison one, with its cap and order, in both locales', () => {
+    // Planted bugs: a locale without the line, or the cap or the order left out of it.
+    const cases: [TriggerSpec, string, string][] = [
+      [
+        bloodRiver,
+        'spread the bleed stacks at 100% strength to the enemies within 60',
+        '把流血層以 100% 的效果傳給半徑 60 內的敵人',
+      ],
+      [
+        withSpread({ effect: 0.5, maxTargets: 2, order: 'nearest' }),
+        'spread the bleed stacks at 50% strength to the enemies within 60, at most 2 enemies, ' +
+          'nearest first',
+        '把流血層以 50% 的效果傳給半徑 60 內的敵人，最多 2 隻，由近到遠',
+      ],
+      [
+        withSpread({ maxTargets: 3 }),
+        'spread the bleed stacks at 100% strength to the enemies within 60, at most 3 enemies',
+        '把流血層以 100% 的效果傳給半徑 60 內的敵人，最多 3 隻',
+      ],
+    ];
+    for (const [trigger, en, zh] of cases) {
+      expect(lines(trigger, 'en'), en).toEqual([EVERY_EN + en]);
+      expect(lines(trigger, 'zh-TW'), zh).toEqual([EVERY_ZH + zh]);
+    }
+  });
+
+  it('gives behind no text of its own, so 血河 needs its hand description', () => {
+    for (const locale of LOCALES) {
+      expect(lines(bloodRiver, locale)).toEqual(lines(withSpread({ behind: false }), locale));
+      expect(lines(bloodRiver, locale).some(isFaulty), locale).toBe(false);
+    }
+  });
+
+  it('quotes the trigger’s 0.5 s and a set effect among its numbers, V17’s check, and no more', () => {
+    // The radius, behind and the cap are not numbers V17 asks for, as a poison spread's are not.
+    expect(triggerNumbers(bloodRiver)).toEqual([['0.5']]);
+    expect(triggerNumbers(withSpread({ effect: 0.5, maxTargets: 2, order: 'nearest' }))).toEqual([
+      ['0.5'],
+      ['50%'],
+    ]);
+    expect(triggerNumbers(withSpread({ behind: false, maxTargets: 3 }))).toEqual([['0.5']]);
+  });
+});

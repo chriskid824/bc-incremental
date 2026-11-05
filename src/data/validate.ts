@@ -1400,6 +1400,10 @@ function effectIssues(
         // The schema rejects it; data checked without the schema can still carry it.
         issues.push('toSplitChildren moves poison only');
       }
+      // E9: a bleed spread's target cap, as poison's; `behind` is a bleed spread's alone, which
+      // the schema holds to, but data checked without it can carry it on any spread.
+      if (effect.ailment === 'bleed') count('maxTargets', effect.maxTargets);
+      else if ('behind' in effect) issues.push('behind filters a bleed spread only');
       break;
     case 'explode':
       positive('radius', effect.radius);

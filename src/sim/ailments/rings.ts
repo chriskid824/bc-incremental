@@ -293,6 +293,23 @@ export class RingPool {
   }
 
   /**
+   * The stack counts of ring `r` that last past tick `now`, counted as spread counts the live
+   * stacks it moves a share of: from the step under way, or on a step tick, whose step's stacks
+   * end at `now`, from the next, before that step as after it. In a run, which deals each step
+   * on its tick, that is stacks[r] but on a step tick before its step, less the stacks ending
+   * at it. Counts are kept by step, so a stack that ended earlier in the step under way counts.
+   */
+  liveCount(r: number, now: number): number {
+    const u = Math.ceil(now / W);
+    const u0 = now < W * u ? u : u + 1;
+    const b = r * RING_BUCKETS;
+    const last = this.last[r] as number;
+    let live = 0;
+    for (let k = u0; k <= last; k++) live += this.dCount[b + (k & BUCKET_MASK)] as number;
+    return live;
+  }
+
+  /**
    * Takes `f` (0 < f ≤ 1) of the damage ring `r` has left: returns it, and scales what the ring
    * deals from now on by 1 − f, every step's rate change and partial damage alike, so each
    * stack keeps going, weaker, and the stack counts stay. f ≥ 1 takes it all and gives the ring

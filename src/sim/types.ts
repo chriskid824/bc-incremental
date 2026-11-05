@@ -395,10 +395,15 @@ export type SimEvent =
       readonly y: number;
       readonly amount: Num;
     }
-  /** A poisoned enemy passed its poison stacks to `targets` enemies nearby (spreadAilment). */
+  /**
+   * A poisoned enemy passed its poison stacks to `targets` enemies nearby (spreadAilment), or a
+   * bleeding one its bleed (血河, E9): `targets` counts the enemies that took it, 0 when every
+   * enemy offered kept a stronger bleed or as many stacks; one per run of the effect whose
+   * enemy held the ailment, none otherwise.
+   */
   | {
       readonly type: 'ailmentSpread';
-      readonly ailment: 'poison';
+      readonly ailment: 'poison' | 'bleed';
       readonly enemyId: number;
       readonly x: number;
       readonly y: number;

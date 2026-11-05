@@ -292,7 +292,8 @@ export const EffectSpecSchema = exact<EffectSpec>()(
       })
       .readonly(),
     // A burn spread may move records, which M1's spread copies whole to every enemy in range:
-    // only a poison spread takes a stack fraction, a target cap and a share for split children.
+    // only a poison spread takes a stack fraction, a target cap and a share for split children,
+    // and only a bleed spread (E9) a target cap and `behind`.
     z.discriminatedUnion('ailment', [
       z
         .strictObject({
@@ -312,6 +313,17 @@ export const EffectSpecSchema = exact<EffectSpec>()(
           maxTargets: finite.exactOptional(),
           order,
           toSplitChildren: finite.exactOptional(),
+        })
+        .readonly(),
+      z
+        .strictObject({
+          kind: z.literal('spreadAilment'),
+          ailment: z.literal('bleed'),
+          radius: finite,
+          effect: finite.exactOptional(),
+          behind: z.boolean().exactOptional(),
+          maxTargets: finite.exactOptional(),
+          order,
         })
         .readonly(),
     ]),

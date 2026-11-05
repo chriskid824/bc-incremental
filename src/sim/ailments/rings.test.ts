@@ -228,6 +228,46 @@ describe('RingPool', () => {
     }
   });
 
+  it('counts the live stacks a spread takes its share of, off a step tick and on one before and after its step (liveCount)', () => {
+    // E9's bleed raise reads its share k / n from this count, so it must be spread's own.
+    // Plants: a step tick's ending stacks counted before its step, the last step left out, and
+    // the step under way left out off a step tick.
+    let ending = 0;
+    for (const seed of [31, 32, 33]) {
+      const rng = createRng(seed);
+      const pool = new RingPool();
+      const r = pool.alloc(0, 0);
+      const naive = new Naive();
+      const check = (now: number, label: string): void => {
+        // Live: stacks whose last step has not been dealt; on a step tick that step is done.
+        const u0 = now % W === 0 ? now / W + 1 : Math.ceil(now / W);
+        const count = pool.liveCount(r, now);
+        expect(count, label).toBe(naive.counts.filter((last) => last >= u0).length);
+        const d = pool.alloc(0, 0);
+        expect(pool.spread(r, d, 0, 1, now), label).toBe(count);
+        pool.release(d);
+      };
+      for (let now = 1; now <= 1200; now++) {
+        if (rng.chance(0.1)) {
+          const { d, end, n } = randomStack(rng, now);
+          pool.apply(r, num(d), now, end, n);
+          naive.apply(d, now, end, n);
+        }
+        if (now % W !== 0) {
+          check(now, `seed ${seed} tick ${now}`);
+          continue;
+        }
+        const k = now / W;
+        check(now, `seed ${seed} before step ${k}`);
+        if (pool.liveCount(r, now) < (pool.stacks[r] as number)) ending++;
+        pool.step(r, k);
+        expect(pool.liveCount(r, now), `seed ${seed} after step ${k}`).toBe(pool.stacks[r]);
+        check(now, `seed ${seed} after step ${k}`);
+      }
+    }
+    expect(ending).toBeGreaterThan(20);
+  });
+
   it('clamps a stack to the 64-step window and frees at k >= last', () => {
     const pool = new RingPool();
     const r = pool.alloc(1, 3);

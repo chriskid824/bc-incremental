@@ -73,9 +73,21 @@ describe('the renderer on a character run', () => {
     expect(source).toMatch(
       /case 'ailmentApplied':\s*if \(this\.magma !== null && event\.ailment === 'poison'\)/,
     );
-    expect(source).toMatch(/case 'ailmentSpread':\s*this\.magma\?\.poisonSpread\(/);
+    expect(source).toMatch(
+      /case 'ailmentSpread':\s*if \(event\.ailment === 'poison'\) \{\s*this\.magma\?\.poisonSpread/,
+    );
     expect(source).toMatch(/case 'waveCleared':\s*this\.magma\?\.waveCleared\(\);/);
     expect(source).toMatch(/this\.magma\?\.flushTick\(\);/);
+  });
+
+  it('pops the green ring for a poison spread only: a bleed one (血河, E9) draws nothing yet', () => {
+    // Planted bug: the poison pop drawn for every spread. B3 draws 血河's red trail.
+    const spread = /case 'ailmentSpread':([\s\S]*?)break;/.exec(source)?.[1] ?? '';
+    expect(spread.replace(/\s+/g, ' ').trim()).toBe(
+      "if (event.ailment === 'poison') { " +
+        'this.magma?.poisonSpread(event.x, event.y, event.radius, event.targets); }',
+    );
+    expect(source.match(/poisonSpread\(/g)).toHaveLength(1);
   });
 
   it('draws a nova at the player as 火環, an explode as a small blast', () => {

@@ -8,7 +8,8 @@
  * class holds it (a fusion ring credits the first fusion that applied to it).
  *
  * Hits (src/sim/combat/hit.ts) and the applyAilment and spreadAilment effects
- * (src/sim/effects/execute.ts) call these and raise ailmentApplied themselves. A dead or leaked
+ * (src/sim/effects/execute.ts) call these and raise ailmentApplied themselves. A spread moves
+ * burn, poison or (血河, E9) bleed already dealt and raises its own event. A dead or leaked
  * enemy gives its rings back (releaseAilments), and targeting asks whether the damage over time
  * on an enemy will kill it (doomed).
  */
@@ -24,10 +25,17 @@ import { slotRow } from '../emitters/types';
 import type { Payload } from '../emitters/types';
 import type { Enemy, RunContext } from '../systems/context';
 import { WARD_AILMENT_MULT, WARDED } from '../systems/enemyRecord';
-import { addBleed, bleedLeft } from './bleed';
+import { addBleed, bleedLeft, holdsBleed } from './bleed';
 import { addBurn, addBurnIfStronger, recordsLeft, spreadBurns } from './records';
 import type { BurnSpread } from './records';
-import { bleedRingEnd, liveBleedStacks, RING_BLEED, RING_BURN, RING_POISON } from './rings';
+import {
+  bleedRingEnd,
+  liveBleedStacks,
+  RING_BLEED,
+  RING_BURN,
+  RING_POISON,
+  RING_SLOTS_BLEED,
+} from './rings';
 
 const DAMAGE = SCOPED_INDEX.damage;
 
@@ -376,6 +384,120 @@ export function spreadPoison(
     radius: spread.radius,
     targets,
   });
+}
+
+/**
+ * spreadAilment's bleed (血河, gd:402; E9): the bleed `source` holds now to the other alive
+ * enemies within the spread radius of it, with `behind` only those farther from the player than
+ * it (Enemy.dist strictly greater, both as they stand now), at most `maxTargets` of those: the
+ * first in id order, or with `nearest` the nearest to `source`, nearest first (ties by id).
+ * Without bleedRings each is offered a copy of its one bleed, `effect` × its damage per second
+ * until its own end, credited to its credit, at trigger depth `depth`, through addBleed, so an
+ * enemy whose own bleed has as much damage left keeps it. Under 大出血's bleedRings each is
+ * raised toward the source's live stacks (raiseBleedRings). One ailmentSpread event with the
+ * enemies that took it; nothing moves and no event comes when `source` holds no live bleed. The
+ * source keeps its own bleed whole.
+ */
+export function spreadBleed(
+  ctx: RunContext,
+  source: Enemy,
+  spread: BurnSpread,
+  maxTargets: number,
+  depth: number,
+  nearest: boolean,
+  behind: boolean,
+): void {
+  const now = ctx.now;
+  const rings = ctx.build.flags.bleedRings;
+  const held = rings ? liveBleedStacks(ctx.rings, source, now) : holdsBleed(source, now) ? 1 : 0;
+  if (held === 0) return;
+  // Moving a bleed kills nothing, so collecting the targets first changes nothing. The source,
+  // and with `behind` an enemy no farther from the player, is left out before the cap counts.
+  const targets = ctx.spreadTargets;
+  const found = ctx.grid.within(source.x, source.y, spread.radiusSq, targets);
+  const dist = source.dist;
+  let count = 0;
+  for (let i = 0; i < found; i++) {
+    const enemy = targets[i] as Enemy;
+    if (enemy === source || (behind && !(enemy.dist > dist))) continue;
+    targets[count++] = enemy;
+  }
+  if (maxTargets < count) {
+    count = nearest ? orderNearest(targets, count, maxTargets, source.x, source.y) : maxTargets;
+  }
+  let reached = 0;
+  if (rings) {
+    const cap = Math.min(held, ctx.build.flags.bleedMaxStacks);
+    for (let i = 0; i < count; i++) {
+      if (raiseBleedRings(ctx, source, targets[i] as Enemy, cap, spread.effect, depth)) reached++;
+    }
+  } else {
+    const dps = mul(source.bleedDps, spread.effect);
+    const until = source.bleedUntil;
+    const credit = source.bleedSource;
+    for (let i = 0; i < count; i++) {
+      if (addBleed(ctx, targets[i] as Enemy, dps, until, depth, credit)) reached++;
+    }
+  }
+  ctx.events.push({
+    type: 'ailmentSpread',
+    ailment: 'bleed',
+    enemyId: source.id,
+    x: source.x,
+    y: source.y,
+    radius: spread.radius,
+    targets: reached,
+  });
+}
+
+/**
+ * Under bleedRings: raises `enemy`'s live bleed stacks (liveBleedStacks) to `cap`, the stacks
+ * `source` holds, at most bleedMaxStacks, from `source`'s live bleed rings in slot order
+ * (center, outer, fusion): from a ring of n stacks lasting past now (RingPool.liveCount), k of
+ * them, as moveRings moves a share (RingPool.spread with k / n of the ring's damage left ×
+ * `effect`, so each new stack at its per-stack damage, and k of its stack counts, the
+ * longest-lasting first), keeping its class, credit and end, at trigger depth `depth`. A warded
+ * enemy takes 元素護盾's share of the damage (C7.6), the counts as they are. True when it took a
+ * stack; at `cap` or above it takes none.
+ */
+function raiseBleedRings(
+  ctx: RunContext,
+  source: Enemy,
+  enemy: Enemy,
+  cap: number,
+  effect: number,
+  depth: number,
+): boolean {
+  const pool = ctx.rings;
+  const now = ctx.now;
+  let room = cap - liveBleedStacks(pool, enemy, now);
+  if (room <= 0) return false;
+  // 元素護盾 (C7.6), as moveRings.
+  const v = enemy.v3;
+  const f = v !== null && (v.defence & WARDED) !== 0 ? effect * WARD_AILMENT_MULT : effect;
+  const from = source.rings;
+  let moved = 0;
+  for (let slot = RING_BLEED; slot < RING_SLOTS_BLEED && room > 0; slot++) {
+    const r = from[slot] as number;
+    if (r < 0 || (pool.end[r] as number) <= now) continue;
+    // n: the ring's stacks as spread counts the live ones it moves a share of (liveCount), so
+    // the share k / n moves k whole stacks with k / n of its damage left, on a step tick before
+    // its step (a kill's spread) as after it. The cap and the room, from liveBleedStacks, still
+    // count the stacks that end at that step: the source's lift the cap, the target's own take
+    // up its room.
+    const n = pool.liveCount(r, now);
+    if (n <= 0) continue;
+    const share = (n < room ? n : room) / n;
+    // A new ring may grow the pool: take it before reading the pool's arrays.
+    const d = ringFor(ctx, enemy, slot, pool.credit[r] as number);
+    const m = pool.spread(r, d, f * share, share, now);
+    moved += m;
+    room -= m;
+  }
+  if (moved === 0) return false;
+  ctx.bleedApplied = true;
+  if (depth < enemy.ailDepth) enemy.ailDepth = depth;
+  return true;
 }
 
 /**

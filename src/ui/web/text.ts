@@ -648,6 +648,9 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
         if (spec.toSplitChildren !== undefined)
           extra('web.extra.splitChildren', { pct: percent(spec.toSplitChildren) });
       }
+      // E9: a bleed spread's cap and order read as poison's; `behind` has no template of its
+      // own, so the node that sets it (血河) writes its hand description.
+      if (spec.ailment === 'bleed') area(undefined, spec.maxTargets, spec.order);
       return text({
         ailment: say(lookup, `web.ailment.${spec.ailment}`),
         effect: percent(spec.effect ?? 1),

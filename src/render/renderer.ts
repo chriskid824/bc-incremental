@@ -432,8 +432,11 @@ export class Renderer {
         case 'ailmentApplied':
           if (this.magma !== null && event.ailment === 'poison') this.onPoisoned(event.targetId);
           break;
+        // A bleed spread (血河, E9) draws nothing yet: its red trail is content batch B3's.
         case 'ailmentSpread':
-          this.magma?.poisonSpread(event.x, event.y, event.radius, event.targets);
+          if (event.ailment === 'poison') {
+            this.magma?.poisonSpread(event.x, event.y, event.radius, event.targets);
+          }
           break;
         case 'waveCleared':
           this.magma?.waveCleared();
