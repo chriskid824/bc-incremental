@@ -50,7 +50,12 @@ const build = builtRelease();
 const appPath = app.getAppPath();
 
 // (1) userData, before anything reads it and before the lock, which lives in it.
-const userData = userDataDir(app.getPath('appData'), args.userDataDir);
+const userData = userDataDir(
+  app.getPath('appData'),
+  args.userDataDir,
+  process.platform,
+  build.folder,
+);
 mkdirSync(userData, { recursive: true });
 app.setPath('userData', userData);
 
@@ -88,7 +93,7 @@ function start(): void {
       home: app.getPath('home'),
       appData: app.getPath('appData'),
     }),
-    autoCloud: autoCloudRow(),
+    autoCloud: autoCloudRow(process.platform, build.folder),
     versions: {
       app: app.getVersion(),
       electron: process.versions.electron,

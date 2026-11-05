@@ -10,6 +10,7 @@
  * tools/steam/package.ts builds and packages the demo and full releases for SteamPipe.
  */
 
+import { APP_FOLDER } from './paths';
 import { SPACEWAR_APP_ID } from './steam';
 
 export type Release = 'dev' | 'demo' | 'full';
@@ -28,6 +29,11 @@ export interface ReleaseSetup {
   readonly page: 'index.html' | 'game.html';
   /** The name in error dialogs. */
   readonly title: string;
+  /**
+   * The userData folder under appData, and so the Auto-Cloud path (electron/paths.ts): one per
+   * release, so the demo and the full game keep apart saves on one PC and in Steam Cloud.
+   */
+  readonly folder: string;
 }
 
 /** Reads BC_RELEASE; anything other than dev, demo or full is an error. */
@@ -40,11 +46,29 @@ export function parseRelease(raw: string | undefined): Release {
 export function releaseSetup(release: Release): ReleaseSetup {
   switch (release) {
     case 'dev':
-      return { release, appId: SPACEWAR_APP_ID, page: 'index.html', title: 'bc-incremental' };
+      return {
+        release,
+        appId: SPACEWAR_APP_ID,
+        page: 'index.html',
+        title: 'bc-incremental',
+        folder: APP_FOLDER,
+      };
     case 'demo':
-      return { release, appId: ARCHEFUSE_DEMO_APP_ID, page: 'game.html', title: 'Archefuse Demo' };
+      return {
+        release,
+        appId: ARCHEFUSE_DEMO_APP_ID,
+        page: 'game.html',
+        title: 'Archefuse Demo',
+        folder: 'archefuse-demo',
+      };
     case 'full':
-      return { release, appId: ARCHEFUSE_APP_ID, page: 'game.html', title: 'Archefuse' };
+      return {
+        release,
+        appId: ARCHEFUSE_APP_ID,
+        page: 'game.html',
+        title: 'Archefuse',
+        folder: 'archefuse',
+      };
   }
 }
 
