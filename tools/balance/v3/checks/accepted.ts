@@ -42,4 +42,10 @@ export const ACCEPTED_CHECK_FAILS: Readonly<Record<string, string>> = acceptedFa
   // With 霜晶 the median front at 30 min is 24 (霜晶 and 蜂巢), and 熔核's 27 sits 12.5 % above it.
   'newbie:all @ 30 min':
     'B3: 熔核 runs 12.5 % ahead of 霜晶 and 蜂巢 at 30 min; re-tune with the late game',
+  // bfb07af's bot fix: default shares greedy's memory, so once the preset order runs out it keeps
+  // buying instead of stalling, and 蜂巢's sessions reach a median of about wave 84-87 at 180 min
+  // (66.5-70.5 before). The game did not change. Hoshi's 11-05 answer keeps the numbers until the
+  // post-prestige run is redesigned after the Demo (before B5); that work drops this entry.
+  'pacing:summon @ 180 min':
+    'default bot stopped stalling (bfb07af); post-prestige pacing re-tuned after the Demo',
 });
