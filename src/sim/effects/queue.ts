@@ -57,7 +57,7 @@ export interface EffectEntry {
   y: number;
   /**
    * The event's value: a kill's drop for gainShards, a shatter's victim's max life, a chain jump's
-   * angle (chainJump), else 0.
+   * angle (chainJump), a drone's flight angle (droneImpact), else 0.
    */
   value: number;
   /** The event's enemy; null for events without one and for kills. */
