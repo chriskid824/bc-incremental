@@ -578,6 +578,7 @@
   "web.node.outer.bleed.main.hemorrhage.name": "大出血",
   "web.node.outer.bleed.main.hemorrhage.desc": "流血最多疊 8 層，但移動中的敵人不再流血 ×3",
   "web.node.outer.bleed.main.threshold.name": "血河",
+  "web.node.outer.bleed.main.threshold.desc": "每 0.5 秒，流血的敵人讓身後（離中央更遠的一側）60 內的敵人也流血（50% 傷害）",
   "web.node.outer.lightning.main.entry.name": "導電",
   "web.branch.outer.lightning.arc": "電弧",
   "web.node.outer.lightning.arc.leap.name": "跳電",

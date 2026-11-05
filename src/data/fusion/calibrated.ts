@@ -91,7 +91,7 @@ export const CALIBRATED: Readonly<Partial<Record<FusionKey, CalibrationEntry>>> 
     coef: 1,
     status: 'insensitive',
     median: 1.0091,
-    min: 0.9952,
+    min: 0.9974,
     max: 1.2315,
     seeds: 8,
     startWave: 1,

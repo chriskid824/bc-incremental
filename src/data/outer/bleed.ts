@@ -70,16 +70,16 @@ export const BLEED = defineOuter({
   ),
   // 大出血: bleeds stack up to 8, but lose the moving ×3.
   keystone: keystone('hemorrhage', { rules: [{ id: 'hemorrhage', maxStacks: 8 }] }),
-  // 血河: every 0.5 s each bleeding enemy makes the nearest enemy within 60 bleed too.
-  // TODO(engine B3): gd's 「身後（離中央更遠的一側）」 has no selector yet; the nearest stands in.
+  // 血河: every 0.5 s each bleeding enemy copies its bleed to the enemies within 60 behind it
+  // (farther from the centre than it is; E9's bleed spread) at 50% (a transfer stays below 1).
+  // Copies keep the bleed's credit.
   threshold: threshold({
     triggers: [
       {
         on: 'ailmentTick',
-        every: 0.5,
         when: [{ ailment: 'bleed' }],
-        target: { pick: 'nearest', range: 60, excludeEventTarget: true },
-        do: [{ kind: 'applyAilment', ailment: 'bleed' }],
+        every: 0.5,
+        do: [{ kind: 'spreadAilment', ailment: 'bleed', radius: 60, effect: 0.5, behind: true }],
       },
     ],
   }),

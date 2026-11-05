@@ -578,6 +578,7 @@
   "web.node.outer.bleed.main.hemorrhage.name": "Hemorrhage",
   "web.node.outer.bleed.main.hemorrhage.desc": "Bleeds stack, up to 8 on an enemy, but moving enemies no longer bleed ×3.",
   "web.node.outer.bleed.main.threshold.name": "River of Blood",
+  "web.node.outer.bleed.main.threshold.desc": "Every 0.5 s, each bleeding enemy passes its bleed at 50% to the enemies within 60 behind it (farther from the centre).",
   "web.node.outer.lightning.main.entry.name": "Conduction",
   "web.branch.outer.lightning.arc": "Arc",
   "web.node.outer.lightning.arc.leap.name": "Leaping Spark",
