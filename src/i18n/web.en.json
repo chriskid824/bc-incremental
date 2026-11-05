@@ -156,6 +156,7 @@
   "web.cond.targetState": "{state}",
   "web.cond.targetFrostAtLeast": "with at least {pct} chill",
   "web.cond.targetIs": "{pick}",
+  "web.cond.inAura": "inside the aura",
   "web.cond.chance": "{pct} chance",
   "web.cond.cooldownSec": "{s} s cooldown",
   "web.cond.hitIs": "{hit} only",

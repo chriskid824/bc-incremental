@@ -153,6 +153,7 @@ export const CONDITION_TEXT: Readonly<Record<ConditionKey, MessageKey>> = {
   targetState: 'web.cond.targetState',
   targetFrostAtLeast: 'web.cond.targetFrostAtLeast',
   targetIs: 'web.cond.targetIs',
+  inAura: 'web.cond.inAura',
   chance: 'web.cond.chance',
   cooldownSec: 'web.cond.cooldownSec',
   hitIs: 'web.cond.hitIs',
@@ -502,7 +503,10 @@ function sourceName(lookup: TextLookup, selector: SourceSelector): string {
 
 // Conditions and the enemies they describe.
 
-/** Conditions that describe the enemy an event or a modifier acts on, as words around its noun. */
+/**
+ * Conditions that describe the enemy an event or a modifier acts on, as words around its noun:
+ * inAura (E15) among them, where the enemy stands as inZone's is (「光環內的敵人」).
+ */
 const ENEMY_CONDITIONS: ReadonlySet<ConditionKey> = new Set<ConditionKey>([
   'targetHas',
   'victimHas',
@@ -513,6 +517,7 @@ const ENEMY_CONDITIONS: ReadonlySet<ConditionKey> = new Set<ConditionKey>([
   'targetState',
   'targetFrostAtLeast',
   'targetIs',
+  'inAura',
 ]);
 
 /** One condition's text; a chance × `coef`, at most 100% (D10). */
@@ -540,6 +545,7 @@ function conditionText(lookup: TextLookup, condition: Condition, coef: number): 
     return say(lookup, key, { pct: percent(condition.targetFrostAtLeast) });
   if ('targetIs' in condition)
     return say(lookup, key, { pick: say(lookup, `web.targetIs.${condition.targetIs}`) });
+  if ('inAura' in condition) return say(lookup, key);
   if ('chance' in condition)
     return say(lookup, key, { pct: percent(Math.min(1, condition.chance * coef)) });
   if ('cooldownSec' in condition) return say(lookup, key, { s: trim(condition.cooldownSec) });

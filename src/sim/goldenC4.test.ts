@@ -3130,6 +3130,34 @@ const COMBO_BURST_STATS = makeStats({ damage: 10, maxLife: 1e6, comboCap: 10 }, 
   emitters: [],
 });
 
+/**
+ * E15's 光環 nodes (gd:455-459, lead rulings W1, W2 and 19) as data on M1's volley and
+ * enemyDefences' v3 waves of squares and shielders, from wave 12: 微光's aura grant, 聚能脈衝's (a
+ * second grant of outer.aura with everyNth { n: 4, mult: 4 }, beside flat ignoreShield 1 on
+ * aura-tagged hits, gd:457's 「能破盾」) and 日冕's (a third with corona { periodSec: 8,
+ * damagePct: 1 }), which combine into one aura, and ◆弱化's 20% increased damage on enemies
+ * inside the aura; the auraRadius stat at 200 (光域's 光環範圍), so that the coronas find enemies
+ * inside it and outside it at both seeds. No crits, ignites or other rolls, so every hit's
+ * amount tells what raised it. It pins the combination, the condition's reach, and the shield
+ * the aura's hits pass and the volley's do not.
+ */
+const AURA_FOCUS_STATS = makeStats(
+  { damage: 10, maxLife: 1e6, critChance: 0, igniteChance: 0, auraRadius: 200 },
+  [
+    { stat: 'ignoreShield', kind: 'flat', value: 1, tags: ['aura'] },
+    { stat: 'damage', kind: 'increased', value: 0.2, when: [{ inAura: true }] },
+  ],
+  {
+    triggers: [],
+    conversions: [],
+    emitters: [
+      { source: 'outer.aura', grant: { kind: 'aura' } },
+      { source: 'outer.aura', grant: { kind: 'aura', everyNth: { n: 4, mult: 4 } } },
+      { source: 'outer.aura', grant: { kind: 'aura', corona: { periodSec: 8, damagePct: 1 } } },
+    ],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3716,6 +3744,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     data: comboData,
     expected: ['0053be478e9621e8', 'd5c7e24912cc450f'],
   },
+  {
+    name: 'auraFocus',
+    config: { stats: AURA_FOCUS_STATS, rules: [], startWave: 12 },
+    data: enemyDefenceData,
+    expected: ['44713b8c35e30537', '486ff943039be4c0'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3827,8 +3861,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E13's chainEnd and E14's comboBurst are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([81, 'chainEnd', 'comboBurst']);
+    // The count docs/ARCHITECTURE.md gives: E14's comboBurst and E15's auraFocus are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([82, 'comboBurst', 'auraFocus']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -8136,6 +8170,101 @@ describe('golden C4 runs', () => {
         bursts: [10, 15, 20, 30, 45, 50, 55, 60, 70],
         halved: ['406 (attack 25): 10 → 6', '1100 (attack 64): 10 → 5'],
         cleared: ['647 (attack 34): 10 → 0'],
+      },
+    });
+  });
+
+  it('combines auraFocus’s three grants into one aura: every 4th pulse at × 4, a corona every 480 ticks, its hits through shields, and ◆弱化 inside its reach alone (E15)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'auraFocus') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const c = {
+        auras: 0,
+        pulses: 0,
+        acted: [] as number[],
+        coronas: [] as number[],
+        offBeat: 0,
+        shielderAuraHits: 0,
+        belowShield: 0,
+        shielderVolleyHits: 0,
+        volleyBlocked: 0,
+        amounts: new Set<string>(),
+      };
+      const types = new Map<number, EnemyId>();
+      let run: RunContext | null = null;
+      const watch: TestModule = (b) => {
+        b.hook('tick', (ctx) => {
+          run = ctx;
+        });
+        b.hook('onHit', (ctx, hit) => {
+          const em = ctx.emitters[1] as EmitterRuntime;
+          const dx = hit.target.x - ctx.player.x;
+          const dy = hit.target.y - ctx.player.y;
+          const r = ctx.build.values.auraRadius * ctx.build.flags.areaFactor;
+          const where = dx * dx + dy * dy <= r * r ? 'inside' : 'outside';
+          const amount = toNumber(hit.amount);
+          let kind = 'volley';
+          if ((hit.mask & TAG.aura) !== 0) {
+            // A pulse on the aura's phase, (3 + 4 × 1) % 15; a corona on any other tick.
+            const pulse = ctx.now % 15 === 7;
+            kind = pulse ? 'pulse' : 'corona';
+            if (pulse && !c.acted.includes(em.attacks)) c.acted.push(em.attacks);
+            if (pulse && em.attacks % 4 !== 0) c.offBeat++;
+            if (!pulse && !c.coronas.includes(ctx.now)) c.coronas.push(ctx.now);
+            if (hit.target.type === 'shielder') {
+              c.shielderAuraHits++;
+              // Below the shield's 15% of max life: blocked but for ignoreShield.
+              const v3 = hit.target.v3;
+              if (v3 !== null && amount < toNumber(hit.target.maxHp) * v3.blockPct) c.belowShield++;
+            }
+          } else if (hit.target.type === 'shielder') c.shielderVolleyHits++;
+          c.amounts.add(`${kind} ${where} ${amount}`);
+        });
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [watch]);
+      while (!sim.state.finished) {
+        for (const event of sim.step(NO_INPUT)) {
+          if (event.type === 'enemySpawned') types.set(event.enemyId, event.enemy);
+          else if (event.type === 'hitBlocked' && types.get(event.targetId) === 'shielder') {
+            c.volleyBlocked++;
+          }
+        }
+      }
+      const ctx = run as unknown as RunContext;
+      c.auras = ctx.emitters.filter((em) => em.spec.kind === 'aura').length;
+      c.pulses = (ctx.emitters[1] as EmitterRuntime).attacks;
+      bySeed[seed] = { ...c, amounts: [...c.amounts].sort() };
+    }
+    // One aura, 80 pulses (1,200 / 15); of the 20 merged pulses, those that found an enemy hit it
+    // at 2.5 × 4 × 1.2 (×4, and ◆弱化: inside the reach, every pulse hit is), and no other pulse
+    // hit; the coronas on ticks 480 and 960 hit every enemy, at 2.5 × 1.2 inside the reach and
+    // 2.5 outside it, as the volley hits at 12 and 10. Every aura hit on a shielder lands, though
+    // below its shield; the volley's never do (each a hitBlocked).
+    const beat = { auras: 1, pulses: 80, coronas: [480, 960], offBeat: 0, shielderVolleyHits: 0 };
+    const amounts = [
+      'corona inside 3',
+      'corona outside 2.5',
+      'pulse inside 12',
+      'volley inside 12',
+      'volley outside 10',
+    ];
+    expect(bySeed).toEqual({
+      1: {
+        ...beat,
+        acted: [24, 28, 32, 36, 40, 48, 52, 56, 60, 68, 80],
+        shielderAuraHits: 11,
+        belowShield: 11,
+        volleyBlocked: 85,
+        amounts,
+      },
+      2: {
+        ...beat,
+        acted: [28, 32, 36, 40, 48, 52, 60, 68, 72],
+        shielderAuraHits: 14,
+        belowShield: 14,
+        volleyBlocked: 73,
+        amounts,
       },
     });
   });

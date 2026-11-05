@@ -15,7 +15,14 @@ import type {
   TriggerSpec,
 } from './triggers';
 import type { GameData, TalentNode, V3WaveRules } from './types';
-import { MAX_KEYSTONES, needsDescKey, starArchetypeIssues, validateGameData } from './validate';
+import {
+  grantConflicts,
+  MAX_KEYSTONES,
+  needsDescKey,
+  starArchetypeIssues,
+  validateGameData,
+} from './validate';
+import type { GrantingNode } from './validate';
 import { WAVES } from './waves';
 import { V3_WAVES } from './wavesV3';
 
@@ -1083,6 +1090,103 @@ describe('trigger validation', () => {
     });
     expect(onModifier).toEqual([
       `talent 'vitality': modifiers[${index}] when[0] comboAtLeast does not apply to modifiers`,
+    ]);
+  });
+
+  it('takes inAura on a modifier and on the events with a target, as inZone, and on no other event (E15, lead ruling W2)', () => {
+    /** The events with an enemy target (triggers.ts TARGETED), in CONDITION_CONTEXTS' order. */
+    const TARGETED_EVENTS: readonly TriggerSpec['on'][] = [
+      'explode',
+      'chainJump',
+      'droneImpact',
+      'hit',
+      'crit',
+      'nthAttack',
+      'contact',
+      'ailmentApplied',
+      'ailmentTick',
+      'freeze',
+    ];
+    // Plants the condition accepted on an event its contexts leave out (kill, periodic).
+    expect(CONDITION_CONTEXTS.inAura).toEqual(CONDITION_CONTEXTS.inZone);
+    expect(CONDITION_CONTEXTS.inAura).toEqual(['modifier', ...TARGETED_EVENTS]);
+    const named: Partial<Record<TriggerSpec['on'], Condition[]>> = {
+      ailmentApplied: [{ ailment: 'burn' }],
+      ailmentTick: [{ ailment: 'burn' }],
+    };
+    const on = (event: TriggerSpec['on']): TriggerSpec => ({
+      on: event,
+      ...(event === 'periodic' ? { every: 1 } : {}),
+      ...(event === 'nthAttack' ? { every: 4 } : {}),
+      when: [...(named[event] ?? []), { inAura: true }],
+      do: [heal],
+    });
+    expect(triggerIssues(...TARGETED_EVENTS.map(on))).toEqual([]);
+    const targetless = TRIGGER_EVENTS.filter((event) => !TARGETED_EVENTS.includes(event));
+    expect(targetless).toEqual([
+      'kill',
+      'diedWithAilment',
+      'shatter',
+      'heroHit',
+      'waveStart',
+      'periodic',
+      'droneExpire',
+    ]);
+    for (const event of targetless) {
+      expect(triggerIssues(on(event)), event).toEqual([
+        `${at} when[0] inAura does not apply to '${event}' events`,
+      ]);
+    }
+    // 弱化's modifier.
+    expect(
+      issuesAfter((d) => {
+        const node = talent(d, 'vitality');
+        node.modifiers.push({
+          stat: 'damage',
+          kind: 'increased',
+          value: 0.2,
+          when: [{ inAura: true }],
+        });
+        node.descKey = 'talent.vitality.desc';
+      }),
+    ).toEqual([]);
+  });
+
+  it('refuses an inAura that is not true, or that has another key beside it (E15)', () => {
+    // Plants false read as true, and a second key read in its place (compileCondition reads
+    // targetHas first).
+    expect(
+      triggerIssues({
+        on: 'hit',
+        when: [
+          { inAura: false },
+          { inAura: 'true' },
+          { inAura: true, targetHas: 'burn' },
+          { inAura: 1, radius: 50 },
+        ] as unknown as Condition[],
+        do: [heal],
+      }),
+    ).toEqual([
+      `${at} when[0] inAura must be true (got false)`,
+      `${at} when[1] inAura must be true (got true)`,
+      `${at} when[2] inAura takes no other key (got inAura, targetHas)`,
+      `${at} when[3] inAura must be true (got 1)`,
+      `${at} when[3] inAura takes no other key (got inAura, radius)`,
+    ]);
+    let index = -1;
+    const onModifier = issuesAfter((d) => {
+      const node = talent(d, 'vitality');
+      index = node.modifiers.length;
+      node.modifiers.push({
+        stat: 'damage',
+        kind: 'increased',
+        value: 0.2,
+        when: [{ inAura: false }],
+      } as unknown as Mutable<Modifier>);
+      node.descKey = 'talent.vitality.desc';
+    });
+    expect(onModifier).toEqual([
+      `talent 'vitality': modifiers[${index}] when[0] inAura must be true (got false)`,
     ]);
   });
 
@@ -3217,9 +3321,12 @@ describe('emitter grant validation', () => {
       "talent 'outer.aura.pulse': emitters[4] everyNth.mult must be > 0 (got -1)",
       "talent 'outer.aura.pulse': emitters[5] corona.periodSec must be >= 0.25 (got 0.2)",
       "talent 'outer.aura.pulse': emitters[6] corona.damagePct must be > 0 (got -1)",
-      // A source has one aura (grantKey ''), so these also conflict.
-      "talents: emitter aura '' is granted twice by source 'outer.aura' with different fields; " +
-        'keep it on one node',
+      // A source has one aura (grantKey ''), whose grants combine field by field (lead ruling
+      // W1, E15): these set everyNth four times and corona twice, each to different values.
+      "talents: emitter aura '' of source 'outer.aura' sets everyNth twice with different " +
+        'values; keep it on one node',
+      "talents: emitter aura '' of source 'outer.aura' sets corona twice with different " +
+        'values; keep it on one node',
     ]);
   });
 
@@ -3268,7 +3375,8 @@ describe('emitter grant validation', () => {
     expect(
       grantIssues(orbit('outer.aura.orbs', { count: 2 }), orbit('hub.orbs', { count: 3 })),
     ).toEqual([]);
-    // An aura of one source is one emitter however its nodes differ.
+    // An aura of one source is one emitter, whose nodes' grants combine (lead ruling W1, E15):
+    // the entry's and 日冕's corona set different fields.
     expect(
       grantIssues(
         { id: 'outer.aura.pulse', emitters: [{ kind: 'aura' }] },
@@ -3277,10 +3385,135 @@ describe('emitter grant validation', () => {
           emitters: [{ kind: 'aura', corona: { periodSec: 8, damagePct: 1 } }],
         },
       ),
-    ).toEqual([
-      "talents: emitter aura '' is granted twice by source 'outer.aura' with different fields; " +
-        'keep it on one node',
-    ]);
+    ).toEqual([]);
+  });
+
+  describe('aura grants of one source (E15, lead ruling W1)', () => {
+    const node = (id: string, ...emitters: EmitterGrant[]): GrantingNode => ({ id, emitters });
+    /** 微光 (entry), 聚能脈衝 and 日冕 as B4's three nodes of outer.aura grant them. */
+    const ENTRY = node('outer.aura.main.entry', { kind: 'aura' });
+    const FOCUS = node('outer.aura.main.focus', { kind: 'aura', everyNth: { n: 4, mult: 4 } });
+    const CORONA = node('outer.aura.main.threshold', {
+      kind: 'aura',
+      corona: { periodSec: 8, damagePct: 1 },
+    });
+    const twice = (field: string, source = 'outer.aura', subject = 'talents'): string =>
+      `${subject}: emitter aura '' of source '${source}' sets ${field} twice with different ` +
+      'values; keep it on one node';
+
+    it('accepts grants that set different fields, or one field to one value, on one node or on several', () => {
+      // Plants a refusal of disjoint fields (today's field-for-field rule).
+      expect(grantConflicts([ENTRY, FOCUS, CORONA])).toEqual([]);
+      expect(grantConflicts([CORONA, FOCUS, ENTRY])).toEqual([]);
+      // One field to one value: everyNth on two nodes, damagePct written and left to its default.
+      expect(
+        grantConflicts([
+          ENTRY,
+          FOCUS,
+          node('outer.aura.pulse.again', { kind: 'aura', everyNth: { mult: 4, n: 4 } }),
+          node('outer.aura.pulse.share', { kind: 'aura', damagePct: 0.25 }),
+          node('outer.aura.pulse.same', { kind: 'aura', damagePct: 0.25 }, ...CORONA.emitters),
+        ]),
+      ).toEqual([]);
+      // Equal by value: everyNth's and corona's numbers, whatever their objects and key order.
+      expect(
+        grantConflicts([
+          CORONA,
+          node('outer.aura.pulse.corona', { kind: 'aura', corona: { damagePct: 1, periodSec: 8 } }),
+        ]),
+      ).toEqual([]);
+      // On one node.
+      expect(
+        grantConflicts([node('outer.aura.main.entry', { kind: 'aura' }, ...FOCUS.emitters)]),
+      ).toEqual([]);
+      // And through the whole data validation, with their descKeys.
+      expect(
+        grantIssues(
+          { id: ENTRY.id, emitters: [...ENTRY.emitters] },
+          {
+            id: FOCUS.id,
+            emitters: [...FOCUS.emitters, ...CORONA.emitters],
+          },
+        ),
+      ).toEqual([]);
+    });
+
+    it('refuses a field set twice to different values, naming the field, once a field', () => {
+      // Plants a field set twice to different values accepted, and one message for the aura.
+      expect(
+        grantConflicts([
+          FOCUS,
+          node('outer.aura.pulse.two', { kind: 'aura', everyNth: { n: 2, mult: 2 } }),
+          node('outer.aura.pulse.three', { kind: 'aura', everyNth: { n: 3, mult: 3 } }),
+        ]),
+      ).toEqual([twice('everyNth')]);
+      expect(
+        grantConflicts([
+          node('outer.aura.pulse.a', { kind: 'aura', damagePct: 0.25 }),
+          ENTRY,
+          node('outer.aura.pulse.b', { kind: 'aura', damagePct: 0.5 }),
+        ]),
+      ).toEqual([twice('damagePct')]);
+      // Every number counts: one alike and one not is a second value.
+      expect(
+        grantConflicts([
+          CORONA,
+          node('outer.aura.pulse.d', { kind: 'aura', corona: { periodSec: 8, damagePct: 0.5 } }),
+          FOCUS,
+          node('outer.aura.pulse.e', { kind: 'aura', everyNth: { n: 2, mult: 4 } }),
+        ]),
+      ).toEqual([twice('corona'), twice('everyNth')]);
+      // Two fields, in the order their second values come.
+      expect(
+        grantConflicts([
+          ENTRY,
+          CORONA,
+          FOCUS,
+          node('outer.aura.pulse.c', {
+            kind: 'aura',
+            corona: { periodSec: 4, damagePct: 1 },
+            everyNth: { n: 4, mult: 2 },
+          }),
+        ]),
+      ).toEqual([twice('everyNth'), twice('corona')]);
+      // The v3 web's subject, and a fusion's source.
+      expect(
+        grantConflicts(
+          [
+            node('fusion.fire.aura.core', { kind: 'aura', damagePct: 0.3 }),
+            node('fusion.fire.aura.r1', { kind: 'aura', damagePct: 0.4 }),
+          ],
+          "outer 'aura' (src/data/outer/aura.ts)",
+        ),
+      ).toEqual([twice('damagePct', 'fusion.fire.aura', "outer 'aura' (src/data/outer/aura.ts)")]);
+    });
+
+    it('lets two sources set one field to different values: each has an aura of its own', () => {
+      expect(
+        grantConflicts([
+          FOCUS,
+          node('hub.aura.pulse', { kind: 'aura', everyNth: { n: 2, mult: 2 } }),
+          node('fusion.lightning.aura.core', { kind: 'aura', everyNth: { n: 3, mult: 3 } }),
+        ]),
+      ).toEqual([]);
+    });
+
+    it('still refuses a conflicting orbit grant of one ring and thorns of one source, as before', () => {
+      // Plants every grant kind combined as an aura's is.
+      expect(
+        grantConflicts([
+          node('outer.aura.orbs', { kind: 'orbit', count: 2 }),
+          node('outer.aura.more', { kind: 'orbit', damagePct: 1 }),
+          node('outer.thorns.a', { kind: 'thorns' }),
+          node('outer.thorns.b', { kind: 'thorns', damagePct: 2 }),
+        ]),
+      ).toEqual([
+        "talents: emitter orbit '0' is granted twice by source 'outer.aura' with different " +
+          'fields; keep it on one node',
+        "talents: emitter thorns '' is granted twice by source 'outer.thorns' with different " +
+          'fields; keep it on one node',
+      ]);
+    });
   });
 
   it('accepts a keystone whose behaviour is a grant, and needs a descKey for one', () => {

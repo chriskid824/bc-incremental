@@ -24,6 +24,18 @@ export function sizeOf(build: Pick<CompiledBuild, 'flags'>, r: number): number {
 }
 
 /**
+ * The squared reach of `build`'s auras: the auraRadius stat as the build sizes it (sizeOf),
+ * squared. An enemy is within it when the squared distance of its centre from the player is at
+ * most this, inclusive, as the grid's within() test: what an aura's pulse hits
+ * (src/sim/emitters/aura.ts) and what the inAura condition asks (src/sim/build/eval.ts; lead
+ * rulings 19, W2) both read it, so they cannot drift apart.
+ */
+export function auraReachSq(build: Pick<CompiledBuild, 'flags' | 'values'>): number {
+  const r = sizeOf(build, build.values.auraRadius);
+  return r * r;
+}
+
+/**
  * A rule module's own spread distance `r` (燎原's 「60 內」), as the build reaches it: r × its
  * spread factor, read at use (in a hook: the factor is set once every module has compiled).
  * Like a marked selector's range, it is a reach and takes no area factor; a module whose spread

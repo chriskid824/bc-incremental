@@ -104,6 +104,7 @@ describe('compileBuild', () => {
       areaFactor: 1,
       spawnsDrones: false,
       highestHp: false,
+      hasAura: false,
       poisonSlowStacks: 0,
       poisonSlowPer: 0,
       poisonSlowMax: 0,

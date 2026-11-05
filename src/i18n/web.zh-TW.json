@@ -156,6 +156,7 @@
   "web.cond.targetState": "{state}",
   "web.cond.targetFrostAtLeast": "冰冷 ≥ {pct}",
   "web.cond.targetIs": "{pick}",
+  "web.cond.inAura": "光環內",
   "web.cond.chance": "{pct} 機率",
   "web.cond.cooldownSec": "冷卻 {s} 秒",
   "web.cond.hitIs": "只算{hit}",

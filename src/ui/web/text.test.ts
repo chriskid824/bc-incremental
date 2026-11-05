@@ -489,6 +489,8 @@ function kitchenSink(): NodeEffects {
     // E14's combo condition: a count, and 滿層 (◆爆發's).
     { on: 'periodic', every: 1, when: [{ comboAtLeast: 15 }], do: [heal] },
     { on: 'nthAttack', every: 5, when: [{ comboAtLeast: 'full' }], do: [heal] },
+    // E15's aura condition.
+    { on: 'hit', when: [{ inAura: true }], do: [heal] },
     ...TARGET_PICKS.map((pick): TriggerSpec => ({ on: 'hit', target: { pick }, do: [heal] })),
     ...(['outward', 'nearest', 'eventTarget', 'along', 'flight'] as const).map(
       (toward): TriggerSpec => ({
@@ -937,6 +939,91 @@ describe('every template, through one node (§4.7)', () => {
         ],
       });
       expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        '20% increased Damage (against enemies inside the aura)',
+        'On hitting elites inside the aura (50% chance): heal 1% of max life',
+        'Every 4 attacks (against enemies inside the aura): heal 1% of max life',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '傷害提高 20%（對光環內的敵人）',
+        '擊中光環內的菁英時（50% 機率）：回復 1% 生命',
+        '每 4 次攻擊（對光環內的敵人）：回復 1% 生命',
+      ],
+    ],
+  ] as const)(
+    'writes ◆弱化’s inAura modifier and a hit trigger’s inAura as enemies inside the aura, in %s (E15)',
+    (locale, expected) => {
+      // Plants the condition's text missing, left off the enemies (ENEMY_CONDITIONS), or written
+      // through another condition's branch, which asks for a key that does not ship.
+      const web = withEffects(fire, NOTABLE, {
+        modifiers: [{ stat: 'damage', kind: 'increased', value: 0.2, when: [{ inAura: true }] }],
+        triggers: [
+          {
+            on: 'hit',
+            when: [{ inAura: true }, { targetKind: 'elite' }, { chance: 0.5 }],
+            do: [{ kind: 'heal', lifePct: 0.01 }],
+          },
+          {
+            on: 'nthAttack',
+            every: 4,
+            when: [{ inAura: true }],
+            do: [{ kind: 'heal', lifePct: 0.01 }],
+          },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+      const asked = new Set<string>();
+      describeNode(web, NOTABLE, 1, recording(lookups[locale], asked));
+      expect([...asked].filter((key) => !lookups[locale].has(key))).toEqual([]);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        [
+          '+1 Ignore shields (tagged aura only)',
+          'Aura: each pulse, enemies around you take 25% damage, one pulse in 4 hits, at ×4',
+        ],
+        [
+          'Aura: each pulse, enemies around you take 25% damage, and a corona every 8 s: ' +
+            "every enemy takes ×1 a pulse's damage",
+        ],
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        [
+          '無視護盾 +1（限光環標籤）',
+          '光環：每次脈衝，你周圍的敵人受到 25% 傷害，每 4 次脈衝只打一次，傷害 ×4',
+        ],
+        ['光環：每次脈衝，你周圍的敵人受到 25% 傷害，每 8 秒放一次日冕：所有敵人受到 ×1 脈衝傷害'],
+      ],
+    ],
+  ] as const)(
+    'writes 聚能脈衝’s and 日冕’s aura grants as their nodes hold them, not as the aura they combine into, in %s (E15)',
+    (locale, expected) => {
+      // A node's text reads its own grant (grantText), its unset damagePct at the default; the
+      // run combines the source's grants (lead ruling W1), which no node's text sees.
+      const focus = withEffects(fire, NOTABLE, {
+        modifiers: [{ stat: 'ignoreShield', kind: 'flat', value: 1, tags: ['aura'] }],
+        emitters: [{ kind: 'aura', everyNth: { n: 4, mult: 4 } }],
+      });
+      const corona = withEffects(fire, NOTABLE, {
+        emitters: [{ kind: 'aura', corona: { periodSec: 8, damagePct: 1 } }],
+      });
+      expect([linesOf(focus, NOTABLE, locale), linesOf(corona, NOTABLE, locale)]).toEqual(expected);
     },
   );
 

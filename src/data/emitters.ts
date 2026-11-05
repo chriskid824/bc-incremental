@@ -3,9 +3,10 @@
  * run beside the signature attack. A node grants each of its emitters once, whatever its rank
  * (src/meta/stats.ts collectExtras), credited to the node's source; compileBuild
  * (src/sim/build/compile.ts) puts them after the signature, in data order, and keeps the first
- * grant of each kind, source and key (grantKey). A barrage grant is no emitter of its own: it
- * rides the signature's attacks (BarrageGrant). Their schemas are in src/data/schema.ts
- * (GRANT_SCHEMAS), their checks in src/data/validate.ts.
+ * grant of each kind, source and key (grantKey), but for an aura, whose grants of one source
+ * combine field by field at the first one's place (combineAuras). A barrage grant is no emitter
+ * of its own: it rides the signature's attacks (BarrageGrant). Their schemas are in
+ * src/data/schema.ts (GRANT_SCHEMAS), their checks in src/data/validate.ts.
  */
 
 import type { TargetSelector } from './triggers';
@@ -125,7 +126,10 @@ export interface DroneGrant {
  * player takes a hit (src/sim/emitters/aura.ts), and the pulse's hits add up to one pulse event.
  * With everyNth (聚能脈衝) only every n-th pulse hits, at × mult, and the pulses between do
  * nothing; with corona (日冕) every alive enemy also takes a hit of corona.damagePct × a pulse's
- * every corona.periodSec. The hits are tagged hit and aura, can crit and roll ailments.
+ * every corona.periodSec. The hits are tagged hit and aura, can crit and roll ailments. A source
+ * has one aura, so its grants are one emitter (lead ruling W1): 微光's, 聚能脈衝's everyNth and
+ * 日冕's corona on three nodes combine into one, each field the first grant's that sets it
+ * (combineAuras), and data validation refuses two that set one field to different values.
  */
 export interface AuraGrant {
   readonly kind: 'aura';
@@ -227,6 +231,33 @@ export const AURA_DEFAULTS = {
   damagePct: 0.25,
 } as const;
 
+/** A field of an aura grant: its source's grants combine each (combineAuras). */
+export type AuraField = Exclude<keyof AuraGrant, 'kind'>;
+/** Every AuraField, in AuraGrant's order. */
+export const AURA_FIELDS = [
+  'damagePct',
+  'everyNth',
+  'corona',
+] as const satisfies readonly AuraField[];
+
+/**
+ * Aura grants `first` and `later` of one source as one grant (lead ruling W1): each field
+ * `first`'s when it sets it, else `later`'s; a field neither sets stays unset, so the emitter
+ * takes its default (AURA_DEFAULTS.damagePct; no everyNth, no corona). compileBuild folds a
+ * source's aura grants with it in grant order, so each field is the first grant's that sets it.
+ */
+export function combineAuras(first: AuraGrant, later: AuraGrant): AuraGrant {
+  const damagePct = first.damagePct ?? later.damagePct;
+  const everyNth = first.everyNth ?? later.everyNth;
+  const corona = first.corona ?? later.corona;
+  return {
+    kind: 'aura',
+    ...(damagePct === undefined ? {} : { damagePct }),
+    ...(everyNth === undefined ? {} : { everyNth }),
+    ...(corona === undefined ? {} : { corona }),
+  };
+}
+
 /**
  * An orbit grant's numbers (初始值): its ring when it names none, each ring's radius around the
  * player (ring 0, ring 1), the orbs' turns a second, and its hits' share of the damage stat, an
@@ -253,10 +284,11 @@ export interface SourcedEmitter {
 
 /**
  * What tells two grants of one kind and source apart: grants that share it are one emitter, and
- * the build keeps the first. A source has one thorns emitter and one aura, so neither has a key;
- * it has one segment emitter per kind of endpoint, one strike per name, one drone emitter per
- * name ('' for a grant without one), and one orbit emitter per ring ('0' for a grant without
- * one). A barrage grant has no key: the build keeps one rider in all (compileBuild).
+ * the build keeps the first, or for an aura combines them (combineAuras). A source has one
+ * thorns emitter and one aura, so neither has a key; it has one segment emitter per kind of
+ * endpoint, one strike per name, one drone emitter per name ('' for a grant without one), and
+ * one orbit emitter per ring ('0' for a grant without one). A barrage grant has no key: the
+ * build keeps one rider in all (compileBuild).
  */
 export function grantKey(grant: EmitterGrant): string {
   switch (grant.kind) {

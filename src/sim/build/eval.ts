@@ -38,6 +38,7 @@ import {
 import type { Enemy, RunContext } from '../systems/context';
 import { DASHING, STOPPED } from '../systems/enemyRecord';
 import type { CompiledMod, ModTable } from './modTable';
+import { auraReachSq } from './size';
 import type { SourceTable } from './sources';
 
 /** Values per row, and the position of damage in a row (as in modTable.ts). */
@@ -280,6 +281,12 @@ const TARGET_IS = 9;
 const COMBO_AT_LEAST = 10;
 /** comboAtLeast 'full''s operand: below every count compileCondition takes, which starts at 1. */
 const COMBO_FULL = -1;
+/**
+ * The target's centre is within the aura's reach of the player (auraReachSq, inclusive, the
+ * pulse's own test) in a run with an aura emitter (BuildFlags.hasAura): inAura (E15, lead
+ * ruling W2). Never met outside a run.
+ */
+const IN_AURA = 11;
 
 /** The EnemyV3.state bit of each targetState (src/sim/systems/enemyRecord.ts). */
 const STATE_BITS: Readonly<Record<TargetState, number>> = { dashing: DASHING, stopped: STOPPED };
@@ -288,11 +295,12 @@ const STATE_BITS: Readonly<Record<TargetState, number>> = { dashing: DASHING, st
  * A condition compiled for checking: a code and two operands. Target conditions read the
  * target (held ailment ordinal; TARGET_KINDS ordinal; hp fraction; stack ailment ordinal and
  * stacks, or for 'max' that ordinal alone; zone source index; state bit; chill fraction;
- * TARGET_IS_PICKS ordinal); hitIs, victimHas and killedBy read the event's flags; comboAtLeast
- * reads the run's stacks against `a`, its count or COMBO_FULL.
+ * TARGET_IS_PICKS ordinal; none for inAura, which reads the run's aura); hitIs, victimHas and
+ * killedBy read the event's flags; comboAtLeast reads the run's stacks against `a`, its count or
+ * COMBO_FULL.
  */
 export interface CompiledCondition {
-  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  readonly code: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
   readonly a: number;
   readonly b: number;
 }
@@ -310,7 +318,8 @@ const flagsCondition = (all: number, none = 0): CompiledCondition => ({
  * applied ailment from the flags of ailmentApplied events, and whether the target holds it on
  * ailmentTick events. inZone numbers its source in `sources`, and throws without them.
  * comboAtLeast is a trigger's condition alone: it throws without `on` (a modifier's), and on a
- * count that is not a whole number of at least 1, as data validation does.
+ * count that is not a whole number of at least 1, as data validation does. inAura throws unless
+ * it is true, as data validation does: a module's addModifier or addTrigger passes none.
  */
 export function compileCondition(
   condition: Condition,
@@ -346,6 +355,11 @@ export function compileCondition(
   }
   if ('targetIs' in condition) {
     return { code: TARGET_IS, a: TARGET_IS_PICKS.indexOf(condition.targetIs), b: 0 };
+  }
+  if ('inAura' in condition) {
+    const value: unknown = condition.inAura;
+    if (value !== true) throw new Error(`inAura: ${String(value)} must be true`);
+    return { code: IN_AURA, a: 0, b: 0 };
   }
   if ('comboAtLeast' in condition) {
     const stacks = condition.comboAtLeast;
@@ -414,9 +428,10 @@ const comboMet = (a: number, ctx: RunContext | null): boolean =>
 /**
  * Every condition holds for an event or instance on `target` (null: none, and then no target
  * condition holds) at tick `now`, carrying `flags`, in run `ctx` (null: none, and then no
- * stacksAtLeast 'max', targetIs or comboAtLeast holds). The flags' conditions and comboAtLeast
- * need no target; comboAtLeast's case in the switch serves the events that have one, so a build
- * without it reads nothing new on them.
+ * stacksAtLeast 'max', targetIs, inAura or comboAtLeast holds). The flags' conditions and
+ * comboAtLeast need no target; comboAtLeast's case in the switch serves the events that have
+ * one, so a build without it reads nothing new on them. inAura is a target condition: the
+ * target-null branch refuses it as any other.
  */
 export function conditionsMet(
   conditions: readonly CompiledCondition[],
@@ -472,6 +487,14 @@ export function conditionsMet(
       case COMBO_AT_LEAST:
         if (!comboMet(c.a, ctx)) return false;
         break;
+      case IN_AURA: {
+        // The pulse's reach and test (the grid's within(): the centre's offset from the player).
+        if (ctx === null || !ctx.build.flags.hasAura) return false;
+        const dx = target.x - ctx.player.x;
+        const dy = target.y - ctx.player.y;
+        if (dx * dx + dy * dy > auraReachSq(ctx.build)) return false;
+        break;
+      }
     }
   }
   return true;

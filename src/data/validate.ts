@@ -4,7 +4,7 @@
  * the same messages.
  */
 
-import { grantKey } from './emitters';
+import { AURA_FIELDS, grantKey } from './emitters';
 import type { EmitterGrant } from './emitters';
 import type { RuleSpec } from './rules';
 import { ARCHETYPE_TAGS, SOURCE_CLASSES, sourceOfNode } from './sources';
@@ -500,18 +500,39 @@ export interface GrantingNode {
 /**
  * A build has one emitter per grant kind, source and key (grantKey): compileBuild keeps the
  * first grant. Grants of a source that share them must therefore agree field for field, or the
- * emitter a build gets would depend on which of its nodes comes first. Each issue starts with
- * `subject`: M1's 'talents', or the v3 web's board.
+ * emitter a build gets would depend on which of its nodes comes first. An aura's grants of one
+ * source combine field by field instead (combineAuras; lead ruling W1), so they may set
+ * different fields, or one field to one value, and only a field set twice to different values is
+ * refused, once a field. Each issue starts with `subject`: M1's 'talents', or the v3 web's board.
  */
 export function grantConflicts(nodes: readonly GrantingNode[], subject = 'talents'): string[] {
   const issues: string[] = [];
   const first = new Map<string, EmitterGrant>();
+  // The value each aura field was first set to, by kind, source, key and field.
+  const auraFields = new Map<string, string>();
   const reported = new Set<string>();
   for (const node of nodes) {
     const source = sourceOfNode(node.id);
     for (const grant of node.emitters) {
       const key = grantKey(grant);
       const id = `${grant.kind}|${source}|${key}`;
+      if (grant.kind === 'aura') {
+        for (const field of AURA_FIELDS) {
+          if (grant[field] === undefined) continue;
+          const at = `${id}|${field}`;
+          const value = canonical(grant[field]);
+          const set = auraFields.get(at);
+          if (set === undefined) auraFields.set(at, value);
+          else if (set !== value && !reported.has(at)) {
+            reported.add(at);
+            issues.push(
+              `${subject}: emitter aura '${key}' of source '${source}' sets ${field} twice ` +
+                'with different values; keep it on one node',
+            );
+          }
+        }
+        continue;
+      }
       const kept = first.get(id);
       if (kept === undefined) first.set(id, grant);
       else if (canonical(kept) !== canonical(grant) && !reported.has(id)) {
@@ -1067,6 +1088,15 @@ function conditionIssues(condition: Condition): string[] {
       const got = typeof stacks === 'string' ? `'${stacks}'` : String(stacks);
       issues.push(`comboAtLeast must be a whole number >= 1 or 'full' (got ${got})`);
     }
+  }
+  // Always true, and alone in its object (E15): data checked without the schema could carry
+  // false, which the compile refuses, or another condition's key beside it, which the compile
+  // would read in its place or drop.
+  if ('inAura' in condition) {
+    const value: unknown = condition.inAura;
+    if (value !== true) issues.push(`inAura must be true (got ${String(value)})`);
+    const keys = Object.keys(condition);
+    if (keys.length !== 1) issues.push(`inAura takes no other key (got ${keys.join(', ')})`);
   }
   // Sources are numbered as a run first meets them, so a class has no fixed set to expand to;
   // 'center' is both a class and its one id.

@@ -13,6 +13,7 @@ import {
   GRANT_SCHEMAS,
   ModifierSchema,
   RuleSpecSchema,
+  TargetConditionSchema,
   TriggerSpecSchema,
 } from './schema';
 import { TALENTS } from './talents';
@@ -426,6 +427,31 @@ describe('ConditionSchema', () => {
     { comboAtLeast: { stacks: 5 } },
   ])('rejects the combo condition %o', (condition) => {
     expect(ConditionSchema.safeParse(condition).success).toBe(false);
+  });
+
+  it('accepts the aura condition { inAura: true } (E15), as a condition and in a modifier’s when', () => {
+    expect(ConditionSchema.parse({ inAura: true })).toEqual({ inAura: true });
+    expect(TargetConditionSchema.parse({ inAura: true })).toEqual({ inAura: true });
+    // 弱化's modifier.
+    const weaken = { stat: 'damage', kind: 'increased', value: 0.2, when: [{ inAura: true }] };
+    expect(ModifierSchema.parse(weaken)).toEqual(weaken);
+  });
+
+  it.each([
+    { inAura: false },
+    { inAura: 'true' },
+    { inAura: 1 },
+    { inAura: null },
+    { inAura: true, radius: 160 },
+    { inAura: true, targetHas: 'burn' },
+    { inAura: { source: 'outer.aura' } },
+  ])('rejects the aura condition %o (E15: always true, alone)', (condition) => {
+    // Plants z.boolean() for z.literal(true), and a loose object.
+    expect(ConditionSchema.safeParse(condition).success).toBe(false);
+    expect(
+      ModifierSchema.safeParse({ stat: 'damage', kind: 'increased', value: 0.2, when: [condition] })
+        .success,
+    ).toBe(false);
   });
 
   it('keeps comboAtLeast off a modifier: Modifier.when takes target conditions only (E14)', () => {

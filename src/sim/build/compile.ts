@@ -10,10 +10,11 @@
  * ModTable of the build's scoped modifiers followed by the module-added ones, the run's damage
  * sources and who its ailments and the center's chain jumps are credited to (D8), the hook
  * lists, the emitters: the signature's first, then the emitter grants, the build's
- * (StatBlock.emitters) and the modules', one per kind, source and key; the triggers with their
- * effects: the built-in shatter (SHATTER_TRIGGER) first, then the build's own
- * (StatBlock.triggers), then the modules', in compile order (src/sim/effects/types.ts); and the
- * build's damage conversions, which the ModTable lists per hit row (src/sim/combat/convert.ts).
+ * (StatBlock.emitters) and the modules', one per kind, source and key (an aura's grants of one
+ * source combined); the triggers with their effects: the built-in shatter (SHATTER_TRIGGER)
+ * first, then the build's own (StatBlock.triggers), then the modules', in compile order
+ * (src/sim/effects/types.ts); and the build's damage conversions, which the ModTable lists per
+ * hit row (src/sim/combat/convert.ts).
  *
  * The source table, the attribution's outer sources and the ModTable rows grow while a run
  * uses them, so createRunContext compiles a fresh build for every run. The talent screen and
@@ -21,8 +22,8 @@
  * centerDamage) and never pass one into a run.
  */
 
-import { BARRAGE_DAMAGE_PCT, grantKey } from '../../data/emitters';
-import type { SourcedEmitter } from '../../data/emitters';
+import { BARRAGE_DAMAGE_PCT, combineAuras, grantKey } from '../../data/emitters';
+import type { BarrageGrant, EmitterGrant, SourcedEmitter } from '../../data/emitters';
 import { M1_SIGNATURE, RULE_COEF_FIELDS, scaleRuleSpec } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { attackSpeedIssues, isScopedStat, powFactorIssues, STAT_IDS } from '../../data/stats';
@@ -181,6 +182,13 @@ export interface BuildFlags {
    * compileTrigger). False: the id stays 0 and nothing computes it.
    */
   highestHp: boolean;
+  /**
+   * The build has an aura emitter, of any source, a node's grant or a module's addEmitter: the
+   * inAura condition holds only then (src/sim/build/eval.ts; lead ruling W2), whatever the
+   * auraRadius stat. compileBuild sets it from the build's emitters once every module has run,
+   * over any value a module wrote, so a module reads it false while it compiles.
+   */
+  hasAura: boolean;
   /**
    * 神經毒 (poisonSlow, src/sim/rules/poisonSlow.ts): enemySlow (src/sim/ailments/frost.ts) takes
    * min(poisonSlowMax, poisonSlowPer × floor(live poison stacks / poisonSlowStacks)) as one more
@@ -759,22 +767,34 @@ function compileSignature<K extends SignatureId>(
 }
 
 /**
- * The emitters of the grants, in grant order, the first of each kind, source and key
- * (grantKey): a node grants each emitter once, and nodes of one source that grant the same one
- * agree on its fields (data validation), so dropping the others loses nothing. A barrage grant
- * is no emitter: it rides the signature (compileBarrage).
+ * The emitters of the grants, in grant order, one per kind, source and key (grantKey), at its
+ * first grant's place: a node grants each emitter once, and nodes of one source that grant the
+ * same one agree on its fields (data validation), so the first grant is the emitter and dropping
+ * the others loses nothing. An aura's grants of one source combine instead (lead ruling W1): its
+ * damagePct, everyNth and corona each the first grant's that sets one (combineAuras), whether a
+ * node or a module's addEmitter granted it; a module's grant passes no validation, so of two
+ * that set one field the first wins. A build with one aura grant a source keeps that grant as it
+ * is. A barrage grant is no emitter: it rides the signature (compileBarrage).
  */
 function grantEmitters(grants: readonly SourcedEmitter[]): EmitterSpec[] {
-  const seen = new Set<string>();
-  const emitters: EmitterSpec[] = [];
+  // Each kind, source and key's grant, combined for an aura, at the index of its first in `kept`.
+  const at = new Map<string, number>();
+  const kept: { source: string; grant: Exclude<EmitterGrant, BarrageGrant> }[] = [];
   for (const { source, grant } of grants) {
     if (grant.kind === 'barrage') continue;
     const id = `${grant.kind}|${source}|${grantKey(grant)}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    emitters.push(grantEmitter(source, grant));
+    const first = at.get(id);
+    if (first === undefined) {
+      at.set(id, kept.length);
+      kept.push({ source, grant });
+      continue;
+    }
+    const into = kept[first] as (typeof kept)[number];
+    if (grant.kind === 'aura' && into.grant.kind === 'aura') {
+      kept[first] = { source, grant: combineAuras(into.grant, grant) };
+    }
   }
-  return emitters;
+  return kept.map(({ source, grant }) => grantEmitter(source, grant));
 }
 
 /**
@@ -878,6 +898,7 @@ export function compileBuild(
     areaFactor: 1,
     spawnsDrones: false,
     highestHp: false,
+    hasAura: false,
     poisonSlowStacks: 0,
     poisonSlowPer: 0,
     poisonSlowMax: 0,
@@ -1226,6 +1247,8 @@ export function compileBuild(
   flags.highestHp ||=
     mods.some((mod) => readsTargetIs(mod.cond)) || triggers.some((t) => readsTargetIs(t.conds));
   const conversions = compileConversions(stats.conversions);
+  const emitters = [signatureEmitter(signature.id, signature), ...grantEmitters(grants)];
+  flags.hasAura = emitters.some((em) => em.kind === 'aura');
   const table = new ModTable(
     mods,
     rowValues(stats.base, 1),
@@ -1246,7 +1269,7 @@ export function compileBuild(
     signature: params,
     hooks,
     hookOwners,
-    emitters: [signatureEmitter(signature.id, signature), ...grantEmitters(grants)],
+    emitters,
     triggers,
     triggersOn,
     effects,

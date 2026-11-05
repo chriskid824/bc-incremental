@@ -18,7 +18,7 @@
  */
 
 import { ZERO } from '../../core/num';
-import { sizeOf } from '../build/size';
+import { auraReachSq } from '../build/size';
 import type { Enemy, RunContext } from '../systems/context';
 import type { PulseAcc } from '../systems/systemState';
 import { hitPulse, hoistPulseRows } from '../systems/zones';
@@ -45,28 +45,23 @@ export function runAura(ctx: RunContext, em: EmitterRuntime): void {
 }
 
 /**
- * The squared reach of an aura pulse: the auraRadius stat, as the build sizes it, around the
- * player; an enemy is in it when its centre is (the grid's inclusive test, alive enemies only).
- */
-function pulseReachSq(ctx: RunContext): number {
-  const r = sizeOf(ctx.build, ctx.build.values.auraRadius);
-  return r * r;
-}
-
-/**
  * The alive enemies a pulse would reach now, the enemiesInAura scaling variable (computed once a
  * tick by src/sim/systems/globals.ts): the grid's count of what pulse's query returns.
  */
 export function enemiesInAura(ctx: RunContext): number {
   const player = ctx.player;
-  return ctx.grid.countWithin(player.x, player.y, pulseReachSq(ctx));
+  return ctx.grid.countWithin(player.x, player.y, auraReachSq(ctx.build));
 }
 
-/** One pulse of aura emitter `em` at `scale`: a hit on every alive enemy within its radius. */
+/**
+ * One pulse of aura emitter `em` at `scale`: a hit on every alive enemy within its reach, the
+ * auraRadius stat as the build sizes it around the player, an enemy in it when its centre is
+ * (auraReachSq: the grid's inclusive test, alive enemies only; the inAura condition's reach).
+ */
 function pulse(ctx: RunContext, em: EmitterRuntime, scale: number): void {
   const targets = em.targets as Enemy[];
   const player = ctx.player;
-  const n = ctx.grid.within(player.x, player.y, pulseReachSq(ctx), targets);
+  const n = ctx.grid.within(player.x, player.y, auraReachSq(ctx.build), targets);
   if (n === 0) return;
   const acc = ctx.sys.pulse;
   const p = em.payload;

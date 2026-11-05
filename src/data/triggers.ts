@@ -227,7 +227,11 @@ export type TargetIsPick = (typeof TARGET_IS_PICKS)[number];
  * groundZone). targetState: it is in that state (TARGET_STATES), never in an M1 run, whose
  * enemies have no behaviours. targetFrostAtLeast: its chill meter is at least this fraction, in
  * (0, 1] (a frozen enemy's meter reads full, frostMeter). targetIs: it is the run's enemy of that
- * pick (TARGET_IS_PICKS) as this tick's globals step found it, never outside a run.
+ * pick (TARGET_IS_PICKS) as this tick's globals step found it, never outside a run. inAura (E15,
+ * gd §4.8's ◆弱化 「光環內的敵人」): its centre is within an aura pulse's reach of the player, the
+ * auraRadius stat as the build sizes it, inclusive (lead rulings 19, W2), as it stands when the
+ * condition is checked; only in a run with an aura emitter, of any source, and never outside a
+ * run. Always true: there is no false form.
  */
 export type TargetCondition =
   | { readonly targetHas: HeldAilment }
@@ -239,7 +243,8 @@ export type TargetCondition =
   | { readonly inZone: SourceSelector }
   | { readonly targetState: TargetState }
   | { readonly targetFrostAtLeast: number }
-  | { readonly targetIs: TargetIsPick };
+  | { readonly targetIs: TargetIsPick }
+  | { readonly inAura: true };
 
 /**
  * A condition of a trigger. chance: the trigger fires with this probability, rolled when the
@@ -302,6 +307,7 @@ export const CONDITION_CONTEXTS: Readonly<
   targetState: ['modifier', ...TARGETED],
   targetFrostAtLeast: ['modifier', ...TARGETED],
   targetIs: ['modifier', ...TARGETED],
+  inAura: ['modifier', ...TARGETED],
   chance: TRIGGER_EVENTS,
   cooldownSec: TRIGGER_EVENTS,
   hitIs: ['hit', 'crit', ...KILLS],

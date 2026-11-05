@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { toNumber } from '../../core/num';
-import { AURA_DEFAULTS } from '../../data/emitters';
-import type { AuraGrant, SourcedEmitter } from '../../data/emitters';
+import { AURA_DEFAULTS, AURA_FIELDS } from '../../data/emitters';
+import type { AuraField, AuraGrant, SourcedEmitter } from '../../data/emitters';
 import type { Modifier, StatId } from '../../data/stats';
 import { TAG } from '../../data/tags';
 import { CHAIN_JUMP, PRIMARY, REPEAT, SIGNATURE } from '../effects/flags';
+import { compileBuild } from '../build/compile';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
 import type { Enemy, RunContext } from '../systems/context';
@@ -23,7 +24,7 @@ import { ARENA_HEIGHT, ARENA_WIDTH, NO_INPUT } from '../types';
 import type { SimEvent } from '../types';
 import { runAura } from './aura';
 import { grantEmitter, periodTicks, PHASE_TICKS, shotsInFlight } from './types';
-import type { AuraSpec, EmitterRuntime, Payload } from './types';
+import type { AuraSpec, EmitterRuntime, EmitterSpec, Payload } from './types';
 
 type PulseEvent = Extract<SimEvent, { type: 'pulse' }>;
 
@@ -202,7 +203,9 @@ describe('aura: its emitter', () => {
 });
 
 describe('aura: one a source', () => {
-  it('is one emitter per source, the first grant of it', () => {
+  it('is one emitter per source, its grants combined at the first one’s place (lead ruling W1)', () => {
+    // Edited by E15: the second grant's fields are no longer dropped. The first sets none, so
+    // the second's damagePct and everyNth hold; hub's aura is its own.
     const ctx = fixture([at(50, 0)], {
       grants: [
         on('outer.aura', aura()),
@@ -214,10 +217,338 @@ describe('aura: one a source', () => {
       ctx.emitters.map((em) => [em.spec.kind, em.spec.source, toNumber(em.payload.baseDamage)]),
     ).toEqual([
       ['volley', 'center', 10],
-      ['aura', 'outer.aura', 2.5],
+      ['aura', 'outer.aura', 10],
       ['aura', 'hub', 5],
     ]);
-    expect((emitter(ctx).spec as AuraSpec).everyNth).toBeNull();
+    expect((emitter(ctx).spec as AuraSpec).everyNth).toEqual({ n: 2, mult: 2 });
+    expect((emitter(ctx, 2).spec as AuraSpec).everyNth).toBeNull();
+  });
+});
+
+/**
+ * The emitters the base (b60fc31, before E15) compiled for builds with at most one aura grant a
+ * source, recorded there: such a build compiles to them still (lead ruling W1).
+ */
+const BASE_MIXED: readonly SourcedEmitter[] = [
+  on('outer.aura', aura({ everyNth: { n: 4, mult: 4 }, corona: { periodSec: 2, damagePct: 0.5 } })),
+  on('hub', aura({ damagePct: 0.15 })),
+  on('outer.aura', { kind: 'orbit', count: 2 }),
+  on('outer.aura', { kind: 'orbit', ring: 1, count: 1, cooldownSec: 0.25 }),
+  on('outer.thorns', { kind: 'thorns' }),
+];
+const BASE_PLAIN: readonly SourcedEmitter[] = [
+  on('outer.thorns', { kind: 'thorns' }),
+  on('outer.aura', aura()),
+  on('outer.aura', { kind: 'orbit', count: 4 }),
+];
+const RECORDED_VOLLEY = {
+  kind: 'volley',
+  signature: true,
+  source: 'center',
+  damagePct: 1,
+  tags: 17,
+  chains: true,
+  rollsAilments: true,
+  canCrit: true,
+};
+const recordedAura = (source: string, damagePct: number, more: object) => ({
+  kind: 'aura',
+  signature: false,
+  source,
+  damagePct,
+  tags: 129,
+  chains: false,
+  rollsAilments: true,
+  canCrit: true,
+  ...more,
+});
+const recordedOrbit = (ring: number, count: number, cooldownSec: number) => ({
+  kind: 'orbit',
+  signature: false,
+  source: 'outer.aura',
+  damagePct: 0.6,
+  tags: 257,
+  chains: false,
+  rollsAilments: true,
+  canCrit: true,
+  ring,
+  radius: [110, 180][ring],
+  count,
+  revPerSec: 1,
+  cooldownSec,
+  orbRadius: 12,
+});
+const RECORDED_THORNS = {
+  kind: 'thorns',
+  signature: false,
+  source: 'outer.thorns',
+  damagePct: 3,
+  tags: 2049,
+  chains: false,
+  rollsAilments: true,
+  canCrit: true,
+};
+
+describe('aura: the grants of one source combine (E15, lead ruling W1)', () => {
+  it('lists every field of an aura grant in AURA_FIELDS, the fields that combine', () => {
+    // A field added to AuraGrant but not to AURA_FIELDS (and combineAuras) fails the type check.
+    const complete: [Exclude<AuraField, (typeof AURA_FIELDS)[number]>] extends [never]
+      ? true
+      : false = true;
+    expect([complete, AURA_FIELDS]).toEqual([true, ['damagePct', 'everyNth', 'corona']]);
+  });
+
+  /** The compiled emitters of a build with these grants and modules. */
+  const emittersOf = (
+    grants: readonly SourcedEmitter[],
+    modules: readonly TestModule[] = [],
+  ): readonly EmitterSpec[] =>
+    compileBuild(
+      makeStats({}, [], { triggers: [], conversions: [], emitters: grants }),
+      [],
+      undefined,
+      modules,
+    ).emitters;
+  /** The aura of `source` among `emitters`, and its index. */
+  const auraOf = (emitters: readonly EmitterSpec[], source = 'outer.aura'): [number, AuraSpec] => {
+    const i = emitters.findIndex((em) => em.kind === 'aura' && em.source === source);
+    return [i, emitters[i] as AuraSpec];
+  };
+  /** 微光 (entry), 聚能脈衝 and 日冕, as B4's three nodes of outer.aura grant them. */
+  const ENTRY = aura();
+  const FOCUS = aura({ everyNth: { n: 4, mult: 4 } });
+  const CORONA = aura({ corona: { periodSec: 8, damagePct: 1 } });
+
+  it('combines two grants of a source, the entry and 聚能脈衝, into one aura with everyNth', () => {
+    const emitters = emittersOf([on('outer.aura', ENTRY), on('outer.aura', FOCUS)]);
+    expect(emitters.map((em) => em.kind)).toEqual(['volley', 'aura']);
+    expect(auraOf(emitters)[1]).toEqual(
+      recordedAura('outer.aura', AURA_DEFAULTS.damagePct, {
+        everyNth: { n: 4, mult: 4 },
+        corona: null,
+      }),
+    );
+  });
+
+  it('combines three, the entry, 聚能脈衝 and 日冕, at the first one’s place among the other grants', () => {
+    // Plants the combined aura at the last grant's place: it would follow hub's aura.
+    const emitters = emittersOf([
+      on('outer.thorns', { kind: 'thorns' }),
+      on('outer.aura', ENTRY),
+      on('outer.aura', { kind: 'orbit', count: 2 }),
+      on('outer.aura', FOCUS),
+      on('hub', aura({ damagePct: 0.5 })),
+      on('outer.aura', CORONA),
+    ]);
+    expect(emitters.map((em) => [em.kind, em.source])).toEqual([
+      ['volley', 'center'],
+      ['thorns', 'outer.thorns'],
+      ['aura', 'outer.aura'],
+      ['orbit', 'outer.aura'],
+      ['aura', 'hub'],
+    ]);
+    expect(auraOf(emitters)).toEqual([
+      2,
+      recordedAura('outer.aura', 0.25, {
+        everyNth: { n: 4, mult: 4 },
+        corona: { periodSec: 8, damagePct: 1 },
+      }),
+    ]);
+    expect(auraOf(emitters, 'hub')[1]).toMatchObject({ damagePct: 0.5, everyNth: null });
+    // In any order of the three: the place is the first aura grant's, the fields the same.
+    for (const order of [
+      [CORONA, ENTRY, FOCUS],
+      [FOCUS, CORONA, ENTRY],
+    ]) {
+      const again = emittersOf([
+        on('outer.thorns', { kind: 'thorns' }),
+        ...order.map((grant) => on('outer.aura', grant)),
+        on('hub', aura()),
+      ]);
+      expect(again.map((em) => em.source)).toEqual(['center', 'outer.thorns', 'outer.aura', 'hub']);
+      expect(auraOf(again)[1]).toEqual(auraOf(emitters)[1]);
+    }
+  });
+
+  it('combines a module’s addEmitter grants with the nodes’ grants of their source, after them', () => {
+    // Plants the modules' grants kept apart, or dropped as before.
+    const focus: TestModule = (b) => b.addEmitter('outer.aura', FOCUS);
+    const corona: TestModule = (b) => b.addEmitter('outer.aura', CORONA);
+    const emitters = emittersOf(
+      [on('outer.aura', ENTRY), on('outer.thorns', { kind: 'thorns' })],
+      [focus, corona],
+    );
+    expect(emitters.map((em) => em.kind)).toEqual(['volley', 'aura', 'thorns']);
+    expect(auraOf(emitters)[1]).toMatchObject({
+      damagePct: 0.25,
+      everyNth: { n: 4, mult: 4 },
+      corona: { periodSec: 8, damagePct: 1 },
+    });
+    // A module's aura on a source no node grants one is at its own place, after the nodes'.
+    const own = emittersOf([on('outer.thorns', { kind: 'thorns' })], [focus, corona]);
+    expect(own.map((em) => em.kind)).toEqual(['volley', 'thorns', 'aura']);
+    expect(auraOf(own)[1]).toMatchObject({ everyNth: { n: 4, mult: 4 }, corona: { periodSec: 8 } });
+  });
+
+  it('takes each field from the first grant that sets it when two set it, as a module may (no validation)', () => {
+    // Plants the last grant's field winning, for each field in turn.
+    const emitters = emittersOf(
+      [
+        on('outer.aura', aura({ corona: { periodSec: 2, damagePct: 0.5 } })),
+        on('outer.aura', aura({ damagePct: 0.4, everyNth: { n: 2, mult: 2 } })),
+        on('outer.aura', aura({ damagePct: 1, corona: { periodSec: 8, damagePct: 1 } })),
+      ],
+      [(b) => b.addEmitter('outer.aura', aura({ everyNth: { n: 4, mult: 4 }, damagePct: 2 }))],
+    );
+    expect(auraOf(emitters)[1]).toMatchObject({
+      damagePct: 0.4,
+      everyNth: { n: 2, mult: 2 },
+      corona: { periodSec: 2, damagePct: 0.5 },
+    });
+    // A field no grant sets keeps its default.
+    const bare = emittersOf([on('outer.aura', aura()), on('outer.aura', aura())]);
+    expect(auraOf(bare)[1]).toEqual(
+      recordedAura('outer.aura', 0.25, { everyNth: null, corona: null }),
+    );
+  });
+
+  it('keeps two sources’ auras apart, each its own grants combined', () => {
+    // Plants the auras of two sources combined into one.
+    const emitters = emittersOf([
+      on('outer.aura', ENTRY),
+      on('hub', aura({ damagePct: 0.15 })),
+      on('outer.aura', FOCUS),
+      on('hub', CORONA),
+    ]);
+    expect(emitters.map((em) => [em.kind, em.source])).toEqual([
+      ['volley', 'center'],
+      ['aura', 'outer.aura'],
+      ['aura', 'hub'],
+    ]);
+    expect(auraOf(emitters)[1]).toMatchObject({
+      damagePct: 0.25,
+      everyNth: { n: 4, mult: 4 },
+      corona: null,
+    });
+    expect(auraOf(emitters, 'hub')[1]).toMatchObject({
+      damagePct: 0.15,
+      everyNth: null,
+      corona: { periodSec: 8, damagePct: 1 },
+    });
+  });
+
+  it('keeps the first grant of every other kind, an orbit ring’s and a thorns emitter’s, as before', () => {
+    // Plants orbit (or thorns) grants combined as an aura's are.
+    const emitters = emittersOf([
+      on('outer.aura', { kind: 'orbit', count: 2 }),
+      on('outer.thorns', { kind: 'thorns' }),
+      on('outer.aura', { kind: 'orbit', count: 3, damagePct: 1, cooldownSec: 1 }),
+      on('outer.thorns', { kind: 'thorns', damagePct: 5 }),
+      on('outer.aura', { kind: 'orbit', ring: 0, orbRadius: 20 }),
+    ]);
+    expect(emitters.slice(1)).toEqual([recordedOrbit(0, 2, 0.5), RECORDED_THORNS]);
+  });
+
+  it('compiles a build with at most one aura grant a source to the emitters the base compiled', () => {
+    expect(emittersOf(BASE_MIXED)).toEqual([
+      RECORDED_VOLLEY,
+      recordedAura('outer.aura', 0.25, {
+        everyNth: { n: 4, mult: 4 },
+        corona: { periodSec: 2, damagePct: 0.5 },
+      }),
+      recordedAura('hub', 0.15, { everyNth: null, corona: null }),
+      recordedOrbit(0, 2, 0.5),
+      recordedOrbit(1, 1, 0.25),
+      RECORDED_THORNS,
+    ]);
+    expect(emittersOf(BASE_PLAIN)).toEqual([
+      RECORDED_VOLLEY,
+      RECORDED_THORNS,
+      recordedAura('outer.aura', 0.25, { everyNth: null, corona: null }),
+      recordedOrbit(0, 4, 0.5),
+    ]);
+  });
+
+  it('pulses the combined aura as one: every 4th pulse at × 4, and its corona every 480 ticks', () => {
+    // 1 inside the aura, 2 outside it: the coronas alone reach 2.
+    const ctx = fixture([at(100, 0), at(400, 0)], {
+      grants: [on('outer.aura', ENTRY), on('outer.aura', FOCUS), on('outer.aura', CORONA)],
+    });
+    expect(ctx.emitters.filter((em) => em.spec.kind === 'aura')).toHaveLength(1);
+    const seen = pulsesOver(ctx, 961);
+    // Pulse 4n on tick 7 + 15 × (4n − 1); coronas on 480 and 960 for 2 × 2.5.
+    const merged = Array.from({ length: 16 }, (_, k) => pulseTick(4 * (k + 1)));
+    expect(seen.filter(([, hits]) => hits === 1)).toEqual(merged.map((t) => [t, 1, 10]));
+    expect(seen.filter(([, hits]) => hits === 2)).toEqual([
+      [480, 2, 5],
+      [960, 2, 5],
+    ]);
+    expect(emitter(ctx).attacks).toBe(64);
+  });
+});
+
+describe('aura: ◆弱化, inAura on a modifier (E15, lead ruling W2)', () => {
+  /** gd:455's 「光環內的敵人受到傷害 +20%」 as B4 writes it. */
+  const WEAKEN: Modifier = {
+    stat: 'damage',
+    kind: 'increased',
+    value: 0.2,
+    when: [{ inAura: true }],
+  };
+
+  it('raises a hit on an enemy inside the aura by 20% and not one outside it, in a run', () => {
+    // 1 inside (100 of 160), 2 at the edge (160: inside, inclusive), 3 outside (400).
+    const { seen, module } = recorder();
+    const ctx = fixture([at(100, 0), at(0, 160), at(400, 0)], {
+      mods: [WEAKEN],
+      grants: [on('outer.aura', aura({ corona: { periodSec: 0.25, damagePct: 1 } }))],
+      modules: [module],
+    });
+    // A pulse (tick 7) hits 1 and 2 at 2.5 × 1.2; the corona (tick 15) hits all three, 3 at 2.5.
+    pulsesOver(ctx, 15);
+    expect(seen.map(([id, , , , , , amount]) => [id, amount])).toEqual([
+      [1, 2.5 * 1.2],
+      [2, 2.5 * 1.2],
+      [1, 2.5 * 1.2],
+      [2, 2.5 * 1.2],
+      [3, 2.5],
+    ]);
+    // Without the modifier every hit is 2.5: it is the condition that raised them.
+    const plain = recorder();
+    const bare = fixture([at(100, 0), at(0, 160), at(400, 0)], {
+      grants: [on('outer.aura', aura({ corona: { periodSec: 0.25, damagePct: 1 } }))],
+      modules: [plain.module],
+    });
+    pulsesOver(bare, 15);
+    expect(plain.seen.map(([id, , , , , , amount]) => [id, amount])).toEqual([
+      [1, 2.5],
+      [2, 2.5],
+      [1, 2.5],
+      [2, 2.5],
+      [3, 2.5],
+    ]);
+  });
+
+  it('reads the enemy where it stands at the hit: one that walks out takes the plain hit', () => {
+    const { seen, module } = recorder();
+    const ctx = fixture([at(100, 0), at(300, 0)], {
+      mods: [WEAKEN],
+      grants: [on('outer.aura', aura({ corona: { periodSec: 0.25, damagePct: 1 } }))],
+      modules: [module],
+    });
+    pulsesOver(ctx, 15);
+    // 2 walks in to 150 and 1 out to 200, for the next corona (tick 30).
+    enemy(ctx, 1).x = PLAYER.x + 200;
+    enemy(ctx, 2).x = PLAYER.x + 150;
+    rebuildGrid(ctx);
+    seen.length = 0;
+    for (let tick = 16; tick <= 30; tick++) auraAt(ctx, tick);
+    // The pulse of tick 22 hits 2 alone; the corona of 30 hits both.
+    expect(seen.map(([id, , , , , , amount]) => [id, amount])).toEqual([
+      [2, 2.5 * 1.2],
+      [1, 2.5],
+      [2, 2.5 * 1.2],
+    ]);
   });
 });
 

@@ -158,6 +158,8 @@ export const TargetConditionSchema = exact<TargetCondition>()(
     z.strictObject({ targetState: z.enum(TARGET_STATES) }).readonly(),
     z.strictObject({ targetFrostAtLeast: finite }).readonly(),
     z.strictObject({ targetIs: z.enum(TARGET_IS_PICKS) }).readonly(),
+    // E15: always true; there is no false form.
+    z.strictObject({ inAura: z.literal(true) }).readonly(),
   ]),
 );
 

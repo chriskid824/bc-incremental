@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { mul, num } from '../../core/num';
 import { SCOPED_STATS } from '../../data/stats';
-import type { Modifier, StatBlock } from '../../data/stats';
+import type { SourcedEmitter } from '../../data/emitters';
+import type { Modifier, StatBlock, StatId } from '../../data/stats';
 import { TAG } from '../../data/tags';
 import type { Condition, ScalingSpec } from '../../data/triggers';
 import type { GameData, WaveTable } from '../../data/types';
+import { computeStatBlock } from '../../meta/stats';
 import { addBurn } from '../ailments/records';
 import { CHAIN_JUMP, CRIT_HIT, heldFlag, HIT_EVENT, killKindFlag, PRIMARY } from '../effects/flags';
+import { enemiesInAura } from '../emitters/aura';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
 import { createRunContext } from '../systems/context';
@@ -36,6 +39,7 @@ import {
 } from './eval';
 import type { CompiledCondition, EvalInput } from './eval';
 import { compileMods, ModTable, modTableFor, SCOPED_INDEX } from './modTable';
+import { auraReachSq } from './size';
 import { CENTER, createSourceTable, rowKey } from './sources';
 
 const S = SCOPED_STATS.length;
@@ -769,5 +773,156 @@ describe('comboAtLeast (E14, lead ruling Z3)', () => {
         `comboAtLeast: ${shown} must be a whole number >= 1 or 'full'`,
       );
     }
+  });
+});
+
+describe('inAura (E15, lead rulings 19 and W2)', () => {
+  const IN_AURA: CompiledCondition[] = [compileCondition({ inAura: true })];
+  /** An outer.aura grant (微光's), and the stats of a build with one and these values and mods. */
+  const AURA = { source: 'outer.aura', grant: { kind: 'aura' } } as const;
+  const auraStats = (
+    values: Partial<Record<StatId, number>> = {},
+    emitters: readonly SourcedEmitter[] = [AURA],
+  ): StatBlock => makeStats(values, [], { triggers: [], conversions: [], emitters });
+  /** The stats the talent screen folds from `mods` (computeStatBlock), with 微光's aura. */
+  const folded = (mods: Modifier[]): StatBlock =>
+    computeStatBlock(mods, { triggers: [], conversions: [], emitters: [AURA] });
+  /** A run of `stats` with one enemy at each offset from the player, standing still. */
+  const run = (
+    offsets: readonly (readonly [number, number])[],
+    stats: StatBlock = auraStats(),
+    modules: TestModule[] = [],
+  ): RunContext => {
+    const centre = placedEnemies([], { stats });
+    const { x, y } = centre.player;
+    return placedEnemies(
+      offsets.map(([dx, dy]) => ({ x: x + dx, y: y + dy })),
+      { stats, modules },
+    );
+  };
+  /** inAura on each enemy of `ctx`, in id order. */
+  const inside = (ctx: RunContext, conds: CompiledCondition[] = IN_AURA): boolean[] =>
+    ctx.enemies.map((e) => conditionsMet(conds, e, ctx.now, 0, ctx));
+  /** r − ε, r and r + ε along x, then r along a diagonal (0.6r, 0.8r), ε = 1/1024: exact squares. */
+  const EPS = 1 / 1024;
+  const around = (r: number): [number, number][] => [
+    [r - EPS, 0],
+    [r, 0],
+    [r + EPS, 0],
+    [0, -(r + EPS)],
+    [-0.6 * r, 0.8 * r],
+  ];
+
+  it('compiles to code 11, after comboAtLeast’s 10, with no operands, and refuses false', () => {
+    expect(IN_AURA).toEqual([{ code: 11, a: 0, b: 0 }]);
+    expect(compileCondition({ comboAtLeast: 1 }, 'hit').code).toBe(10);
+    // On a trigger's event as on a modifier's.
+    expect(compileCondition({ inAura: true }, 'hit')).toEqual({ code: 11, a: 0, b: 0 });
+    // A module's addModifier passes no validation (plants false read as true).
+    expect(() => compileCondition({ inAura: false } as unknown as Condition)).toThrow(
+      'inAura: false must be true',
+    );
+  });
+
+  it('holds at r − ε and r, not at r + ε, on the pulse’s reach: auraRadius 160 (exact squares)', () => {
+    // Plants `<` for `<=` (r itself would fail) and a test on x alone (0, r + ε would pass).
+    const ctx = run(around(160));
+    expect([160 - EPS, 160, 160 + EPS].map((d) => d * d)).toEqual([
+      25599.6875 + EPS * EPS,
+      25600,
+      25600.3125 + EPS * EPS,
+    ]);
+    expect(0.6 * 160 * (0.6 * 160) + 0.8 * 160 * (0.8 * 160)).toBe(25600);
+    expect(inside(ctx)).toEqual([true, true, false, false, true]);
+    expect(auraReachSq(ctx.build)).toBe(25600);
+    // The pulse's own reach: what a pulse would hit, the grid's count of the same test.
+    rebuildGrid(ctx);
+    expect(enemiesInAura(ctx)).toBe(3);
+  });
+
+  it('reads the auraRadius stat as the build folds it, a modifier’s 25% making it 200', () => {
+    // Plants the base stat read in place of the build's value.
+    const stats = folded([{ stat: 'auraRadius', kind: 'increased', value: 0.25 }]);
+    const ctx = run([...around(200), [180, 0]], stats);
+    expect(ctx.build.values.auraRadius).toBe(200);
+    expect(inside(ctx)).toEqual([true, true, false, false, true, true]);
+  });
+
+  it('reads the reach as the build sizes it: areaSize 1.5 makes 160 a reach of 240', () => {
+    // Plants the unsized auraRadius: 220 would be outside 160.
+    const ctx = run([...around(240), [220, 0]], auraStats({ areaSize: 1.5 }));
+    expect([ctx.build.flags.areaFactor, ctx.build.values.auraRadius]).toEqual([1.5, 160]);
+    expect(inside(ctx)).toEqual([true, true, false, false, true, true]);
+    // And with both, folded: 200 × 1.5 = 300.
+    const both = run(
+      around(300),
+      folded([
+        { stat: 'auraRadius', kind: 'increased', value: 0.25 },
+        { stat: 'areaSize', kind: 'flat', value: 0.5 },
+      ]),
+    );
+    expect([both.build.flags.areaFactor, both.build.values.auraRadius]).toEqual([1.5, 200]);
+    expect(inside(both)).toEqual([true, true, false, false, true]);
+  });
+
+  it('reads the reach through 巨大化’s sizeFactor too: × 1.25 makes 160 a reach of 200, as the pulse’s', () => {
+    // Plants a private reach of auraRadius × areaSize, which drops a module's sizeFactor.
+    const giant: TestModule = (b) => {
+      b.flags.sizeFactor = 1.25;
+    };
+    const ctx = run(around(200), auraStats(), [giant]);
+    expect([ctx.build.flags.areaFactor, auraReachSq(ctx.build)]).toEqual([1.25, 40000]);
+    expect(inside(ctx)).toEqual([true, true, false, false, true]);
+    rebuildGrid(ctx);
+    expect(enemiesInAura(ctx)).toBe(3);
+  });
+
+  it('never holds outside a run (ctx null) or without a target, even at the player’s centre', () => {
+    // Plants the condition met with ctx null: the estimates and describe would meet it.
+    const ctx = run([[0, 0]]);
+    const target = ctx.enemies[0] as Enemy;
+    expect(conditionsMet(IN_AURA, target, ctx.now, 0, ctx)).toBe(true);
+    expect(conditionsMet(IN_AURA, target, ctx.now, 0, null)).toBe(false);
+    expect(conditionsMet(IN_AURA, target, ctx.now, 0)).toBe(false);
+    expect(conditionsMet(IN_AURA, null, ctx.now, 0, ctx)).toBe(false);
+    expect(staticInput().ctx).toBeNull();
+  });
+
+  it('never holds in a run without an aura emitter, whatever auraRadius, and holds with a module’s', () => {
+    // Plants the emitter check dropped, or read from the nodes' grants alone.
+    const none = run([[0, 0]], auraStats({ auraRadius: 1e6 }, []));
+    expect([none.build.flags.hasAura, inside(none)[0]]).toEqual([false, false]);
+    // Other grants are no aura.
+    const thorns = run(
+      [[0, 0]],
+      auraStats({}, [{ source: 'outer.thorns', grant: { kind: 'thorns' } }]),
+    );
+    expect(inside(thorns)).toEqual([false]);
+    // A module's addEmitter grants one, of any source.
+    const granted: TestModule = (b) => b.addEmitter('hub', { kind: 'aura' });
+    const moduled = run([[0, 0]], auraStats({}, []), [granted]);
+    expect([moduled.build.flags.hasAura, inside(moduled)[0]]).toEqual([true, true]);
+    // A module's own write to the flag gives no aura: compileBuild sets it from the emitters.
+    const forged: TestModule = (b) => {
+      b.flags.hasAura = true;
+    };
+    const lied = run([[0, 0]], auraStats({}, []), [forged]);
+    expect([lied.build.flags.hasAura, inside(lied)[0]]).toEqual([false, false]);
+    // Every source's aura counts: hub's alone.
+    const hub = run([[100, 0]], auraStats({}, [{ source: 'hub', grant: { kind: 'aura' } }]));
+    expect([hub.build.flags.hasAura, inside(hub)[0]]).toEqual([true, true]);
+  });
+
+  it('reads the target as it stands when checked, beside the other target conditions', () => {
+    const ctx = run([[100, 0]]);
+    const target = ctx.enemies[0] as Enemy;
+    expect(inside(ctx)).toEqual([true]);
+    target.x += 61;
+    expect(inside(ctx)).toEqual([false]);
+    target.x -= 1;
+    expect(inside(ctx)).toEqual([true]);
+    const both = [...IN_AURA, compileCondition({ targetKind: 'elite' })];
+    expect(inside(ctx, both)).toEqual([false]);
+    expect(inside(ctx, [...IN_AURA, compileCondition({ targetKind: 'normal' })])).toEqual([true]);
   });
 });
