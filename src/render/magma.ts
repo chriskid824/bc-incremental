@@ -14,7 +14,7 @@
  *   out by its expiry; under 霜焰 its edge is frosted.
  * - 火毒 瘟爆: an explosion that poisoned an enemy (an 'ailmentApplied' poison in the same tick on
  *   an enemy inside it) bubbles green in the poison skin's accent (shape 'bubble'); a poison
- *   spread ('ailmentSpread') pops a green ring.
+ *   spread ('ailmentSpread' of poison; a bleed one draws nothing here) pops a green ring.
  *
  * The sprites come from pools allocated up to their caps (MAX_BOMBS, MAX_ZONES, SCORCH_CAP) and
  * reused every frame; the bursts go through the renderer's capped FX and ring pools.

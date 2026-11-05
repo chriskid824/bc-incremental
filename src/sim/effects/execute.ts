@@ -73,6 +73,10 @@
  *
  * A thaw (E6) ends the freeze of its live target, a normal enemy frozen now, and starts its frost
  * immunity there (thawEnemy, src/sim/ailments/frost.ts); it raises no event.
+ *
+ * A spreadAilment moves its live target's burn, poison or bleed (血河, E9: spreadBleed, with
+ * `behind` only to the enemies farther from the player than the target) to the enemies within
+ * its spread; it deals no damage and raises no ailmentApplied.
  */
 
 import type { Num } from '../../core/num';
@@ -85,6 +89,7 @@ import {
   applyBurn,
   applyPoison,
   creditOf,
+  spreadBleed,
   spreadBurn,
   spreadPoison,
 } from '../ailments/apply';
@@ -549,10 +554,14 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const target = liveTarget(entry);
     if (target === null || fx.spread === null) return;
     if (spec.ailment === 'burn') spreadBurn(ctx, target, fx.spread, entry.depth);
-    else {
+    else if (spec.ailment === 'poison') {
       const sf = spec.stacks ?? 1;
       const max = spec.maxTargets ?? Infinity;
       spreadPoison(ctx, target, fx.spread, sf, max, entry.depth, spec.order === 'nearest');
+    } else {
+      const max = spec.maxTargets ?? Infinity;
+      const nearest = spec.order === 'nearest';
+      spreadBleed(ctx, target, fx.spread, max, entry.depth, nearest, spec.behind === true);
     }
   },
   explode(ctx, spec, fx, entry) {

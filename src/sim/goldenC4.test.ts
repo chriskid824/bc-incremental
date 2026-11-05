@@ -2946,6 +2946,47 @@ const barrageParams =
     b.flags.barrage.bounce = bounce;
   };
 
+/**
+ * E9's bleed spread (血河, gd:402 「每 0.5 秒，流血的敵人讓身後（離中央更遠的一側）60 內的敵人也流
+ * 血」; the gap map's E9, lead rulings S1-S7): the M1 volley of three projectiles bleeding at 0.5,
+ * and B3's trigger on outer.bleed (a bleed on a character not of bleed credits outer.bleed, impl
+ * §2.1), from wave 32 of the fixture waves with every enemy at speed 60, so that a wave is still
+ * walking in when the next one comes and enemies walk close behind each other. Every 0.5 s each
+ * bleeding enemy gives its bleed, at its damage and until its own end, to the enemies within 60
+ * of it that stand farther from the player, each keeping a stronger bleed of its own; the copies
+ * spread on in turn, up to MAX_DEPTH. `bloodRiverRings` is the same run under 大出血's bleedRings
+ * (8 stacks, × 1 while moving; a test module standing in for B3's), where an enemy behind is
+ * raised to the spreading enemy's live stacks and no further.
+ */
+const BLOOD_RIVER: TriggerSpec = {
+  on: 'ailmentTick',
+  when: [{ ailment: 'bleed' }],
+  every: 0.5,
+  do: [{ kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true }],
+};
+const BLOOD_RIVER_STATS = makeStats(
+  {
+    damage: 4,
+    bleedChance: 0.5,
+    igniteChance: 0,
+    critChance: 0.1,
+    maxLife: 1e6,
+    projectileCount: 3,
+  },
+  maskProbeMods(),
+  { triggers: [{ source: 'outer.bleed', spec: BLOOD_RIVER }], conversions: [], emitters: [] },
+);
+
+const bloodRiverData = (): GameData =>
+  makeTestData({
+    enemies: { triangle: { speed: 60 }, square: { speed: 60 }, pentagon: { speed: 60 } },
+  });
+const BLOOD_RIVER_RINGS: TestModule = (b) => {
+  b.flags.bleedRings = true;
+  b.flags.bleedMaxStacks = 8;
+  b.flags.bleedMoveMult = 1;
+};
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3473,6 +3514,19 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [barrageParams(2, 2)],
     expected: ['bf4990aecc74c84e', '335888c3efad9746'],
   },
+  {
+    name: 'bloodRiver',
+    config: { stats: BLOOD_RIVER_STATS, rules: [], startWave: 32 },
+    data: bloodRiverData,
+    expected: ['1a0a41aa17c13024', 'bc7ead42f5567510'],
+  },
+  {
+    name: 'bloodRiverRings',
+    config: { stats: BLOOD_RIVER_STATS, rules: [], startWave: 32 },
+    data: bloodRiverData,
+    modules: () => [BLOOD_RIVER_RINGS],
+    expected: ['647382082a5b90e6', '3c959acb38081b68'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3584,8 +3638,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E10a's barrage and barrageHive are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([72, 'barrage', 'barrageHive']);
+    // The count docs/ARCHITECTURE.md gives: E9's bloodRiver and bloodRiverRings are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([74, 'bloodRiver', 'bloodRiverRings']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -6929,6 +6983,313 @@ describe('golden C4 runs', () => {
         capped: 0,
         projectilesCapped: 0,
         unmatched: 0,
+      },
+    });
+  });
+
+  /** An enemy's bleed as a bleed spread reads it: its slot, its live ring stacks, its dist. */
+  interface BleedView {
+    readonly dps: number;
+    readonly until: number;
+    readonly source: number;
+    readonly stacks: number;
+    readonly dist: number;
+    readonly depth: number;
+  }
+
+  /** One bleed spread of a run, with the enemies' bleeds just before and just after it. */
+  interface WatchedSpread {
+    readonly now: number;
+    readonly event: Extract<SimEvent, { type: 'ailmentSpread' }>;
+    /** The ids within() found around the spreading enemy; null if no query was seen this tick. */
+    readonly found: readonly number[] | null;
+    readonly before: ReadonlyMap<number, BleedView>;
+    readonly after: ReadonlyMap<number, BleedView>;
+  }
+
+  /**
+   * Each bleed spread of a run of `entry` at `seed`. spreadBleed queries the enemy grid once,
+   * writes the copies and pushes its event, so the grid's within() is wrapped to keep, at each
+   * query of the spread's radius, the ids it found and a view of every alive enemy, and the
+   * event list's push to read the views again at each bleed ailmentSpread.
+   */
+  function watchBleedSpreads(entry: GoldenC4Entry, seed: number): WatchedSpread[] {
+    const spreads: WatchedSpread[] = [];
+    let found: number[] = [];
+    let foundAt = -1;
+    let before: Map<number, BleedView> = new Map();
+    const view = (ctx: RunContext): Map<number, BleedView> => {
+      const out = new Map<number, BleedView>();
+      for (const e of ctx.enemies) {
+        if (!e.alive) continue;
+        out.set(e.id, {
+          dps: toNumber(e.bleedDps),
+          until: e.bleedUntil,
+          source: e.bleedSource,
+          stacks: liveBleedStacks(ctx.rings, e, ctx.now),
+          dist: e.dist,
+          depth: e.ailDepth,
+        });
+      }
+      return out;
+    };
+    let wrapped = false;
+    const wrap: TestModule = (b) =>
+      void b.hook('tick', (ctx) => {
+        if (wrapped) return;
+        wrapped = true;
+        const radiusSq = ctx.build.effects.find((fx) => fx.spec.kind === 'spreadAilment')?.spread
+          ?.radiusSq;
+        const grid = ctx.grid;
+        const within = grid.within.bind(grid);
+        grid.within = (x, y, rSq, out) => {
+          const n = within(x, y, rSq, out);
+          if (rSq === radiusSq) {
+            found = out.slice(0, n).map((e) => e.id);
+            foundAt = ctx.now;
+            before = view(ctx);
+          }
+          return n;
+        };
+        const events = ctx.events;
+        const push = events.push.bind(events);
+        events.push = (...items) => {
+          const n = push(...items);
+          for (const event of items) {
+            if (event.type !== 'ailmentSpread' || event.ailment !== 'bleed') continue;
+            const now = ctx.now;
+            spreads.push({
+              now,
+              event,
+              found: foundAt === now ? found : null,
+              before,
+              after: view(ctx),
+            });
+          }
+          return n;
+        };
+      });
+    const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+    const modules = [...(entry.modules?.() ?? []), wrap];
+    const sim = createSimulation(config, entry.data?.() ?? makeTestData(), modules);
+    while (!sim.state.finished) sim.step(NO_INPUT);
+    return spreads;
+  }
+
+  /** What every spread of watchBleedSpreads shares: who it was offered to and who took it. */
+  interface SpreadTally {
+    spreads: number;
+    /** Spreads at a tick that is not a multiple of 30 (0.5 s). */
+    offCadence: number;
+    /** Spreads by the spreading enemy's ailment depth: copies spread on, short of MAX_DEPTH. */
+    depths: Record<number, number>;
+    empty: number;
+    offered: number;
+    took: number;
+    behindFiltered: number;
+    /** Spreads seen without their query, from a source without a live bleed, or miscounted. */
+    wrong: number;
+    /** Enemies the spread changed that it was not offered to, the source among them. */
+    strays: number;
+  }
+
+  const sameView = (a: BleedView | undefined, b: BleedView | undefined): boolean =>
+    a !== undefined &&
+    b !== undefined &&
+    a.dps === b.dps &&
+    a.until === b.until &&
+    a.source === b.source &&
+    a.stacks === b.stacks;
+
+  /**
+   * Tallies `spread` into `t`: the enemies found, less the source and those not behind it, are
+   * offered; those whose view changed took it. Calls `offer` with each offered enemy's views.
+   */
+  function tallySpread(
+    t: SpreadTally,
+    spread: WatchedSpread,
+    held: (source: BleedView) => boolean,
+    offer: (source: BleedView, was: BleedView, now: BleedView, took: boolean) => void,
+  ): void {
+    const { event, found, before, after } = spread;
+    const source = before.get(event.enemyId);
+    t.spreads++;
+    if (spread.now % 30 !== 0) t.offCadence++;
+    if (event.targets === 0) t.empty++;
+    if (found === null || source === undefined || !held(source)) {
+      t.wrong++;
+      return;
+    }
+    t.depths[source.depth] = (t.depths[source.depth] ?? 0) + 1;
+    const offered = new Set<number>();
+    for (const id of found) {
+      if (id === event.enemyId) continue;
+      if ((before.get(id) as BleedView).dist > source.dist) offered.add(id);
+      else t.behindFiltered++;
+    }
+    let took = 0;
+    for (const [id, was] of before) {
+      const now = after.get(id);
+      const changed = !sameView(was, now);
+      if (!offered.has(id)) {
+        if (changed && now !== undefined) t.strays++;
+        continue;
+      }
+      if (changed) took++;
+      offer(source, was, now as BleedView, changed);
+    }
+    t.offered += offered.size;
+    t.took += took;
+    if (took !== event.targets) t.wrong++;
+  }
+
+  const newTally = (): SpreadTally => ({
+    spreads: 0,
+    offCadence: 0,
+    depths: {},
+    empty: 0,
+    offered: 0,
+    took: 0,
+    behindFiltered: 0,
+    wrong: 0,
+    strays: 0,
+  });
+
+  it('spreads bloodRiver’s bleed every 0.5 s to the enemies behind, each copy the source’s damage, end and credit, refused by a stronger bleed (E9)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'bloodRiver') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const t = newTally();
+      const c = { refused: 0, wrongTake: 0, wrongCopy: 0 };
+      for (const spread of watchBleedSpreads(entry, seed)) {
+        const now = spread.now;
+        const left = (v: BleedView): number => (v.until > now ? v.dps * (v.until - now) : 0);
+        tallySpread(
+          t,
+          spread,
+          (source) => source.until > now,
+          (source, was, after, took) => {
+            // addBleed's rule: the copy (effect 1) only over a bleed with less damage left.
+            if (took !== left(source) > left(was)) c.wrongTake++;
+            if (!took) c.refused++;
+            else if (
+              after.dps !== source.dps ||
+              after.until !== source.until ||
+              after.source !== source.source
+            ) {
+              c.wrongCopy++;
+            }
+          },
+        );
+      }
+      bySeed[seed] = { ...t, ...c };
+    }
+    // Every spread at a 0.5 s step, from an enemy holding a live bleed, of depth 0 to 2 (the copy
+    // of a copy of a copy spreads no more); the enemies found but not farther from the player
+    // left out, those behind each taking the copy if and only if their own bleed had less damage
+    // left, and taking it at the source's damage, end and credit; no other enemy changed.
+    expect(bySeed).toEqual({
+      1: {
+        spreads: 160,
+        offCadence: 0,
+        depths: { 0: 82, 1: 71, 2: 7 },
+        empty: 117,
+        offered: 179,
+        took: 70,
+        refused: 109,
+        behindFiltered: 155,
+        wrong: 0,
+        strays: 0,
+        wrongTake: 0,
+        wrongCopy: 0,
+      },
+      2: {
+        spreads: 269,
+        offCadence: 0,
+        depths: { 0: 93, 1: 119, 2: 57 },
+        empty: 177,
+        offered: 430,
+        took: 162,
+        refused: 268,
+        behindFiltered: 379,
+        wrong: 0,
+        strays: 0,
+        wrongTake: 0,
+        wrongCopy: 0,
+      },
+    });
+  });
+
+  it('raises bloodRiverRings’ enemies behind to the source’s live stacks and no further, at most 8, those at it or above refusing (E9)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'bloodRiverRings') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const t = newTally();
+      const c = {
+        raisedTo: {} as Record<number, number>,
+        refusedAtCount: 0,
+        refusedAtCap: 0,
+        wrongRaise: 0,
+        above: 0,
+        slot: 0,
+      };
+      for (const spread of watchBleedSpreads(entry, seed)) {
+        tallySpread(
+          t,
+          spread,
+          (source) => source.stacks > 0,
+          (source, was, after, took) => {
+            const goal = Math.min(source.stacks, 8);
+            if (after.stacks !== Math.max(was.stacks, goal) || took !== was.stacks < goal) {
+              c.wrongRaise++;
+            }
+            if (took && after.stacks > source.stacks) c.above++;
+            if (after.until !== 0) c.slot++;
+            if (took) c.raisedTo[after.stacks] = (c.raisedTo[after.stacks] ?? 0) + 1;
+            else if (was.stacks >= 8) c.refusedAtCap++;
+            else c.refusedAtCount++;
+          },
+        );
+      }
+      bySeed[seed] = { ...t, ...c };
+    }
+    // Each enemy behind raised to the source's live stacks (at most 8) and no further, those at
+    // the source's count or the cap refusing; the strongest-only slot unused; no other enemy
+    // changed.
+    expect(bySeed).toEqual({
+      1: {
+        spreads: 160,
+        offCadence: 0,
+        depths: { 0: 81, 1: 72, 2: 7 },
+        empty: 108,
+        offered: 179,
+        took: 85,
+        behindFiltered: 155,
+        wrong: 0,
+        strays: 0,
+        raisedTo: { 1: 10, 2: 4, 3: 2, 4: 6, 5: 7, 6: 11, 7: 29, 8: 16 },
+        refusedAtCount: 58,
+        refusedAtCap: 36,
+        wrongRaise: 0,
+        above: 0,
+        slot: 0,
+      },
+      2: {
+        spreads: 273,
+        offCadence: 0,
+        depths: { 0: 93, 1: 125, 2: 55 },
+        empty: 176,
+        offered: 438,
+        took: 169,
+        behindFiltered: 386,
+        wrong: 0,
+        strays: 0,
+        raisedTo: { 1: 20, 2: 11, 3: 7, 4: 13, 5: 12, 6: 31, 7: 36, 8: 39 },
+        refusedAtCount: 189,
+        refusedAtCap: 80,
+        wrongRaise: 0,
+        above: 0,
+        slot: 0,
       },
     });
   });

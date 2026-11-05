@@ -725,6 +725,13 @@ export interface ThawSpec {
  *   `toSplitChildren`, on a kill trigger that runs at the kill: each enemy the victim splits
  *   into gets that fraction of the victim's poison stacks and of their damage left, wherever
  *   it is and whatever `effect`, `stacks` and `maxTargets` say.
+ *   Bleed (血河, gd:402; E9): the event enemy's one live bleed, `effect` × its damage per second
+ *   until its own end and with its credit, to each enemy whose own bleed has less damage left
+ *   (an enemy keeps only its strongest); under 大出血's bleedRings, stacks at the event enemy's
+ *   per-stack damage × `effect` until an enemy holds as many live stacks as it, at most the cap.
+ *   Nothing moves while the event enemy holds no live bleed. `behind` keeps only the enemies
+ *   farther from the player than the event enemy; `maxTargets` caps how many enemies it is
+ *   offered to, after `behind` (in `order`).
  * - explode: hits up to `maxTargets` enemies within `radius` of the event (in `order`).
  * - nova: hits every enemy within `radius` of the player, or of the event with at 'event'.
  * - push: moves the enemies within `radius` of the event `distance` further from the player.
@@ -780,6 +787,15 @@ export type EffectSpec =
       readonly maxTargets?: number;
       readonly order?: TargetOrder;
       readonly toSplitChildren?: number;
+    }
+  | {
+      readonly kind: 'spreadAilment';
+      readonly ailment: 'bleed';
+      readonly radius: number;
+      readonly effect?: number;
+      readonly behind?: boolean;
+      readonly maxTargets?: number;
+      readonly order?: TargetOrder;
     }
   | ExplodeSpec
   | NovaSpec
