@@ -29,4 +29,10 @@ export const ACCEPTED_CHECK_FAILS: Readonly<Record<string, string>> = acceptedFa
   // against the hook, then drops this entry (蜂巢 passes at 60 min since E5).
   'pacing:fire @ 60 min':
     'real prestige landed in PR #6; post-prestige climb back to be re-tuned by B1',
+  // bfb07af's bot fix: default shares greedy's memory, so once the preset order runs out it keeps
+  // buying instead of stalling, and 蜂巢's sessions reach a median of about wave 84-87 at 180 min
+  // (66.5-70.5 before). The game did not change. Hoshi's 11-05 answer keeps the numbers until the
+  // post-prestige run is redesigned after the Demo (before B5); that work drops this entry.
+  'pacing:summon @ 180 min':
+    'default bot stopped stalling (bfb07af); post-prestige pacing re-tuned after the Demo',
 });
