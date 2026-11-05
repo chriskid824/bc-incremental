@@ -41,13 +41,23 @@ describe('threatsOf', () => {
 });
 
 describe('suggest (gd §8 items 8 and 14)', () => {
-  it("marks the center's answer first, then an open outer's, then the default order", () => {
+  it("marks the center's answer first, then the default order", () => {
     const out = suggest(ice, progress(), account, { damageTakenBy: taken({ shielder: 50 }) });
+    // poison's 滲透 answers the shielder too, but the outer is not invested in: the 建議外盤 names it.
+    const [first, second] = [...new Set(ice.def.defaultOrder)];
     expect(out.nodes).toEqual([
       { id: 'ice.center.shatter.icicle', answers: 'shielder' },
-      // poison is open (recommended); bleed's, summon's and barrage's answers are hidden.
+      { id: first, answers: null },
+      { id: second, answers: null },
+    ]);
+  });
+
+  it("marks an answer on an outer the character has invested in, after the center's", () => {
+    const owned = progress({ 'outer.poison.main.entry': 1 });
+    const out = suggest(ice, owned, account, { damageTakenBy: taken({ shielder: 50 }) });
+    expect(out.nodes.slice(0, 2)).toEqual([
+      { id: 'ice.center.shatter.icicle', answers: 'shielder' },
       { id: 'outer.poison.virulence.seep', answers: 'shielder' },
-      { id: ice.def.defaultOrder[0], answers: null },
     ]);
   });
 

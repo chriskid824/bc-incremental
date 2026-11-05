@@ -309,6 +309,8 @@
   "panel.price.resonance": "{resonance} resonance",
   "panel.price.free": "Free",
   "panel.tip.price": "Price: {price}",
+  "panel.tip.dps": "vs. crowds {crowd} → {crowdAfter}, vs. bosses {boss} → {bossAfter} DPS",
+  "panel.tip.dpsPending": "DPS: measuring…",
   "panel.tip.pathPrice": "The whole path: {count} nodes for {price}",
   "panel.tip.rank": "Rank {rank}/{max}",
   "panel.tip.rankUnlimited": "Rank {rank}",

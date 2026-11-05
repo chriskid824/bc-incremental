@@ -3,9 +3,10 @@
  * after a death, 3 nodes marked on the web and 1 outer named on the result screen, picked by
  * what got through. The threats are the enemy columns of gd §6.4, ordered by the damage they did
  * to the player (contact and bullets, the result's own tallies). A node is suggested when it
- * answers a threat (「答案：盾兵」, V18) and can still take a rank: the center's first, then the
- * outers' the character has invested in, then the other open outers'. The rest of the 3 are the
- * next nodes of the character's default order (the 預設 build) that can still take a rank. The
+ * answers a threat (「答案：盾兵」, V18) and can still take a rank, the center's before those of the
+ * outers the character has invested in (and their fusions'); the rest of the 3 are the next nodes
+ * of the character's default order (the 預設 build) that can still take a rank. An outer not yet
+ * invested in is the 建議外盤's to name, not a node's: its nodes are folded away on the web. The
  * outer is an open one whose gd §6.5 cover of the first threat it can is ◆, else ＋, preferring
  * one the character has not invested in (「優先選已揭露但還沒投資的」). Pure, so the tests and the
  * balance tools reach it.
@@ -88,8 +89,12 @@ function open(
   return check.ok || !UNREACHABLE.has(check.reason);
 }
 
-const outerOf = (node: WebNode): OuterId | null =>
-  node.board.startsWith('outer.') ? (node.board.slice('outer.'.length) as OuterId) : null;
+/** The outer of an outer's board or of a fusion's (`fusion.<c>.<o>`); null for any other. */
+function outerOf(node: WebNode): OuterId | null {
+  if (node.board.startsWith('outer.')) return node.board.slice('outer.'.length) as OuterId;
+  if (node.board.startsWith('fusion.')) return (node.board.split('.')[2] ?? null) as OuterId | null;
+  return null;
+}
 
 /** Whether the character owns any rank on outer `outer`'s board. */
 function invested(web: AssembledWeb, progress: CharacterProgress, outer: OuterId): boolean {
@@ -97,12 +102,11 @@ function invested(web: AssembledWeb, progress: CharacterProgress, outer: OuterId
   return web.nodes.some((node) => node.board === board && storedRank(progress, node.id) > 0);
 }
 
-/** 0 the center, 1 an invested outer, 2 another outer, 3 anything else (the hub, fusions). */
-function nodeTier(web: AssembledWeb, progress: CharacterProgress, node: WebNode): number {
+/** 0 the center, 1 an invested outer or its fusion; null any other board. */
+function nodeTier(web: AssembledWeb, progress: CharacterProgress, node: WebNode): number | null {
   if (node.board === `${web.character}.center`) return 0;
   const outer = outerOf(node);
-  if (outer === null) return 3;
-  return invested(web, progress, outer) ? 1 : 2;
+  return outer !== null && invested(web, progress, outer) ? 1 : null;
 }
 
 export function suggest(
@@ -120,10 +124,14 @@ export function suggest(
     nodes.push({ id, answers });
   };
   for (const enemy of threats) {
-    const answering = web.nodes
-      .filter((node) => node.answers.includes(enemy) && open(web, progress, account, node.id))
-      .map((node, index) => ({ node, index, tier: nodeTier(web, progress, node) }))
-      .sort((a, b) => a.tier - b.tier || a.index - b.index);
+    const answering: { node: WebNode; tier: number }[] = [];
+    for (const node of web.nodes) {
+      if (!node.answers.includes(enemy)) continue;
+      const tier = nodeTier(web, progress, node);
+      if (tier !== null && open(web, progress, account, node.id)) answering.push({ node, tier });
+    }
+    // Stable: web order within a tier.
+    answering.sort((a, b) => a.tier - b.tier);
     for (const { node } of answering) add(node.id, enemy);
   }
   for (const id of web.def.defaultOrder) {

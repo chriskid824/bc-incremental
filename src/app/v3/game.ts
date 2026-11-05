@@ -305,6 +305,7 @@ export class GamePage {
       onStartRun: () => this.startRun(),
       onBack: () => this.showSelect(),
       suggested: this.suggested?.character === c ? this.suggested.ids : [],
+      data: this.data,
     });
     // Over the panel, which was appended after it.
     this.root.append(this.picker.root);

@@ -131,6 +131,7 @@ const CSS = `
 .v3p-tip-kind { font-size: 13px; color: #8e98b3; margin-bottom: 6px; }
 .v3p-tip-line { font-size: 14px; }
 .v3p-tip-price { margin-top: 8px; font-weight: 700; color: #ffcf70; }
+.v3p-tip-dps { margin-top: 6px; font-size: 13px; color: #9fe8ff; font-variant-numeric: tabular-nums; }
 .v3p-tip-action { margin-top: 4px; font-size: 14px; color: #9fe8ff; }
 .v3p-tip-action[data-refused='true'] { color: #ff9a6b; }
 .v3p-tip-refund { margin-top: 4px; font-size: 13px; color: #8e98b3; }
