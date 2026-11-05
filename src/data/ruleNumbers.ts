@@ -232,6 +232,7 @@ export function effectNumbers(effect: EffectSpec): string[][] {
       return [[`×${effect.multiplier}`, percent(effect.multiplier)]];
     case 'chainBolt':
       return [
+        ...((effect.bolts ?? 1) > 1 ? [[String(effect.bolts ?? 1)]] : []),
         ...(effect.jumps === 0 ? [] : [[String(effect.jumps)]]),
         [percent(effect.damagePct)],
         ...(effect.shockStacks === undefined ? [] : [[String(effect.shockStacks)]]),

@@ -2223,6 +2223,87 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it("accepts chainBolt from 'nearestOther' wherever 'nearestToPoint' is, bolts 1 to 3 from either, and arc from any start (E7)", () => {
+    const bolt = { kind: 'chainBolt', jumps: 0, damagePct: 0.5 } as const;
+    const other = { ...bolt, from: 'nearestOther' } as const;
+    const three = { ...other, bolts: 3, arc: true } as const;
+    expect(
+      triggerIssues(
+        {
+          on: 'hit',
+          do: [
+            other,
+            three,
+            { ...other, bolts: 1, arc: false },
+            { ...other, bolts: 2 },
+            { ...bolt, from: 'nearestToPoint', bolts: 3, arc: true },
+            { ...bolt, from: 'nearestToPoint', bolts: 2 },
+            { ...bolt, bolts: 1, arc: true },
+            { ...bolt, from: 'eventTarget', bolts: 1 },
+          ],
+        },
+        { on: 'freeze', do: [three] },
+        { on: 'kill', do: [other, { ...bolt, from: 'nearestToPoint', arc: true }] },
+        { on: 'diedWithAilment', do: [three] },
+        { on: 'shatter', do: [{ ...three, shockStacks: 2 }] },
+        { on: 'contact', do: [other] },
+        { on: 'heroHit', do: [other] },
+        { on: 'periodic', every: 1, do: [three] },
+        { on: 'waveStart', do: [other] },
+        { on: 'explode', do: [three] },
+        { on: 'chainJump', do: [other] },
+        { on: 'droneImpact', do: [three] },
+        { on: 'periodic', every: 1, target: { pick: 'highestHp' }, do: [three] },
+        { on: 'periodic', every: 1, target: { pick: 'player' }, do: [three] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects chainBolt bolts outside [1, 3] or not whole, and bolts above 1 from 'eventTarget' (E7)", () => {
+    const bolt = { kind: 'chainBolt', jumps: 0, damagePct: 0.5, from: 'nearestOther' } as const;
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [
+          { ...bolt, bolts: 0 },
+          { ...bolt, bolts: 4 },
+          { ...bolt, bolts: -1 },
+          { ...bolt, bolts: 1.5 },
+          { ...bolt, bolts: Number.NaN },
+          { ...bolt, from: 'nearestToPoint', bolts: 5 },
+        ],
+      }),
+    ).toEqual([
+      `${at} do[0] bolts must be an integer in [1, 3] (got 0)`,
+      `${at} do[1] bolts must be an integer in [1, 3] (got 4)`,
+      `${at} do[2] bolts must be an integer in [1, 3] (got -1)`,
+      `${at} do[3] bolts must be an integer in [1, 3] (got 1.5)`,
+      `${at} do[4] bolts must be an integer in [1, 3] (got NaN)`,
+      `${at} do[5] bolts must be an integer in [1, 3] (got 5)`,
+    ]);
+    const one = (bolts: number): string =>
+      `${at} do[0] chainBolt from 'eventTarget' starts on one enemy; bolts ${bolts} needs from 'nearestToPoint' or 'nearestOther'`;
+    const target = { kind: 'chainBolt', jumps: 2, damagePct: 0.5 } as const;
+    expect(triggerIssues({ on: 'hit', do: [{ ...target, bolts: 2 }] })).toEqual([one(2)]);
+    expect(
+      triggerIssues({ on: 'hit', do: [{ ...target, from: 'eventTarget', bolts: 3, arc: true }] }),
+    ).toEqual([one(3)]);
+    // Out of range as well: both problems.
+    expect(triggerIssues({ on: 'hit', do: [{ ...target, bolts: 4 }] })).toEqual([
+      `${at} do[0] bolts must be an integer in [1, 3] (got 4)`,
+      one(4),
+    ]);
+    // With a selector's enemy it still starts on one.
+    expect(
+      triggerIssues({
+        on: 'periodic',
+        every: 1,
+        target: { pick: 'nearest' },
+        do: [{ ...target, bolts: 2 }],
+      }),
+    ).toEqual([one(2)]);
+  });
+
   it("rejects stacksAtLeast 'max' for poison, on a trigger and on a modifier", () => {
     const problem = "stacksAtLeast 'max' needs a stack cap, which poison has not; give a number";
     const max = { stacksAtLeast: { ailment: 'poison', stacks: 'max' } } as const;

@@ -13,6 +13,7 @@ import type { Modifier } from './stats';
 import { DELIVERY_MASK, DOT_MASK, TAG } from './tags';
 import {
   BUFF_STATS,
+  chainBoltBoltsIssues,
   CONDITION_CONTEXTS,
   conditionKey,
   DOT_AILMENTS,
@@ -1540,6 +1541,8 @@ function effectIssues(
       }
       nonNegative('damagePct', effect.damagePct);
       count('shockStacks', effect.shockStacks);
+      // Its bolts: a whole number in [1, 3], and one from 'eventTarget' (E7).
+      issues.push(...chainBoltBoltsIssues(effect));
       // From 'eventTarget' it starts on the event's enemy, or the selector's, alive when the
       // bolt runs (see the event's enemy above).
       if ((effect.from ?? 'eventTarget') === 'eventTarget') {

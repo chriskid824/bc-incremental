@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ArcLayer } from './arcs';
 
@@ -41,5 +42,21 @@ describe('ArcLayer', () => {
     expect(widest(2)).toBeLessThan(widest(1));
     expect(widest(4)).toBeLessThan(widest(2));
     expect(widest(50)).toBeGreaterThan(0);
+  });
+});
+
+/** Comments blanked out, so only code is read. */
+const code = (source: string): string =>
+  source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|\s)\/\/.*$/gm, '$1');
+
+describe('the renderer’s hit arcs', () => {
+  // The Renderer needs a canvas, so its routing of a hit is read from its source.
+  const source = code(readFileSync(new URL('renderer.ts', import.meta.url), 'utf8'));
+
+  it('draws a bolt for every hit that comes from a point, a jump’s or a chainBolt’s arc’d first hit, as wide as a first jump’s (E7)', () => {
+    // Planted bug: the arc kept to the jumps (chainIndex > 0), so an arc'd first hit draws none.
+    expect(source).toMatch(
+      /if \(event\.fromX !== null && event\.fromY !== null\) \{\s*this\.arcs\.add\(event\.fromX, event\.fromY, x, y, Math\.max\(1, event\.chainIndex\)\);\s*this\.bursts\.chain\(x, y\);\s*\} else if \(!crit\) \{/,
+    );
   });
 });

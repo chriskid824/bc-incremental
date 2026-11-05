@@ -23,6 +23,7 @@ import { TAG, tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import {
   BARRAGE_ENTRY_SHOTS,
+  chainBoltBoltsIssues,
   COEF_FIELDS,
   DETONATE_AILMENTS,
   PROJECTILES_COUNT_MAX,
@@ -425,10 +426,17 @@ export function compileEffect(
       tags = TAG.hit | TAG.trigger;
       baseDamage = ONE;
       break;
-    case 'chainBolt':
+    case 'chainBolt': {
+      // Data was validated at load; a rule module's effects were not, and the executor's picks
+      // need a whole count of bolts in [1, CHAIN_BOLT_BOLTS_MAX] (lead ruling R8).
+      const issues = chainBoltBoltsIssues(scaled);
+      if (issues.length > 0) {
+        throw new Error(`A chainBolt effect ${JSON.stringify(spec)}: ${issues.join('; ')}`);
+      }
       tags = TAG.hit | TAG.trigger | TAG.chain | TAG.lightning;
       baseDamage = mul(num(damage), scaled.damagePct);
       break;
+    }
     case 'applyAilment':
       tags = TAG.hit | TAG.trigger;
       baseDamage = mul(num(damage), scaled.damagePct ?? 1);
