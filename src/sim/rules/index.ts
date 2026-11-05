@@ -44,6 +44,7 @@ import { frostSentry, superconduct, thermalShock } from './frostFusions';
 import { hemorrhage } from './hemorrhage';
 import { bulletRain } from './bulletRain';
 import { frozenNoSplit, shatterChain } from './shatterFlags';
+import { bulletHell } from './bulletHell';
 import { flameBee, frostBee } from './hiveFusions';
 import { plasma, stormWeb } from './lightningFusions';
 import { bugSea, cannon, lockBeacon, teslaTower } from './summonPolicies';
@@ -113,6 +114,7 @@ export const RULE_MODULES: {
   hemorrhage,
   bulletRain,
   shatterChain,
+  bulletHell,
   frozenNoSplit,
 };
 

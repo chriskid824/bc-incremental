@@ -286,3 +286,12 @@ describe('bulletRain (彈雨)', () => {
     expect(bullets(run(ICE, [], 600, stats))).toBe(0);
   });
 });
+
+describe('bulletHell (★子彈地獄)', () => {
+  it('doubles the rider and bounces it twice, and leaves the flags alone without it', () => {
+    const plain = compileBuild(makeStats(), [], ICE).flags.barrage;
+    const hell = compileBuild(makeStats(), [{ id: 'bulletHell' }], ICE).flags.barrage;
+    expect([hell.countMult, hell.bounce]).toEqual([2, 2]);
+    expect([plain.countMult, plain.bounce]).not.toEqual([2, 2]);
+  });
+});

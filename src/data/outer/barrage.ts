@@ -1,7 +1,8 @@
 /**
  * 彈幕 (barrage, clock 10; gd §4.11): small projectiles that fly with your attacks, each a small
- * hit. The barrage count (barrageCount) is how many an attack sends: 副彈 gives 2, and each rank
- * of 齊射 one more; the attack trigger's projectiles and the barrage payload's grow with it
+ * hit. 副彈's barrage grant (E10a) makes every counted signature attack send floor(barrageCount)
+ * small shots straight at the nearest distinct enemies; 副彈 gives 2, and every two count ranks
+ * one more (only the whole part counts). The barrage payload's projectiles grow with it too
  * (countStat). Every number is an initial value for the balance simulator.
  */
 
@@ -21,31 +22,16 @@ import {
   threshold,
 } from '../templates';
 
-/** The small projectiles' hits: trigger projectiles (every effect projectile's). */
-const BULLETS = { tags: ['projectile', 'trigger'] } as const;
+/**
+ * The small projectiles' hits: every hit this outer's board is credited with (the rider's shots,
+ * which are plain projectile hits, and its notables' triggered projectiles).
+ */
+const BULLETS = { scope: 'outer.barrage' } as const;
 
 export const BARRAGE = defineOuter({
   id: 'barrage',
   // 副彈: each attack sends 2 small projectiles of 25% at different enemies.
-  entry: entry({
-    modifiers: [flat('barrageCount', 2)],
-    triggers: [
-      {
-        on: 'nthAttack',
-        every: 1,
-        do: [
-          {
-            kind: 'projectiles',
-            count: 2,
-            damagePct: 0.25,
-            aim: 'distinct',
-            from: 'player',
-            countStat: 'barrageCount',
-          },
-        ],
-      },
-    ],
-  }),
+  entry: entry({ modifiers: [flat('barrageCount', 2)], emitters: [{ kind: 'barrage' }] }),
   branches: [
     // 齊射: projectile count and projectile damage.
     outerBranch('volley', {
@@ -71,10 +57,10 @@ export const BARRAGE = defineOuter({
       }),
       mastery: mastery(),
     }),
-    // 分裂: pierce and split.
+    // 分裂: pierce and split. Pierce is the rider's dearest knob (E10a), so two ranks a pierce.
     outerBranch('split', {
       r1: ranked('damage', 0.08, 4, 'increased', BULLETS),
-      r2: ranked('barrageCount', 0.5, 4, 'flat'),
+      r2: ranked('barragePierce', 0.5, 4, 'flat'),
       // 子母彈: a small projectile that kills splits into 3 (the split ones do not split again).
       // TODO(engine B3): interim data until a kill can tell a small projectile's; until then a
       // kill by a hit splits 3 small projectiles a third of the time.
@@ -104,10 +90,9 @@ export const BARRAGE = defineOuter({
   // 集火: the hits on one enemy within 0.2 s are summed against its shield (答案：盾兵).
   answer: answers(notable('focus-fire', { modifiers: [flat('shieldPoolSec', 0.2)] }), 'shielder'),
   // 子彈地獄: ×2 small projectiles, each −40% damage; they bounce off the arena's edge (twice).
-  // TODO(engine B3): the bounce off the edge waits on a barrage bounce stat; the count and the
-  // cost are here.
   keystone: keystone('bullet-hell', {
-    modifiers: [more('barrageCount', 1), more('damage', -0.4, BULLETS)],
+    modifiers: [more('damage', -0.4, BULLETS)],
+    rules: [{ id: 'bulletHell' }],
   }),
   // 彈雨: for 2 s in every 10, ×3 small projectiles (its own rule module, Q12 A).
   threshold: threshold({

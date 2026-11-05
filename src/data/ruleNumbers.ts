@@ -98,6 +98,7 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
       return [[`×${rule.damageMult}`], [`×${rule.speedMult}`]];
     case 'focusFire':
     case 'shatterChain':
+    case 'bulletHell':
     case 'frozenNoSplit':
       return [];
     case 'outpost':

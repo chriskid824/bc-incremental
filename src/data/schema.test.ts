@@ -73,6 +73,7 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   hammerRole: { id: 'hammerRole', damageMult: 5, speedMult: 0.4 },
   focusFire: { id: 'focusFire' },
   shatterChain: { id: 'shatterChain' },
+  bulletHell: { id: 'bulletHell' },
   frozenNoSplit: { id: 'frozenNoSplit' },
   outpost: { id: 'outpost', turretRadius: 220 },
   selfDestruct: { id: 'selfDestruct', radius: 80, damagePct: 1.5 },

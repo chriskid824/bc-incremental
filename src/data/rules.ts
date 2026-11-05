@@ -317,6 +317,11 @@ export type RuleSpec =
   | { readonly id: 'hemorrhage'; readonly maxStacks: number }
   /** ◆連鎖碎裂 (霜晶's center, E6): an enemy a shatter kills shatters too (src/sim/rules/shatterFlags.ts). */
   | { readonly id: 'shatterChain' }
+  /**
+   * ★子彈地獄 (the barrage outer's keystone, gd §4.11, E10a): the rider sends ×2 small shots and
+   * they bounce off the arena's edge twice (src/sim/rules/bulletHell.ts).
+   */
+  | { readonly id: 'bulletHell' }
   /** ◆粉碎 (霜晶's center, E6): an enemy that dies frozen does not split. */
   | { readonly id: 'frozenNoSplit' }
   /**
@@ -386,6 +391,7 @@ export const RULE_IDS: readonly RuleId[] = [
   'stormWeb',
   'hemorrhage',
   'bulletRain',
+  'bulletHell',
   'shatterChain',
   'frozenNoSplit',
 ];

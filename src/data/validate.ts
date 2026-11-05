@@ -817,6 +817,7 @@ function ruleIssues(rule: RuleSpec): string[] {
     case 'lockBeacon':
     case 'focusFire':
     case 'shatterChain':
+    case 'bulletHell':
     case 'frozenNoSplit':
       break;
     case 'cannon':
@@ -1971,6 +1972,7 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'hemorrhage':
     case 'bulletRain':
     case 'shatterChain':
+    case 'bulletHell':
     case 'frozenNoSplit':
       return [];
   }
