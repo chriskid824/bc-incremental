@@ -4,6 +4,7 @@ import zhTW from '../i18n/zh-TW.json';
 import { mentions, modifierNumbers, quotedNumbers, triggerNumbers } from './ruleNumbers';
 import { isBehaviourModifier } from './stats';
 import { TALENTS } from './talents';
+import { flat, inc, more } from './templates';
 
 /** Every number a node's descKey text must quote: its rules', triggers' and behaviour modifiers'. */
 function nodeNumbers(node: (typeof TALENTS)[number]): string[][] {
@@ -62,7 +63,27 @@ describe('rule descriptions', () => {
     expect(numbersOf('flashpoint')).toEqual([['+30%']]);
     expect(numbersOf('conduction')).toEqual([['+25%']]);
     expect(numbersOf('staticFocus')).toEqual([['+10%']]);
-    expect(numbersOf('searingCrits')).toEqual([['−50%']]);
+    // A more modifier also reads as its factor: Searing Crits' −50% more is ×0.5.
+    expect(numbersOf('searingCrits')).toEqual([['−50%', '×0.5']]);
+  });
+
+  it("reads a more modifier as its percentage or its factor, and the others as their percentage alone (加農砲's ×4, A12)", () => {
+    const shots = { tags: ['minion', 'projectile'], notTags: ['trigger'] } as const;
+    expect(modifierNumbers(more('damage', 3, shots))).toEqual([['+300%', '×4']]);
+    expect(modifierNumbers(more('damage', -0.4, { scope: 'outer.barrage' }))).toEqual([
+      ['−40%', '×0.6'],
+    ]);
+    expect(modifierNumbers(inc('damage', 0.15, shots))).toEqual([['+15%']]);
+    expect(modifierNumbers(flat('critChance', 0.05, { tags: ['minion'] }))).toEqual([['+5%']]);
+    // An *Always stat quotes nothing, as a more too: "always" is the whole message.
+    expect(modifierNumbers(more('critAlways', 1, { tags: ['minion'] }))).toEqual([]);
+    // A scaled more adds its value per step (1 + 0.1 × steps): 致命毒素's +10% is no ×1.1.
+    const perStacks = { per: 'targetPoisonStacks', every: 10, cap: 3 } as const;
+    expect(modifierNumbers(more('damage', 0.1, { tags: ['poison'], scaling: perStacks }))).toEqual([
+      ['+10%'],
+    ]);
+    // 1 + −0.7 is 0.30000000000000004 in floating point; the factor reads ×0.3.
+    expect(modifierNumbers(more('damage', -0.7, shots))).toEqual([['−70%', '×0.3']]);
   });
 
   it('reads Pandemic’s numbers from its trigger', () => {
