@@ -204,3 +204,30 @@ describe('hemorrhage (大出血)', () => {
     });
   });
 });
+
+describe('bulletRain (彈雨)', () => {
+  const RAIN: RuleSpec = {
+    id: 'bulletRain',
+    periodSec: 10,
+    durationSec: 2,
+    countMult: 3,
+    damagePct: 0.25,
+  };
+
+  it('compiles the entry volley it repeats', () => {
+    const specs = compileBuild(makeStats(), [RAIN], ICE).effects.map((fx) => fx.spec);
+    expect(specs).toContainEqual(
+      expect.objectContaining({ kind: 'projectiles', aim: 'distinct', countStat: 'barrageCount' }),
+    );
+  });
+
+  it('sends small projectiles only in the last 2 s of every 10', () => {
+    const stats = { barrageCount: 2 };
+    const bullets = (events: readonly SimEvent[]): number =>
+      hitsWith(events, TAG.trigger | TAG.projectile);
+    // 7.5 s: before the first window; 10 s: through it.
+    expect(bullets(run(ICE, [RAIN], 450, stats))).toBe(0);
+    expect(bullets(run(ICE, [RAIN], 600, stats))).toBeGreaterThan(0);
+    expect(bullets(run(ICE, [], 600, stats))).toBe(0);
+  });
+});

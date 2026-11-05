@@ -662,6 +662,15 @@ export const RuleSpecSchema = exact<RuleSpec>()(
     z.strictObject({ id: z.literal('hemorrhage'), maxStacks: finite }).readonly(),
     z
       .strictObject({
+        id: z.literal('bulletRain'),
+        periodSec: finite,
+        durationSec: finite,
+        countMult: finite,
+        damagePct: finite,
+      })
+      .readonly(),
+    z
+      .strictObject({
         id: z.literal('stormWeb'),
         damagePct: finite,
         periodSec: finite,

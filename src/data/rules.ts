@@ -311,6 +311,18 @@ export type RuleSpec =
    * and a moving enemy no longer bleeds ×3 (src/sim/rules/hemorrhage.ts).
    */
   | { readonly id: 'hemorrhage'; readonly maxStacks: number }
+  /**
+   * 彈雨 (the barrage outer's threshold, gd §4.11, Q12 A): for the last durationSec of every
+   * periodSec, each attack sends countMult times the entry's small projectiles of damagePct
+   * (src/sim/rules/bulletRain.ts).
+   */
+  | {
+      readonly id: 'bulletRain';
+      readonly periodSec: number;
+      readonly durationSec: number;
+      readonly countMult: number;
+      readonly damagePct: number;
+    }
   | {
       readonly id: 'stormWeb';
       readonly damagePct: number;
@@ -365,6 +377,7 @@ export const RULE_IDS: readonly RuleId[] = [
   'plasma',
   'stormWeb',
   'hemorrhage',
+  'bulletRain',
 ];
 
 /**
@@ -513,4 +526,5 @@ export const NOTABLE_RULES: readonly RuleId[] = [
   'swarmSurge',
   'royalJelly',
   'zoneTune',
+  'bulletRain',
 ];

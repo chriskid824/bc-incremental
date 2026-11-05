@@ -42,6 +42,7 @@ import {
 } from './hive';
 import { frostSentry, superconduct, thermalShock } from './frostFusions';
 import { hemorrhage } from './hemorrhage';
+import { bulletRain } from './bulletRain';
 import { flameBee, frostBee } from './hiveFusions';
 import { plasma, stormWeb } from './lightningFusions';
 import { bugSea, cannon, lockBeacon, teslaTower } from './summonPolicies';
@@ -109,6 +110,7 @@ export const RULE_MODULES: {
   plasma,
   stormWeb,
   hemorrhage,
+  bulletRain,
 };
 
 export const SIGNATURES: {

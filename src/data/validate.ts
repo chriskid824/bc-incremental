@@ -1000,6 +1000,20 @@ function ruleIssues(rule: RuleSpec): string[] {
         issues.push(`hemorrhage.maxStacks must be an integer in [1, 8] (got ${rule.maxStacks})`);
       }
       break;
+    case 'bulletRain':
+      if (!(rule.periodSec > 0 && Number.isFinite(rule.periodSec))) {
+        issues.push(`bulletRain.periodSec must be finite and > 0 (got ${rule.periodSec})`);
+      }
+      if (!(rule.durationSec > 0 && rule.durationSec <= rule.periodSec)) {
+        issues.push(`bulletRain.durationSec must be in (0, periodSec] (got ${rule.durationSec})`);
+      }
+      if (!(isPositiveInt(rule.countMult) && rule.countMult >= 2)) {
+        issues.push(`bulletRain.countMult must be an integer >= 2 (got ${rule.countMult})`);
+      }
+      if (!(rule.damagePct > 0 && Number.isFinite(rule.damagePct))) {
+        issues.push(`bulletRain.damagePct must be finite and > 0 (got ${rule.damagePct})`);
+      }
+      break;
     case 'stormWeb':
       if (!(rule.damagePct > 0 && Number.isFinite(rule.damagePct))) {
         issues.push(`stormWeb.damagePct must be finite and > 0 (got ${rule.damagePct})`);
@@ -1831,6 +1845,7 @@ function ruleDamageModifiers(rule: RuleSpec): Modifier[] {
     case 'plasma':
     case 'stormWeb':
     case 'hemorrhage':
+    case 'bulletRain':
       return [];
   }
 }

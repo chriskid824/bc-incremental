@@ -102,6 +102,7 @@ const SAMPLE_RULES: { readonly [K in RuleId]: Extract<RuleSpec, { id: K }> } = {
   plasma: { id: 'plasma', arcsPerBlast: 3, arcDamagePct: 0.5, shockBurnMore: 0.3 },
   stormWeb: { id: 'stormWeb', damagePct: 0.1, periodSec: 0.25, pairPeriodSec: 0.5 },
   hemorrhage: { id: 'hemorrhage', maxStacks: 8 },
+  bulletRain: { id: 'bulletRain', periodSec: 10, durationSec: 2, countMult: 3, damagePct: 0.25 },
 };
 
 describe('ModifierSchema', () => {

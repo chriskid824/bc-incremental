@@ -135,6 +135,8 @@ export function quotedNumbers(rule: RuleSpec): string[][] {
       return [[String(rule.maxStacks)]];
     case 'stormWeb':
       return [[percent(rule.damagePct)]];
+    case 'bulletRain':
+      return [[String(rule.periodSec)], [String(rule.durationSec)], [String(rule.countMult)]];
   }
 }
 

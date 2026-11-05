@@ -592,5 +592,6 @@
   "web.node.outer.barrage.main.focus-fire.name": "Concentrated Fire",
   "web.node.outer.barrage.main.bullet-hell.name": "Bullet Hell",
   "web.node.outer.barrage.main.bullet-hell.desc": "Twice the small projectiles (×2), each deals −40% damage.",
-  "web.node.outer.barrage.main.threshold.name": "Bullet Rain"
+  "web.node.outer.barrage.main.threshold.name": "Bullet Rain",
+  "web.node.outer.barrage.main.threshold.desc": "For 2 s in every 10 s, each attack sends ×3 small projectiles."
 }

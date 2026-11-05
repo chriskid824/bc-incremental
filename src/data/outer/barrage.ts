@@ -109,27 +109,9 @@ export const BARRAGE = defineOuter({
   keystone: keystone('bullet-hell', {
     modifiers: [more('barrageCount', 1), more('damage', -0.4, BULLETS)],
   }),
-  // 彈雨: for 2 s in every 10, ×3 small projectiles.
-  // TODO(B3): interim data until 彈雨's own rule module (Q12 A); until then a burst of 12 small
-  // projectiles every 10 s.
+  // 彈雨: for 2 s in every 10, ×3 small projectiles (its own rule module, Q12 A).
   threshold: threshold({
-    triggers: [
-      {
-        on: 'periodic',
-        every: 10,
-        target: { pick: 'nearest' },
-        do: [
-          {
-            kind: 'projectiles',
-            count: 12,
-            damagePct: 0.25,
-            aim: 'distinct',
-            from: 'player',
-            countStat: 'barrageCount',
-          },
-        ],
-      },
-    ],
+    rules: [{ id: 'bulletRain', periodSec: 10, durationSec: 2, countMult: 3, damagePct: 0.25 }],
   }),
   payload: {
     type: 'placement',

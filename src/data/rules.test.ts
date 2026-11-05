@@ -132,7 +132,7 @@ describe('tables the rule modules fill', () => {
   });
 
   // A ◆ rule module adds its NOTABLE_RULES id when it lands (E2: 神經毒's poisonSlow, gd:389).
-  it("admits poisonSlow, the summon outer's policy rules and 蜂巢's on a ◆", () => {
+  it("admits poisonSlow, the summon outer's policy rules, 蜂巢's and 彈雨 on a ◆", () => {
     expect(NOTABLE_RULES).toEqual([
       'poisonSlow',
       'lockBeacon',
@@ -150,6 +150,7 @@ describe('tables the rule modules fill', () => {
       'swarmSurge',
       'royalJelly',
       'zoneTune',
+      'bulletRain',
     ]);
   });
 });
