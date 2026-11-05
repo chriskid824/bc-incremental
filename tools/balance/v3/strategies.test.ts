@@ -23,12 +23,15 @@ import {
   GREEDY_CANDIDATES,
   GREEDY_PER_BOARD,
   insideOutOrder,
+  isRulesKeystone,
   isWebStrategyId,
   openNodes,
+  savesForShards,
+  savesOnWallet,
   webStrategiesFor,
   WALLET_REASONS,
 } from './strategies';
-import type { WebStrategyId } from './strategies';
+import type { WebStrategy, WebStrategyId } from './strategies';
 import { openVisit } from './visit';
 
 const ACCOUNT = { singularityBeaten: false };
@@ -77,6 +80,44 @@ function visitOf(
   strategy.visit(visit);
   return { bought: visit.bought, progress: visit.progress(), evaluations: strategy.evaluations };
 }
+
+/**
+ * One more visit of `strategy` from `progress`, the probe as visitOf's; what it bought and the
+ * readings it added.
+ */
+function nextVisit(
+  strategy: WebStrategy,
+  progress: CharacterProgress,
+  weights = new Map<string, number>(),
+) {
+  const before = strategy.evaluations.length;
+  const visit = openVisit({
+    web,
+    account: ACCOUNT,
+    economy: DEFAULT_WEB_ECONOMY,
+    data: characterGameData(),
+    rng: createRng(1),
+    minutes: 0,
+    progress,
+    probe: (p) => {
+      let x = 10;
+      for (const [node, rank] of Object.entries(p.ranks)) x += (weights.get(node) ?? 0) * rank;
+      return [x, x];
+    },
+  });
+  strategy.visit(visit);
+  return {
+    bought: visit.bought,
+    progress: visit.progress(),
+    probed: strategy.evaluations.slice(before).map((e) => e.node),
+  };
+}
+
+/** The nodes canBuy accepts on `progress`. */
+const acceptedOn = (progress: CharacterProgress): WebNode[] =>
+  openNodes(web, progress).filter(
+    (node) => canBuy(web, progress, ACCOUNT, node.id, DEFAULT_WEB_ECONOMY).ok,
+  );
 
 const C = 'fire.center.';
 
@@ -279,6 +320,80 @@ describe('greedy', () => {
     expect(bought).toEqual(['hub.rules.rule-one', 'hub.might.might']);
     expect(PRICE_CURVE_OF.keystone).toBeNull();
   });
+
+  it('after a visit whose candidates read no gain, probes others on the same ranks', () => {
+    // From nothing owned the center's r1s are all greedy can buy, two a board: alpha's and
+    // beta's read no gain, gamma's does.
+    const greedy = createStrategy('greedy', web);
+    const weights = new Map([[`${C}gamma.r1`, 0.5]]);
+    const start = funded(1e6);
+    const first = nextVisit(greedy, start, weights);
+    expect(first.probed).toEqual([`${C}alpha.r1`, `${C}beta.r1`]);
+    expect(first.bought).toEqual([]);
+    // The broken rule probed alpha's and beta's again, and bought nothing, for ever.
+    const second = nextVisit(greedy, first.progress, weights);
+    expect(second.probed).toEqual([`${C}gamma.r1`, `${C}alpha.r1`]);
+    expect(second.bought).toEqual([`${C}gamma.r1`]);
+  });
+
+  it('moves a node that read no gain behind the others, though the visit bought another', () => {
+    const greedy = createStrategy('greedy', web);
+    const weights = new Map([
+      [`${C}alpha.r2`, 0.2],
+      [`${C}beta.r1`, 0.3],
+    ]);
+    // alpha.r1's next rank (owned first) reads no gain; alpha.r2 does and is bought.
+    const first = nextVisit(greedy, withWallet(owning([`${C}alpha.r1`]), 1e6), weights);
+    expect(first.probed).toEqual([`${C}alpha.r1`, `${C}alpha.r2`]);
+    expect(first.bought).toEqual([`${C}alpha.r2`]);
+    // alpha.r1, owned and first in web order, kept its place in every visit before.
+    const second = nextVisit(greedy, first.progress, weights);
+    expect(second.probed).toEqual([`${C}alpha.r2`, `${C}beta.r1`]);
+    expect(second.bought).toEqual([`${C}beta.r1`, `${C}alpha.r2`]);
+  });
+
+  it('takes the passed nodes back in turn, the longest passed first', () => {
+    const greedy = createStrategy('greedy', web);
+    const start = funded(1e6);
+    const probed = [0, 1, 2].map(() => nextVisit(greedy, start).probed);
+    expect(probed).toEqual([
+      [`${C}alpha.r1`, `${C}beta.r1`],
+      [`${C}gamma.r1`, `${C}alpha.r1`],
+      [`${C}beta.r1`, `${C}alpha.r1`],
+    ]);
+    // A node bought since its reading is new again: its next rank was never probed.
+    const owned = { ...start, ranks: { [`${C}alpha.r1`]: 1 } };
+    expect(nextVisit(greedy, owned).probed[0]).toBe(`${C}alpha.r1`);
+  });
+
+  it('puts a board whose candidates all read no gain after the others', () => {
+    const greedy = createStrategy('greedy', web);
+    const entries = ['outer.ice.main.entry', 'outer.crit.main.entry', 'outer.summon.main.entry'];
+    const progress = withWallet(owning(entries), 1e6, 10);
+    const first = nextVisit(greedy, progress);
+    expect(first.probed).toEqual([
+      `${C}beta.r1`,
+      'hub.economy.r1',
+      'outer.crit.alpha.r1',
+      'outer.ice.alpha.r1',
+      'outer.summon.alpha.r1',
+      `${C}beta.r2`,
+      'hub.economy.r2',
+      'outer.crit.beta.r1',
+    ]);
+    // Both of crit's read no gain, so its board comes after ice's and summon's, which each have
+    // a node not yet probed; on each board the passed nodes come last.
+    expect(nextVisit(greedy, progress).probed).toEqual([
+      `${C}beta.r3`,
+      'hub.economy.r3',
+      'outer.ice.beta.r1',
+      'outer.summon.beta.r1',
+      'outer.crit.alpha.r1',
+      `${C}main.c3`,
+      'hub.echo.r1',
+      'outer.ice.alpha.r1',
+    ]);
+  });
 });
 
 describe('random', () => {
@@ -334,12 +449,29 @@ describe('cheapest, balanced, might-only and focus', () => {
       'outer.crit.main.entry',
       'outer.ice.alpha.r1',
       `${C}alpha.r1`,
-      'hub.rules.rule-two',
+      'hub.defense.r3',
       'outer.crit.alpha.r1',
       'outer.ice.alpha.r1',
       `${C}alpha.r1`,
-      'hub.defense.r3',
+      'hub.defense.r2',
     ]);
+  });
+
+  it("balanced never takes the hub's 規則 ★, though it costs no shards", () => {
+    const start = withWallet(owning(['outer.ice.main.entry']), 1e6, 10);
+    const { bought, progress } = visitOf('balanced', start);
+    expect(isRulesKeystone(web.byId.get('hub.rules.rule-two') as WebNode)).toBe(true);
+    expect(isRulesKeystone(web.byId.get(`${C}main.star-one`) as WebNode)).toBe(false);
+    expect(bought.filter((id) => isRulesKeystone(web.byId.get(id) as WebNode))).toEqual([]);
+    // At the hub's second turn rule-two, next to defense.r4, was accepted and the hub's cheapest
+    // at 0 shards: the sixth purchase before.
+    let sixth = start;
+    for (const id of bought.slice(0, 5)) sixth = buy(web, sixth, ACCOUNT, id, DEFAULT_WEB_ECONOMY);
+    expect(acceptedOn(sixth).map((node) => node.id)).toContain('hub.rules.rule-two');
+    expect(bought[5]).toBe('hub.defense.r3');
+    // It stops with nothing accepted but a 規則 ★ (here none: the center's two fill the ★ cap).
+    for (const node of acceptedOn(progress)) expect(isRulesKeystone(node), node.id).toBe(true);
+    expect(bought).toContain(`${C}main.star-one`);
   });
 
   it('balanced carries its turn from one visit to the next', () => {
@@ -411,6 +543,32 @@ describe('cheapest, balanced, might-only and focus', () => {
     ]);
   });
 
+  it("might-only buys what costs no cores while its route's ◆ waits on one", () => {
+    // Every route from the root runs through a center ◆: alpha-one here, 1 core.
+    const mightOnly = createStrategy('might-only', web);
+    const poor = nextVisit(mightOnly, funded(1e6, 0));
+    expect(poor.bought.slice(0, 2)).toEqual([`${C}alpha.r1`, `${C}alpha.r2`]);
+    expect(poor.bought.length).toBeGreaterThan(2);
+    expect(
+      poor.bought.every((id) => DEFAULT_WEB_ECONOMY.cores[web.byId.get(id)?.kind ?? 'core'] === 0),
+    ).toBe(true);
+    // It stops with nothing accepted that costs no cores: the r1s and r2s at their last rank.
+    for (const node of acceptedOn(poor.progress)) {
+      expect(DEFAULT_WEB_ECONOMY.cores[node.kind], node.id).toBeGreaterThan(0);
+    }
+    expect(poor.bought.filter((id) => id === `${C}gamma.r2`)).toHaveLength(3);
+    // With the core in, the route and then might alone.
+    const rich = nextVisit(mightOnly, withWallet(poor.progress, 1e6, 1));
+    expect(rich.bought.slice(0, 6)).toEqual([
+      `${C}alpha.alpha-one`,
+      `${C}alpha.r3`,
+      `${C}main.c1`,
+      'hub.defense.r1',
+      'hub.might.might',
+      'hub.might.might',
+    ]);
+  });
+
   it("focus buys the center's first eight, the route to its outer's entry, then that board", () => {
     const centerEight = [
       `${C}alpha.r1`,
@@ -440,9 +598,51 @@ describe('cheapest, balanced, might-only and focus', () => {
       'outer.crit.main.entry',
       'outer.crit.alpha.r1',
     ]);
-    // A core short of the eighth: the visit saves, buying nothing past the seven it can.
+    // A core short of the eighth: beta-one parks and the visit goes on past it (savesForShards).
     const short = visitOf('focus:ice', funded(1e6, 1));
-    expect(short.bought).toEqual(centerEight.slice(0, 7));
+    expect(short.bought.slice(0, 8)).toEqual([...centerEight.slice(0, 7), `${C}alpha.r3`]);
+    expect(short.bought).not.toContain(`${C}beta.beta-one`);
+    // Shards for three step nodes: the fourth is short of shards alone, and the visit saves.
+    const price = (k: number) => 2 * 1.11 ** k;
+    const three = visitOf('focus:ice', funded(price(0) + price(1) + price(2) + 1e-9, 10));
+    expect(three.bought).toEqual(centerEight.slice(0, 3));
+  });
+
+  it('focus saves only for a node short of shards alone', () => {
+    const visitAt = (progress: CharacterProgress) =>
+      openVisit({
+        web,
+        account: ACCOUNT,
+        economy: DEFAULT_WEB_ECONOMY,
+        data: characterGameData(),
+        rng: createRng(1),
+        minutes: 0,
+        progress,
+        probe: () => [0, 0],
+      });
+    const reasonOf = (v: ReturnType<typeof visitAt>, id: string) => {
+      const check = v.check(id);
+      if (check.ok) throw new Error(`${id} accepted`);
+      return check.reason;
+    };
+    const ONE = `${C}alpha.alpha-one`;
+    const ranked = visitAt(funded(0, 0));
+    expect(reasonOf(ranked, `${C}alpha.r1`)).toBe('notEnoughShards');
+    expect(savesForShards(ranked, `${C}alpha.r1`, 'notEnoughShards')).toBe(true);
+    // The ◆ takes a core too: short of shards and of its core, it does not save.
+    const broke = visitAt(withWallet(owning([`${C}alpha.r2`]), 0, 0));
+    expect(reasonOf(broke, ONE)).toBe('notEnoughShards');
+    expect(savesForShards(broke, ONE, 'notEnoughShards')).toBe(false);
+    expect(
+      savesForShards(visitAt(withWallet(owning([`${C}alpha.r2`]), 0, 1)), ONE, 'notEnoughShards'),
+    ).toBe(true);
+    const coreless = visitAt(withWallet(owning([`${C}alpha.r2`]), 1e6, 0));
+    expect(reasonOf(coreless, ONE)).toBe('notEnoughCores');
+    expect(savesForShards(coreless, ONE, 'notEnoughCores')).toBe(false);
+    expect(savesOnWallet(coreless, ONE, 'notEnoughCores')).toBe(true);
+    expect(reasonOf(ranked, `${C}alpha.r2`)).toBe('notAdjacent');
+    expect(savesForShards(ranked, `${C}alpha.r2`, 'notAdjacent')).toBe(false);
+    expect(savesOnWallet(ranked, `${C}alpha.r2`, 'notAdjacent')).toBe(false);
   });
 });
 
