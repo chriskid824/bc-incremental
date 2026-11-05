@@ -298,7 +298,16 @@ describe('compileBarrage (lead rulings W1, W3, W4)', () => {
   it('compiles no rider without a barrage grant, its params at their defaults, a fresh object each compile', () => {
     const plain = compiled({ grants: [] });
     expect(plain.barrage).toBeNull();
-    expect(plain.flags.barrage).toEqual({ countMult: 1, bounce: 0 });
+    expect(plain.flags.barrage).toEqual({
+      countMult: 1,
+      bounce: 0,
+      aim: 'distinct',
+      spreadDeg: 30,
+      ring: null,
+      split: null,
+      focus: null,
+      rain: null,
+    });
     expect(compiled({ grants: [] }).flags.barrage).not.toBe(plain.flags.barrage);
     // A grant is no emitter: the signature alone.
     const build = compiled();
@@ -309,6 +318,12 @@ describe('compileBarrage (lead rulings W1, W3, W4)', () => {
       count: 2,
       hits: 1,
       bounce: 0,
+      aim: 'distinct',
+      spread: Math.PI / 6,
+      ring: null,
+      split: null,
+      focus: null,
+      rain: null,
     });
     expect(BARRAGE_DAMAGE_PCT).toBe(0.25);
     expect(

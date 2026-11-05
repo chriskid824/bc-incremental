@@ -24,9 +24,12 @@
  * follows, as at a volley projectile's arrival (chainAttack, src/sim/combat/chain.ts). A granted
  * turret's shot is one too under 特斯拉塔's jumps, and every turret shot's arrival hits the
  * splash around its target under 加農砲 (turretArrival, C5.9). The volley's projectiles and the
- * pool share PROJECTILE_CAP (src/sim/caps.ts).
+ * pool share PROJECTILE_CAP (src/sim/caps.ts). A barrage rider that splits (◆子母彈, E10b) fires
+ * its shots at round SPLIT_ROUND: each hit of theirs that kills its enemy records a split
+ * (splitOnKill, src/sim/systems/barrage.ts), whose children spawn once the stage is over.
  */
 
+import type { FanParams } from '../build/compile';
 import { PROJECTILE_CAP, SHOT_MEMORY } from '../caps';
 import { beginAttack, chainAttack, chainFrom, endAttack, primaryHit } from '../combat/chain';
 import { hitWithPayload } from '../combat/hit';
@@ -35,6 +38,7 @@ import { SIGNATURE } from '../emitters/types';
 import type { EmitterRuntime, Payload } from '../emitters/types';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import type { ShotPoolState } from '../types';
+import { splitOnKill } from './barrage';
 import type { Enemy, RunContext } from './context';
 
 /** ShotPool.motion values. */
@@ -49,6 +53,13 @@ export const MOTION_LOB = 2;
  */
 const ROUND_SLOTS = 256;
 const ROUND_MASK = ROUND_SLOTS - 1;
+
+/**
+ * ShotPool.round of a generation-0 small shot of a barrage rider that splits (◆子母彈, E10b):
+ * below −1, every other shot's round when it is no fan cone, so the straight step's one round
+ * test a step tells the three apart. Its children and every other shot have −1 and never split.
+ */
+export const SPLIT_ROUND = -2;
 
 /** The shot pool of a run (RunContext.shots), also SimState.shots. */
 export interface ShotPool extends ShotPoolState {
@@ -74,7 +85,10 @@ export interface ShotPool extends ShotPoolState {
   readonly origin: Int32Array;
   /** 1: every hit of it crits (steadyAim). */
   readonly steady: Uint8Array;
-  /** Serial of the fan round a cone belongs to; −1 for none. */
+  /**
+   * Serial of the fan round a cone belongs to; −1 for none; SPLIT_ROUND for a barrage rider's
+   * shot that splits.
+   */
   readonly round: Int32Array;
   /** Index of the emitter that fired it; −1 for an effect's. */
   readonly owner: Int16Array;
@@ -406,7 +420,8 @@ function turretArrival(
  * An enemy that died earlier in the step (a kill's split, a primary hit's chain) is passed over
  * without using pierce. A fan's cone (round ≥ 0) whose round has no primary hit yet makes this
  * hit the round's primary, an attack of its own with the round's chain; under 稜鏡
- * (FanParams.prism) a cone's hits grow with the enemies it passed before.
+ * (FanParams.prism) a cone's hits grow with the enemies it passed before. A shot at SPLIT_ROUND
+ * hits as splitterHits says, the round test in place of the fan's null test.
  */
 function stepStraight(ctx: RunContext, s: number): void {
   const shots = ctx.shots;
@@ -428,11 +443,20 @@ function stepStraight(ctx: RunContext, s: number): void {
     const depth = shots.depth[s] as number;
     const origin = shots.origin[s] as number;
     const round = shots.round[s] as number;
-    const fan = round >= 0 ? ctx.build.signature.fan : null;
-    const prism = fan === null ? null : fan.prism;
+    // A cone's round reads the fan's prism; a splitting small shot hits on its own path (E10b),
+    // so a shot that is neither makes two tests here, as before.
+    let prism: FanParams['prism'] = null;
+    let n = count;
+    if (round >= 0) {
+      const fan = ctx.build.signature.fan;
+      if (fan !== null) prism = fan.prism;
+    } else if (round !== -1) {
+      splitterHits(ctx, s, count);
+      n = 0;
+    }
     const taken = shots.roundTaken;
     const enemies = ctx.shotHits.enemies;
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < n; i++) {
       const pierce = shots.pierce[s] as number;
       if (pierce === 0) break;
       const enemy = enemies[i] as Enemy;
@@ -474,6 +498,37 @@ function stepStraight(ctx: RunContext, s: number): void {
     }
   }
   if (shots.pierce[s] === 0) endShot(shots, s);
+}
+
+/**
+ * The hits of the straight shot in slot `s` at SPLIT_ROUND, a generation-0 small shot of a
+ * barrage rider that splits, on the `count` enemies of ctx.shotHits: plain hits as stepStraight's,
+ * and each that takes its enemy from alive (the test before it) to dead (once hitWithPayload has
+ * returned: applyHitDamage's lethal test, src/sim/combat/hit.ts, ran killEnemy, whose
+ * removeEnemy cleared alive, src/sim/systems/death.ts) records a split at the victim's position
+ * along the shot's velocity (splitOnKill).
+ */
+function splitterHits(ctx: RunContext, s: number, count: number): void {
+  const shots = ctx.shots;
+  const p = shots.payload[s] as Payload;
+  const scale = shots.scale[s] as number;
+  const steady = shots.steady[s] === 1;
+  const depth = shots.depth[s] as number;
+  const origin = shots.origin[s] as number;
+  const vx = shots.vx[s] as number;
+  const vy = shots.vy[s] as number;
+  const enemies = ctx.shotHits.enemies;
+  for (let i = 0; i < count; i++) {
+    const pierce = shots.pierce[s] as number;
+    if (pierce === 0) break;
+    const enemy = enemies[i] as Enemy;
+    if (!enemy.alive) continue;
+    hitWithPayload(ctx, enemy, p, 0, scale, null, null, steady, depth, origin);
+    if (!enemy.alive) splitOnKill(ctx, enemy, vx, vy);
+    remember(shots, s, enemy.id);
+    shots.pierced[s] = (shots.pierced[s] as number) + 1;
+    if (pierce > 0) shots.pierce[s] = pierce - 1;
+  }
 }
 
 /**

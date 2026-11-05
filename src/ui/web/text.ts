@@ -414,6 +414,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   droneSpeed: 'percent',
   summonDuration: 'percent',
   barragePierce: 'number',
+  barrageSplit: 'percent',
 };
 
 /**

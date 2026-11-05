@@ -32,7 +32,9 @@ import { COEF_MAX, COEF_MIN } from '../data/triggers';
 import type { GameData } from '../data/types';
 import { dispatchPendingKills } from './effects/dispatch';
 import { drainDelayedRepeats, runEffectQueue } from './effects/execute';
+import type { BarrageRider, EmitterRuntime } from './emitters/types';
 import { updateAilments } from './systems/ailments';
+import { spawnSplits } from './systems/barrage';
 import { stepCombo } from './systems/combo';
 import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
@@ -164,6 +166,10 @@ export function createSimulation(
   const minions = flags.minionCount;
   const globals = held || inAura || top || minions;
   const wallet = config.walletShards ?? ZERO;
+  // So is whether the barrage rider splits (◆子母彈, E10b): its kills' children spawn once the
+  // projectile stage has compacted.
+  const rider = (ctx.emitters[0] as EmitterRuntime).barrage;
+  const splits = rider !== null && rider.split !== null;
 
   /**
    * Advances one tick. The systems run in the tick order of
@@ -211,7 +217,9 @@ export function createSimulation(
    * 7. projectiles: the volley's projectiles move, retarget, and hit on arrival, and the shot
    *    pool's shots move and hit, all in id order (projectiles.ts, shots.ts). Hits and chains
    *    (src/sim/combat/) with their hit and crit triggers, and kills with their transfer
-   *    triggers, onKill hooks, drops and splits (death.ts) resolve inline.
+   *    triggers, onKill hooks, drops and splits (death.ts) resolve inline. In a run whose barrage
+   *    rider splits (◆子母彈, E10b), the children of the splits its small shots' kills recorded
+   *    then spawn, in hit order, once the pool has compacted (spawnSplits, barrage.ts).
    * 8. segments: the segment emitters due judge, in emitter order, linking their endpoints (the
    *    shocked enemies, or the drone pool's drones or rows) and hitting the enemies on the links
    *    (segments.ts).
@@ -252,6 +260,7 @@ export function createSimulation(
       runTickHooks(ctx);
       if (ctx.sys.drones.count !== 0) stepDrones(ctx);
       moveProjectiles(ctx);
+      if (splits) spawnSplits(ctx, rider as BarrageRider);
       if (segments) stepSegments(ctx);
       if (ctx.sys.zones.count !== 0) stepZones(ctx);
       updateAilments(ctx);

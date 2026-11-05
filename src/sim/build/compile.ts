@@ -50,6 +50,7 @@ import { RULE_MODULES, SIGNATURES } from '../rules';
 import type { BuildCompiler, HookName, Hooks, TestModule } from '../rules';
 import { NO_POLICY_SPEC } from '../systems/systemState';
 import type { ChainPolicySpec } from '../systems/systemState';
+import { TICK_RATE } from '../types';
 import type { CharacterRun } from '../types';
 import { readsTargetIs, statAt, staticInput } from './eval';
 import { compileConversions, compileMods, ModTable, rowValues } from './modTable';
@@ -274,15 +275,75 @@ export interface BuildFlags {
   frostGainShocked: number;
   frostGainBoss: number;
   /**
-   * The barrage rider's (BarrageGrant, E10a; gd §4.11's ★子彈地獄 「小彈數量 ×2 … 小彈會在場地邊緣反彈
-   * （最多 2 次）」): the factor on its shots an attack, a whole number in [1, 4], and the arena-edge
-   * bounces of each shot, a whole number in [0, 4] (compileBarrage, src/sim/systems/barrage.ts).
-   * A module writes them in place (`b.flags.barrage.countMult = 2`); compileBuild refuses any
-   * other value. { countMult: 1, bounce: 0 }, a fresh object each compile; without a barrage
-   * grant they do nothing. ★'s −40% is a `more` damage scoped 'outer.barrage', not a param.
+   * The barrage rider's params (BarrageParams; BarrageGrant, E10a and E10b), which the barrage
+   * outer's ★ and ◆ modules write in place (`b.flags.barrage.countMult = 2`,
+   * `b.flags.barrage.ring = { every: 6, directions: 12 }`) and compileBuild checks after the
+   * modules, with or without a grant. DEFAULT_BARRAGE_PARAMS' values, a fresh object each
+   * compile; without a barrage grant they do nothing.
    */
-  barrage: { countMult: number; bounce: number };
+  barrage: BarrageParams;
 }
+
+/**
+ * The barrage rider's params (gd §4.11; compileBarrage, src/sim/systems/barrage.ts). compileBuild
+ * refuses any value outside the ranges below, naming the field and its value.
+ */
+export interface BarrageParams {
+  /**
+   * ★子彈地獄's 「小彈數量 ×2」 (E10a): the factor on its shots an attack, its rings' and its
+   * splits' children, a whole number in [1, 4]. ★'s −40% is a `more` damage scoped
+   * 'outer.barrage', not a param.
+   */
+  countMult: number;
+  /** ★子彈地獄's 「小彈會在場地邊緣反彈（最多 2 次）」 (E10a): a whole number in [0, 4]. */
+  bounce: number;
+  /**
+   * ◆扇形 (gd:489 「小彈改成扇形射向同一個目標」, E10b): 'fan' fires an attack's shots at its
+   * first pick alone, spread over spreadDeg; 'distinct' at the nearest distinct enemies.
+   */
+  aim: 'distinct' | 'fan';
+  /** The fan's spread in degrees, finite and in (0, 360); read with aim 'fan' alone. */
+  spreadDeg: number;
+  /**
+   * ◆環射 (gd:489 「每第 6 次攻擊朝 12 個方向射出小彈」, E10b): on every `every`-th counted
+   * attack, `directions` × countMult more shots evenly round the attack's origin; `every` a
+   * whole number in [1, 60], `directions` one in [1, 64]. Null: no ring.
+   */
+  ring: { every: number; directions: number } | null;
+  /**
+   * ◆子母彈 (gd:490 「小彈擊殺時分裂成 3 發（分裂出來的不再分裂）」) and the 分裂 rank (A19, E10b): a
+   * small shot whose hit kills its enemy splits, with chance min(1, chance + max(0,
+   * barrageSplit)), into `count` × countMult children that never split; `count` a whole number in
+   * [1, 8], `chance` finite in [0, 1]. Null: nothing splits, whatever barrageSplit.
+   */
+  split: { count: number; chance: number } | null;
+  /**
+   * ◆聚焦 (gd:490 「場上只剩 1 個目標時，所有小彈都打它，傷害 +20%」, A20, E10b): while `when` holds
+   * at a firing, every shot of it goes at one enemy and its hits deal × (1 + bonus), `bonus`
+   * finite in [0, 4]: 'lastAlive' while one enemy is alive (A20 (a)), 'boss' while a boss is,
+   * at the nearest boss (A20 (b)). Null: no focus.
+   */
+  focus: { bonus: number; when: 'lastAlive' | 'boss' } | null;
+  /**
+   * 彈雨 (gd:493 「每 10 秒有 2 秒，小彈數量 ×3」, E10b): the shots, rings and children × countMult
+   * while the run's tick % round(periodSec × 60) < round(activeSec × 60), a stateless window;
+   * `countMult` a whole number in [2, 4], both seconds finite and the active ticks at least 1
+   * and below the period's. Null: no rain.
+   */
+  rain: { periodSec: number; activeSec: number; countMult: number } | null;
+}
+
+/** BuildFlags.barrage's values before the modules: E10a's rider as it is, no ◆ param. */
+export const DEFAULT_BARRAGE_PARAMS: Readonly<BarrageParams> = {
+  countMult: 1,
+  bounce: 0,
+  aim: 'distinct',
+  spreadDeg: 30,
+  ring: null,
+  split: null,
+  focus: null,
+  rain: null,
+};
 
 /**
  * The combo's cap (gd:419's 「上限 20」): BuildFlags.comboCap's default, and comboFull's when a
@@ -514,13 +575,37 @@ export interface CompiledBarrage {
   readonly hits: number;
   /** Arena-edge bounces of a shot: BuildFlags.barrage.bounce. */
   readonly bounce: number;
+  /** ◆扇形 (BarrageParams.aim): 'fan' fires every shot at the first pick, over `spread`. */
+  readonly aim: 'distinct' | 'fan';
+  /** The fan's spread in radians: spreadDeg × π / 180. */
+  readonly spread: number;
+  /**
+   * ◆環射: every `every`-th counted attack, `count` more shots round its origin,
+   * countOf(directions) × countMult; null without the ring param.
+   */
+  readonly ring: { readonly every: number; readonly count: number } | null;
+  /**
+   * ◆子母彈 and the 分裂 rank: a killing small shot splits with `chance`, min(1, split.chance +
+   * max(0, barrageSplit)), into `count`, split.count × countMult, children; null without the
+   * split param or at chance 0, which splits nothing.
+   */
+  readonly split: { readonly count: number; readonly chance: number } | null;
+  /** ◆聚焦: its bonus and condition; null without the focus param. */
+  readonly focus: { readonly bonus: number; readonly when: 'lastAlive' | 'boss' } | null;
+  /**
+   * 彈雨: × `mult` while the tick % `period` < `active`, round(periodSec × 60) and
+   * round(activeSec × 60) ticks; null without the rain param.
+   */
+  readonly rain: { readonly period: number; readonly active: number; readonly mult: number } | null;
 }
 
 /**
- * The barrage rider of `grants` (lead rulings W1, W4): the first barrage grant in grant order,
- * credited to its source, whatever other sources grant one; null for none. Its count reads the
- * compiled barrageCount, halved by 巨大化 as the other counts are (countOf), then × countMult;
- * the C6b.1 count link of a projectiles effect reads the StatBlock's value and never this.
+ * The barrage rider of `grants` (lead rulings W1, W4, X1-X8): the first barrage grant in grant
+ * order, credited to its source, whatever other sources grant one; null for none. Its count
+ * reads the compiled barrageCount, halved by 巨大化 as the other counts are (countOf), then ×
+ * countMult; the C6b.1 count link of a projectiles effect reads the StatBlock's value and never
+ * this. The ◆ params compile once here: the ring's directions as the count (countOf, ×
+ * countMult), the split's chance with barrageSplit's compiled value, the rain's seconds as ticks.
  */
 function compileBarrage(
   grants: readonly SourcedEmitter[],
@@ -529,16 +614,86 @@ function compileBarrage(
 ): CompiledBarrage | null {
   for (const { source, grant } of grants) {
     if (grant.kind !== 'barrage') continue;
-    const { countMult, bounce } = flags.barrage;
+    const { countMult, bounce, aim, spreadDeg, ring, split, focus, rain } = flags.barrage;
+    const chance =
+      split === null ? 0 : Math.min(1, split.chance + Math.max(0, values.barrageSplit));
     return {
       source,
       damagePct: grant.damagePct ?? BARRAGE_DAMAGE_PCT,
       count: Math.max(0, countOf({ flags }, Math.floor(values.barrageCount))) * countMult,
       hits: Math.max(0, Math.floor(values.barragePierce)) + 1,
       bounce,
+      aim,
+      spread: (spreadDeg * Math.PI) / 180,
+      ring:
+        ring === null
+          ? null
+          : { every: ring.every, count: countOf({ flags }, ring.directions) * countMult },
+      split: split === null || chance === 0 ? null : { count: split.count * countMult, chance },
+      focus: focus === null ? null : { bonus: focus.bonus, when: focus.when },
+      rain:
+        rain === null
+          ? null
+          : {
+              period: Math.round(rain.periodSec * TICK_RATE),
+              active: Math.round(rain.activeSec * TICK_RATE),
+              mult: rain.countMult,
+            },
     };
   }
   return null;
+}
+
+/** `v` is a whole number in [min, max]. */
+const wholeIn = (v: number, min: number, max: number): boolean =>
+  Number.isInteger(v) && v >= min && v <= max;
+
+/**
+ * Throws on a ◆ param of BuildFlags.barrage (E10b, lead ruling X1) outside its range, naming the
+ * field and its value; compileBuild calls it after the modules and E10a's countMult and bounce
+ * checks, with or without a grant, so a module's slip shows on every build. aim and focus.when
+ * are held to their unions by their types alone.
+ */
+function checkBarrageParams(params: BarrageParams): void {
+  const { spreadDeg, ring, split, focus, rain } = params;
+  if (!(Number.isFinite(spreadDeg) && spreadDeg > 0 && spreadDeg < 360)) {
+    throw new Error(`barrage.spreadDeg: ${spreadDeg} must be finite and in (0, 360)`);
+  }
+  if (ring !== null) {
+    if (!wholeIn(ring.every, 1, 60)) {
+      throw new Error(`barrage.ring.every: ${ring.every} must be a whole number in [1, 60]`);
+    }
+    if (!wholeIn(ring.directions, 1, 64)) {
+      throw new Error(
+        `barrage.ring.directions: ${ring.directions} must be a whole number in [1, 64]`,
+      );
+    }
+  }
+  if (split !== null) {
+    if (!wholeIn(split.count, 1, 8)) {
+      throw new Error(`barrage.split.count: ${split.count} must be a whole number in [1, 8]`);
+    }
+    if (!(Number.isFinite(split.chance) && split.chance >= 0 && split.chance <= 1)) {
+      throw new Error(`barrage.split.chance: ${split.chance} must be finite and in [0, 1]`);
+    }
+  }
+  if (focus !== null && !(Number.isFinite(focus.bonus) && focus.bonus >= 0 && focus.bonus <= 4)) {
+    throw new Error(`barrage.focus.bonus: ${focus.bonus} must be finite and in [0, 4]`);
+  }
+  if (rain !== null) {
+    if (!wholeIn(rain.countMult, 2, 4)) {
+      throw new Error(`barrage.rain.countMult: ${rain.countMult} must be a whole number in [2, 4]`);
+    }
+    const { periodSec, activeSec } = rain;
+    const finite = Number.isFinite(periodSec) && Number.isFinite(activeSec);
+    const active = Math.round(activeSec * TICK_RATE);
+    if (!(finite && active >= 1 && active < Math.round(periodSec * TICK_RATE))) {
+      throw new Error(
+        `barrage.rain: periodSec ${periodSec} and activeSec ${activeSec} must be finite, ` +
+          'round(activeSec × 60) at least 1 and below round(periodSec × 60)',
+      );
+    }
+  }
 }
 
 function compileRule<K extends RuleId>(
@@ -724,7 +879,7 @@ export function compileBuild(
     frozenNoSplit: false,
     frostGainShocked: 0,
     frostGainBoss: 0,
-    barrage: { countMult: 1, bounce: 0 },
+    barrage: { ...DEFAULT_BARRAGE_PARAMS },
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -1036,6 +1191,7 @@ export function compileBuild(
   if (!(Number.isInteger(bounce) && bounce >= 0 && bounce <= 4)) {
     throw new Error(`barrage.bounce: ${bounce} must be a whole number in [0, 4]`);
   }
+  checkBarrageParams(flags.barrage);
   const triggersOn = TRIGGER_EVENTS.map((_, event) =>
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
   );
