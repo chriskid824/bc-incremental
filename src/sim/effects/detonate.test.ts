@@ -646,6 +646,35 @@ describe('detonate on a kill (焚屍)', () => {
   });
 });
 
+describe('detonate on a target that died before it ran', () => {
+  // A chain jump's value is its angle and, since FL, a drone impact's its flight angle: neither
+  // is what a dead victim had left, as a kill trigger's or a rule module's value is (pyreChain,
+  // fireAscendancy.test.ts).
+  it.each(['chainJump', 'droneImpact'] as const)(
+    "deals nothing on '%s' whatever the event's value",
+    (on) => {
+      const ctx = fixture([{ on, do: [detonate({ ailment: 'burn', radius: 100 })] }], {
+        placed: [at(0, 0, 1), at(40, 0)],
+      });
+      const t = ctx.build.triggers[FIRST] as CompiledTrigger;
+      expect(t.on).toBe(EVENT[on]);
+      const victim = enemy(ctx, 1);
+      burn(ctx, victim);
+      burn(ctx, enemy(ctx, 2));
+      emitterHit(ctx, victim);
+      runEffectQueue(ctx);
+      expect(victim.alive).toBe(false);
+      const ran = ctx.counters.effectsRun;
+      // A forced pass: a chainJump trigger's own chance (CHAIN_JUMP_CHANCE) would roll.
+      (ctx.build.triggers as CompiledTrigger[])[FIRST] = { ...t, chance: 1 };
+      fireOne(ctx, FIRST, 0, -1, victim, victim.x, victim.y, HIT_EVENT, num(Math.PI / 2), -1);
+      ctx.events.length = 0;
+      runEffectQueue(ctx);
+      expect([ctx.counters.effectsRun - ran, effectHits(ctx)]).toEqual([1, []]);
+    },
+  );
+});
+
 describe('detonate fanned out', () => {
   it('detonates each alive enemy of a freeze list on its own ailment', () => {
     const ctx = fixture([{ on: 'freeze', do: [detonate({ ailment: 'poison', fraction: 0.5 })] }]);

@@ -27,9 +27,11 @@
  * once their tick has come (drainDelayedRepeats).
  *
  * A detonate takes its share of the damage an ailment has left on its live target
- * (src/sim/ailments/remaining.ts) and deals it at once, as it is (PRESCALED); on a kill trigger,
- * whose target is dead, it deals that share of what the victim had left, its entry's value
- * (recordPendingKills, dispatch.ts), and consumes nothing.
+ * (src/sim/ailments/remaining.ts) and deals it at once, as it is (PRESCALED); with a dead
+ * target it deals that share of what the victim had left, its entry's value, and consumes
+ * nothing: a kill trigger's (recordPendingKills, dispatch.ts) or a rule module's (pyreChain).
+ * On a chainJump or droneImpact trigger a target that died before the detonate ran leaves
+ * nothing: those events' values are angles (angleValued), not an ailment's damage.
  *
  * A projectiles effect spawns its small projectiles in the shot pool (src/sim/systems/shots.ts),
  * through spawnShot and PROJECTILE_CAP, from the event's point or the player: homing at its
@@ -122,6 +124,12 @@ type Executor<K extends CompiledEffectKind> = (
 /** The event's enemy, if it is still alive. */
 const liveTarget = (entry: Readonly<EffectEntry>): Enemy | null =>
   entry.target !== null && entry.target.alive ? entry.target : null;
+
+/** Whether the trigger at `origin` listens to an event whose value is an angle (EffectEntry). */
+const angleValued = (ctx: RunContext, origin: number): boolean => {
+  const on = ctx.build.triggers[origin]?.on;
+  return on === EVENT.chainJump || on === EVENT.droneImpact;
+};
 
 /** Writes the alive enemies within the effect's radius of (x, y) to ctx.effectTargets. */
 const within = (ctx: RunContext, fx: CompiledEffect, x: number, y: number): number =>
@@ -654,11 +662,17 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     for (let c = 0; c < count; c++) step(ctx, em, p, depth, origin);
   },
   // `fraction` of what the ailment has left on the live target, consumed from it, or of a dead
-  // victim's (the entry's value), × `damage`: to the target, or to each alive enemy within the
-  // radius (at most maxTargets, in `order`), every one taking the whole amount.
+  // victim's (the entry's value; nothing when that value is an angle), × `damage`: to the
+  // target, or to each alive enemy within the radius (at most maxTargets, in `order`), every one
+  // taking the whole amount.
   detonate(ctx, spec, fx, entry) {
     const live = liveTarget(entry);
-    const left = live !== null ? remainingOf(ctx, live, spec.ailment) : num(entry.value);
+    const left =
+      live !== null
+        ? remainingOf(ctx, live, spec.ailment)
+        : angleValued(ctx, entry.origin)
+          ? ZERO
+          : num(entry.value);
     if (!gt(left, ZERO)) return;
     const fraction = spec.fraction ?? 1;
     const dealt =
