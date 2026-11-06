@@ -74,6 +74,15 @@
  * A thaw (E6) ends the freeze of its live target, a normal enemy frozen now, and starts its frost
  * immunity there (thawEnemy, src/sim/ailments/frost.ts); it raises no event.
  *
+ * A push moves every enemy within its radius of its center `distance` further out; a pull (E15,
+ * ◆引力) moves its live target alone, if no boss, in to R from the player along its own
+ * direction: R the aura's reach for 'auraEdge' (auraReach, src/sim/build/size.ts: the
+ * auraRadius stat as the build sizes it, where an aura's pulse reaches), else `to` as it is,
+ * or a few ulps below R where player + u × R would round outside R's squared test (landing).
+ * Both set the enemy's dist and position, and rebuild the grid mid-phase once they moved one,
+ * so the effects after them this tick query the new positions. A pull draws nothing and raises
+ * no event; the enemy AI reads the new dist on the next tick (src/sim/systems/enemyAi.ts).
+ *
  * A spreadAilment moves its live target's burn, poison or bleed (血河, E9: spreadBleed, with
  * `behind` only to the enemies farther from the player than the target) to the enemies within
  * its spread; it deals no damage and raises no ailmentApplied.
@@ -96,7 +105,7 @@ import {
 import { addFrost, thawEnemy } from '../ailments/frost';
 import { consumeAilment, remainingOf } from '../ailments/remaining';
 import { addShock } from '../ailments/shock';
-import { sizeOf } from '../build/size';
+import { auraReach, sizeOf } from '../build/size';
 import { REPEAT_CHARGE_CAP, SMALL_PROJECTILE_TICKS } from '../caps';
 import { beginAttack, endAttack } from '../combat/chain';
 import { applyHitDamage, hitWithPayload } from '../combat/hit';
@@ -941,7 +950,44 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const target = liveTarget(entry);
     if (target !== null) thawEnemy(ctx, target);
   },
+  // The live target, if no boss, to dist min(dist, R): one already within R stays, and the grid
+  // is rebuilt only when it moved.
+  pull(ctx, spec, _fx, entry) {
+    const target = liveTarget(entry);
+    if (target === null || target.boss) return;
+    const to = spec.to;
+    const r = to === 'auraEdge' ? auraReach(ctx.build) : to;
+    if (!(target.dist > r)) return;
+    const player = ctx.player;
+    const d = landing(player.x, player.y, target.ux, target.uy, r);
+    target.dist = d;
+    target.x = player.x + target.ux * d;
+    target.y = player.y + target.uy * d;
+    rebuildGrid(ctx);
+  },
 };
+
+/**
+ * Where a pull to `r` lands an enemy along (ux, uy) from the player at (px, py): r itself, or
+ * the first of r − εr, r − 2εr, r − 4εr, … whose position passes the inclusive squared test
+ * that the grid's within(), an aura's pulse and inAura apply (dx² + dy² <= r²). The position
+ * player + u × r alone rounds an ulp outside that test on about 44% of bearings. Movement
+ * rebuilds the position from dist the same way each tick, so an enemy that stands where it
+ * lands stays inside. Any r of 0.5 or more lands within a dozen tries; 64 bounds the loop.
+ */
+function landing(px: number, py: number, ux: number, uy: number, r: number): number {
+  const rSq = r * r;
+  let d = r;
+  let step = r * Number.EPSILON;
+  for (let i = 0; i < 64; i++) {
+    const dx = px + ux * d - px;
+    const dy = py + uy * d - py;
+    if (dx * dx + dy * dy <= rSq) return d;
+    d = r - step;
+    step *= 2;
+  }
+  return 0;
+}
 
 type AnyExecutor = (
   ctx: RunContext,

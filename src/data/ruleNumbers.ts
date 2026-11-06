@@ -161,8 +161,9 @@ export function conditionNumbers(condition: Condition): string[][] {
 }
 
 /**
- * The numbers an effect must quote: its damage, amounts and target counts. Radii and push
- * distances are arena units, which the text describes in words ("nearby").
+ * The numbers an effect must quote: its damage, amounts and target counts. Radii and push and
+ * pull distances are arena units, which the text describes in words ("nearby"); a pull to the
+ * aura's edge is words too.
  */
 export function effectNumbers(effect: EffectSpec): string[][] {
   switch (effect.kind) {
@@ -190,6 +191,7 @@ export function effectNumbers(effect: EffectSpec): string[][] {
     case 'nova':
       return [[percent(effect.damagePct)]];
     case 'push':
+    case 'pull':
       return [];
     case 'addFrost':
       return [

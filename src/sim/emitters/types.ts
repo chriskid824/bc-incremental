@@ -194,7 +194,10 @@ export interface OrbitSpec extends EmitterBase {
   readonly radius: number;
   /** Orbs it adds to the orbitCount stat's whole part. */
   readonly count: number;
-  /** Turns of the ring a second. */
+  /**
+   * Turns of the ring a second: ORBIT_DEFAULTS.revPerSec × the orbitSpeed stat, in [0,
+   * ORBIT_MAX_REV_PER_SEC], set once a compile (E15).
+   */
   readonly revPerSec: number;
   /** Seconds before an orb can hit an enemy it hit again (EmitterRuntime.interval). */
   readonly cooldownSec: number;
@@ -218,11 +221,14 @@ export type EmitterSpec =
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
  * never the signature attack, never chaining from an attack (a strike runs its own chain,
- * chainGeneral). A barrage grant has none: it rides the signature (BarrageRider).
+ * chainGeneral). A barrage grant has none: it rides the signature (BarrageRider). An orbit's
+ * ring turns `orbitRevPerSec` times a second: the orbitSpeed stat's (compileBuild,
+ * orbitRevPerSec in src/sim/build/compile.ts), ORBIT_DEFAULTS.revPerSec at its base.
  */
 export function grantEmitter(
   source: string,
   grant: Exclude<EmitterGrant, BarrageGrant>,
+  orbitRevPerSec: number = ORBIT_DEFAULTS.revPerSec,
 ): EmitterSpec {
   switch (grant.kind) {
     case 'thorns':
@@ -317,7 +323,7 @@ export function grantEmitter(
         ring,
         radius: ORBIT_DEFAULTS.ringRadius[ring] as number,
         count: grant.count ?? 0,
-        revPerSec: ORBIT_DEFAULTS.revPerSec,
+        revPerSec: orbitRevPerSec,
         cooldownSec: grant.cooldownSec ?? ORBIT_DEFAULTS.cooldownSec,
         orbRadius: grant.orbRadius ?? ORBIT_DEFAULTS.orbRadius,
       };

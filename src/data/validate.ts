@@ -1653,6 +1653,23 @@ function effectIssues(
         issues.push(`thaw needs a live enemy, which '${on}' events do not give; add target {pick}`);
       }
       break;
+    case 'pull': {
+      // E15: to the aura's edge, or a distance from the player, finite and >= 0; the schema
+      // takes a number or 'auraEdge', but data checked without it can carry anything.
+      const to: unknown = effect.to;
+      if (to !== 'auraEdge' && !(typeof to === 'number' && Number.isFinite(to) && to >= 0)) {
+        issues.push(`to must be 'auraEdge' or a finite number >= 0 (got ${String(to)})`);
+      }
+      // It pulls the event's enemy, or the selector's, alive when it runs, as thaw needs one.
+      if (target !== undefined) {
+        if (target.pick === 'player') {
+          issues.push("pull needs an enemy, which target.pick 'player' does not give");
+        }
+      } else if (ENEMYLESS_EVENTS.has(on) || dead || on === 'contact') {
+        issues.push(`pull needs a live enemy, which '${on}' events do not give; add target {pick}`);
+      }
+      break;
+    }
   }
   return issues;
 }

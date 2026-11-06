@@ -235,6 +235,7 @@ const [
   buff,
   execute,
   thaw,
+  pull,
 ] = EffectSpecSchema.options;
 
 /**
@@ -265,6 +266,7 @@ export const PayloadEffectSchema = exact<PayloadEffect>()(
     buff,
     execute,
     thaw,
+    pull,
   ]),
 );
 

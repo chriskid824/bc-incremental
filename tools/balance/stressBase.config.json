@@ -66,7 +66,8 @@
       "summonDuration": 1,
       "barragePierce": 0,
       "barrageSplit": 0,
-      "comboCap": 20
+      "comboCap": 20,
+      "orbitSpeed": 1
     },
     "values": {
       "damage": 450.22067097931824,
@@ -133,7 +134,8 @@
       "summonDuration": 1,
       "barragePierce": 0,
       "barrageSplit": 0,
-      "comboCap": 20
+      "comboCap": 20,
+      "orbitSpeed": 1
     },
     "scoped": [
       {

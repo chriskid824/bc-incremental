@@ -228,6 +228,14 @@ export const STAT_IDS = [
    * cap that is not finite. Its base is DEFAULT_COMBO_CAP; flat ranks add stacks.
    */
   'comboCap',
+  /**
+   * 環繞球轉速 (the aura outer's 環繞 ranks, docs/v3/game-design-v3.md §4.8 「球數、轉速」): the
+   * multiplier on how fast every orbit grant's ring turns, e.g. 1.5 = 150%. Read once a compile
+   * into each orbit emitter's OrbitSpec.revPerSec as ORBIT_DEFAULTS.revPerSec × orbitSpeed, at
+   * most ORBIT_MAX_REV_PER_SEC and at least 0 (src/sim/build/compile.ts orbitRevPerSec); the
+   * orbs' cooldown on an enemy stays theirs (cooldownSec).
+   */
+  'orbitSpeed',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -301,6 +309,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   barrageSplit: 0,
   // DEFAULT_COMBO_CAP (src/sim/build/compile.ts), which src/sim/systems/combo.test.ts pins equal.
   comboCap: 20,
+  orbitSpeed: 1,
 };
 
 /**

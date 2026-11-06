@@ -28,7 +28,7 @@ import { liveBleedStacks, livePoisonStacks } from './ailments/rings';
 import { holdsShock } from './ailments/shock';
 import type { BarrageParams } from './build/compile';
 import { compileScaling, scaledValue } from './build/eval';
-import { spreadOf } from './build/size';
+import { sizeOf, spreadOf } from './build/size';
 import { SMALL_PROJECTILE_TICKS } from './caps';
 import { KILLED, REPEAT, SIGNATURE } from './effects/flags';
 import { MAX_DEPTH } from './effects/types';
@@ -3158,6 +3158,50 @@ const AURA_FOCUS_STATS = makeStats(
   },
 );
 
+/**
+ * E15's ◆引力 (gd:455 「每 4 秒把場上最遠的 1 隻敵人拉到光環邊緣，Boss 除外」) and 環繞's 轉速 (gd:456)
+ * as inline data on M1's volley: an aura on outer.aura at the base auraRadius 160, two orbit rings
+ * of 2 orbs on outer.aura (雙軌, ring 1 with ring 0's count, lead ruling 16) turning 1.5 times a
+ * second (the orbitSpeed stat at 1.5, lead ruling 17), and the periodic trigger every 4 s that
+ * pulls the outermost enemy but a boss to the aura's edge (lead ruling V1). The waves from wave 9
+ * hold triangles, shooters and summoners, with the onion from wave 10, so the pulls take
+ * shooters and summoners off their walk-in to stand and act at the edge (lead ruling 18), and
+ * pass over the boss when it is the farthest.
+ */
+const PULL_ORBIT_TRIGGER: TriggerSpec = {
+  on: 'periodic',
+  every: 4,
+  target: { pick: 'outermost', excludeBoss: true },
+  do: [{ kind: 'pull', to: 'auraEdge' }],
+};
+const PULL_ORBIT_STATS = makeStats({ damage: 5, maxLife: 1e6, orbitSpeed: 1.5 }, [], {
+  triggers: [{ source: 'outer.aura', spec: PULL_ORBIT_TRIGGER }],
+  conversions: [],
+  emitters: [
+    { source: 'outer.aura', grant: { kind: 'aura' } },
+    { source: 'outer.aura', grant: { kind: 'orbit', count: 2 } },
+    { source: 'outer.aura', grant: { kind: 'orbit', ring: 1, count: 2 } },
+  ],
+});
+const pullOrbitData = (): GameData =>
+  v3TestData({
+    waves: {
+      rules: [
+        { enemy: 'triangle', fromWave: 1, base: 6, perWave: 0, maxCount: 6 },
+        { enemy: 'shooter', fromWave: 1, base: 4, perWave: 0, maxCount: 4 },
+        { enemy: 'summoner', fromWave: 1, base: 6, perWave: 0, maxCount: 6 },
+      ],
+      eliteEvery: 1000,
+      bossEvery: 10,
+      v3: {
+        ...TEST_V3_WAVES.v3,
+        enemyCap: 120,
+        affixes: [],
+        treasure: { ...TEST_V3_WAVES.v3.treasure, fromWave: 999 },
+      },
+    },
+  });
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3750,6 +3794,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     data: enemyDefenceData,
     expected: ['44713b8c35e30537', '486ff943039be4c0'],
   },
+  {
+    name: 'pullOrbit',
+    config: { stats: PULL_ORBIT_STATS, rules: [], startWave: 9 },
+    data: pullOrbitData,
+    expected: ['c20d78eeb08601bd', '9d981c139a561833'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3861,8 +3911,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E14's comboBurst and E15's auraFocus are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([82, 'comboBurst', 'auraFocus']);
+    // The count docs/ARCHITECTURE.md gives: E15's auraFocus and pullOrbit are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([83, 'auraFocus', 'pullOrbit']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -8265,6 +8315,157 @@ describe('golden C4 runs', () => {
         belowShield: 14,
         volleyBlocked: 73,
         amounts,
+      },
+    });
+  });
+
+  it('pulls pullOrbit’s outermost enemy but the boss to the aura’s edge every 4 s, the pulled shooters and summoners acting from there, its orbs turning 1.5 times a second (E15)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'pullOrbit') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // At the tick hook (the emitter stage, after the enemies moved): each enemy's distance, and
+      // the outermost alive one but a boss, which the trigger's selector picks in this tick's
+      // effect phase; nothing but a pull moves an enemy after it.
+      let ctxOf: RunContext | null = null;
+      let seen = new Map<number, number>();
+      let pick: Enemy | null = null;
+      let farthest: Enemy | null = null;
+      const watch: TestModule = (b) =>
+        b.hook('tick', (ctx) => {
+          ctxOf = ctx;
+          seen = new Map(ctx.enemies.map((e) => [e.id, e.dist]));
+          pick = null;
+          farthest = null;
+          for (const e of ctx.enemies) {
+            if (!e.alive) continue;
+            if (farthest === null || e.dist > farthest.dist) farthest = e;
+            if (!e.boss && (pick === null || e.dist > pick.dist)) pick = e;
+          }
+        });
+      const c = {
+        pulls: [] as string[],
+        // Pulls whose pick was already within R, so nothing moved.
+        inside: 0,
+        // Enemies moved after the emitter stage that were not the tick's pick, or not to R
+        // along their own direction.
+        stray: 0,
+        bossMoved: 0,
+        bossFarthest: [] as number[],
+        acts: [] as string[],
+        revPerSec: [] as number[],
+        orbHits: 0,
+        orbMemoryFull: 0,
+      };
+      const pulled = new Map<number, number>();
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [watch]);
+      while (!sim.state.finished) {
+        const events = sim.step(NO_INPUT);
+        const ctx = ctxOf as RunContext | null;
+        if (ctx === null) continue;
+        const r = sizeOf(ctx.build, ctx.build.values.auraRadius);
+        const p = ctx.player;
+        const now = ctx.now;
+        const chosen = pick as Enemy | null;
+        const far = farthest as Enemy | null;
+        const moved = ctx.enemies.filter((e) => {
+          const was = seen.get(e.id);
+          return was !== undefined && was !== e.dist;
+        });
+        c.bossMoved += moved.filter((e) => e.boss).length;
+        const due = now % 240 === 1 && now > 1;
+        if (due && far?.boss === true) c.bossFarthest.push(now);
+        if (due && moved.length === 0 && chosen !== null && chosen.dist <= r) c.inside++;
+        for (const e of moved) {
+          // At the edge: r, or the least below it that the aura's reach test takes.
+          const exact =
+            e.dist <= r &&
+            r - e.dist < 1e-9 &&
+            e.x === p.x + e.ux * e.dist &&
+            e.y === p.y + e.uy * e.dist &&
+            (e.x - p.x) ** 2 + (e.y - p.y) ** 2 <= r * r;
+          if (!due || e !== chosen || !exact) c.stray++;
+          pulled.set(e.id, now);
+          c.pulls.push(`${now}: ${e.type} ${e.id} from ${(seen.get(e.id) as number).toFixed(1)}`);
+        }
+        for (const event of events) {
+          if (event.type === 'hit' && (event.tags & TAG.orbit) !== 0) c.orbHits++;
+          const id = 'enemyId' in event ? event.enemyId : -1;
+          const at = pulled.get(id);
+          if (at === undefined) continue;
+          if (event.type === 'enemyKilled') {
+            const where = Math.hypot(event.x - p.x, event.y - p.y);
+            c.acts.push(
+              `${now}: ${event.enemy} ${event.enemyId} (pulled ${at}) killed at ${where.toFixed(6)}`,
+            );
+            continue;
+          }
+          const self = ctx.enemies.find((e) => e.id === id) as Enemy;
+          if (event.type === 'summoned') {
+            c.acts.push(`${now}: summoner ${self.id} (pulled ${at}) at ${self.dist.toFixed(6)}`);
+          }
+          if (event.type === 'bulletFired') {
+            const from = Math.hypot(event.x - p.x, event.y - p.y);
+            c.acts.push(`${now}: shooter ${self.id} (pulled ${at}) from ${from.toFixed(6)}`);
+          }
+        }
+        c.revPerSec = ctx.emitters.flatMap((em) =>
+          em.spec.kind === 'orbit' ? [em.spec.revPerSec] : [],
+        );
+      }
+      c.orbMemoryFull = sim.result().counters.orbMemoryFull;
+      bySeed[seed] = c;
+    }
+    // Both seeds pull on ticks 241, 481, 721 and 961 (the build's one trigger, index 1): each
+    // time the outermost alive enemy but the boss, from its walk-in 490–1066 out, to the base
+    // aura's 160 along its own direction (or the least below it that the aura's reach test takes),
+    // and nothing else moves; none was already inside.
+    // Seed 2's boss is the farthest at 721 and stays where it is. The pulled summoners summon at
+    // 160 on their timers and the pulled shooters fire from there, or the aura and the orbs at
+    // its edge kill them first. Both rings turn 1.5 times a second, and no orb forgets an enemy.
+    const common = { inside: 0, stray: 0, bossMoved: 0, revPerSec: [1.5, 1.5], orbMemoryFull: 0 };
+    expect(bySeed).toEqual({
+      1: {
+        ...common,
+        pulls: [
+          '241: shooter 15 from 736.1',
+          '481: summoner 31 from 1032.1',
+          '721: summoner 39 from 732.1',
+          '961: shooter 96 from 559.9',
+        ],
+        bossFarthest: [],
+        acts: [
+          '305: shooter 15 (pulled 241) killed at 160.000000',
+          '662: summoner 31 (pulled 481) at 160.000000',
+          '842: summoner 31 (pulled 481) at 160.000000',
+          '902: summoner 39 (pulled 721) at 160.000000',
+          '1022: summoner 31 (pulled 481) at 160.000000',
+          '1037: summoner 31 (pulled 481) killed at 160.000000',
+          '1082: summoner 39 (pulled 721) at 160.000000',
+          '1082: shooter 96 (pulled 961) from 160.000000',
+        ],
+        orbHits: 193,
+      },
+      2: {
+        ...common,
+        pulls: [
+          '241: summoner 15 from 789.0',
+          '481: shooter 33 from 558.0',
+          '721: summoner 42 from 489.6',
+          '961: shooter 88 from 1065.5',
+        ],
+        bossFarthest: [721],
+        acts: [
+          '422: summoner 15 (pulled 241) at 160.000000',
+          '472: summoner 15 (pulled 241) killed at 160.000000',
+          '602: shooter 33 (pulled 481) from 160.000000',
+          '610: shooter 33 (pulled 481) killed at 160.000000',
+          '902: summoner 42 (pulled 721) at 160.000000',
+          '1082: summoner 42 (pulled 721) at 160.000000',
+          '1082: shooter 88 (pulled 961) from 160.000000',
+          '1197: shooter 88 (pulled 961) killed at 160.000000',
+        ],
+        orbHits: 171,
       },
     });
   });

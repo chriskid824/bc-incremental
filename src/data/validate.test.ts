@@ -10,6 +10,7 @@ import type {
   Condition,
   ConditionKey,
   ConversionSpec,
+  EffectSpec,
   ScalingSpec,
   SlashLineSpec,
   TriggerSpec,
@@ -2770,6 +2771,63 @@ describe('trigger validation', () => {
     expect(
       triggerIssues({ on: 'periodic', every: 1, target: { pick: 'player' }, do: [thaw] }),
     ).toEqual([`${at} do[0] thaw needs an enemy, which target.pick 'player' does not give`]);
+  });
+
+  it('accepts pull to the aura’s edge or a distance >= 0 on events with a live enemy, and with a selector on the others (E15)', () => {
+    const edge = { kind: 'pull', to: 'auraEdge' } as const;
+    expect(
+      triggerIssues(
+        { on: 'hit', do: [edge] },
+        { on: 'freeze', do: [{ kind: 'pull', to: 0 }] },
+        { on: 'nthAttack', every: 3, do: [{ kind: 'pull', to: 160 }] },
+        { on: 'ailmentApplied', when: [{ ailment: 'shock' }], do: [{ kind: 'pull', to: 0.5 }] },
+        // ◆引力 (gd:455): every 4 s, the farthest enemy but a boss.
+        {
+          on: 'periodic',
+          every: 4,
+          target: { pick: 'outermost', excludeBoss: true },
+          do: [edge],
+        },
+        { on: 'kill', target: { pick: 'nearest' }, do: [edge] },
+        { on: 'shatter', target: { pick: 'highestHp' }, do: [edge] },
+      ),
+    ).toEqual([]);
+  });
+
+  it("rejects a pull distance below 0, NaN, Infinity or not a number, on events without a live enemy, and with a 'player' pick (E15)", () => {
+    // Planted bugs: a negative distance accepted; pull accepted on a context without a target.
+    const bad: unknown[] = [-1, -0.001, -Infinity, Number.NaN, Infinity, 'edge', null, '160'];
+    expect(
+      bad.map((to) => triggerIssues({ on: 'hit', do: [{ kind: 'pull', to } as EffectSpec] })),
+    ).toEqual([
+      [`${at} do[0] to must be 'auraEdge' or a finite number >= 0 (got -1)`],
+      [`${at} do[0] to must be 'auraEdge' or a finite number >= 0 (got -0.001)`],
+      [`${at} do[0] to must be 'auraEdge' or a finite number >= 0 (got -Infinity)`],
+      [`${at} do[0] to must be 'auraEdge' or a finite number >= 0 (got NaN)`],
+      [`${at} do[0] to must be 'auraEdge' or a finite number >= 0 (got Infinity)`],
+      [`${at} do[0] to must be 'auraEdge' or a finite number >= 0 (got edge)`],
+      [`${at} do[0] to must be 'auraEdge' or a finite number >= 0 (got null)`],
+      [`${at} do[0] to must be 'auraEdge' or a finite number >= 0 (got 160)`],
+    ]);
+    const pull = { kind: 'pull', to: 'auraEdge' } as const;
+    const problem = (on: string): string =>
+      `${at} do[0] pull needs a live enemy, which '${on}' events do not give; add target {pick}`;
+    const events: TriggerSpec[] = [
+      { on: 'periodic', every: 4, do: [pull] },
+      { on: 'waveStart', do: [pull] },
+      { on: 'heroHit', do: [pull] },
+      { on: 'kill', do: [pull] },
+      { on: 'diedWithAilment', do: [pull] },
+      { on: 'shatter', do: [pull] },
+      { on: 'contact', do: [pull] },
+      { on: 'droneExpire', do: [pull] },
+    ];
+    for (const trigger of events) {
+      expect(triggerIssues(trigger), trigger.on).toEqual([problem(trigger.on)]);
+    }
+    expect(
+      triggerIssues({ on: 'periodic', every: 4, target: { pick: 'player' }, do: [pull] }),
+    ).toEqual([`${at} do[0] pull needs an enemy, which target.pick 'player' does not give`]);
   });
 });
 

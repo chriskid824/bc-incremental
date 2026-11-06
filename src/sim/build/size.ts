@@ -24,14 +24,23 @@ export function sizeOf(build: Pick<CompiledBuild, 'flags'>, r: number): number {
 }
 
 /**
- * The squared reach of `build`'s auras: the auraRadius stat as the build sizes it (sizeOf),
- * squared. An enemy is within it when the squared distance of its centre from the player is at
- * most this, inclusive, as the grid's within() test: what an aura's pulse hits
- * (src/sim/emitters/aura.ts) and what the inAura condition asks (src/sim/build/eval.ts; lead
- * rulings 19, W2) both read it, so they cannot drift apart.
+ * The reach of `build`'s auras from the player: the auraRadius stat as the build sizes it
+ * (sizeOf). The pull effect's 'auraEdge' (src/sim/effects/execute.ts) reads it, and so do an
+ * aura's pulse and the inAura condition through auraReachSq; a pull lands its enemy where that
+ * squared test holds (landing), so the aura's edge is where its pulse reaches.
+ */
+export function auraReach(build: Pick<CompiledBuild, 'flags' | 'values'>): number {
+  return sizeOf(build, build.values.auraRadius);
+}
+
+/**
+ * The squared reach of `build`'s auras (auraReach). An enemy is within it when the squared
+ * distance of its centre from the player is at most this, inclusive, as the grid's within()
+ * test: what an aura's pulse hits (src/sim/emitters/aura.ts) and what the inAura condition asks
+ * (src/sim/build/eval.ts; lead rulings 19, W2) both read it, so they cannot drift apart.
  */
 export function auraReachSq(build: Pick<CompiledBuild, 'flags' | 'values'>): number {
-  const r = sizeOf(build, build.values.auraRadius);
+  const r = auraReach(build);
   return r * r;
 }
 

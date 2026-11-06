@@ -589,6 +589,10 @@ describe('EffectSpecSchema', () => {
     { kind: 'buff', stat: 'attackSpeed', more: -0.3, durationSec: 0.5, tags: ['minion', 'hit'] },
     // E6: 熱震's 解凍.
     { kind: 'thaw' },
+    // E15: ◆引力's pull to the aura's edge, and to a distance.
+    { kind: 'pull', to: 'auraEdge' },
+    { kind: 'pull', to: 0 },
+    { kind: 'pull', to: 160 },
     // E9: 血河's bleed spread, behind the event enemy, with poison's cap and order.
     { kind: 'spreadAilment', ailment: 'bleed', radius: 60 },
     { kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true },
@@ -830,6 +834,12 @@ describe('EffectSpecSchema', () => {
     ],
     ['thaw with a number (E6)', { kind: 'thaw', amount: 1 }],
     ['thaw with a radius (E6)', { kind: 'thaw', radius: 90 }],
+    ['pull without to (E15)', { kind: 'pull' }],
+    ['pull with an extra key (E15)', { kind: 'pull', to: 'auraEdge', radius: 90 }],
+    ['pull to another string (E15)', { kind: 'pull', to: 'edge' }],
+    ['pull to a number as a string (E15)', { kind: 'pull', to: '160' }],
+    ['pull to NaN (E15)', { kind: 'pull', to: Number.NaN }],
+    ['pull to Infinity (E15)', { kind: 'pull', to: Infinity }],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
   });

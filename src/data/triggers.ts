@@ -720,6 +720,21 @@ export interface ThawSpec {
 }
 
 /**
+ * Pulls the event's enemy (or the one the trigger's selector picked) in (◆引力's 「拉到光環邊緣」,
+ * gd:455; E15): to within R of the player, along its own direction from the player, where R is
+ * the build's aura reach (the auraRadius stat × the area factor, auraReach in
+ * src/sim/build/size.ts, whether or not the build has an aura emitter) with to 'auraEdge', or
+ * `to` itself (arena units, unsized). An enemy already within R does not move, a boss never
+ * does, and a dead one is left as it is. It draws no RNG and raises no event; the enemy AI goes
+ * on from where it lands (a pulled shooter or summoner stands at its new place,
+ * src/sim/systems/enemyAi.ts stepPost).
+ */
+export interface PullSpec {
+  readonly kind: 'pull';
+  readonly to: 'auraEdge' | number;
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -773,6 +788,7 @@ export interface ThawSpec {
  * - buff: × (1 + more) on the cadence of the emitters that carry its tags, for a time (BuffSpec).
  * - execute: the event's enemy, if no boss, killed outright (ExecuteSpec).
  * - thaw: the event's enemy, if frozen and no boss, thawed at once (ThawSpec).
+ * - pull: the event's enemy, if no boss, pulled in to the aura's edge or `to` (PullSpec).
  */
 export type EffectSpec =
   | {
@@ -834,7 +850,8 @@ export type EffectSpec =
   | ComboStackSpec
   | BuffSpec
   | ExecuteSpec
-  | ThawSpec;
+  | ThawSpec
+  | PullSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -876,6 +893,8 @@ export const COEF_FIELDS: {
   execute: [],
   // No numbers: a freeze ends or it does not.
   thaw: [],
+  // A distance, which the coefficient never scales.
+  pull: [],
 };
 
 /**

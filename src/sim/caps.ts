@@ -104,6 +104,18 @@ export const GUARD_REV_PER_SEC = 0.5;
  */
 export const ORB_MEMORY = 64;
 /**
+ * The fastest an orbit's ring turns, in turns a second (環繞球轉速, the orbitSpeed stat; lead
+ * ruling 17 on gap-map E8 (d)): compileBuild clamps every orbit emitter's revPerSec to it once a
+ * compile (src/sim/build/compile.ts orbitRevPerSec). An orb remembers each enemy it hit for its
+ * cooldown (0.5 s at ORBIT_DEFAULTS.cooldownSec, which the speed leaves alone), so the faster it
+ * turns, the more enemies it sweeps past in that time: the stress crowd needs at most 30 entries
+ * an orb at 1 turn a second and 46 at 2 (docs/v3 C4 design D21 and §7.1), which ORB_MEMORY's
+ * 64 holds.
+ * The clamp keeps the memory within its size where validation could not, since a build's speed
+ * is the sum of its ranks; src/sim/emitters/orbit.test.ts pins the relation.
+ */
+export const ORBIT_MAX_REV_PER_SEC = 2;
+/**
  * The enemy cap is enforced (docs/v3 C7 design §1.8; D31): a v3 run holds at most its data's
  * enemyCap alive (src/sim/systems/spawn.ts), so the web fuzz fails a run that has more alive
  * after a tick (src/meta/web/fuzz.ts). It refuses nothing itself: the cap's counters are

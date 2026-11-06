@@ -132,6 +132,8 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   buff: 'web.effect.buff',
   execute: 'web.effect.execute',
   thaw: 'web.effect.thaw',
+  // E15: a distance's; to 'auraEdge' reads web.effect.pull.auraEdge (effectText).
+  pull: 'web.effect.pull',
 };
 
 /**
@@ -418,6 +420,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   barragePierce: 'number',
   barrageSplit: 'percent',
   comboCap: 'number',
+  orbitSpeed: 'percent',
 };
 
 /**
@@ -451,6 +454,7 @@ export const COEF_FORMAT: {
   execute: {},
   buff: {},
   thaw: {},
+  pull: {},
 };
 
 // Numbers, as M1 writes them (src/ui/describe.ts).
@@ -682,6 +686,11 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
       return text({ radius: trim(spec.radius), damage: percent(spec.damagePct) });
     case 'push':
       return text({ radius: trim(spec.radius), distance: trim(spec.distance) });
+    // E15: to the aura's edge (its reach as the build sizes it, words), or within a distance.
+    case 'pull':
+      return spec.to === 'auraEdge'
+        ? say(lookup, 'web.effect.pull.auraEdge', { extra: extras.join('') })
+        : text({ distance: trim(spec.to) });
     case 'addFrost':
       area(spec.radius, spec.maxTargets, spec.order);
       return text({ amount: percent(spec.amount) });
@@ -838,6 +847,7 @@ const isCenterEvent = (on: TriggerEventId): on is CenterEvent =>
 /** An effect the engine runs once per enemy of a center event's list (CompiledEffect.fanout). */
 const fansOut = (effect: EffectSpec): boolean =>
   effect.kind === 'thaw' ||
+  effect.kind === 'pull' ||
   ((effect.kind === 'applyAilment' || effect.kind === 'addFrost' || effect.kind === 'detonate') &&
     effect.radius === undefined);
 const onPlayer = (effect: EffectSpec): boolean =>

@@ -17,6 +17,8 @@
   "web.effect.push": "把半徑 {radius} 內的敵人往外推 {distance}",
   "web.effect.addFrost": "冰冷 +{amount}{extra}",
   "web.effect.thaw": "立刻解凍{extra}",
+  "web.effect.pull": "拉到離你 {distance} 以內{extra}",
+  "web.effect.pull.auraEdge": "拉到光環邊緣{extra}",
   "web.effect.heal": "回復 {pct} 生命",
   "web.effect.shield": "得到 {pct} 最大生命的護盾",
   "web.effect.gainShards": "再掉落 {pct} 的碎片",

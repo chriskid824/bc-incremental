@@ -17,6 +17,8 @@
   "web.effect.push": "push the enemies within {radius} back {distance}",
   "web.effect.addFrost": "+{amount} chill{extra}",
   "web.effect.thaw": "thaw at once{extra}",
+  "web.effect.pull": "pull it to within {distance} of you{extra}",
+  "web.effect.pull.auraEdge": "pull it to the aura's edge{extra}",
   "web.effect.heal": "heal {pct} of max life",
   "web.effect.shield": "gain a shield of {pct} of max life",
   "web.effect.gainShards": "the enemy drops {pct} of its shards again",

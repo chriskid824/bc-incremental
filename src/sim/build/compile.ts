@@ -11,7 +11,8 @@
  * sources and who its ailments and the center's chain jumps are credited to (D8), the hook
  * lists, the emitters: the signature's first, then the emitter grants, the build's
  * (StatBlock.emitters) and the modules', one per kind, source and key (an aura's grants of one
- * source combined); the triggers with their effects: the built-in shatter (SHATTER_TRIGGER)
+ * source combined), each orbit's ring turning at the speed the orbitSpeed stat gives it
+ * (orbitRevPerSec); the triggers with their effects: the built-in shatter (SHATTER_TRIGGER)
  * first, then the build's own (StatBlock.triggers), then the modules', in compile order
  * (src/sim/effects/types.ts); and the build's damage conversions, which the ModTable lists per
  * hit row (src/sim/combat/convert.ts).
@@ -22,7 +23,7 @@
  * centerDamage) and never pass one into a run.
  */
 
-import { BARRAGE_DAMAGE_PCT, combineAuras, grantKey } from '../../data/emitters';
+import { BARRAGE_DAMAGE_PCT, combineAuras, grantKey, ORBIT_DEFAULTS } from '../../data/emitters';
 import type { BarrageGrant, EmitterGrant, SourcedEmitter } from '../../data/emitters';
 import { M1_SIGNATURE, RULE_COEF_FIELDS, scaleRuleSpec } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
@@ -33,6 +34,7 @@ import type { TagMask } from '../../data/tags';
 import { TRIGGER_EVENTS } from '../../data/triggers';
 import type { EffectSpec, TriggerSpec } from '../../data/triggers';
 import { BLEED_RING_MAX_STACKS } from '../ailments/rings';
+import { ORBIT_MAX_REV_PER_SEC } from '../caps';
 import { spreadSelector } from '../effects/select';
 import {
   compileEffect,
@@ -767,6 +769,18 @@ function compileSignature<K extends SignatureId>(
 }
 
 /**
+ * The turns a second of every orbit ring under the orbitSpeed stat at `speed` (環繞球轉速, E15;
+ * lead ruling 17): ORBIT_DEFAULTS.revPerSec × speed, at most ORBIT_MAX_REV_PER_SEC, so an orb's
+ * memory (ORB_MEMORY) holds what it sweeps past in its cooldown, and 0 at a speed that is not
+ * above 0 (NaN included): a ring that stands still. At the stat's base, 1, it is
+ * ORBIT_DEFAULTS.revPerSec exactly.
+ */
+export function orbitRevPerSec(speed: number): number {
+  const rev = ORBIT_DEFAULTS.revPerSec * speed;
+  return rev > 0 ? Math.min(ORBIT_MAX_REV_PER_SEC, rev) : 0;
+}
+
+/**
  * The emitters of the grants, in grant order, one per kind, source and key (grantKey), at its
  * first grant's place: a node grants each emitter once, and nodes of one source that grant the
  * same one agree on its fields (data validation), so the first grant is the emitter and dropping
@@ -774,9 +788,10 @@ function compileSignature<K extends SignatureId>(
  * damagePct, everyNth and corona each the first grant's that sets one (combineAuras), whether a
  * node or a module's addEmitter granted it; a module's grant passes no validation, so of two
  * that set one field the first wins. A build with one aura grant a source keeps that grant as it
- * is. A barrage grant is no emitter: it rides the signature (compileBarrage).
+ * is. A barrage grant is no emitter: it rides the signature (compileBarrage). Every orbit
+ * turns `revPerSec` times a second (orbitRevPerSec).
  */
-function grantEmitters(grants: readonly SourcedEmitter[]): EmitterSpec[] {
+function grantEmitters(grants: readonly SourcedEmitter[], revPerSec: number): EmitterSpec[] {
   // Each kind, source and key's grant, combined for an aura, at the index of its first in `kept`.
   const at = new Map<string, number>();
   const kept: { source: string; grant: Exclude<EmitterGrant, BarrageGrant> }[] = [];
@@ -794,7 +809,7 @@ function grantEmitters(grants: readonly SourcedEmitter[]): EmitterSpec[] {
       kept[first] = { source, grant: combineAuras(into.grant, grant) };
     }
   }
-  return kept.map(({ source, grant }) => grantEmitter(source, grant));
+  return kept.map(({ source, grant }) => grantEmitter(source, grant, revPerSec));
 }
 
 /**
@@ -1247,7 +1262,11 @@ export function compileBuild(
   flags.highestHp ||=
     mods.some((mod) => readsTargetIs(mod.cond)) || triggers.some((t) => readsTargetIs(t.conds));
   const conversions = compileConversions(stats.conversions);
-  const emitters = [signatureEmitter(signature.id, signature), ...grantEmitters(grants)];
+  // 環繞球轉速 (E15): the orbitSpeed stat, read once here, after every module.
+  const emitters = [
+    signatureEmitter(signature.id, signature),
+    ...grantEmitters(grants, orbitRevPerSec(values.orbitSpeed)),
+  ];
   flags.hasAura = emitters.some((em) => em.kind === 'aura');
   const table = new ModTable(
     mods,

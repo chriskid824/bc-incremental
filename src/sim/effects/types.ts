@@ -191,8 +191,8 @@ export interface CompiledEffect {
   /** Its trigger's selector picks 'player': the effect centers on the player, with no target. */
   readonly atPlayer: boolean;
   /**
-   * It acts on its target alone (applyAilment, addFrost and detonate without a radius, and
-   * thaw): on a center event with a list, a trigger without a selector queues it once per alive
+   * It acts on its target alone (applyAilment, addFrost and detonate without a radius, thaw and
+   * pull): on a center event with a list, a trigger without a selector queues it once per alive
    * enemy of the list (fireOne in dispatch.ts).
    */
   readonly fanout: boolean;
@@ -483,6 +483,7 @@ export function compileEffect(
       fanout = scaled.radius === undefined;
       break;
     case 'thaw':
+    case 'pull':
       fanout = true;
       break;
     default:

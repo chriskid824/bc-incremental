@@ -115,6 +115,20 @@ describe('rule descriptions', () => {
     ]);
   });
 
+  it('reads ◆引力’s period as a number to quote, and a pull’s reach as words (E15)', () => {
+    // A hand description of 引力 quotes the 4 s; the aura's edge and a pull's distance are
+    // words, as push's distance and radius are ("nearby").
+    const gravity = {
+      on: 'periodic',
+      every: 4,
+      target: { pick: 'outermost', excludeBoss: true },
+      do: [{ kind: 'pull', to: 'auraEdge' }],
+    } as const;
+    expect(triggerNumbers(gravity)).toEqual([['4']]);
+    expect(triggerNumbers({ ...gravity, do: [{ kind: 'pull', to: 120 }] })).toEqual([['4']]);
+    expect(triggerNumbers({ on: 'hit', do: [{ kind: 'pull', to: 0 }] })).toEqual([]);
+  });
+
   it('reads the numbers of triggers', () => {
     expect(
       triggerNumbers({

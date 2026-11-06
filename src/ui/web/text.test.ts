@@ -198,6 +198,7 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'droneSpeed',
       'summonDuration',
       'barrageSplit',
+      'orbitSpeed',
     ]);
   });
 
@@ -455,6 +456,14 @@ function kitchenSink(): NodeEffects {
       when: [{ ailment: 'burn' }, { targetHas: 'frozen' }],
       do: [{ kind: 'thaw' }],
     },
+    // E15: ◆引力's pull to the aura's edge, and one to a distance.
+    {
+      on: 'periodic',
+      every: 4,
+      target: { pick: 'outermost', excludeBoss: true },
+      do: [{ kind: 'pull', to: 'auraEdge' }],
+    },
+    { on: 'hit', do: [{ kind: 'pull', to: 120 }] },
     // Each center event's fan-outs (status, self, placement) and a selector's.
     ...CENTER_EVENTS.flatMap((on): TriggerSpec[] => [
       { on, do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
@@ -1038,6 +1047,51 @@ describe('every template, through one node (§4.7)', () => {
         modifiers: [{ stat: 'comboCap', kind: 'flat', value: 2 }],
       });
       expect(linesOf(web, 'fire.center.alpha.r1', locale, 2)).toEqual([line]);
+    },
+  );
+
+  it.each([
+    ['en', '15% increased Orbit speed per rank (2/3: +30%)'],
+    ['zh-TW', '每級環繞球轉速提高 15%（2/3：+30%）'],
+  ] as const)(
+    'writes 環繞’s 轉速 on a ranked node, an increased percentage a rank with its total, in %s (E15)',
+    (locale, line) => {
+      // ranked('orbitSpeed', 0.15, 3) at rank 2: a percentage, as the increased stats beside it.
+      const web = withEffects(fire, 'fire.center.alpha.r1', {
+        modifiers: [{ stat: 'orbitSpeed', kind: 'increased', value: 0.15 }],
+      });
+      expect(linesOf(web, 'fire.center.alpha.r1', locale, 2)).toEqual([line]);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        "Every 4 s, at the enemy farthest from you (never a boss): pull it to the aura's edge",
+        'On hitting enemies: pull it to within 120 of you',
+      ],
+    ],
+    [
+      'zh-TW',
+      ['每 4 秒，對離你最遠的敵人（不含 Boss）：拉到光環邊緣', '擊中敵人時：拉到離你 120 以內'],
+    ],
+  ] as const)(
+    'writes ◆引力’s pull to the aura’s edge and a pull to a distance on a notable, in %s (E15)',
+    (locale, expected) => {
+      // Plants the pull's text missing, or its distance unquoted.
+      const web = withEffects(fire, NOTABLE, {
+        triggers: [
+          {
+            on: 'periodic',
+            every: 4,
+            target: { pick: 'outermost', excludeBoss: true },
+            do: [{ kind: 'pull', to: 'auraEdge' }],
+          },
+          { on: 'hit', do: [{ kind: 'pull', to: 120 }] },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
     },
   );
 
@@ -1854,6 +1908,20 @@ describe('E6: thaw', () => {
     ]);
     expect(MESSAGES.en['web.effect.thaw']).toBe('thaw at once{extra}');
     expect(MESSAGES['zh-TW']['web.effect.thaw']).toBe('立刻解凍{extra}');
+  });
+});
+
+describe('E15: pull on a center event', () => {
+  it("writes a freeze's pull on its list as a thaw's, in both locales", () => {
+    // Plants text.ts's fansOut without pull, while compileEffect fans it out.
+    const onFreeze: TriggerSpec = { on: 'freeze', do: [{ kind: 'pull', to: 'auraEdge' }] };
+    const web = withEffects(fire, NOTABLE, { triggers: [onFreeze] });
+    expect(LOCALES.map((locale) => linesOf(web, NOTABLE, locale))).toEqual([
+      [
+        "On each freeze: pull it to the aura's edge on the target and the enemies within 90, at most 5",
+      ],
+      ['凍結時，對目標與半徑 90 內最多 5 隻敵人：拉到光環邊緣'],
+    ]);
   });
 });
 

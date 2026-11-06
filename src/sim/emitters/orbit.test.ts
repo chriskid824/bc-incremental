@@ -4,10 +4,12 @@ import { createRng } from '../../core/rng';
 import { ORBIT_DEFAULTS } from '../../data/emitters';
 import type { OrbitGrant, SourcedEmitter } from '../../data/emitters';
 import type { SignatureSpec } from '../../data/rules';
+import { BASE_STATS } from '../../data/stats';
 import type { StatId } from '../../data/stats';
 import { TAG } from '../../data/tags';
 import type { EnemyId } from '../../data/types';
-import { ORB_MEMORY } from '../caps';
+import { orbitRevPerSec, compileBuild } from '../build/compile';
+import { ORB_MEMORY, ORBIT_MAX_REV_PER_SEC } from '../caps';
 import { CHAIN_JUMP, PRIMARY, REPEAT, SIGNATURE } from '../effects/flags';
 import type { TestModule } from '../rules';
 import { createSimulation } from '../simulation';
@@ -21,13 +23,16 @@ import {
   makeTestData,
   placedEnemies,
   rngPositions,
+  STRESS_START_WAVE,
+  stressData,
+  stressStats,
 } from '../testing';
 import type { PlacedEnemy } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH, NO_INPUT, TICK_RATE } from '../types';
 import type { SimEvent } from '../types';
 import { runOrbit } from './orbit';
 import { createOrbMemory, grantEmitter, shotsInFlight } from './types';
-import type { EmitterRuntime, OrbMemory } from './types';
+import type { EmitterRuntime, EmitterSpec, OrbMemory } from './types';
 
 type HitEvent = Extract<SimEvent, { type: 'hit' }>;
 
@@ -102,9 +107,19 @@ function hitsOver(ctx: RunContext, from: number, to: number, i = 1): [number, nu
   return seen;
 }
 
-/** Where orb `o` of `n` on a ring of radius `ring` is on tick `now`, turning once a second. */
-function orbAt(ctx: RunContext, now: number, o: number, n: number, ring: number) {
-  const a = (2 * Math.PI * ORBIT_DEFAULTS.revPerSec * now) / TICK_RATE + (2 * Math.PI * o) / n;
+/**
+ * Where orb `o` of `n` on a ring of radius `ring` is on tick `now`, turning `rev` times a second
+ * (once at the orbitSpeed stat's base).
+ */
+function orbAt(
+  ctx: RunContext,
+  now: number,
+  o: number,
+  n: number,
+  ring: number,
+  rev: number = ORBIT_DEFAULTS.revPerSec,
+) {
+  const a = (2 * Math.PI * rev * now) / TICK_RATE + (2 * Math.PI * o) / n;
   return { x: ctx.player.x + ring * Math.cos(a), y: ctx.player.y + ring * Math.sin(a) };
 }
 
@@ -149,7 +164,7 @@ function written(m: OrbMemory, until: number): [number, number][] {
  * tick, orb by orb, each alive enemy the orb touches, in id order, is hit when the tick has
  * reached its entry. With `limit`, an orb remembers at most that many enemies whose ticks are
  * still ahead, and one more makes it forget the one it hit longest ago (Q13/F1), counted in
- * `dropped`.
+ * `dropped`. Its ring turns `rev` times a second (once at the orbitSpeed stat's base).
  */
 class OrbitRef {
   private readonly ready = new Map<string, number>();
@@ -163,6 +178,7 @@ class OrbitRef {
     private readonly cd: number,
     private readonly orbRadius = ORB_RADIUS,
     private readonly limit = Infinity,
+    private readonly rev: number = ORBIT_DEFAULTS.revPerSec,
   ) {
     this.order = Array.from({ length: n }, () => []);
   }
@@ -171,7 +187,7 @@ class OrbitRef {
   step(ctx: RunContext, now: number): [number, number, number][] {
     const out: [number, number, number][] = [];
     for (let o = 0; o < this.n; o++) {
-      const orb = orbAt(ctx, now, o, this.n, this.ring);
+      const orb = orbAt(ctx, now, o, this.n, this.ring, this.rev);
       const key = (id: number): string => `${o}:${id}`;
       const order = (this.order[o] as number[]).filter(
         (id) => now < (this.ready.get(key(id)) as number),
@@ -804,5 +820,315 @@ describe('orbit: the emitter stage', () => {
     }
     expect(count).toBeGreaterThan(0);
     expect(tags).toEqual(new Set([ORBIT_TAGS]));
+  });
+});
+
+describe('orbit: its speed (環繞球轉速, the orbitSpeed stat; E15, lead ruling 17)', () => {
+  /** Two orbits on outer.aura (ring 0 of 2, ring 1 of 1 with cooldown 0.25) and one on hub. */
+  const SPEED_GRANTS: readonly SourcedEmitter[] = [
+    on('outer.aura', { kind: 'aura' }),
+    on('outer.aura', orbit(2)),
+    on('outer.aura', orbit(1, { ring: 1, cooldownSec: 0.25 })),
+    on('hub', orbit(3, { damagePct: 0.4, orbRadius: 20 })),
+  ];
+  /** The emitters a build of these values compiles with SPEED_GRANTS and orbitCount 1.5. */
+  const compiled = (
+    values: Partial<Record<StatId, number>> = {},
+    modules: readonly TestModule[] = [],
+  ): EmitterSpec[] => [
+    ...compileBuild(
+      makeStats({ orbitCount: 1.5, ...values }, [], {
+        triggers: [],
+        conversions: [],
+        emitters: SPEED_GRANTS,
+      }),
+      [],
+      undefined,
+      modules,
+    ).emitters,
+  ];
+  const revs = (emitters: readonly EmitterSpec[]): number[] =>
+    emitters.flatMap((em) => (em.kind === 'orbit' ? [em.revPerSec] : []));
+  /** Four shards at the quarter points of ring 0. */
+  const QUARTERS = [at(RING_0, 0), at(0, -RING_0), at(-RING_0, 0), at(0, RING_0)].map((p) => ({
+    ...p,
+    type: 'shard' as const,
+  }));
+
+  /**
+   * SPEED_GRANTS' emitters as b60fc31 (E14, before orbitSpeed) compiled them, recorded by running
+   * that tree's compileBuild on the same build (S/b4/e15b-bench/scripts/baseEmitters.mts).
+   */
+  const PARENT_EMITTERS = [
+    {
+      kind: 'volley',
+      signature: true,
+      source: 'center',
+      damagePct: 1,
+      tags: 17,
+      chains: true,
+      rollsAilments: true,
+      canCrit: true,
+    },
+    {
+      kind: 'aura',
+      signature: false,
+      source: 'outer.aura',
+      damagePct: 0.25,
+      tags: 129,
+      chains: false,
+      rollsAilments: true,
+      canCrit: true,
+      everyNth: null,
+      corona: null,
+    },
+    {
+      kind: 'orbit',
+      signature: false,
+      source: 'outer.aura',
+      damagePct: 0.6,
+      tags: 257,
+      chains: false,
+      rollsAilments: true,
+      canCrit: true,
+      ring: 0,
+      radius: 110,
+      count: 2,
+      revPerSec: 1,
+      cooldownSec: 0.5,
+      orbRadius: 12,
+    },
+    {
+      kind: 'orbit',
+      signature: false,
+      source: 'outer.aura',
+      damagePct: 0.6,
+      tags: 257,
+      chains: false,
+      rollsAilments: true,
+      canCrit: true,
+      ring: 1,
+      radius: 180,
+      count: 1,
+      revPerSec: 1,
+      cooldownSec: 0.25,
+      orbRadius: 12,
+    },
+    {
+      kind: 'orbit',
+      signature: false,
+      source: 'hub',
+      damagePct: 0.4,
+      tags: 257,
+      chains: false,
+      rollsAilments: true,
+      canCrit: true,
+      ring: 0,
+      radius: 110,
+      count: 3,
+      revPerSec: 1,
+      cooldownSec: 0.5,
+      orbRadius: 20,
+    },
+  ];
+
+  it('compiles a build at the base orbitSpeed exactly as before it: every emitter toEqual the parent’s own compile', () => {
+    // Planted bug: the base folded to anything but ORBIT_DEFAULTS.revPerSec × 1.
+    expect(BASE_STATS.orbitSpeed).toBe(1);
+    expect(compiled()).toEqual(PARENT_EMITTERS);
+    expect(compiled({ orbitSpeed: 1 })).toEqual(PARENT_EMITTERS);
+    expect(revs(compiled())).toEqual([1, 1, 1]);
+  });
+
+  it('sets every orbit emitter’s revPerSec to ORBIT_DEFAULTS.revPerSec × orbitSpeed: 1.5 at 1.5, all else as at the base', () => {
+    // Planted bug: the stat not folded at all, or folded into one emitter or one source only.
+    const base = compiled();
+    const fast = compiled({ orbitSpeed: 1.5 });
+    expect(revs(fast)).toEqual([1.5, 1.5, 1.5]);
+    expect(fast).toEqual(base.map((em) => (em.kind === 'orbit' ? { ...em, revPerSec: 1.5 } : em)));
+    expect(revs(compiled({ orbitSpeed: 1.25 }))).toEqual([1.25, 1.25, 1.25]);
+  });
+
+  it('turns the orbs at 2π × (1.5 × now / 60 + o / n) at orbitSpeed 1.5: a quarter turn by tick 10, and hits as the reference turning 1.5 times a second', () => {
+    // On tick 10 a ring at 1.5 turns a second has turned a quarter (at 1, by tick 15): its 4
+    // orbs sit at π/2, π, 3π/2 and 2π and hit in orb order; at 1 they sit 30° short, out of
+    // reach.
+    const grants = [on('outer.aura', orbit(4))];
+    const fast = fixture(QUARTERS, { grants, values: { orbitSpeed: 1.5 } });
+    orbitAt(fast, 10);
+    expect(hitIds(fast)).toEqual([4, 3, 2, 1]);
+    const base = fixture(QUARTERS, { grants });
+    orbitAt(base, 10);
+    expect(hitIds(base)).toEqual([]);
+    // Moving enemies over 600 ticks: every hit (tick, orb, id) is the reference's at 1.5 turns
+    // a second, and not the one at 1.
+    const n = 3;
+    const moving = movers(4242, 40, RING_0);
+    const placed = moving.map((m) => at(m.dist, 0, { type: m.type }));
+    const ctx = fixture(placed, {
+      grants: [on('outer.aura', orbit(n))],
+      values: { orbitSpeed: 1.5 },
+    });
+    const twin = fixture(placed, { grants: [on('outer.aura', orbit(n))] });
+    const ref = new OrbitRef(n, RING_0, 30, ORB_RADIUS, Infinity, 1.5);
+    const slow = new OrbitRef(n, RING_0, 30, ORB_RADIUS, Infinity, 1);
+    const expected: [number, number, number][] = [];
+    const atOne: [number, number, number][] = [];
+    const actual: [number, number, number][] = [];
+    for (let tick = 1; tick <= 600; tick++) {
+      move(ctx, moving, tick);
+      move(twin, moving, tick);
+      expected.push(...ref.step(ctx, tick));
+      atOne.push(...slow.step(twin, tick));
+      orbitAt(ctx, tick);
+      for (const [o, id] of written(memoryOf(ctx), tick + 30)) actual.push([tick, o, id]);
+    }
+    expect(actual).toEqual(expected);
+    expect(expected.length).toBeGreaterThan(30);
+    expect(atOne).not.toEqual(expected);
+  });
+
+  it.each([
+    [3, 2],
+    [2.5, 2],
+    [2, 2],
+    [1.75, 1.75],
+    [Infinity, 2],
+  ])(
+    'clamps revPerSec at ORBIT_MAX_REV_PER_SEC: orbitSpeed %s turns the rings %s times a second',
+    (speed, rev) => {
+      // Planted bug: no clamp, or a clamp anywhere but 2.
+      expect(ORBIT_MAX_REV_PER_SEC).toBe(2);
+      expect(revs(compiled({ orbitSpeed: speed }))).toEqual([rev, rev, rev]);
+      expect(orbitRevPerSec(speed)).toBe(rev);
+    },
+  );
+
+  it('turns the orbs at 2 a second at orbitSpeed 3: on tick 8 they reach the shards at the quarters, which at 3 they would have passed', () => {
+    const grants = [on('outer.aura', orbit(4))];
+    const capped = fixture(QUARTERS, { grants, values: { orbitSpeed: 3 } });
+    expect(emitter(capped).spec).toMatchObject({ revPerSec: 2 });
+    // At 2 a second the ring has turned 0.2667 of a turn on tick 8, 6° past the quarter; at 3
+    // it would have turned 0.4, 36° past it and out of reach.
+    orbitAt(capped, 8);
+    expect(hitIds(capped)).toEqual([4, 3, 2, 1]);
+  });
+
+  it.each([0, -1, -0.5, NaN])(
+    'stands the rings still at orbitSpeed %s: revPerSec 0, an orb at angle 0 hits a shard there once each cooldown',
+    (speed) => {
+      // Planted bug: a clamp below 0 missing (a ring turning backwards) or wrong.
+      expect(revs(compiled({ orbitSpeed: speed }))).toEqual([0, 0, 0]);
+      expect(orbitRevPerSec(speed)).toBe(0);
+      const ctx = fixture([at(RING_0, 0, { type: 'shard' })], { values: { orbitSpeed: speed } });
+      expect(hitsOver(ctx, 1, 61)).toEqual([
+        [1, 1],
+        [31, 1],
+        [61, 1],
+      ]);
+    },
+  );
+
+  it('orbitRevPerSec: 1 gives ORBIT_DEFAULTS.revPerSec exactly, and the speed scales it linearly up to the cap', () => {
+    expect(ORBIT_DEFAULTS.revPerSec).toBe(1);
+    expect(orbitRevPerSec(1)).toBe(ORBIT_DEFAULTS.revPerSec);
+    expect([0.15, 0.5, 1.3, 1.45, 1.999].map(orbitRevPerSec)).toEqual([
+      0.15, 0.5, 1.3, 1.45, 1.999,
+    ]);
+    expect([Number.MIN_VALUE, 2 + 1e-12, 1e300].map(orbitRevPerSec)).toEqual([
+      Number.MIN_VALUE,
+      2,
+      2,
+    ]);
+  });
+
+  it('reads the stat once a compile, after every module: a module’s offsetStat and scaleStat reach it, and a change to values afterwards turns nothing', () => {
+    // Planted bug: the stat read before the modules, or each tick from the run's values.
+    const offset: TestModule = (b) => b.offsetStat('orbitSpeed', 0.5);
+    const scale: TestModule = (b) => b.scaleStat('orbitSpeed', 3);
+    expect(revs(compiled({}, [offset]))).toEqual([1.5, 1.5, 1.5]);
+    expect(revs(compiled({ orbitSpeed: 0.5 }, [scale]))).toEqual([1.5, 1.5, 1.5]);
+    expect(revs(compiled({}, [scale]))).toEqual([2, 2, 2]);
+    // The run's orbs turn at what the compile set, whatever the values say later.
+    const grants = [on('outer.aura', orbit(4))];
+    const ctx = fixture(QUARTERS, { grants, values: { orbitSpeed: 1.5 } });
+    (ctx.build.values as Record<StatId, number>).orbitSpeed = 1;
+    orbitAt(ctx, 10);
+    expect(hitIds(ctx)).toEqual([4, 3, 2, 1]);
+    const still = fixture(QUARTERS, { grants });
+    (still.build.values as Record<StatId, number>).orbitSpeed = 1.5;
+    orbitAt(still, 10);
+    expect(hitIds(still)).toEqual([]);
+  });
+
+  it('turns a module’s own addEmitter orbit at the run’s orbitSpeed, under the same clamp (D2)', () => {
+    // Planted bug: a module's orbit grant left at ORBIT_DEFAULTS.revPerSec, or given the
+    // unclamped speed while the build's own grants are clamped.
+    const grant: TestModule = (b) => b.addEmitter('outer.thorns', orbit(1, { ring: 1 }));
+    const moduleRevs = (speed: number): number[] =>
+      compiled({ orbitSpeed: speed }, [grant]).flatMap((em) =>
+        em.kind === 'orbit' && em.source === 'outer.thorns' ? [em.revPerSec] : [],
+      );
+    expect([1, 1.5, 3, -1, Number.NaN].map(moduleRevs)).toEqual([[1], [1.5], [2], [0], [0]]);
+    expect(revs(compiled({ orbitSpeed: 3 }, [grant]))).toEqual([2, 2, 2, 2]);
+  });
+
+  it('leaves the cooldown alone: an orb’s interval is round(cooldownSec × 60) at any orbitSpeed', () => {
+    for (const speed of [0, 1, 1.5, 3]) {
+      const ctx = fixture([], {
+        values: { orbitSpeed: speed },
+        grants: [
+          on('outer.aura', orbit(1)),
+          on('outer.aura', orbit(1, { ring: 1, cooldownSec: 0.25 })),
+        ],
+      });
+      expect([emitter(ctx, 1).interval, emitter(ctx, 2).interval], `orbitSpeed ${speed}`).toEqual([
+        30, 15,
+      ]);
+    }
+    expect(ORBIT_DEFAULTS.cooldownSec).toBe(0.5);
+  });
+
+  it('keeps ORB_MEMORY enough at the clamp: in the grants crowd an orb remembers at most 25–27 enemies at 1 turn a second and 39–41 at 2, below 64, and none is forgotten', () => {
+    // The bench's grants scenario (tools/balance/bench.ts): the stress crowd around an aura and
+    // two rings of 4 orbs, for its 30 s; orbitSpeed 4 is held at 2 turns a second.
+    expect([ORB_MEMORY, ORBIT_MAX_REV_PER_SEC]).toEqual([64, 2]);
+    const grants: readonly SourcedEmitter[] = [
+      on('outer.aura', { kind: 'aura', everyNth: { n: 4, mult: 4 } }),
+      on('outer.aura', orbit(4)),
+      on('outer.aura', orbit(4, { ring: 1 })),
+      on('outer.thorns', { kind: 'thorns' }),
+    ];
+    const peakOf = (speed: number, seed: number): [number[], number, number] => {
+      let peak = 0;
+      let rev: number[] = [];
+      const watch: TestModule = (b) =>
+        b.hook('tick', (ctx) => {
+          rev = revs(ctx.emitters.map((em) => em.spec));
+          for (const em of ctx.emitters) {
+            if (em.orbs === null) continue;
+            for (let o = 0; o < em.orbs.n; o++) peak = Math.max(peak, em.orbs.count[o] as number);
+          }
+        });
+      const stats = stressStats(
+        { auraRadius: 160, orbitSpeed: speed },
+        { triggers: [], conversions: [], emitters: grants },
+      );
+      const sim = createSimulation(
+        makeConfig({ stats, seed, startWave: STRESS_START_WAVE, maxTicks: 30 * TICK_RATE }),
+        stressData(),
+        [watch],
+      );
+      while (!sim.state.finished) sim.step(NO_INPUT);
+      return [rev, peak, sim.result().counters.orbMemoryFull];
+    };
+    expect([1, 2].map((seed) => peakOf(1, seed))).toEqual([
+      [[1, 1], 25, 0],
+      [[1, 1], 27, 0],
+    ]);
+    expect([1, 2].map((seed) => peakOf(4, seed))).toEqual([
+      [[2, 2], 39, 0],
+      [[2, 2], 41, 0],
+    ]);
   });
 });

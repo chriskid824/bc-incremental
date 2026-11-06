@@ -355,9 +355,8 @@ describe('computeStatBlock', () => {
     expect(ModifierSchema.safeParse(flat).success).toBe(true);
   });
 
-  it("appends E14's comboCap: last of 65, base 20, an unscoped count that flat adds to", () => {
-    expect(STAT_IDS).toHaveLength(65);
-    expect(STAT_IDS.slice(-2)).toEqual(['barrageSplit', 'comboCap']);
+  it("appends E14's comboCap: the 65th, base 20, an unscoped count that flat adds to", () => {
+    expect(STAT_IDS.slice(63, 65)).toEqual(['barrageSplit', 'comboCap']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.comboCap).toBe(20);
     expect(isScopedStat('comboCap')).toBe(false);
@@ -398,6 +397,54 @@ describe('computeStatBlock', () => {
       compileBuild(block([]), [], undefined, [
         (b) => {
           b.addModifier({ stat: 'comboCap', kind: 'flat', value: 2, tags: ['hit'] });
+        },
+      ]),
+    ).toThrow('is not a scoped stat; use scaleStat or offsetStat');
+  });
+
+  it("appends E15's orbitSpeed: last of 66, base 1, an unscoped multiplier that increased adds to", () => {
+    expect(STAT_IDS).toHaveLength(66);
+    expect(STAT_IDS.slice(-2)).toEqual(['comboCap', 'orbitSpeed']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.orbitSpeed).toBe(1);
+    expect(isScopedStat('orbitSpeed')).toBe(false);
+    expect(block([]).values.orbitSpeed).toBe(1);
+    // 環繞's 轉速 ranks: increased on the base 1, which compileBuild folds into every orbit's
+    // revPerSec (src/sim/emitters/orbit.test.ts pins the fold and its clamp).
+    const stats = block([
+      { stat: 'orbitSpeed', kind: 'increased', value: 0.15 },
+      { stat: 'orbitSpeed', kind: 'increased', value: 0.3 },
+    ]);
+    expect(stats.values.orbitSpeed).toBeCloseTo(1.45, 12);
+    expect(stats.scoped).toEqual([]);
+    // Plants orbitSpeed's tags, notTags or scope taken: refused by computeStatBlock, and at load
+    // by the modifier schema, on their fields, as comboCap's are.
+    const bad = [
+      { stat: 'orbitSpeed', kind: 'increased', value: 0.15, tags: ['orbit'] },
+      { stat: 'orbitSpeed', kind: 'increased', value: 0.15, notTags: ['aura'] },
+      { stat: 'orbitSpeed', kind: 'increased', value: 0.15, scope: 'outer.aura' },
+    ] as const satisfies readonly Modifier[];
+    for (const mod of bad) {
+      expect(() => block([mod])).toThrow(
+        'Tags, scopes, conditions and scalings are only allowed on scoped stats, not flat ' +
+          `damage: ${JSON.stringify(mod)}`,
+      );
+    }
+    expect(
+      bad.map((mod) => ModifierSchema.safeParse(mod).error?.issues.map((i) => i.message)),
+    ).toEqual([
+      ['tags are only allowed on scoped stats, and not on flat damage'],
+      ['notTags are only allowed on scoped stats, and not on flat damage'],
+      ['scope is only allowed on scoped stats, and not on flat damage'],
+    ]);
+    expect(
+      ModifierSchema.safeParse({ stat: 'orbitSpeed', kind: 'increased', value: 0.15 }).success,
+    ).toBe(true);
+    // And a module's addModifier, which takes scoped stats alone.
+    expect(() =>
+      compileBuild(block([]), [], undefined, [
+        (b) => {
+          b.addModifier({ stat: 'orbitSpeed', kind: 'increased', value: 0.15, tags: ['orbit'] });
         },
       ]),
     ).toThrow('is not a scoped stat; use scaleStat or offsetStat');

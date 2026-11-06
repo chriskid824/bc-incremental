@@ -315,6 +315,57 @@ describe('攔截軌道 (orbitBlocksBullets; lead ruling W6)', () => {
     }
   });
 
+  it('turns with the orbitSpeed stat: at 1.5 a bullet is blocked where the orbs, turning 1.5 times a second, hit an enemy of its radius (E15)', () => {
+    // Plants the blockers placed at ORBIT_DEFAULTS.revPerSec, not the emitter's own speed.
+    const reach = 12 + BULLET_RADIUS;
+    const probes: PlacedEnemy[] = [];
+    for (let k = 0; k < 72; k++) {
+      const a = (2 * Math.PI * k) / 72;
+      for (const ring of [110, 180]) {
+        for (const off of [-reach + 0.5, 0, reach - 0.5]) {
+          probes.push({
+            x: PLAYER.x + (ring + off) * Math.cos(a),
+            y: PLAYER.y + (ring + off) * Math.sin(a),
+            type: 'square',
+            radius: BULLET_RADIUS,
+          });
+        }
+      }
+    }
+    const ctx = placed([shooterAt(400), ...probes], {
+      values: { orbitBlocksBullets: 1, orbitSpeed: 1.5 },
+      grants: [ORBIT, OUTER_RING],
+    });
+    expect(orbits(ctx).map((em) => (em.spec as OrbitSpec).revPerSec)).toEqual([1.5, 1.5]);
+    const shooter = enemy(ctx, 1);
+    const probed = ctx.enemies.slice(1);
+    // Ticks on which no orb of ring 0's 3 at 1.5 a second sits where orb 0 would at 1 (they
+    // meet every 40 ticks).
+    for (const now of [7, 23, 50]) {
+      ctx.now = now;
+      ctx.events.length = 0;
+      rebuildGrid(ctx);
+      for (const em of orbits(ctx)) runOrbit(ctx, em);
+      const hit = new Set(ctx.events.flatMap((e) => (e.type === 'hit' ? [e.targetId] : [])));
+      const blocked = new Set(
+        probed.filter((e) => blockedAt(ctx, shooter, e.x, e.y)).map((e) => e.id),
+      );
+      expect(blocked, `tick ${now}`).toEqual(hit);
+      expect(hit.size, `tick ${now}`).toBeGreaterThan(5);
+      // Not where a ring turning once a second would put its orb 0.
+      const [ox, oy] = (() => {
+        const em = orbits(ctx)[0] as EmitterRuntime;
+        const a = (2 * Math.PI * now) / TICK_RATE;
+        return [
+          ctx.player.x + (em.spec as OrbitSpec).radius * Math.cos(a),
+          ctx.player.y + (em.spec as OrbitSpec).radius * Math.sin(a),
+        ];
+      })();
+      expect(blockedAt(ctx, shooter, ox, oy), `tick ${now}`).toBe(false);
+      for (const em of orbits(ctx)) em.orbs?.count.fill(0);
+    }
+  });
+
   it('blocks nothing with orbitBlocksBullets 0 or without an orbit emitter', () => {
     for (const options of [
       { grants: [ORBIT] },

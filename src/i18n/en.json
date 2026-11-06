@@ -189,6 +189,7 @@
   "stat.barragePierce": "Small projectile pierce",
   "stat.barrageSplit": "Small projectile split chance",
   "stat.comboCap": "Combo stack cap",
+  "stat.orbitSpeed": "Orbit speed",
   "enemy.triangle.name": "Triangle",
   "enemy.triangle.plural": "Triangles",
   "enemy.square.name": "Square",

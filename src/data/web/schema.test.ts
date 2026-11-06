@@ -595,6 +595,8 @@ describe('PayloadEffectSchema', () => {
     ['a coin', { kind: 'coinHit', multiplier: 10, ignoreShield: true }],
     ['a burn spread', { kind: 'spreadAilment', ailment: 'burn', radius: 100, effect: 0.5 }],
     ['a thaw (E6)', { kind: 'thaw' }],
+    ['a pull to the aura’s edge (E15)', { kind: 'pull', to: 'auraEdge' }],
+    ['a pull to a distance (E15)', { kind: 'pull', to: 120 }],
   ] as const)('accepts %s', (_label, effect) => {
     expect(PayloadEffectSchema.parse(effect)).toEqual(effect);
   });
