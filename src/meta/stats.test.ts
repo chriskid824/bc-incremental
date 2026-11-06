@@ -542,7 +542,6 @@ describe('computeStatBlock', () => {
   });
 
   it("appends E17's interestRate and bonusWaveInterest: the 69th and 70th, bases 0 and 1, unscoped, flat adds to them", () => {
-    expect(STAT_IDS).toHaveLength(70);
     expect(STAT_IDS.slice(68, 70)).toEqual(['interestRate', 'bonusWaveInterest']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.interestRate).toBe(0);
@@ -600,6 +599,74 @@ describe('computeStatBlock', () => {
       ).toThrow(
         `addModifier: ${JSON.stringify(added)} is not a scoped stat; use scaleStat or offsetStat`,
       );
+    }
+  });
+
+  it("appends E17's shardExponent: last of 71, base 1, an unscoped factor that more multiplies", () => {
+    expect(STAT_IDS).toHaveLength(71);
+    expect(STAT_IDS.slice(-2)).toEqual(['bonusWaveInterest', 'shardExponent']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.shardExponent).toBe(1);
+    expect(isScopedStat('shardExponent')).toBe(false);
+    expect(block([]).values.shardExponent).toBe(1);
+    // ★守財奴's 「持有碎片加成的指數 ×1.5」: more 0.5 on the base 1, which compileBuild reads once
+    // (src/sim/build/shardExponent.test.ts pins what it reaches).
+    const stats = block([{ stat: 'shardExponent', kind: 'more', value: 0.5 }]);
+    expect(stats.values.shardExponent).toBe(1.5);
+    expect(stats.scoped).toEqual([]);
+    expect(compileBuild(stats, []).values.shardExponent).toBe(1.5);
+    // Plants the factor read from StatBlock.base, BASE_STATS's 1 in a block meta builds: 錢包's
+    // 0.06 compiles to 0.09 beside ★守財奴's more.
+    const held: Modifier = {
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06 },
+    };
+    const miser = block([held, { stat: 'shardExponent', kind: 'more', value: 0.5 }]);
+    expect(miser.base.shardExponent).toBe(1);
+    expect(compileBuild(miser, []).mods.map((mod) => mod.scale?.exponent)).toEqual([0.09]);
+    expect(compileBuild(block([held]), []).mods.map((mod) => mod.scale?.exponent)).toEqual([0.06]);
+    // Plants shardExponent's tags, notTags, scope, conditions or scaling taken: refused by
+    // computeStatBlock, at load by the modifier schema on their fields, and by compileBuild,
+    // whose rows take scoped stats alone.
+    const bad = [
+      { stat: 'shardExponent', kind: 'more', value: 0.5, tags: ['hit'] },
+      { stat: 'shardExponent', kind: 'more', value: 0.5, notTags: ['crit'] },
+      { stat: 'shardExponent', kind: 'more', value: 0.5, scope: 'outer.greed' },
+      { stat: 'shardExponent', kind: 'more', value: 0.5, when: [{ targetKind: 'boss' }] },
+      { stat: 'shardExponent', kind: 'more', value: 0.5, scaling: { per: 'shardsHeld' } },
+    ] as const satisfies readonly Modifier[];
+    for (const mod of bad) {
+      expect(() => block([mod])).toThrow(
+        'Tags, scopes, conditions and scalings are only allowed on scoped stats, not flat ' +
+          `damage: ${JSON.stringify(mod)}`,
+      );
+      expect(() => compileBuild({ ...block([]), scoped: [mod] }, [])).toThrow(
+        `Not a scoped stat: ${JSON.stringify(mod)}`,
+      );
+    }
+    expect(
+      bad.map((mod) => ModifierSchema.safeParse(mod).error?.issues.map((i) => i.message)),
+    ).toEqual([
+      ['tags are only allowed on scoped stats, and not on flat damage'],
+      ['notTags are only allowed on scoped stats, and not on flat damage'],
+      ['scope is only allowed on scoped stats, and not on flat damage'],
+      ['conditions are only allowed on scoped stats, and not on flat damage'],
+      ['scaling is only allowed on scoped stats, and not on flat damage'],
+    ]);
+    expect(
+      ModifierSchema.safeParse({ stat: 'shardExponent', kind: 'more', value: 0.5 }).success,
+    ).toBe(true);
+    // And a module's addModifier, which takes scoped stats alone, with a scaling as without.
+    for (const mod of [bad[0], bad[4]]) {
+      expect(() =>
+        compileBuild(block([]), [], undefined, [
+          (b) => {
+            b.addModifier(mod);
+          },
+        ]),
+      ).toThrow('is not a scoped stat; use scaleStat or offsetStat');
     }
   });
 

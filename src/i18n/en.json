@@ -194,6 +194,7 @@
   "stat.walletWeight": "Wallet weight",
   "stat.interestRate": "Interest rate",
   "stat.bonusWaveInterest": "Bonus wave interest",
+  "stat.shardExponent": "Held-shards exponent",
   "enemy.triangle.name": "Triangle",
   "enemy.triangle.plural": "Triangles",
   "enemy.square.name": "Square",

@@ -7,7 +7,8 @@
  * at their board's source, from specs scaled by its fusion's coefficient (docs/v3 C6 design D9,
  * D10). Both scale and offset stats, add modifiers, set flags and the signature attack's
  * parameters, and add triggers, effects and hooks. The result holds the final stat values, the
- * ModTable of the build's scoped modifiers followed by the module-added ones, the run's damage
+ * ModTable of the build's scoped modifiers followed by the module-added ones (a shardsHeld
+ * scaling's exponent × the shardExponent stat, read before the modules), the run's damage
  * sources and who its ailments and the center's chain jumps are credited to (D8), the hook
  * lists, the emitters: the signature's first, then the emitter grants, the build's
  * (StatBlock.emitters) and the modules', one per kind, source and key (an aura's grants of one
@@ -66,7 +67,7 @@ import { NO_POLICY_SPEC } from '../systems/systemState';
 import type { ChainPolicySpec } from '../systems/systemState';
 import { TICK_RATE } from '../types';
 import type { CharacterRun } from '../types';
-import { readsCombo, readsTargetIs, statAt, staticInput } from './eval';
+import { heldExponent, readsCombo, readsTargetIs, statAt, staticInput } from './eval';
 import { compileConversions, compileMods, ModTable, rowValues } from './modTable';
 import type { CompiledConversion, CompiledMod } from './modTable';
 import { countOf, sizeOf } from './size';
@@ -1159,6 +1160,12 @@ export function compileBuild(
   // a module's own cap (★無盡連擊's Infinity) wins; whole stacks, at least 1. At its base, 20,
   // the flag is the literal's DEFAULT_COMBO_CAP.
   flags.comboCap = Math.max(1, Math.floor(values.comboCap));
+  // ★守財奴's 「持有碎片加成的指數 ×1.5」 (E17, lead ruling G2): the shardExponent stat, read once
+  // here, before any module runs, as comboCap is, so a module's offsetStat or scaleStat does not
+  // reach it; every shardsHeld scaling on the pow and powFactor curves, the build's and the
+  // modules' addModifier ones, compiles with its exponent × it (compileMods). At 1, the stat's
+  // base, each compiles with its spec's own exponent.
+  const shardExponent = heldExponent(values.shardExponent);
   // The signature's changes come before the rules', whose scaleStat calls then scale them too.
   compileInstance(CENTER, () => compileSignature(signature.id, signature, compiler, CENTER));
   if (character === null) {
@@ -1342,7 +1349,7 @@ export function compileBuild(
     Int32Array.from(triggers.filter((t) => t.on === event).map((t) => t.index)),
   );
 
-  const mods = compileMods(scoped, sources);
+  const mods = compileMods(scoped, sources, shardExponent);
   // So too the highest-hp enemy (lead ruling H2): every condition compiles in compileMods (a
   // modifier's `when`, the build's and the modules') or in compileTrigger (a trigger's, through
   // addTrigger), so a targetIs anywhere in the build is in one of these.

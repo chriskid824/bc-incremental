@@ -146,16 +146,21 @@ const ESTIMATE = staticInput();
 /**
  * Compiles StatBlock.scoped, keeping data order; scopes resolve against `sources`, which keeps
  * them current as it numbers more sources, and an inZone condition numbers its source there.
- * Throws on a stat that is not scoped.
+ * Each scaling compiles with `shardExponent`, the factor on a shardsHeld exponent (compileScaling;
+ * the build's heldExponent, compileBuild), 1 when omitted. Throws on a stat that is not scoped.
  */
-export function compileMods(scoped: readonly Modifier[], sources: SourceTable): CompiledMod[] {
+export function compileMods(
+  scoped: readonly Modifier[],
+  sources: SourceTable,
+  shardExponent = 1,
+): CompiledMod[] {
   return scoped.map((mod) => {
     const stat = (SCOPED_STATS as readonly string[]).indexOf(mod.stat);
     if (stat < 0) throw new Error(`Not a scoped stat: ${JSON.stringify(mod)}`);
     const all = tagMask(mod.tags ?? []);
     const none = tagMask(mod.notTags ?? []);
     const scopeOk = mod.scope === undefined ? null : sources.scopeMask(mod.scope);
-    const scale = mod.scaling === undefined ? null : compileScaling(mod.scaling);
+    const scale = mod.scaling === undefined ? null : compileScaling(mod.scaling, shardExponent);
     const cond =
       mod.when === undefined
         ? null

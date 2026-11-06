@@ -270,6 +270,18 @@ export const STAT_IDS = [
    * values at such a payout, as it is when above 0, else 0 (NaN included). Its base is 1.
    */
   'bonusWaveInterest',
+  /**
+   * 持有碎片指數倍率 (the greed outer's ★守財奴, docs/v3/game-design-v3.md §4.12 「持有碎片加成的指數
+   * ×1.5」): the factor on the exponent of every shardsHeld scaling on the pow and powFactor
+   * curves (錢包's, 存款's and a greed fusion payload's × (held shards)^exponent alike, lead
+   * ruling 25a), e.g. 1.5 = ×1.5. Read once a compile, before any rule module runs, as comboCap is,
+   * so a module's offsetStat or scaleStat does not reach it: each such scaling compiles with
+   * exponent × shardExponent when the stat is finite and above 0, else × 1 (heldExponent,
+   * src/sim/build/eval.ts); at 1 with the spec's own exponent, no product. Other variables, the
+   * linear and log10 curves and a scaling's cap take nothing from it, and nothing reads it once the
+   * build is compiled.
+   */
+  'shardExponent',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -348,6 +360,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   walletWeight: 1,
   interestRate: 0,
   bonusWaveInterest: 1,
+  shardExponent: 1,
 };
 
 /**

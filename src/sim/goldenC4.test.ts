@@ -18,7 +18,7 @@ import type { Num } from '../core/num';
 import { AFFIX_IDS, AFFIX_MULTIPLY } from '../data/affixes';
 import { THORNS_DAMAGE_PCT } from '../data/emitters';
 import type { RuleSpec } from '../data/rules';
-import type { Modifier } from '../data/stats';
+import type { Modifier, StatBlock } from '../data/stats';
 import { TAG } from '../data/tags';
 import { inc } from '../data/templates';
 import type { TriggerSpec } from '../data/triggers';
@@ -28,6 +28,7 @@ import { enemySlow, frostMeter } from './ailments/frost';
 import { holdsBurn } from './ailments/records';
 import { liveBleedStacks, livePoisonStacks } from './ailments/rings';
 import { holdsShock } from './ailments/shock';
+import { compileBuild } from './build/compile';
 import type { BarrageParams } from './build/compile';
 import { compileScaling, scaledValue } from './build/eval';
 import { sizeOf, spreadOf } from './build/size';
@@ -61,6 +62,7 @@ import {
 } from './systems/shots';
 import {
   afterimageModule,
+  eventsOf,
   GOLDEN_BUILDS,
   makeConfig,
   makeStats,
@@ -3344,6 +3346,25 @@ const GOLD_RING_STATS = makeStats({}, [], {
   emitters: [{ source: 'outer.greed', grant: { kind: 'goldRing', radius: 200, dropPct: 0.5 } }],
 });
 
+/**
+ * E17's ★守財奴 (gd:503 「持有碎片加成的指數 ×1.5」, lead ruling G2) as inline data on M1's volley
+ * and waves from wave 12: a wallet of 1e4 shards under 錢包's damage more of × (held shards)^0.06
+ * (gd:498) and a second copy at 0.06, 存款 at full (gd:499 「點滿約到 0.12」), with the
+ * shardExponent stat at 1.5, BASE_STATS's 1 under ★守財奴's more 0.5. Each copy compiles to
+ * 0.06 × 1.5 = 0.09, so the bonus starts at (1e4^0.09)^2 = 5.25 where the same build without the
+ * ★ starts at (1e4^0.06)^2 = 3.02, and rises with the shards the run collects.
+ */
+const MISER_HELD: Modifier = {
+  stat: 'damage',
+  kind: 'more',
+  value: 1,
+  scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06 },
+};
+const MISER_STATS = makeStats({ maxLife: 1e6, shardExponent: 1 * (1 + 0.5) }, [
+  MISER_HELD,
+  MISER_HELD,
+]);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3965,6 +3986,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: GOLD_RING_STATS, rules: [], startWave: 5 },
     expected: ['35908d0be9184213', 'aaa613a22e334a00'],
   },
+  {
+    name: 'miser',
+    config: { stats: MISER_STATS, rules: [], startWave: 12, walletShards: num(1e4) },
+    expected: ['d9134dd710b2adaa', '8c0b5754f125811a'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -4076,8 +4102,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E17's interest and goldRing are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([87, 'interest', 'goldRing']);
+    // The count docs/ARCHITECTURE.md gives: E17's goldRing and miser are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([88, 'goldRing', 'miser']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -9121,6 +9147,112 @@ describe('golden C4 runs', () => {
         insideShards: '14.2062',
         nearestOutside: '253.23',
         end: 'timeout',
+      },
+    });
+  });
+
+  it('compiles miser’s two copies to 0.09 each, multiplies its every hit by (H^0.09)^2 at its tick’s held shards H, and its first hits by H^0.06 over the same run’s without the ★ (E17, G2)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'miser') as GoldenC4Entry;
+    const stats = entry.config.stats as StatBlock;
+    // The same build without ★守財奴: the stat at its base.
+    const plain: StatBlock = { ...stats, values: { ...stats.values, shardExponent: 1 } };
+    const exponents = (block: StatBlock): (number | undefined)[] =>
+      compileBuild(block, []).mods.map((mod) => mod.scale?.exponent);
+    expect([exponents(stats), exponents(plain)]).toEqual([
+      [0.09, 0.09],
+      [0.06, 0.06],
+    ]);
+    /** The factor of the two copies at H held, as a hit reads it: (1 × p) × p. */
+    const factor = (x: number, e: number): number => {
+      const p = Math.max(1, x) ** e;
+      return p * p;
+    };
+    const bySeed: Record<number, Record<string, unknown>> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const runOf = (block: StatBlock) => {
+        const held = new Map<number, number>();
+        const watch: TestModule = (b) => {
+          b.hook('tick', (ctx) => {
+            held.set(ctx.now, ctx.evalInput.shardsHeld);
+          });
+        };
+        const config = makeConfig({
+          ...entry.config,
+          stats: block,
+          seed,
+          maxTicks: GOLDEN_C4_TICKS,
+        });
+        return { held, sim: createSimulation(config, makeTestData(), [watch]) };
+      };
+      const miser = runOf(stats);
+      const without = runOf(plain);
+      let tick = 0;
+      let first: Record<string, unknown> | null = null;
+      const counts = { hits: 0, crits: 0, kills: 0 };
+      while (!miser.sim.state.finished) {
+        tick++;
+        const events = miser.sim.step(NO_INPUT);
+        const others = without.sim.step(NO_INPUT);
+        const x = miser.held.get(tick) as number;
+        const hits = eventsOf([events], 'hit');
+        // Every hit of the volley, a crit's × 1.5 included: 10 × the factor at its tick.
+        for (const hit of hits) {
+          const base = hit.crit ? 10 * 1.5 : 10;
+          expect(toNumber(hit.amount), `${tick}`).toBe(base * factor(x, 0.09));
+          counts.hits++;
+          if (hit.crit) counts.crits++;
+        }
+        counts.kills += eventsOf([events], 'enemyKilled').length;
+        if (first !== null) continue;
+        // Until the first hit the two runs are one; at it, the same hits at × H^0.06.
+        expect(without.held.get(tick)).toBe(x);
+        if (hits.length === 0) {
+          expect(events).toEqual(others);
+          continue;
+        }
+        const plainHits = eventsOf([others], 'hit');
+        expect(plainHits.map((h) => [h.targetId, h.crit])).toEqual(
+          hits.map((h) => [h.targetId, h.crit]),
+        );
+        const ratios = hits.map((h, i) => {
+          const before = plainHits[i] as (typeof plainHits)[number];
+          expect(toNumber(before.amount)).toBe((h.crit ? 15 : 10) * factor(x, 0.06));
+          return toNumber(h.amount) / toNumber(before.amount);
+        });
+        for (const ratio of ratios) expect(ratio).toBeCloseTo(x ** 0.06, 12);
+        first = { tick, held: x, hits: hits.length, ratio: (ratios[0] as number).toFixed(6) };
+      }
+      const ticks = [...miser.held.values()];
+      bySeed[seed] = {
+        first,
+        factor: [factor(ticks[0] as number, 0.09), factor(Math.max(...ticks), 0.09)].map((f) =>
+          f.toFixed(4),
+        ),
+        without: factor(ticks[0] as number, 0.06).toFixed(4),
+        ...counts,
+        shards: toNumber(miser.sim.state.shards).toFixed(4),
+      };
+    }
+    // From the wallet's 1e4 alone, (1e4^0.09)^2 = 5.2481 where the build without the ★ reads
+    // (1e4^0.06)^2 = 3.0200, rising with the run's shards; the first hits land at tick 34 and 33,
+    // × 1e4^0.06 = 1.7378 over the same run's without the ★, crits as plain hits.
+    const common = { without: '3.0200', hits: 150 };
+    expect(bySeed).toEqual({
+      1: {
+        first: { tick: 34, held: 10000, hits: 2, ratio: '1.737801' },
+        factor: ['5.2481', '5.2823'],
+        ...common,
+        crits: 12,
+        kills: 80,
+        shards: '367.3228',
+      },
+      2: {
+        first: { tick: 33, held: 10000, hits: 1, ratio: '1.737801' },
+        factor: ['5.2481', '5.2813'],
+        ...common,
+        crits: 10,
+        kills: 79,
+        shards: '357.0561',
       },
     });
   });

@@ -71,7 +71,8 @@
       "thornsArea": 1,
       "walletWeight": 1,
       "interestRate": 0,
-      "bonusWaveInterest": 1
+      "bonusWaveInterest": 1,
+      "shardExponent": 1
     },
     "values": {
       "damage": 450.22067097931824,
@@ -143,7 +144,8 @@
       "thornsArea": 1,
       "walletWeight": 1,
       "interestRate": 0,
-      "bonusWaveInterest": 1
+      "bonusWaveInterest": 1,
+      "shardExponent": 1
     },
     "scoped": [
       {

@@ -224,12 +224,31 @@ export interface CompiledScaling {
   readonly cap: number;
 }
 
-export function compileScaling(spec: ScalingSpec): CompiledScaling {
+/**
+ * The factor ★守財奴's shardExponent stat puts on a shardsHeld scaling's exponent (「持有碎片加成的
+ * 指數 ×1.5」, gd:503; E17, lead ruling G2): the stat when it is finite and above 0, else 1, since
+ * an exponent of 0 would turn the held-shard bonus off, which no node asks for.
+ */
+export const heldExponent = (value: number): number =>
+  Number.isFinite(value) && value > 0 ? value : 1;
+
+/**
+ * `spec` compiled; with `shardExponent` (heldExponent of the build's stat, compileBuild), a
+ * shardsHeld scaling on the pow or powFactor curve takes exponent × shardExponent, and at 1 the
+ * spec's own exponent with no product. Other variables, the linear and log10 curves and the cap
+ * are the spec's whatever the factor.
+ */
+export function compileScaling(spec: ScalingSpec, shardExponent = 1): CompiledScaling {
+  const curve = CURVE_CODE[spec.curve ?? 'linear'];
+  const exponent = spec.exponent ?? 1;
   return {
     read: SCALING_READERS[spec.per],
     every: spec.every ?? 0,
-    curve: CURVE_CODE[spec.curve ?? 'linear'],
-    exponent: spec.exponent ?? 1,
+    curve,
+    exponent:
+      shardExponent !== 1 && spec.per === 'shardsHeld' && (curve === POW || curve === POW_FACTOR)
+        ? exponent * shardExponent
+        : exponent,
     cap: spec.curve === 'powFactor' ? (spec.cap ?? Infinity) - 1 : (spec.cap ?? Infinity),
   };
 }

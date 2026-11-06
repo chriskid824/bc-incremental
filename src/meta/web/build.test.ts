@@ -16,7 +16,8 @@ import { FULL_SCOPE } from '../../data/web/scope';
 import { fixtureContent } from '../../data/web/testing';
 import type { AssembledWeb, NodeEffects, WebNode } from '../../data/web/types';
 import { applyPoison } from '../../sim/ailments/apply';
-import { statAt } from '../../sim/build/eval';
+import { compileBuild, signatureRows } from '../../sim/build/compile';
+import { statAt, staticInput } from '../../sim/build/eval';
 import type { EvalInput } from '../../sim/build/eval';
 import { modTableFor, SCOPED_INDEX } from '../../sim/build/modTable';
 import { CENTER, rowKey } from '../../sim/build/sources';
@@ -222,6 +223,55 @@ describe('webBuild (§5.1)', () => {
       (mod) => !bare.stats.scoped.includes(mod) && mod.stat === 'damage',
     );
     expect(extra).toEqual([{ stat: 'damage', kind: 'more', value: 0.05 * 11 }]);
+  });
+
+  it('raises the greed payload’s held-shard bonus under ★守財奴’s shardExponent as it does 錢包’s: 0.06 to 0.09 each (E17, lead ruling 25a)', () => {
+    // Planted bugs: the factor on unscoped modifiers alone (the payload's bonus is scoped to the
+    // center), or on scoped ones alone; the payload's bonus left out of the build.
+    const held = (exponent: number): Modifier => ({
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      scaling: { per: 'shardsHeld', curve: 'powFactor', exponent },
+    });
+    const core = fire.byId.get('fusion.fire.greed.core') as WebNode;
+    // The fixture's greed payload (C6b.3): a center damage more × shardsHeld^0.06.
+    expect(core.effects.modifiers).toEqual([{ ...held(0.06), scope: 'center' }]);
+    const ENTRY = 'outer.greed.main.entry';
+    const STAR = 'outer.greed.main.star';
+    let web = withEffects(fire, ENTRY, { modifiers: [held(0.06)] });
+    web = withEffects(web, STAR, {
+      modifiers: [{ stat: 'shardExponent', kind: 'more', value: 0.5 }],
+    });
+    const compiled = (ranks: Readonly<Record<string, number>>) => {
+      const run = webBuild(web, owning(ranks));
+      const build = compileBuild(run.stats, [], run.signature, [], run.character);
+      const exponents = run.stats.scoped.flatMap((mod, i) =>
+        mod.scaling?.per === 'shardsHeld'
+          ? [[mod.scope ?? null, build.mods[i]?.scale?.exponent]]
+          : [],
+      );
+      const hit = build.table.row(signatureRows(build).hit);
+      const at = { ...staticInput(), shardsHeld: 1e4 };
+      return { exponents, factor: statAt(build.table, hit, SCOPED_INDEX.damage, at) };
+    };
+    const owned = { [ENTRY]: 1, 'fusion.fire.greed.core': 1 };
+    const plain = compiled(owned);
+    const miser = compiled({ ...owned, [STAR]: 1 });
+    expect(plain.exponents).toEqual([
+      [null, 0.06],
+      ['center', 0.06],
+    ]);
+    expect(miser.exponents).toEqual([
+      [null, 0.09],
+      ['center', 0.09],
+    ]);
+    expect(compiled({ 'fusion.fire.greed.core': 1, [STAR]: 1 }).exponents).toEqual([
+      ['center', 0.09],
+    ]);
+    // A center hit at 1e4 held: × (1e4^0.06)^2 = 3.02 before, × (1e4^0.09)^2 = 5.25 under the
+    // ★, so × 1e4^0.06 = 1.74 more: both bonuses reach the hit.
+    expect(miser.factor / plain.factor).toBeCloseTo(1e4 ** 0.06, 10);
   });
 });
 

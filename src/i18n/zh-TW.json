@@ -194,6 +194,7 @@
   "stat.walletWeight": "錢包碎片權重",
   "stat.interestRate": "利率",
   "stat.bonusWaveInterest": "獎勵波利息倍率",
+  "stat.shardExponent": "持有碎片指數",
   "enemy.triangle.name": "三角",
   "enemy.triangle.plural": "三角",
   "enemy.square.name": "方塊",

@@ -440,6 +440,8 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   interestRate: 'percent',
   // A multiplier on 1 (◆獎勵波's flat 2 reads +200%: ×3), as walletWeight reads.
   bonusWaveInterest: 'percent',
+  // A factor on 1, as walletWeight: a flat 0.5 reads +50%, never +0.5 (★守財奴 is a more).
+  shardExponent: 'percent',
 };
 
 /**

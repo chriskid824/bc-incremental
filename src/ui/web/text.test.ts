@@ -203,6 +203,7 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'walletWeight',
       'interestRate',
       'bonusWaveInterest',
+      'shardExponent',
     ]);
   });
 
@@ -1296,6 +1297,21 @@ describe('every template, through one node (§4.7)', () => {
       );
       const web = { ...fire, nodes, byId: new Map(nodes.map((node) => [node.id, node])) };
       expect(linesOf(web, id, locale, 3)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    ['en', ['50% more Held-shards exponent', '+50% Held-shards exponent']],
+    ['zh-TW', ['持有碎片指數總增 50%', '持有碎片指數 +50%']],
+  ] as const)(
+    'writes ★守財奴’s more shardExponent 0.5, and a flat 0.5 as a percentage on the factor, in %s (E17)',
+    (locale, expected) => {
+      // Plants shardExponent's name missing, or its flat read as a number (+0.5).
+      const mods = [more('shardExponent', 0.5), flat('shardExponent', 0.5)];
+      const lines = mods.map(
+        (mod) => linesOf(withEffects(fire, NOTABLE, { modifiers: [mod] }), NOTABLE, locale)[0],
+      );
+      expect(lines).toEqual(expected);
     },
   );
 

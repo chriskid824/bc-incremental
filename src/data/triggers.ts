@@ -25,7 +25,8 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
  * combo stacks as they are at the instance (src/sim/systems/combo.ts). `shardsHeld`: the shards
  * the player holds, the wallet the run started with (RunConfig.walletShards) × the walletWeight
  * stat (E17) plus the run's own (SimState.shards, less what spendShards spent), and under ◆複利
- * (BuildFlags.interestHeld) the run's interest too (SimState.interestShards, InterestSpec).
+ * (BuildFlags.interestHeld) the run's interest too (SimState.interestShards, InterestSpec); the
+ * shardExponent stat multiplies the exponent of its pow and powFactor scalings at compile.
  * `enemiesInAura`: the alive enemies an aura pulse of the build would reach, 0
  * without an aura emitter (src/sim/emitters/aura.ts). `minionCount`: the live timed rows a
  * spawnDrone effect appended to the drone pool (its spirits and small drones; gd:572's
@@ -67,7 +68,11 @@ export interface ScalingSpec {
   /** Step size: x counts whole steps of `every`. Continuous without it. */
   readonly every?: number;
   readonly curve?: ScalingCurve;
-  /** Exponent of the pow and powFactor curves; required exactly with those two. */
+  /**
+   * Exponent of the pow and powFactor curves; required exactly with those two. A shardsHeld
+   * scaling's exponent compiles × the build's shardExponent stat (heldExponent of it; ★守財奴,
+   * E17; compileScaling, src/sim/build/eval.ts); no other variable's does.
+   */
   readonly exponent?: number;
   /** Upper bound on the contribution, or on powFactor's factor. Uncapped without it. */
   readonly cap?: number;
