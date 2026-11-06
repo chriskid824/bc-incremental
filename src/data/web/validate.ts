@@ -491,11 +491,47 @@ function schemaIssues(content: Content): ContentIssue[] {
   return issues;
 }
 
-/** V1 on a board: each node's effects (nodeEffectIssues) and its grants (grantConflicts). */
+/**
+ * V1 on a node's priceFactor (WebNode.priceFactor), each problem after `at`: a finite number above
+ * 1 (the schema refuses NaN and Infinity first, at load; this says so again for content that
+ * skipped it), on a 1-rank node, since it counts once per owned node, and not on the signature,
+ * which is never bought and counts in no price (D5). [] for a node without one. Above 1 (the
+ * lead's ruling 25c): a refund returns the unfactored price (Hoshi's 照原價退), so under a factor
+ * below 1 a buy and its refund would pay back more than the buy charged, and a loop of them would
+ * turn spent into wallet shards; a factor of 1 does nothing. A discount node would need what each
+ * rank paid, a save field, and so a ruling of its own.
+ */
+export function priceFactorIssues(at: string, node: WebNode): string[] {
+  const factor = node.priceFactor;
+  if (factor === undefined) return [];
+  const issues: string[] = [];
+  if (!(Number.isFinite(factor) && factor > 1)) {
+    issues.push(
+      `${at}: priceFactor must be a finite number above 1 (got ${num(factor)}): a refund returns the base price, so below 1 it would pay back more than the buy charged, and 1 does nothing; write the factor on the shard prices, 1.5 for +50%`,
+    );
+  }
+  if (node.ranks !== 1) {
+    issues.push(
+      `${at}: priceFactor sits on a node of ${node.ranks} ranks; it counts once per owned node, so it takes a 1-rank node (a ◆ or ★)`,
+    );
+  }
+  if (node.kind === 'signature') {
+    issues.push(
+      `${at}: priceFactor sits on the signature, which is never bought and counts in no price (D5); put it on a node that is bought`,
+    );
+  }
+  return issues;
+}
+
+/**
+ * V1 on a board: each node's effects (nodeEffectIssues) and price factor (priceFactorIssues), and
+ * its grants (grantConflicts).
+ */
 function effectIssues(board: Board): ContentIssue[] {
   const issues: ContentIssue[] = [];
   for (const node of board.def.nodes) {
-    for (const message of nodeEffectIssues(nodeSubject(node, board.file), node.effects)) {
+    const at = nodeSubject(node, board.file);
+    for (const message of [...nodeEffectIssues(at, node.effects), ...priceFactorIssues(at, node)]) {
       issues.push({ file: board.file, node: node.id, message });
     }
   }

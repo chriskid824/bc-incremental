@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mul } from '../../core/num';
 import { deriveSeed } from '../../core/rng';
 import { assembleWeb, FULL_SCOPE } from '../../data/web';
 import type { Content } from '../../data/web';
 import { fixtureContent } from '../../data/web/testing';
+import { nextPrice } from '../../meta/web';
 import { GATED_KINDS } from '../../meta/web/counts';
 import type { RenderRandom } from '../../render/random';
 import { createSimulation, NO_INPUT } from '../../sim';
@@ -340,6 +342,41 @@ describe('resolveReplayBuild (docs/v3 C10 design §1.7; B5’s dev start options
     expect(fusion.progress?.ranks[core?.id ?? '']).toBe(1);
     expect(fusion.run.config(3, 18)).toMatchObject({ seed: 3, startWave: 18 });
     expect(fusion.run.config(3, 18).character?.id).toBe('fire');
+  });
+
+  it('credits a fusion’s purchases at their factored prices under an owned price factor (E17)', () => {
+    // 熔核's ◆ beta-one, which 霜焰's unlock investment buys before the core, with a factor.
+    const factorId = 'fire.center.beta.beta-one';
+    const fire = content.characters.fire;
+    const center = fire.center;
+    if (center === null) throw new Error('the fixture has 熔核’s center');
+    const nodes = center.nodes.map((node) =>
+      node.id === factorId ? { ...node, priceFactor: 1.5 } : node,
+    );
+    const priced: Content = {
+      ...content,
+      characters: { ...content.characters, fire: { ...fire, center: { ...center, nodes } } },
+    };
+    const build = { kind: 'fusion', key: 'fire.ice' } as const;
+    const plain = resolveReplayBuild(build, content, FULL_SCOPE);
+    const factored = resolveReplayBuild(build, priced, FULL_SCOPE);
+    const web = factored.web;
+    const progress = factored.progress;
+    if (web === null || progress === null || plain.web === null || plain.progress === null) {
+      throw new Error('a fusion build has a web and a progress');
+    }
+    // The same purchases, each credited at exactly the price canBuy asks, cores unfactored.
+    expect(progress.ranks).toEqual(plain.progress.ranks);
+    expect(progress.ranks[factorId]).toBe(1);
+    expect(progress.wallet).toEqual({ shards: 0, cores: 0, resonance: 0 });
+    expect(progress.spent.cores).toBe(plain.progress.spent.cores);
+    expect(progress.spent.shards).toBeGreaterThan(plain.progress.spent.shards);
+    // The core's own price: 1.5 × today's on the same ranks.
+    const core = web.fusions.get('ice')?.board.nodes.find((node) => node.kind === 'core');
+    const id = core?.id ?? '';
+    const before = { ...progress, ranks: { ...progress.ranks, [id]: 0 } };
+    const today = nextPrice(plain.web, before, id);
+    expect(nextPrice(web, before, id)).toEqual({ ...today, shards: mul(today.shards, 1.5) });
   });
 
   it('runs a preset on its own data, and refuses a character with no center (製作中)', () => {

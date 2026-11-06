@@ -22,6 +22,7 @@ import {
   more,
   notable,
   outerBranch,
+  priceFactor,
   ranked,
   rankedMods,
   signatureNode,
@@ -520,6 +521,32 @@ describe('the node templates', () => {
     expect(marked.answers).toEqual(['shielder', 'dasher']);
     expect({ ...marked, answers: [] }).toStrictEqual(spec);
     expect(spec.answers).toEqual([]);
+  });
+
+  it('priceFactor marks a copy with its factor, which the board builder records on the node', () => {
+    const spec = keystone('miser', { modifiers: [more('damage', 0.1)] });
+    const marked = priceFactor(spec, 1.5);
+    expect(marked).toStrictEqual({ ...spec, priceFactor: 1.5 });
+    expect(Object.hasOwn(spec, 'priceFactor')).toBe(false);
+    const def = defineOuter({ ...outerSpec('greed'), keystone: marked });
+    expect(byId(def.board, 'outer.greed.main.miser')?.priceFactor).toBe(1.5);
+    // A node written without one has no such key, as before the field existed.
+    const plain = defineOuter(outerSpec('greed'));
+    for (const node of [...plain.board.nodes, ...def.board.nodes]) {
+      if (node.id !== 'outer.greed.main.miser') {
+        expect(Object.hasOwn(node, 'priceFactor'), node.id).toBe(false);
+      }
+    }
+    expect(Object.keys(byId(def.board, 'outer.greed.main.miser') ?? {})).toEqual([
+      'id',
+      'kind',
+      'board',
+      'slot',
+      'ranks',
+      'effects',
+      'answers',
+      'priceFactor',
+    ]);
   });
 
   it('fusionRank is a RankSpec', () => {

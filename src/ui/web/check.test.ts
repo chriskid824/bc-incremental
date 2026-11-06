@@ -11,7 +11,7 @@ import { HUB } from '../../data/hub';
 import { OUTERS } from '../../data/outer';
 import { CHARACTER_IDS, OUTER_IDS } from '../../data/sources';
 import { isBehaviourModifier } from '../../data/stats';
-import { flat, inc } from '../../data/templates';
+import { flat, inc, more } from '../../data/templates';
 import type { TriggerSpec } from '../../data/triggers';
 import { assembleWeb, FULL_SCOPE, SCOPES, scopeHolds } from '../../data/web';
 import type { AssembledWeb, FusionKey, WebNode } from '../../data/web';
@@ -412,6 +412,62 @@ describe('V17', () => {
     );
     const jumping = { ...base, nodes, byId: new Map(nodes.map((node) => [node.id, node])) };
     expect(issuesWith({}, [jumping])).toEqual([]);
+  });
+});
+
+describe("a ★ with a price factor (E17's WebNode.priceFactor)", () => {
+  const STAR = 'outer.greed.main.star';
+  const DESC = `web.node.${STAR}.desc`;
+  /** fire's web with the greed ★ priced at 1.5 and holding `modifiers`. */
+  const miser = (modifiers: WebNode['effects']['modifiers']): AssembledWeb => {
+    const nodes = fire.nodes.map((node): WebNode =>
+      node.id === STAR
+        ? { ...node, priceFactor: 1.5, effects: { ...node.effects, modifiers } }
+        : node,
+    );
+    return { ...fire, nodes, byId: new Map(nodes.map((node) => [node.id, node])) };
+  };
+
+  it('asks for its hand description as without the field, and for no quote of the factor', () => {
+    const web = miser([more('damage', 0.5)]);
+    // The fixture's description says nothing of +50%: the generated line after it does.
+    expect(textIssues([web], fixtureLookups())).toEqual([]);
+    expect(issuesWith({ en: { [DESC]: null }, 'zh-TW': { [DESC]: null } }, [web])).toEqual([
+      `key '${DESC}' is missing in ${EN}; npm run content -- --stubs writes a TODO stub for each missing key`,
+      `key '${DESC}' is missing in ${ZH}; npm run content -- --stubs writes a TODO stub for each missing key`,
+    ]);
+    // A behaviour modifier's numbers are quoted as before, the factor's never.
+    const tagged = miser([flat('critChance', 0.1, { tags: ['burn'] })]);
+    expect(issuesWith({}, [tagged])).toEqual([
+      `key '${DESC}' (${EN}): does not quote +10%; a hand description quotes every number of its node's rules, triggers and behaviour modifiers`,
+      `key '${DESC}' (${ZH}): does not quote +10%; a hand description quotes every number of its node's rules, triggers and behaviour modifiers`,
+    ]);
+    expect(
+      issuesWith(
+        { en: { [DESC]: '+10% crit chance on burn.' }, 'zh-TW': { [DESC]: '燃燒暴擊率 +10%。' } },
+        [tagged],
+      ),
+    ).toEqual([]);
+  });
+
+  it("fills the factor's line under V19, which reports its key", () => {
+    const issues = issuesWith(
+      {
+        en: {
+          'web.priceFactor':
+            'While owned: talent shard prices {pct}{cap} (a refund returns the base price; the rest comes back with Refund all)',
+        },
+        'zh-TW': {
+          'web.priceFactor':
+            '擁有時：天賦節點的碎片價格 {pct}{cap}（退點只退原價，多付的在全部洗點時退回）',
+        },
+      },
+      [miser([])],
+    );
+    expect(issues).toEqual([
+      `node '${STAR}' (en): the text has an unfilled {cap}; check web.priceFactor`,
+      `node '${STAR}' (zh-TW): the text has an unfilled {cap}; check web.priceFactor`,
+    ]);
   });
 });
 

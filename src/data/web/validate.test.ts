@@ -8,7 +8,14 @@ import type { Batch } from './scope';
 import { fixtureContent } from './testing';
 import type { BoardDef, Content, WebNode, WebScope } from './types';
 import { contentIds } from './snapshot';
-import { contentIssues, fileOfBoard, keysAt, pathText, zodIssueText } from './validate';
+import {
+  contentIssues,
+  fileOfBoard,
+  keysAt,
+  pathText,
+  priceFactorIssues,
+  zodIssueText,
+} from './validate';
 import type { ValidateOptions } from './validate';
 import type * as RulesModule from '../rules';
 
@@ -1065,6 +1072,90 @@ describe('one golden message per load-time check (D23)', () => {
       "scope 'demoA' (src/data/web/scope.ts): another scope has this name; give each scope its own",
       "scope 'demoA' (src/data/web/scope.ts): character 'fier' is not a character; did you mean 'fire'?",
       "scope 'demoA' (src/data/web/scope.ts): fusion 'fire.fire' is not a fusion; did you mean 'fire.ice'?",
+    ]);
+  });
+});
+
+describe("V1: a node's priceFactor (E17)", () => {
+  const GREED = 'src/data/outer/greed.ts';
+  const STAR = 'outer.greed.main.star';
+  /** The issues of `factor` planted on node `id` of the fixture after B4, which has greed. */
+  const factorOn = (id: string, factor: unknown, board = 'greed'): string[] =>
+    plant((content) => {
+      const def =
+        board === 'fire' ? content.characters.fire.center : content.outers[board as 'greed']?.board;
+      set(find(def, id), 'priceFactor', factor);
+    }, 'B4');
+  /** V1's one range message (the lead's ruling 25c), after `at`, for the factor shown as `shown`. */
+  const range = (at: string, shown: string): string =>
+    `${at}: priceFactor must be a finite number above 1 (got ${shown}): a refund returns the base price, so below 1 it would pay back more than the buy charged, and 1 does nothing; write the factor on the shard prices, 1.5 for +50%`;
+
+  it('accepts a finite factor above 1 on a ★, a ◆, an entry and a threshold', () => {
+    expect(factorOn(STAR, 1.5)).toEqual([]);
+    expect(factorOn('outer.greed.beta.beta-one', 1.2)).toEqual([]);
+    expect(factorOn('outer.greed.main.entry', 1.0001)).toEqual([]);
+    expect(factorOn('outer.greed.main.threshold', 1 + 1e-9)).toEqual([]);
+    expect(factorOn('fire.center.main.star-one', 2, 'fire')).toEqual([]);
+  });
+
+  // 1 does nothing; below 1 a refund (the base price) would pay back more than the buy charged.
+  it.each([
+    [1, '1'],
+    [0.999, '0.999'],
+    [0.8, '0.8'],
+    [0, '0'],
+    [-1, '-1'],
+    [-0.5, '-0.5'],
+  ])('refuses %s with its message (the lead’s ruling 25c)', (factor, shown) => {
+    expect(factorOn(STAR, factor)).toEqual([range(`node '${STAR}' (${GREED})`, shown)]);
+  });
+
+  it('refuses NaN and Infinity at load, in the schema’s words, before any other check', () => {
+    // zodIssueText writes the value as JSON, where NaN and Infinity are null.
+    for (const factor of [Number.NaN, Infinity, -Infinity]) {
+      expect(factorOn(STAR, factor)).toEqual([
+        `node '${STAR}' (${GREED}): priceFactor null is not a number`,
+      ]);
+    }
+    // Validation's own words for content that skipped the schema.
+    const star = find(fixtureContent('B4').outers.greed?.board, STAR);
+    for (const [factor, shown] of [
+      [Number.NaN, 'NaN'],
+      [Infinity, 'Infinity'],
+      [-Infinity, '-Infinity'],
+      [-0, '0'],
+    ] as const) {
+      expect(priceFactorIssues('at', { ...star, priceFactor: factor })).toEqual([
+        range('at', shown),
+      ]);
+    }
+    expect(priceFactorIssues('at', star)).toEqual([]);
+    expect(priceFactorIssues('at', { ...star, priceFactor: 1.5 })).toEqual([]);
+  });
+
+  it('refuses a factor on a node of more than one rank, and on the signature', () => {
+    const r1 = 'outer.greed.alpha.r1';
+    expect(factorOn(r1, 1.5)).toEqual([
+      `node '${r1}' (${GREED}): priceFactor sits on a node of 3 ranks; it counts once per owned node, so it takes a 1-rank node (a ◆ or ★)`,
+    ]);
+    const mastery = 'outer.greed.alpha.mastery';
+    expect(factorOn(mastery, 1.5)).toEqual([
+      `node '${mastery}' (${GREED}): priceFactor sits on a node of unlimited ranks; it counts once per owned node, so it takes a 1-rank node (a ◆ or ★)`,
+    ]);
+    const root = 'fire.center.main.signature';
+    expect(factorOn(root, 1.5, 'fire')).toEqual([
+      `node '${root}' (src/data/characters/fire.ts): priceFactor sits on the signature, which is never bought and counts in no price (D5); put it on a node that is bought`,
+    ]);
+    // Two ranks are more than one (the schema refuses 2 ranks at load, so a node that skipped it).
+    const star = find(fixtureContent('B4').outers.greed?.board, STAR);
+    const twoRanks = 2 as unknown as WebNode['ranks'];
+    expect(priceFactorIssues('at', { ...star, ranks: twoRanks, priceFactor: 1.5 })).toEqual([
+      'at: priceFactor sits on a node of 2 ranks; it counts once per owned node, so it takes a 1-rank node (a ◆ or ★)',
+    ]);
+    // Both problems of one node, in this order.
+    expect(factorOn(r1, 0)).toEqual([
+      range(`node '${r1}' (${GREED})`, '0'),
+      `node '${r1}' (${GREED}): priceFactor sits on a node of 3 ranks; it counts once per owned node, so it takes a 1-rank node (a ◆ or ★)`,
     ]);
   });
 });

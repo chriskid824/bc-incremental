@@ -81,7 +81,7 @@ export interface NodeText {
   /**
    * The hand description when `web.node.<id>.desc` exists, with chanceLine's line under a
    * fusion's coef below 1 when a trigger is not chainJump and has no chance condition; else the
-   * generated lines; then 「答案：…」.
+   * generated lines; then 「答案：…」; then priceFactorLine's.
    */
   readonly lines: readonly string[];
 }
@@ -1410,10 +1410,22 @@ function generatedLines(
 }
 
 /**
+ * The line of a node with a price factor (WebNode.priceFactor), after its other lines: 「擁有時：
+ * 天賦節點的碎片價格 +50%（退點只退原價，多付的在全部洗點時退回）」 for 1.5, the factor less 1
+ * as a signed percent (1.25 → +25%), with how a refund works (the lead's ruling 25d); none without
+ * one. Generated even beside a hand description, which need not quote it (V17).
+ */
+function priceFactorLine(lookup: TextLookup, node: WebNode): string[] {
+  if (node.priceFactor === undefined) return [];
+  return [say(lookup, 'web.priceFactor', { pct: signedPercent(node.priceFactor - 1) })];
+}
+
+/**
  * A node's name, kind and lines at `rank` (§4.7): the hand text `web.node.<id>.desc` when the key
  * exists (F25), its placeholders filled (coefValues), then under a fusion's coef below 1 the
  * chance of its triggers that are not chainJump and have no chance condition (chanceLine); else
- * the generated lines; then 「答案：…」 for a node with answers. Numbers on a fusion board are the
+ * the generated lines; then 「答案：…」 for a node with answers, and the price factor's line
+ * (priceFactorLine) for a node with one. Numbers on a fusion board are the
  * run's: a trigger's chance and COEF fields × the fusion's coef, a rule's fields through
  * scaleRuleSpec (D10), a template core's bonus as generate wrote it. Throws on an id the web does
  * not hold.
@@ -1439,6 +1451,7 @@ export function describeNode(
       .join(say(lookup, 'web.join.list'));
     lines.push(say(lookup, 'web.answers', { enemies }));
   }
+  lines.push(...priceFactorLine(lookup, node));
   return { name: nodeName(web, id, lookup), kind: say(lookup, KIND_TEXT[node.kind]), lines };
 }
 

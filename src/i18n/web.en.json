@@ -370,6 +370,7 @@
   "web.coreName": "{name} \"{title}\"",
   "web.desc.chance": "{chance} chance to trigger",
   "web.answers": "Answers: {enemies}",
+  "web.priceFactor": "While owned: talent shard prices {pct} (a refund returns the base price; the rest comes back with Refund all)",
   "web.join.list": ", ",
   "web.join.and": " and ",
   "web.join.clause": ", ",

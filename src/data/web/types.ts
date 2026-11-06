@@ -110,6 +110,8 @@ export interface NodeSpec<K extends WebNodeKind = WebNodeKind> {
   readonly effects: NodeEffects;
   /** Enemies the node answers (「答案：盾兵」; V18). */
   readonly answers: readonly RowEnemy[];
+  /** WebNode.priceFactor, as written through the priceFactor helper; absent for none. */
+  readonly priceFactor?: number;
 }
 
 export const CENTER_STEPS = ['r1', 'r2', 'a', 'r3', 'r4', 'b', 'r5', 'r6', 'c', 'mastery'] as const;
@@ -149,6 +151,17 @@ export interface WebNode {
   readonly ranks: Ranks;
   readonly effects: NodeEffects;
   readonly answers: readonly RowEnemy[];
+  /**
+   * While the node is owned, the shard price of the next rank of every node of its character's web
+   * is multiplied by this factor (★守財奴's 1.5, gd:503 「天賦節點價格 +50%」; several
+   * multiply): boardCounts (src/meta/web/counts.ts) forms F from it and priceOf (price.ts)
+   * applies F. Absent for none, as on every node but a factor's. A finite number above 1 on a
+   * 1-rank node other than the signature (V1): it counts once per owned node, and below 1 a
+   * refund, which returns the unfactored price, would pay back more than the buy charged (the
+   * lead's ruling 25c). A fusion node never carries one (generate writes none). Not a run
+   * property: webBuild and the simulation never read it.
+   */
+  readonly priceFactor?: number;
 }
 
 export interface BoardDef {

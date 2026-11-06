@@ -1830,6 +1830,55 @@ describe('describeNode (§4.7)', () => {
     ]);
   });
 
+  it("adds the price factor's line after the node's other lines, in en and zh-TW (E17)", () => {
+    const priced = (web: AssembledWeb, id: string, factor: number): AssembledWeb => {
+      const nodes = web.nodes.map((n): WebNode =>
+        n.id === id ? { ...n, priceFactor: factor } : n,
+      );
+      return { ...web, nodes, byId: new Map(nodes.map((n) => [n.id, n])) };
+    };
+    const star = 'outer.greed.main.star';
+    const en = (pct: string): string =>
+      `While owned: talent shard prices ${pct} (a refund returns the base price; the rest comes back with Refund all)`;
+    const zh = (pct: string): string =>
+      `擁有時：天賦節點的碎片價格 ${pct}（退點只退原價，多付的在全部洗點時退回）`;
+    // A ★'s hand description, then the line, generated beside it (the lead's ruling 25d).
+    expect(linesOf(priced(fire, star, 1.5), star, 'en')).toEqual([
+      'A fixture keystone with no effect.',
+      'While owned: talent shard prices +50% (a refund returns the base price; the rest comes back with Refund all)',
+    ]);
+    expect(linesOf(priced(fire, star, 1.5), star, 'zh-TW')).toEqual([
+      '測試用的關鍵天賦，沒有效果。',
+      '擁有時：天賦節點的碎片價格 +50%（退點只退原價，多付的在全部洗點時退回）',
+    ]);
+    expect(linesOf(priced(fire, star, 1.25), star, 'en')).toEqual([
+      'A fixture keystone with no effect.',
+      en('+25%'),
+    ]);
+    expect(linesOf(priced(fire, star, 1.25), star, 'zh-TW')).toEqual([
+      '測試用的關鍵天賦，沒有效果。',
+      zh('+25%'),
+    ]);
+    // It names the 「全部洗點」 button as the panel does, in each locale.
+    expect(en('+50%')).toContain(MESSAGES.en['panel.refundAll']);
+    expect(zh('+50%')).toContain(MESSAGES['zh-TW']['panel.refundAll']);
+    // After a ◆'s generated lines and its 「答案：…」.
+    const counter = 'outer.poison.main.counter';
+    const mod = withEffects(fire, counter, { modifiers: [inc('damage', 0.1)] });
+    expect(linesOf(priced(mod, counter, 1.5), counter, 'zh-TW')).toEqual([
+      '傷害提高 10%',
+      '答案：三角、五角、盾兵、衝刺者',
+      zh('+50%'),
+    ]);
+    // The factor less 1 as a signed percent, trimmed as every percent here is (1.005: +0.5%).
+    const pct = (factor: number): string | undefined =>
+      linesOf(priced(fire, star, factor), star, 'en')[1];
+    expect([1.15, 2.5, 1.005].map(pct)).toEqual([en('+15%'), en('+150%'), en('+0.5%')]);
+    // A node without the field has no such line.
+    expect(linesOf(fire, star, 'en')).toEqual(['A fixture keystone with no effect.']);
+    expect(APP_LOOKUP.get('web.priceFactor', { pct: '+50%' })).toBe(en('+50%'));
+  });
+
   it('throws on an id the web does not hold', () => {
     expect(() => describeNode(fire, 'fire.center.main.nope', 1, lookups.en)).toThrow(
       "node 'fire.center.main.nope' is not on character 'fire''s web",

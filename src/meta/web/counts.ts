@@ -94,8 +94,10 @@ export function chainOfBoard(board: BoardId): string | null {
 /**
  * What the gates and prices count (D18, D19): distinct owned nodes per board, the signature never
  * (D5), a node of any rank once, an outer's entry and the center's connectors, ★ and threshold
- * included, fusion nodes toward no board; the owned cores and ★; and the purchases on each price
- * curve, every rank counted. A node's own gate leaves the node out (rules.ts), not this count.
+ * included, fusion nodes toward no board; the owned cores and ★; the purchases on each price
+ * curve, every rank counted; and the price factor F, the product of the owned nodes' priceFactor
+ * in web order, each owned node once, set only when one of them carries one (BoardCounts). A
+ * node's own gate leaves the node out (rules.ts), not this count.
  */
 export function boardCounts(web: AssembledWeb, progress: CharacterProgress): BoardCounts {
   let center = 0;
@@ -104,11 +106,15 @@ export function boardCounts(web: AssembledWeb, progress: CharacterProgress): Boa
   let stepPurchases = 0;
   let masteryRanks = 0;
   let mightRanks = 0;
+  let priceFactor: number | null = null;
   const outers: Partial<Record<OuterId, number>> = {};
   for (const node of web.nodes) {
     if (node.kind === 'signature') continue;
     const rank = storedRank(progress, node.id);
     if (rank === 0) continue;
+    if (node.priceFactor !== undefined) {
+      priceFactor = priceFactor === null ? node.priceFactor : priceFactor * node.priceFactor;
+    }
     if (isCenterBoard(node.board)) center += 1;
     else if (node.board.startsWith('outer.')) {
       const outer = outerOfBoard(node.board) as OuterId;
@@ -121,5 +127,6 @@ export function boardCounts(web: AssembledWeb, progress: CharacterProgress): Boa
     else if (curve === 'mastery') masteryRanks += rank;
     else if (curve === 'might') mightRanks += rank;
   }
-  return { center, outers, cores, keystones, stepPurchases, masteryRanks, mightRanks };
+  const counts = { center, outers, cores, keystones, stepPurchases, masteryRanks, mightRanks };
+  return priceFactor === null ? counts : { ...counts, priceFactor };
 }

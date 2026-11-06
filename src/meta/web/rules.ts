@@ -3,6 +3,11 @@
  * F51): canBuy's twelve rows, buy, the refunds and legalize, a spoke's fusion progress and the
  * fusion-slot order. Pure: each function returns a new progress and changes nothing it is given
  * (D21). B1's web UI, its run loop, C8's loader, the fuzz and calibration call them.
+ *
+ * Under a price factor (price.ts; ★守財奴), Hoshi's 2026-11-06 answer to item 25, 照原價退: canBuy
+ * and buy take the factored shard price, which buy adds to spent; refundNode, refundPreview and
+ * legalize return min(spent, the unfactored difference of canonicalCost), so what the factor added
+ * stays in spent; refundAll returns everything spent, the factor's part included.
  */
 
 import { add, gt, lt, min, sub, ZERO } from '../../core/num';
@@ -231,7 +236,8 @@ function rows7to11(account: AccountProgress, node: WebNode, counts: BoardCounts)
  *  5. needsPrestige, otherAscendancy (F10)
  *  6. notAdjacent: rank 0 and no owned neighbour, the signature counting as owned
  *  7–11. centerGate, outerGate, fusionGate, noFusionSlot, keystoneCap
- *  12. notEnoughShards, notEnoughCores, notEnoughResonance
+ *  12. notEnoughShards, notEnoughCores, notEnoughResonance, at priceOf's price: the shards × F,
+ *      the owned nodes' price factor (price.ts)
  * A refused gate carries its progress; every other refusal null.
  */
 export function canBuy(
@@ -273,7 +279,8 @@ export function canBuy(
 
 /**
  * One more rank of `id`: canBuy, which it throws on (callers check first), then the price moved
- * from the wallet to spent, and the chain recorded on the first purchase of an ascendancy node.
+ * from the wallet to spent, its shards × the owned nodes' price factor (priceOf), and the chain
+ * recorded on the first purchase of an ascendancy node.
  */
 export function buy(
   web: AssembledWeb,
@@ -377,7 +384,9 @@ const cappedCount = (spent: number, difference: number): number =>
 
 /**
  * The legal progress kept from `entries` (legalRanks), with the refund of what that drops from
- * `progress`: min(spent, canonicalCost(progress) − canonicalCost(kept)) per currency.
+ * `progress`: min(spent, canonicalCost(progress) − canonicalCost(kept)) per currency, unfactored
+ * (Hoshi's 2026-11-06 answer to item 25): a node bought under a price factor returns the
+ * unfactored difference, and the rest of what it paid stays in spent.
  */
 function settle(
   web: AssembledWeb,
@@ -423,7 +432,9 @@ const entriesWithout = (progress: CharacterProgress, id: string): [string, numbe
 /**
  * Every rank of `id` refunded, and then every node that only `id` connected or unlocked, through
  * legalize (AMB40; F16): min(spent, canonicalCost(before) − canonicalCost(after)) per currency
- * comes back. The chosen ascendancy stays (F10). An id that is not owned removes nothing.
+ * comes back, the base prices under a price factor (settle). Refunding a factor node itself
+ * returns its own price and takes its factor off the next prices. The chosen ascendancy stays
+ * (F10). An id that is not owned removes nothing.
  */
 export function refundNode(
   web: AssembledWeb,
@@ -456,7 +467,10 @@ export function refundPreview(
   return { dropped: Object.hasOwn(progress.ranks, id) ? [id, ...dropped] : dropped, refund };
 }
 
-/** Everything spent back in the wallet, nothing owned; the chosen ascendancy stays (gd:979, F10). */
+/**
+ * Everything spent back in the wallet, nothing owned; the chosen ascendancy stays (gd:979, F10).
+ * What a price factor added to spent comes back with the rest.
+ */
 export function refundAll(progress: CharacterProgress): CharacterProgress {
   const { wallet, spent } = progress;
   return {
@@ -475,8 +489,9 @@ export function refundAll(progress: CharacterProgress): CharacterProgress {
  * The legal part of `progress` (§4.5; R4): a node stays only while it is in the web, visible,
  * reachable from the root through kept nodes and buyable again counting the other kept nodes
  * (gates, slots, the ★ cap, ascendancy and, with `challenge`, the challenge's limits), repeated to a
- * fixpoint; ties drop in reverse web order. What drops is refunded as refundNode refunds, and the
- * dropped ids come back in drop order. C8's loader and B5's loadouts call it; it never throws.
+ * fixpoint; ties drop in reverse web order. What drops is refunded as refundNode refunds (the
+ * base prices under a price factor), and the dropped ids come back in drop order. C8's loader and
+ * B5's loadouts call it; it never throws.
  */
 export function legalize(
   web: AssembledWeb,

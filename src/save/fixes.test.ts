@@ -7,18 +7,29 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { add, gt, min, num, sub, ZERO } from '../core/num';
+import { add, gt, min, mul, num, sub, ZERO } from '../core/num';
 import type { Num } from '../core/num';
 import { createRng, deriveSeed } from '../core/rng';
 import { CHARACTER_IDS } from '../data/sources';
 import type { CharacterId } from '../data/sources';
 import { DEMO_SCOPE_A, FULL_SCOPE } from '../data/web/scope';
 import { fixtureContent } from '../data/web/testing';
-import type { AssembledWeb } from '../data/web/types';
+import type { AssembledWeb, Content } from '../data/web/types';
+import { GATED_KINDS } from '../meta/web/counts';
 import { progressFromOrder, unlockInvestment } from '../meta/web/invest';
-import { canonicalCost, DEFAULT_WEB_ECONOMY } from '../meta/web/price';
+import { shortestRoute } from '../meta/web/path';
+import { canonicalCost, DEFAULT_WEB_ECONOMY, nextPrice } from '../meta/web/price';
+import { emptyProgress } from '../meta/web/rules';
 import type { AccountProgress, CharacterProgress, Wallet, WebEconomy } from '../meta/web/types';
-import { fixProfile, freshProfile, profileContext, toProfileData } from './profile';
+import { SAVE_VERSION } from './format';
+import {
+  fixProfile,
+  freshProfile,
+  parseProfile,
+  profileContext,
+  serializeProfile,
+  toProfileData,
+} from './profile';
 import type { CharacterSlot, LoadoutRanks, SaveProfile } from './profile';
 import {
   conservationIssues,
@@ -509,6 +520,74 @@ describe('fixProfile (T8)', () => {
       without(three.ranks, 'fusion.fire.ice.core'),
     );
     expect(profile.characters.fire.progress.wallet.cores).toBe(WALLET.cores + 1);
+  });
+});
+
+// E17's WebNode.priceFactor (★守財奴) with Hoshi's 2026-11-06 answer to item 25, 照原價退: the
+// factor lives in the content, never in the save, and a load's legalize refunds unfactored.
+describe('a build bought under a price factor (E17): the save and its load-time fixes', () => {
+  const STAR = 'outer.greed.main.star';
+  const R3 = 'outer.greed.alpha.r3';
+  const R4 = 'outer.greed.alpha.r4';
+  const greed = content.outers.greed;
+  if (greed === undefined) throw new Error('the fixture has the greed outer');
+  const nodes = greed.board.nodes.map((node) =>
+    node.id === STAR ? { ...node, priceFactor: 1.5 } : node,
+  );
+  const priced: Content = {
+    ...content,
+    outers: { ...content.outers, greed: { ...greed, board: { ...greed.board, nodes } } },
+  };
+  const pricedContext = profileContext(priced, FULL_SCOPE);
+  const pricedFire = pricedContext.webOf('fire') as AssembledWeb;
+  const route =
+    shortestRoute(pricedFire, emptyProgress('fire'), STAR, (n) => !GATED_KINDS.has(n.kind)) ?? [];
+  /** The ★'s route, the ★ last, then r3 and r4 under its factor. */
+  const progress: CharacterProgress = deepFreeze({
+    ...progressFromOrder(pricedFire, account, [...route, R3, R4]),
+    wallet: WALLET,
+  });
+  const profile = profileOf({ fire: { progress } });
+
+  it('saves it as any build: SAVE_VERSION 2, the same slot fields, loaded with no notice', () => {
+    expect(route.at(-1)).toBe(STAR);
+    // spent holds the factor's surplus over the unfactored canonical cost.
+    expect(gt(progress.spent.shards, canonicalCost(pricedFire, progress).shards)).toBe(true);
+    const text = serializeProfile(profile, '2026-11-06T00:00:00.000Z');
+    const envelope = JSON.parse(text) as { v: number; data: ReturnType<typeof toProfileData> };
+    expect([envelope.v, SAVE_VERSION]).toEqual([2, 2]);
+    expect(Object.keys(envelope.data.characters.fire)).toEqual(
+      Object.keys(toProfileData(freshProfile()).characters.fire),
+    );
+    expect(envelope.data).toEqual(toProfileData(profile));
+    // Under the content with the factor and under the fixture without it: the same profile.
+    for (const loadContext of [pricedContext, context]) {
+      const loaded = parseProfile(text, loadContext);
+      expect(loaded).toMatchObject({ ok: true, fromVersion: 2, notices: [], changed: false });
+      if (!loaded.ok) throw new Error('loaded');
+      expect(loaded.profile).toEqual(profile);
+      expect(conservationIssues(profile, loaded.profile, [], loadContext)).toEqual([]);
+    }
+  });
+
+  it('legalizes a load by the unfactored rule: a dropped node returns today’s price, no more', () => {
+    const damaged = profileOf({
+      fire: { progress: { ...progress, ranks: without(progress.ranks, R3) } },
+    });
+    const { profile: fixed, notices } = fixProfile(damaged, pricedContext);
+    expect(notices).toEqual([{ kind: 'dropped', character: 'fire', ids: [R4] }]);
+    const now = fixed.characters.fire.progress;
+    expect(now.ranks).toEqual(without(progress.ranks, R3, R4));
+    // legalize's exact move: the difference of the two canonical costs, which equals (up to its
+    // rounding) r4's step price at the count left, today's price, not the 1.5 × it that r4 cost.
+    const was = damaged.characters.fire.progress;
+    const refund = sub(canonicalCost(fire, was).shards, canonicalCost(fire, now).shards);
+    const today = nextPrice(fire, now, R4).shards;
+    expect(refund).toBeCloseTo(today, 9);
+    expect(nextPrice(pricedFire, now, R4).shards).toEqual(mul(today, 1.5));
+    expect(now.wallet).toEqual({ ...WALLET, shards: add(WALLET.shards, refund) });
+    expect(now.spent).toEqual({ ...progress.spent, shards: sub(progress.spent.shards, refund) });
+    expect(conservationIssues(damaged, fixed, notices, pricedContext)).toEqual([]);
   });
 });
 

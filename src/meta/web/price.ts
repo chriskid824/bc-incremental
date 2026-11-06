@@ -2,6 +2,14 @@
  * Prices of the v3 web (docs/v3 C6 design D19, §4.5, F17): one canonical shard curve per kind, so
  * k purchases cost base × (g^k − 1) / (g − 1) in any order and a refund is the difference of two
  * closed forms; plus each kind's cores and 迴響. Shard values are Num (src/core/num.ts).
+ *
+ * Under a price factor (WebNode.priceFactor; ★守財奴's 1.5, gd:503 「天賦節點價格 +50%」), as
+ * Hoshi answered item 25 on 2026-11-06 (照原價退): on a character's web the shard price of
+ * every node's next rank is curvePrice × F, F the product of priceFactor over that character's
+ * owned nodes that carry one (boardCounts' priceFactor; with none, no product). Cores and 迴響
+ * are never factored, and a factor node's own purchase is priced before it is owned.
+ * canonicalCost stays unfactored, so a refund returns the unfactored difference (rules.ts) and
+ * what a purchase paid above it stays in spent until refundAll.
  */
 
 import { add, div, gt, mul, num, ONE, pow, sub, toNumber, ZERO } from '../../core/num';
@@ -74,11 +82,21 @@ function curveSum(curve: PriceCurve, k: number): Num {
   return mul(div(sub(pow(num(curve.growth), k), ONE), curve.growth - 1), curve.base);
 }
 
-/** The price of `node`'s next rank on these counts (nextPrice without recounting). */
+/**
+ * The price of `node`'s next rank on these counts (nextPrice without recounting): its curve's
+ * price × counts.priceFactor when the counts carry one (F; no product without one), its kind's
+ * cores and 迴響 as they are. `counts` must be boardCounts' for the progress being priced, which
+ * is how F reaches every price: canBuy passes its standing's counts and nextPrice counts afresh.
+ */
 export function priceOf(node: WebNode, counts: BoardCounts, economy: WebEconomy): Price {
   const curve = PRICE_CURVE_OF[node.kind];
+  let shards = ZERO;
+  if (curve !== null) {
+    shards = curvePrice(economy[curve], countOn(curve, counts));
+    if (counts.priceFactor !== undefined) shards = mul(shards, counts.priceFactor);
+  }
   return {
-    shards: curve === null ? ZERO : curvePrice(economy[curve], countOn(curve, counts)),
+    shards,
     cores: economy.cores[node.kind],
     resonance: economy.resonance[node.kind],
   };
@@ -86,8 +104,8 @@ export function priceOf(node: WebNode, counts: BoardCounts, economy: WebEconomy)
 
 /**
  * The price of the next rank of `id`: base × growth^k shards on its kind's curve, k being the
- * purchases already counted on that curve (boardCounts), plus its kind's cores and 迴響. Throws
- * for an id outside the web; canBuy says `unknown` for one.
+ * purchases already counted on that curve, × F, the owned nodes' price factor (boardCounts),
+ * plus its kind's cores and 迴響. Throws for an id outside the web; canBuy says `unknown` for one.
  */
 export function nextPrice(
   web: AssembledWeb,
@@ -107,7 +125,9 @@ export function nextPrice(
 /**
  * What the owned nodes cost bought in any order: Σ over the curves of base × (g^k − 1) / (g − 1),
  * plus the cores and 迴響 of every owned rank. Ids outside the web have no kind to price them by
- * and count nothing; spent keeps what they cost for refundAll (§6).
+ * and count nothing; spent keeps what they cost for refundAll (§6). Never factored (Hoshi's
+ * 2026-11-06 answer to item 25, 照原價退): the refunds that read it return the base prices, and
+ * what a price factor added stays in spent.
  */
 export function canonicalCost(
   web: AssembledWeb,

@@ -140,6 +140,9 @@ export const WebNodeSchema = exact<WebNode>()(
       ranks: RanksSchema,
       effects: NodeEffectsSchema,
       answers: z.array(RowEnemySchema).readonly(),
+      // Any finite number (NaN and Infinity refused here); validation checks the range, the
+      // ranks and the signature (V1).
+      priceFactor: finite.exactOptional(),
     })
     .readonly(),
 );

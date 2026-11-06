@@ -2,8 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { num, toNumber } from '../../core/num';
 import { assembleWeb, FULL_SCOPE, layoutWeb, loadContent } from '../../data/web';
 import { fixtureContent } from '../../data/web/testing';
-import { buy, canBuy, emptyProgress, planPath, unlockInvestment } from '../../meta/web';
+import {
+  buy,
+  buyPath,
+  canBuy,
+  emptyProgress,
+  nextPrice,
+  planPath,
+  refundPreview,
+  unlockInvestment,
+} from '../../meta/web';
 import type { AccountProgress, CharacterProgress } from '../../meta/web';
+import type { AssembledWeb, WebNode } from '../../data/web';
 import { fixtureLookups } from '../web/testing';
 import {
   ascendancyLine,
@@ -232,6 +242,62 @@ describe('nodeTip (gd §8 item 1)', () => {
   it('says why a gated node cannot be bought', () => {
     const tip = nodeTip(web, start(0), account, CRIT_CORE, en);
     expect(tip.action).toBe(refusalText(planClick(web, start(0), account, CRIT_CORE) as never, en));
+  });
+});
+
+describe('the node card under a price factor (E17; Hoshi’s 照原價退)', () => {
+  const STAR = 'outer.greed.main.star';
+  const STEP = 'outer.greed.alpha.r3';
+  const nodes = web.nodes.map((node): WebNode =>
+    node.id === STAR ? { ...node, priceFactor: 1.5 } : node,
+  );
+  const priced: AssembledWeb = { ...web, nodes, byId: new Map(nodes.map((n) => [n.id, n])) };
+  /** The ★ and its route (12 step purchases) bought from start(30). */
+  const owned = buyPath(priced, start(30), account, STAR);
+
+  it('prices the next rank × 1.5 and refunds a rank bought under it at today’s price', () => {
+    expect(nodeTip(web, owned, account, STEP, en).price).toBe('Price: 7 shards');
+    const before = nodeTip(priced, owned, account, STEP, en);
+    expect(before.price).toBe('Price: 10.5 shards');
+    expect(before.price).toBe(`Price: ${priceText(nextPrice(priced, owned, STEP), en)}`);
+    expect(planClick(priced, owned, account, STEP)).toEqual({
+      kind: 'buy',
+      id: STEP,
+      price: nextPrice(priced, owned, STEP),
+    });
+    const after = buy(priced, owned, account, STEP);
+    const tip = nodeTip(priced, after, account, STEP, en);
+    expect(tip.price).toBe('Price: 11.6 shards');
+    // The refund is today's price of the rank (7), not the 10.5 it paid.
+    expect(tip.refund).toBe('Right-click to refund 7 shards');
+    expect(tip.refund).toBe(nodeTip(web, after, account, STEP, en).refund);
+    expect(tip.refund).toBe(
+      `Right-click to refund ${priceText(refundPreview(priced, after, account, STEP).refund, en)}`,
+    );
+    const zhTip = nodeTip(priced, after, account, STEP, zh);
+    expect([zhTip.price, zhTip.refund]).toEqual(['價格：11.6 碎片', '右鍵退點，返還 7 碎片']);
+    // The ★'s own card: its line after its description, and its 3 cores back on a refund.
+    const star = nodeTip(priced, after, account, STAR, zh);
+    expect(star.lines).toEqual([
+      '測試用的關鍵天賦，沒有效果。',
+      '擁有時：天賦節點的碎片價格 +50%（退點只退原價，多付的在全部洗點時退回）',
+    ]);
+    expect(nodeTip(priced, after, account, STAR, en).lines[1]).toBe(
+      'While owned: talent shard prices +50% (a refund returns the base price; the rest comes back with Refund all)',
+    );
+    expect(star.refund).toBe('右鍵退點，返還 3 核心');
+  });
+
+  it('gives the factored price beside 「碎片不足」 and on a planned path', () => {
+    const poor = { ...owned, wallet: { shards: num(7), cores: 0, resonance: 0 } };
+    const near = nodeTip(priced, poor, account, STEP, en);
+    expect([near.action, near.price]).toEqual(['Not enough shards', 'Price: 10.5 shards']);
+    expect(nodeTip(web, poor, account, STEP, en).action).toBe('Click to buy');
+    const far = planClick(priced, owned, account, 'outer.greed.alpha.r4');
+    const path = planPath(priced, owned, account, 'outer.greed.alpha.r4');
+    expect(far).toMatchObject({ kind: 'path', ids: [STEP, 'outer.greed.alpha.r4'] });
+    if (far.kind === 'path' && path.ok) expect(far.price).toEqual(path.price);
+    if (far.kind === 'path') expect(priceText(far.price, en)).toBe('22.1 shards');
   });
 });
 

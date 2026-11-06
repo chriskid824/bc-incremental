@@ -14,6 +14,7 @@ import {
   NodeSlotSchema,
   OuterDefSchema,
   PayloadEffectSchema,
+  WebNodeSchema,
   WebScopeSchema,
 } from './schema';
 import type {
@@ -576,6 +577,34 @@ describe('web content schemas', () => {
     ).toEqual(['payload.effects.0']);
     const issue = PayloadEffectSchema.safeParse(effect).error?.issues[0];
     expect(issue?.code).toBe('unrecognized_keys');
+  });
+});
+
+describe("a node's priceFactor (E17)", () => {
+  const STAR = node('outer.greed.main.miser', 'keystone', 'outer.greed', {
+    at: 'outerEdge',
+    place: 'keystone',
+  });
+
+  it('accepts a node without one and any finite factor, which validation ranges', () => {
+    expect(issuePaths(WebNodeSchema, STAR)).toEqual([]);
+    for (const factor of [1.5, 0.8, 1, 0, -1, 1e-9]) {
+      const priced = { ...STAR, priceFactor: factor };
+      expect(issuePaths(WebNodeSchema, priced), String(factor)).toEqual([]);
+      expect(WebNodeSchema.parse(priced)).toEqual(priced);
+    }
+  });
+
+  it.each([
+    ['NaN', Number.NaN, 'invalid_type'],
+    ['Infinity', Infinity, 'invalid_type'],
+    ['−Infinity', -Infinity, 'invalid_type'],
+    ['a string', '1.5', 'invalid_type'],
+    ['null', null, 'invalid_type'],
+  ] as const)('refuses %s', (_label, factor, code) => {
+    expect(issueCodes(WebNodeSchema, { ...STAR, priceFactor: factor })).toEqual([
+      ['priceFactor', code],
+    ]);
   });
 });
 

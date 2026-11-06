@@ -165,6 +165,15 @@ export function answers<K extends WebNodeKind>(
   return { ...spec, answers: [...new Set([...spec.answers, ...enemies])] };
 }
 
+/**
+ * The same node with a price factor (WebNode.priceFactor): while it is owned, every next shard
+ * price on its character's web is × factor (★守財奴's 1.5; gd:503). Above 1, on a 1-rank node
+ * (V1).
+ */
+export function priceFactor<K extends WebNodeKind>(spec: NodeSpec<K>, factor: number): NodeSpec<K> {
+  return { ...spec, priceFactor: factor };
+}
+
 /** One of an outer's fusion ranked nodes; `scope: 'fusion'` is narrowed to the fusion by generate. */
 export function fusionRank(modifiers: readonly Modifier[], ranks: RankCount): RankSpec {
   return { modifiers, ranks };
@@ -345,7 +354,10 @@ function targeted(effects: NodeEffects, board: BoardId): NodeEffects {
   return { ...effects, modifiers };
 }
 
-/** Records `spec` in `slot` as written; a mastery written without a target takes its board's. */
+/**
+ * Records `spec` in `slot` as written, its priceFactor only when it has one; a mastery written
+ * without a target takes its board's.
+ */
 function put(
   nodes: WebNode[],
   board: BoardId,
@@ -362,6 +374,7 @@ function put(
     ranks: spec.ranks,
     effects: spec.kind === 'mastery' ? targeted(spec.effects, board) : spec.effects,
     answers: spec.answers,
+    ...(spec.priceFactor === undefined ? {} : { priceFactor: spec.priceFactor }),
   });
 }
 

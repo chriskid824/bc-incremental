@@ -88,6 +88,13 @@ export interface BoardCounts {
   readonly stepPurchases: number;
   readonly masteryRanks: number;
   readonly mightRanks: number;
+  /**
+   * F, the product of priceFactor over the owned nodes that carry one, in web order (★守財奴's
+   * 1.5; Hoshi's 2026-11-06 answer to item 25): every next shard price is × F (priceOf). Absent
+   * when no owned node carries one, so a progress that owns no factor node prices with no
+   * product.
+   */
+  readonly priceFactor?: number;
 }
 
 export interface RefundPreview {

@@ -370,6 +370,7 @@
   "web.coreName": "{name}「{title}」",
   "web.desc.chance": "觸發機率 {chance}",
   "web.answers": "答案：{enemies}",
+  "web.priceFactor": "擁有時：天賦節點的碎片價格 {pct}（退點只退原價，多付的在全部洗點時退回）",
   "web.join.list": "、",
   "web.join.and": "、",
   "web.join.clause": "，",

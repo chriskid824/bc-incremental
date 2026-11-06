@@ -51,7 +51,10 @@ export type AuditStep =
   | { readonly ok: true; readonly progress: CharacterProgress }
   | { readonly ok: false; readonly refusal: Refusal };
 
-/** One audit purchase (R3): the wallet credited with the price, then canBuy and buy. */
+/**
+ * One audit purchase (R3): the wallet credited with the price (nextPrice, so its shards are × the
+ * owned nodes' price factor, as canBuy's), then canBuy and buy.
+ */
 export function auditBuy(
   web: AssembledWeb,
   progress: CharacterProgress,
