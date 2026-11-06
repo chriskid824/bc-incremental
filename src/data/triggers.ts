@@ -24,7 +24,8 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
  * `lifeLostPct`: the fraction of the player's max life missing, 0 to 1. `comboStacks`: the run's
  * combo stacks as they are at the instance (src/sim/systems/combo.ts). `shardsHeld`: the shards
  * the player holds, the wallet the run started with (RunConfig.walletShards) × the walletWeight
- * stat (E17) plus the run's own (SimState.shards, less what spendShards spent).
+ * stat (E17) plus the run's own (SimState.shards, less what spendShards spent), and under ◆複利
+ * (BuildFlags.interestHeld) the run's interest too (SimState.interestShards, InterestSpec).
  * `enemiesInAura`: the alive enemies an aura pulse of the build would reach, 0
  * without an aura emitter (src/sim/emitters/aura.ts). `minionCount`: the live timed rows a
  * spawnDrone effect appended to the drone pool (its spirits and small drones; gd:572's
@@ -95,6 +96,7 @@ export const TRIGGER_EVENTS = [
   'waveStart',
   'periodic',
   'droneExpire',
+  'waveCleared',
 ] as const;
 export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
 
@@ -133,6 +135,14 @@ export type TriggerEventId = (typeof TRIGGER_EVENTS)[number];
  * - droneExpire: a timed row (spawnDrone) left the drone pool, its time up or its impacts spent,
  *   at its position; no target, at the depth and origin of the effect that spawned it. Fixed
  *   drones and turrets never leave and raise none.
+ * - waveCleared (利息's 「每波結束」, gd:501; E17): a wave's record cleared, every enemy of it
+ *   spawned and gone (SimState.highestWaveCleared), once per record in the order the tick's
+ *   waveControl step clears them (src/sim/systems/waves.ts updateClears), overlapping waves and
+ *   the cap wave each once; at the player with no target, its value the wave's number. It is
+ *   raised after the tick's death step, so it takes no selector (the grid is past its last
+ *   query). Its triggers' effects run in the next tick's effect phase, which a clear on the
+ *   run's last tick never reaches, but a trigger of interest effects alone runs at the clear
+ *   (InterestSpec), before the run's end check.
  */
 export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
   'explode',
@@ -152,6 +162,7 @@ export const WIRED_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>
   'freeze',
   'shatter',
   'droneExpire',
+  'waveCleared',
 ]);
 
 /** Events without an enemy target: their effects start at the player. */
@@ -159,6 +170,7 @@ export const TARGETLESS_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEve
   'waveStart',
   'periodic',
   'heroHit',
+  'waveCleared',
 ]);
 
 /**
@@ -774,6 +786,68 @@ export function spendShardsIssues(spec: SpendShardsSpec): string[] {
     : [`fraction must be finite and in (0, 1] (got ${fraction})`];
 }
 
+/** 利息's 「每次觸發利率提高 0.5 個百分點」 (gd:501, 初始值): InterestSpec.rateStep's default. */
+export const INTEREST_RATE_STEP = 0.005;
+/** 利息's 「最多 10%」 (gd:501, 初始值): InterestSpec.rateMax's default. */
+export const INTEREST_RATE_MAX = 0.1;
+/**
+ * ◆獎勵波's 「每 10 波」 (gd:501; lead ruling 24 of B4): the interest of a wave whose number is a
+ * multiple of it (10, 20, 30 …) is × the bonusWaveInterest stat.
+ */
+export const BONUS_WAVE_EVERY = 10;
+
+/**
+ * Interest on the run's shards (利息, gd:501 「每波結束拿本局碎片的一部分當利息，每次觸發利率提高
+ * 0.5 個百分點，最多 10%」; E17, lead ruling G2): each payout pays base × rate, in Num and unrounded,
+ * into the run's interest pool (SimState.interestShards), never into SimState.shards, with
+ * - rate = min(rateMax, interestRate + n × rateStep), n the run's payouts before it
+ *   (SimState.interestPayouts, which each payout raises by 1) and interestRate the stat (its
+ *   start, which 利率's ranks raise), counted as 0 when it is not above 0 (NaN included);
+ * - base = SimState.shards, plus the pool itself under ◆複利 (BuildFlags.interestHeld);
+ * - on a wave whose number is a multiple of BONUS_WAVE_EVERY (◆獎勵波), base × (rate × m), m the
+ *   bonusWaveInterest stat (base 1), counted as 0 when it is not above 0.
+ * It is allowed only on a waveCleared trigger whose effects are all interest (validation, and
+ * compileTrigger for a rule module's), which runs at the clear, inside the waveControl step
+ * (src/sim/effects/dispatch.ts fireWaveCleared), as a kill's transfers run at the kill, so the
+ * run's last cleared wave pays before the run's end check. It needs no enemy, draws no RNG,
+ * raises no event, and no fusion coefficient scales it. The pool reaches the wallet at the
+ * settlement (RunResult.interestShards, src/meta/settle.ts).
+ */
+export interface InterestSpec {
+  readonly kind: 'interest';
+  /** The rate's rise a payout, finite and ≥ 0; INTEREST_RATE_STEP (0.5 points) when omitted. */
+  readonly rateStep?: number;
+  /** The rate's cap, finite and in (0, 1]; INTEREST_RATE_MAX (10%) when omitted. */
+  readonly rateMax?: number;
+}
+
+/**
+ * What is wrong with an interest effect's fields (E17): a rateStep that is not finite and ≥ 0,
+ * a rateMax that is not finite and in (0, 1]. Data validation asks it (src/data/validate.ts), and
+ * compileEffect for every interest effect, which rule modules add unvalidated (as
+ * spendShardsIssues), so a payout is never negative.
+ */
+export function interestIssues(spec: InterestSpec): string[] {
+  const issues: string[] = [];
+  const { rateStep, rateMax } = spec;
+  if (rateStep !== undefined && !(Number.isFinite(rateStep) && rateStep >= 0)) {
+    issues.push(`rateStep must be finite and >= 0 (got ${rateStep})`);
+  }
+  if (rateMax !== undefined && !(Number.isFinite(rateMax) && rateMax > 0 && rateMax <= 1)) {
+    issues.push(`rateMax must be finite and in (0, 1] (got ${rateMax})`);
+  }
+  return issues;
+}
+
+/**
+ * A trigger made of interest effects alone (InterestSpec), on waveCleared: it runs at the clear
+ * (CompiledTrigger.inline). Validation and compileTrigger allow interest in no other trigger.
+ */
+export const runsAtClear = (trigger: Pick<TriggerSpec, 'on' | 'do'>): boolean =>
+  trigger.on === 'waveCleared' &&
+  trigger.do.length > 0 &&
+  trigger.do.every((effect) => effect.kind === 'interest');
+
 /**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
@@ -831,6 +905,8 @@ export function spendShardsIssues(spec: SpendShardsSpec): string[] {
  * - pull: the event's enemy, if no boss, pulled in to the aura's edge or `to` (PullSpec).
  * - spendShards: `fraction` of the run's shards spent, never the wallet's, with `liveTarget`
  *   only while the event's enemy lives (SpendShardsSpec).
+ * - interest: a share of the run's shards paid into its interest pool, at a rate that rises with
+ *   each payout (InterestSpec); waveCleared only.
  */
 export type EffectSpec =
   | {
@@ -894,7 +970,8 @@ export type EffectSpec =
   | ExecuteSpec
   | ThawSpec
   | PullSpec
-  | SpendShardsSpec;
+  | SpendShardsSpec
+  | InterestSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -940,6 +1017,8 @@ export const COEF_FIELDS: {
   pull: [],
   // A cost, which the coefficient never scales (lead ruling G2, E17).
   spendShards: [],
+  // A rate, which the coefficient never scales (E17, as the spend's cost).
+  interest: [],
 };
 
 /**
@@ -963,8 +1042,9 @@ export interface TriggerSpec {
   /**
    * The enemy its effects act on instead of the event's, picked once per firing: after its
    * conditions, which still read the event's enemy, and before its chance roll. When nothing is
-   * picked it does not fire, rolls nothing and its cooldown does not restart. Not on waveStart,
-   * nor on a kill trigger that runs at the kill (its transfers always act on the victim).
+   * picked it does not fire, rolls nothing and its cooldown does not restart. Not on waveStart
+   * or waveCleared, nor on a kill trigger that runs at the kill (its transfers always act on the
+   * victim).
    */
   readonly target?: TargetSelector;
   readonly do: readonly EffectSpec[];

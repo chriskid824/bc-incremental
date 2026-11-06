@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { mul, num, ZERO } from '../../core/num';
+import { add, mul, num, ZERO } from '../../core/num';
 import type { Num } from '../../core/num';
 import { loadGameData } from '../../data';
 import type { RuleSpec } from '../../data/rules';
@@ -388,6 +388,7 @@ function runResult(overrides: Partial<RunResult> = {}): RunResult {
     endReason: 'death',
     ticks: 3600,
     shards: num(50),
+    interestShards: ZERO,
     cores: 2,
     kills: 30,
     damage: { hit: ZERO, crit: ZERO, burn: ZERO, chain: ZERO, poison: ZERO, bleed: ZERO },
@@ -468,6 +469,22 @@ describe('settleWebRun (§5.1, D21)', () => {
     const meta = { shards: num(100), cores: 3, maxWave: 12, runs: 5 };
     settleRun(meta, result, data, plain.stats, DEFAULT_WEB_ECONOMY);
     expect(weighed.progress.wallet.shards).toBe(meta.shards);
+  });
+
+  it('credits the wallet shards + interestShards (E17, lead ruling G5)', () => {
+    // Planted bug: the pool left out of a web run's wallet.
+    const result = runResult({ highestWaveReached: 18, interestShards: num(6.5) });
+    const settled = settleWebRun(progress, result, data, stats);
+    const meta = { shards: num(100), cores: 3, maxWave: 12, runs: 5 };
+    const settlement = settleRun(meta, result, data, stats, DEFAULT_WEB_ECONOMY);
+    expect(settled.settlement).toEqual(settlement);
+    expect(settled.settlement.interestFromRun).toBe(num(6.5));
+    expect(settled.progress.wallet.shards).toBe(meta.shards);
+    const dry = settleWebRun(progress, runResult({ highestWaveReached: 18 }), data, stats);
+    expect(settled.progress.wallet.shards).toBe(
+      add(num(100), add(num(56.5), settlement.skipShards)),
+    );
+    expect(dry.progress.wallet.shards).toBe(add(num(100), add(num(50), settlement.skipShards)));
   });
 });
 

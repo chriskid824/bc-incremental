@@ -299,6 +299,16 @@ export interface BuildFlags {
   frostGainShocked: number;
   frostGainBoss: number;
   /**
+   * ◆複利 (gd:501 「利息也算進持有碎片加成」, E17; Hoshi's item 23 of B4 at its default): the run's
+   * interest pool (SimState.interestShards) counts in shardsHeld, which the globals step then
+   * writes as the weighed wallet + SimState.shards + the pool (src/sim/systems/globals.ts), and
+   * in every interest payout's base, the run's shards + the pool (InterestSpec). Only a rule
+   * module writes it (`b.flags.interestHeld = true`); it does not make the run compute shardsHeld,
+   * which a modifier scaling on it does. False: shardsHeld and the base are the shards without
+   * the pool, bit for bit as before.
+   */
+  interestHeld: boolean;
+  /**
    * The barrage rider's params (BarrageParams; BarrageGrant, E10a and E10b), which the barrage
    * outer's ★ and ◆ modules write in place (`b.flags.barrage.countMult = 2`,
    * `b.flags.barrage.ring = { every: 6, directions: 12 }`) and compileBuild checks after the
@@ -943,6 +953,7 @@ export function compileBuild(
     frozenNoSplit: false,
     frostGainShocked: 0,
     frostGainBoss: 0,
+    interestHeld: false,
     barrage: { ...DEFAULT_BARRAGE_PARAMS },
   };
   const params: SignatureParams = {
@@ -1047,6 +1058,11 @@ export function compileBuild(
       addTrigger(sources.index(source), spec, coef);
     },
     addEffect(source: string, spec: EffectSpec, coef = 1) {
+      // An interest effect pays at the clear, from its waveCleared trigger (E17): a hook's queue
+      // would run it a tick late, past the run's last clear, with no wave as its value.
+      if (spec.kind === 'interest') {
+        throw new Error('addEffect: an interest effect runs only from a waveCleared trigger');
+      }
       const ix = sources.index(source);
       const at = effects.length;
       effects.push(compileEffect(spec, ix, coef, values.damage, undefined, barrageCount));

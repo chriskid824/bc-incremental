@@ -122,6 +122,7 @@ describe('compileBuild', () => {
       frozenNoSplit: false,
       frostGainShocked: 0,
       frostGainBoss: 0,
+      interestHeld: false,
       barrage: {
         countMult: 1,
         bounce: 0,

@@ -1,15 +1,15 @@
 /**
  * Wave control (docs/v3/implementation-plan-v3.md §2.15, docs/GDD.md §2.1): starts waves,
- * shuffling each wave's enemies into its spawn queue, and records cleared waves. A v3 run's
- * queue also holds the treasures its schedule makes due at the wave (treasuresDue,
- * src/sim/systems/enemyAi.ts), outside composeWave's count.
+ * shuffling each wave's enemies into its spawn queue, and records cleared waves, raising
+ * waveCleared for each (E17). A v3 run's queue also holds the treasures its schedule makes due at
+ * the wave (treasuresDue, src/sim/systems/enemyAi.ts), outside composeWave's count.
  */
 
 import { ZERO } from '../../core/num';
 import { composeWave } from '../../data/compose';
 import { shardsPerStdEnemy, stdHp } from '../../data/curve';
 import type { EnemyDef, V3WaveRules } from '../../data/types';
-import { fire } from '../effects/dispatch';
+import { fire, fireWaveCleared } from '../effects/dispatch';
 import { EVENT } from '../effects/types';
 import type { RunContext, WaveRecord } from './context';
 import { treasuresDue } from './enemyAi';
@@ -80,6 +80,12 @@ export function startDueWave(ctx: RunContext): void {
   }
 }
 
+/**
+ * Records the waves whose enemies are all spawned and gone, in the order of `open` (start order,
+ * overlapping waves and the cap wave alike), each with its waveCleared SimEvent and then its
+ * waveCleared trigger event (fireWaveCleared, E17), whose interest triggers pay at once, before
+ * the tick's end check (src/sim/simulation.ts).
+ */
 export function updateClears(ctx: RunContext): void {
   const open = ctx.open;
   const state = ctx.state;
@@ -90,6 +96,7 @@ export function updateClears(ctx: RunContext): void {
       rec.cleared = true;
       if (rec.wave > state.highestWaveCleared) state.highestWaveCleared = rec.wave;
       ctx.events.push({ type: 'waveCleared', wave: rec.wave });
+      fireWaveCleared(ctx, rec.wave);
     } else {
       open[kept++] = rec;
     }

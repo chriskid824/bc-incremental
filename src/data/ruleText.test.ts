@@ -162,6 +162,26 @@ describe('rule descriptions', () => {
     ).toEqual([[['0.1%']], [['0.2%']], [['0.15%']], [['7%']], [['30%']], [['100%']]]);
   });
 
+  it('reads 利息’s rate step in percentage points and its cap as a percentage, each at its default when left out (E17)', () => {
+    // A hand description quotes the 0.5 (or 0.5%) and the 10% the generated line writes; the
+    // start rate is the interestRate stat's own line.
+    expect([
+      effectNumbers({ kind: 'interest' }),
+      effectNumbers({ kind: 'interest', rateStep: 0.0025, rateMax: 0.15 }),
+      effectNumbers({ kind: 'interest', rateStep: 0.01, rateMax: 1 }),
+      effectNumbers({ kind: 'interest', rateStep: 0 }),
+    ]).toEqual([
+      [['0.5', '0.5%'], ['10%']],
+      [['0.25', '0.25%'], ['15%']],
+      [['1', '1%'], ['100%']],
+      [['0', '0%'], ['10%']],
+    ]);
+    expect(triggerNumbers({ on: 'waveCleared', do: [{ kind: 'interest' }] })).toEqual([
+      ['0.5', '0.5%'],
+      ['10%'],
+    ]);
+  });
+
   it('reads the numbers of triggers', () => {
     expect(
       triggerNumbers({

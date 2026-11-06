@@ -17,6 +17,7 @@ import type {
   SourcedTrigger,
   StatBlock,
 } from '../../data/stats';
+import { runsAtClear } from '../../data/triggers';
 import type { GameData } from '../../data/types';
 import type { AssembledWeb } from '../../data/web/types';
 import type { CharacterRun, RunConfig, RunResult } from '../../sim/types';
@@ -55,11 +56,13 @@ function merged(mod: Modifier, rank: number): Modifier {
  * collected as M1's collectModifiers and collectExtras do (src/meta/stats.ts), except that a
  * modifier without a scaling goes in once, merged (P4), while one with a scaling goes in r times,
  * its cap applying per copy; triggers and conversions r times and emitter grants once, each with
- * its node's source; a fusion board's triggers with the fusion's coef. Rules go in once each, as
+ * its node's source, but a trigger that runs at the clear (利息's interest, runsAtClear) once, in
+ * its first rank's place, since it pays once a wave whatever the rank (B4's lead ruling 23a); a
+ * fusion board's triggers with the fusion's coef. Rules go in once each, as
  * { source, spec, coef }, coef 1 off fusion boards (D9, D10). The 迴響 ever earned adds one
  * independent all-damage more of 5 % per point (gd:778, GDD:174), last and only when above 0, so
- * a build before its first prestige compiles as it did. The wallet's shards, as
- * settleWebRun reads them, go to the run's config (webRunConfig).
+ * a build before its first prestige compiles as it did. The wallet's shards, as settleWebRun
+ * reads them, go to the run's config (webRunConfig).
  */
 export function webBuild(web: AssembledWeb, progress: CharacterProgress): WebRun {
   const modifiers: Modifier[] = [];
@@ -81,6 +84,7 @@ export function webBuild(web: AssembledWeb, progress: CharacterProgress): WebRun
     const coef = outer === null ? undefined : web.fusions.get(outer)?.coef;
     for (let r = 0; r < rank; r++) {
       for (const spec of effects.triggers) {
+        if (r > 0 && runsAtClear(spec)) continue;
         triggers.push(coef === undefined ? { source, spec } : { source, spec, coef });
       }
       for (const spec of effects.conversions) conversions.push({ source, spec });

@@ -17,6 +17,7 @@ import {
   CONDITION_CONTEXTS,
   conditionKey,
   DOT_AILMENTS,
+  interestIssues,
   PROJECTILES_COUNT_MAX,
   spendShardsIssues,
   TARGETLESS_EVENTS,
@@ -54,8 +55,9 @@ const isPositiveInt = (n: number): boolean => Number.isInteger(n) && n > 0;
 const isNonNegativeInt = (n: number): boolean => Number.isInteger(n) && n >= 0;
 
 /**
- * Events whose effects never have the event's enemy: the targetless events, and droneExpire,
- * raised at a leaving row's position (its effects start there, not at the player).
+ * Events whose effects never have the event's enemy: the targetless events (waveCleared among
+ * them, E17), and droneExpire, raised at a leaving row's position (its effects start there, not
+ * at the player).
  */
 const ENEMYLESS_EVENTS: ReadonlySet<TriggerEventId> = new Set<TriggerEventId>([
   ...TARGETLESS_EVENTS,
@@ -1238,6 +1240,11 @@ function triggerIssues(trigger: TriggerSpec, zonesRead: boolean): string[] {
   if (kill && transfers > 0 && transfers < trigger.do.length) {
     issues.push('mixes transfer and other effects on a kill event; split it into two triggers');
   }
+  // So too an interest trigger at the clear (E17, runsAtClear): its effects are interest alone.
+  const interests = trigger.do.filter((effect) => effect.kind === 'interest').length;
+  if (interests > 0 && interests < trigger.do.length) {
+    issues.push('mixes interest and other effects; an interest trigger holds interest alone');
+  }
   issues.push(...detonateIssues(trigger));
   const atKill = runsAtKill(trigger);
   trigger.do.forEach((effect, i) => {
@@ -1281,14 +1288,15 @@ function detonateIssues(trigger: TriggerSpec): string[] {
 /**
  * Where a target selector can run, for a trigger on events `on` that runs at the kill when
  * `atKill` (runsAtKill), and what it needs: no waveStart (nothing has spawned to pick when it
- * fires), no kill trigger that runs at the kill (its transfers act on the victim), no pick that
- * scans every enemy on events that come per hit, mostStacks with exactly its ailment, a range
- * above 0, a spread mark only as true and with a range, and the event's enemy to exclude. A
- * strike's target runs as a periodic trigger's.
+ * fires) nor waveCleared (E17: it is raised after the tick's death step compacts the enemies,
+ * past the grid's last query), no kill trigger that runs at the kill (its transfers act on the
+ * victim), no pick that scans every enemy on events that come per hit, mostStacks with exactly
+ * its ailment, a range above 0, a spread mark only as true and with a range, and the event's
+ * enemy to exclude. A strike's target runs as a periodic trigger's.
  */
 function selectorIssues(on: TriggerEventId, atKill: boolean, target: TargetSelector): string[] {
-  if (on === 'waveStart') {
-    return ["target is not allowed on 'waveStart' events; use a periodic trigger with a selector"];
+  if (on === 'waveStart' || on === 'waveCleared') {
+    return [`target is not allowed on '${on}' events; use a periodic trigger with a selector`];
   }
   if (atKill) {
     return [
@@ -1711,6 +1719,14 @@ function effectIssues(
       }
       break;
     }
+    case 'interest':
+      // E17: rateStep >= 0, rateMax in (0, 1], on a waveCleared trigger of interest effects
+      // alone (triggerIssues), which runs at the clear (runsAtClear).
+      issues.push(...interestIssues(effect));
+      if (on !== 'waveCleared') {
+        issues.push(`interest runs only on 'waveCleared' events (got '${on}')`);
+      }
+      break;
   }
   return issues;
 }

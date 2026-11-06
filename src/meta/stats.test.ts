@@ -496,9 +496,8 @@ describe('computeStatBlock', () => {
     ).toThrow('is not a scoped stat; use scaleStat or offsetStat');
   });
 
-  it("appends E17's walletWeight: last of 68, base 1, an unscoped weight that flat adds to", () => {
-    expect(STAT_IDS).toHaveLength(68);
-    expect(STAT_IDS.slice(-2)).toEqual(['thornsArea', 'walletWeight']);
+  it("appends E17's walletWeight: the 68th, base 1, an unscoped weight that flat adds to", () => {
+    expect(STAT_IDS.slice(66, 68)).toEqual(['thornsArea', 'walletWeight']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.walletWeight).toBe(1);
     expect(isScopedStat('walletWeight')).toBe(false);
@@ -540,6 +539,68 @@ describe('computeStatBlock', () => {
         },
       ]),
     ).toThrow('is not a scoped stat; use scaleStat or offsetStat');
+  });
+
+  it("appends E17's interestRate and bonusWaveInterest: the 69th and 70th, bases 0 and 1, unscoped, flat adds to them", () => {
+    expect(STAT_IDS).toHaveLength(70);
+    expect(STAT_IDS.slice(68, 70)).toEqual(['interestRate', 'bonusWaveInterest']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.interestRate).toBe(0);
+    expect(BASE_STATS.bonusWaveInterest).toBe(1);
+    expect(isScopedStat('interestRate')).toBe(false);
+    expect(isScopedStat('bonusWaveInterest')).toBe(false);
+    expect(block([]).values.interestRate).toBe(0);
+    expect(block([]).values.bonusWaveInterest).toBe(1);
+    // 利率 1% and ◆獎勵波's 「×3」: flat 0.01 on 0 and flat 2 on 1, which the payout reads from the
+    // compile's values (src/sim/effects/interest.test.ts pins the read).
+    const stats = block([
+      { stat: 'interestRate', kind: 'flat', value: 0.01 },
+      { stat: 'bonusWaveInterest', kind: 'flat', value: 2 },
+    ]);
+    expect(stats.values.interestRate).toBe(0.01);
+    expect(stats.values.bonusWaveInterest).toBe(3);
+    expect(stats.scoped).toEqual([]);
+    expect(compileBuild(stats, []).values.interestRate).toBe(0.01);
+    expect(compileBuild(stats, []).values.bonusWaveInterest).toBe(3);
+    // Plants either stat's tags, notTags, scope, conditions or scaling taken: refused by
+    // computeStatBlock (and so at compile, which takes its block), and at load by the modifier
+    // schema, on their fields, as walletWeight's are.
+    for (const stat of ['interestRate', 'bonusWaveInterest'] as const) {
+      const bad = [
+        { stat, kind: 'flat', value: 0.5, tags: ['hit'] },
+        { stat, kind: 'flat', value: 0.5, notTags: ['crit'] },
+        { stat, kind: 'flat', value: 0.5, scope: 'outer.greed' },
+        { stat, kind: 'flat', value: 0.5, when: [{ targetKind: 'boss' }] },
+        { stat, kind: 'flat', value: 0.5, scaling: { per: 'shardsHeld', curve: 'log10' } },
+      ] as const satisfies readonly Modifier[];
+      for (const mod of bad) {
+        expect(() => block([mod])).toThrow(
+          'Tags, scopes, conditions and scalings are only allowed on scoped stats, not flat ' +
+            `damage: ${JSON.stringify(mod)}`,
+        );
+      }
+      expect(
+        bad.map((mod) => ModifierSchema.safeParse(mod).error?.issues.map((i) => i.message)),
+      ).toEqual([
+        ['tags are only allowed on scoped stats, and not on flat damage'],
+        ['notTags are only allowed on scoped stats, and not on flat damage'],
+        ['scope is only allowed on scoped stats, and not on flat damage'],
+        ['conditions are only allowed on scoped stats, and not on flat damage'],
+        ['scaling is only allowed on scoped stats, and not on flat damage'],
+      ]);
+      expect(ModifierSchema.safeParse({ stat, kind: 'flat', value: 0.5 }).success).toBe(true);
+      // And a module's addModifier, which takes scoped stats alone.
+      const added = { stat, kind: 'flat', value: 0.5, scope: 'outer.greed' } as const;
+      expect(() =>
+        compileBuild(block([]), [], undefined, [
+          (b) => {
+            b.addModifier(added);
+          },
+        ]),
+      ).toThrow(
+        `addModifier: ${JSON.stringify(added)} is not a scoped stat; use scaleStat or offsetStat`,
+      );
+    }
   });
 
   it('passes the triggers and conversions through', () => {

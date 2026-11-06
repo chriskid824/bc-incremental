@@ -489,6 +489,15 @@ export const EffectSpecSchema = exact<EffectSpec>()(
         liveTarget: z.literal(true).exactOptional(),
       })
       .readonly(),
+    // E17: validate.ts holds rateStep to >= 0, rateMax to (0, 1] and the effect to a waveCleared
+    // trigger of interest effects alone (runsAtClear).
+    z
+      .strictObject({
+        kind: z.literal('interest'),
+        rateStep: finite.exactOptional(),
+        rateMax: finite.exactOptional(),
+      })
+      .readonly(),
   ]),
 );
 

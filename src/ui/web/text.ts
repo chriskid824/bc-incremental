@@ -26,7 +26,14 @@ import type { OuterId, SourceClass, SourceSelector } from '../../data/sources';
 import { ALWAYS_STATS } from '../../data/stats';
 import type { Modifier, StatId } from '../../data/stats';
 import type { DamageTag } from '../../data/tags';
-import { CENTER_EVENTS, COEF_FIELDS, conditionKey } from '../../data/triggers';
+import {
+  CENTER_EVENTS,
+  COEF_FIELDS,
+  conditionKey,
+  INTEREST_RATE_MAX,
+  INTEREST_RATE_STEP,
+  runsAtClear,
+} from '../../data/triggers';
 import type {
   CenterEvent,
   Condition,
@@ -136,6 +143,7 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   pull: 'web.effect.pull',
   // E17: with liveTarget (lead ruling G5) it reads web.effect.spendShards.liveTarget (effectText).
   spendShards: 'web.effect.spendShards',
+  interest: 'web.effect.interest',
 };
 
 /**
@@ -276,6 +284,7 @@ export const EVENT_TEXT: Readonly<Record<TriggerEventId, MessageKey>> = {
   waveStart: 'web.event.waveStart',
   periodic: 'web.event.periodic',
   droneExpire: 'web.event.droneExpire',
+  waveCleared: 'web.event.waveCleared',
 };
 
 /** Every grant kind, aura, orbit and barrage included (C4.21; N-1; E10a). */
@@ -426,6 +435,10 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   thornsArea: 'percent',
   // A weight on 1 (◆金庫's flat 0.5 reads +50%), as its multiplier neighbours read.
   walletWeight: 'percent',
+  // A share of the run's shards (利率's flat 0.01 reads +1%), as its chance neighbours read.
+  interestRate: 'percent',
+  // A multiplier on 1 (◆獎勵波's flat 2 reads +200%: ×3), as walletWeight reads.
+  bonusWaveInterest: 'percent',
 };
 
 /**
@@ -461,6 +474,7 @@ export const COEF_FORMAT: {
   thaw: {},
   pull: {},
   spendShards: {},
+  interest: {},
 };
 
 // Numbers, as M1 writes them (src/ui/describe.ts).
@@ -714,6 +728,13 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
       return spec.liveTarget === true
         ? say(lookup, 'web.effect.spendShards.liveTarget', { pct: percent(spec.fraction) })
         : text({ pct: percent(spec.fraction) });
+    // E17: the rate's rise a payout in percentage points (0.5) and its cap (10%), at their
+    // defaults when left out; the start rate is the interestRate stat's own line.
+    case 'interest':
+      return text({
+        step: trim((spec.rateStep ?? INTEREST_RATE_STEP) * 100),
+        max: percent(spec.rateMax ?? INTEREST_RATE_MAX),
+      });
     case 'groundZone': {
       if (spec.damagePctPerSec !== 0)
         extra('web.extra.zoneDamage', { damage: percent(spec.damagePctPerSec) });
@@ -1341,7 +1362,8 @@ function ruleText(lookup: TextLookup, rule: RuleSpec): string {
 /**
  * A node's generated lines (§4.7): a template core's fan-out and bonus first, then its other
  * modifiers, triggers, conversions, grants and rules; a ranked node's modifiers per rank, its
- * triggers and conversions once a rank.
+ * triggers and conversions once a rank, but a trigger that runs at the clear (利息's interest,
+ * runsAtClear), which webBuild puts in once whatever the rank (B4's lead ruling 23a), as it is.
  */
 function generatedLines(
   web: AssembledWeb,
@@ -1371,8 +1393,9 @@ function generatedLines(
   }
   for (const mod of modifiers.slice(skip)) lines.push(modifierText(lookup, mod, rank, node.ranks));
   for (const trigger of triggers) {
-    if (trigger !== own)
-      lines.push(repeated(triggerText(lookup, trigger, coef, fanoutOf(trigger))));
+    if (trigger === own) continue;
+    const line = triggerText(lookup, trigger, coef, fanoutOf(trigger));
+    lines.push(runsAtClear(trigger) ? line : repeated(line));
   }
   for (const conversion of conversions) lines.push(repeated(conversionText(lookup, conversion)));
   for (const grant of emitters) lines.push(grantText(lookup, grant));

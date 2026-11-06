@@ -255,6 +255,21 @@ export const STAT_IDS = [
    * the wallet itself stay unweighted, and the run's own shards (SimState.shards) count once.
    */
   'walletWeight',
+  /**
+   * 利率 (the greed outer's 利息 ranks, docs/v3/game-design-v3.md §4.12 「每波結束拿本局碎片的一部分
+   * 當利息」): the rate of an interest effect's first payout, e.g. 0.01 = 1% of the run's shards,
+   * from which each payout's rate rises by the effect's rateStep up to its rateMax (InterestSpec,
+   * src/data/triggers.ts). Read from the compiled build's values at each payout, as it is when
+   * above 0, else 0 (NaN included). Its base is 0, so only a flat modifier raises it.
+   */
+  'interestRate',
+  /**
+   * 獎勵波利息倍率 (the greed outer's ◆獎勵波, gd:501 「每 10 波的利息 ×3」; lead ruling 24 of B4): the
+   * multiplier on an interest payout of a wave whose number is a multiple of BONUS_WAVE_EVERY (10,
+   * 20, 30 …), e.g. 3 = ×3; the other waves' payouts never read it. Read from the compiled build's
+   * values at such a payout, as it is when above 0, else 0 (NaN included). Its base is 1.
+   */
+  'bonusWaveInterest',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -331,6 +346,8 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   orbitSpeed: 1,
   thornsArea: 1,
   walletWeight: 1,
+  interestRate: 0,
+  bonusWaveInterest: 1,
 };
 
 /**

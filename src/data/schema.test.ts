@@ -598,6 +598,11 @@ describe('EffectSpecSchema', () => {
     { kind: 'spendShards', fraction: 0.001 },
     { kind: 'spendShards', fraction: 1 },
     { kind: 'spendShards', fraction: 0.002, liveTarget: true },
+    // E17: 利息's payout at its defaults and with both fields; validate.ts holds rateStep to
+    // >= 0, rateMax to (0, 1] and the effect to a waveCleared trigger of interest alone.
+    { kind: 'interest' },
+    { kind: 'interest', rateStep: 0.005, rateMax: 0.1 },
+    { kind: 'interest', rateStep: 0 },
     // E9: 血河's bleed spread, behind the event enemy, with poison's cap and order.
     { kind: 'spreadAilment', ailment: 'bleed', radius: 60 },
     { kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true },
@@ -854,6 +859,12 @@ describe('EffectSpecSchema', () => {
       'spendShards with liveTarget false (G5)',
       { kind: 'spendShards', fraction: 0.001, liveTarget: false },
     ],
+    ['interest with an extra key (E17)', { kind: 'interest', pool: true }],
+    ['interest with a rate (E17)', { kind: 'interest', rate: 0.01 }],
+    ['interest with a rateStep as a string (E17)', { kind: 'interest', rateStep: '0.5%' }],
+    ['interest with a NaN rateStep (E17)', { kind: 'interest', rateStep: Number.NaN }],
+    ['interest with an infinite rateMax (E17)', { kind: 'interest', rateMax: Infinity }],
+    ['interest with a NaN rateMax (E17)', { kind: 'interest', rateMax: Number.NaN }],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
   });

@@ -8,6 +8,7 @@
 import type { RuleSpec } from './rules';
 import { ALWAYS_STATS } from './stats';
 import type { Modifier, StatId } from './stats';
+import { INTEREST_RATE_MAX, INTEREST_RATE_STEP } from './triggers';
 import type { Condition, EffectSpec, TriggerSpec } from './triggers';
 
 export const percent = (value: number): string => `${Math.round(Math.abs(value) * 100)}%`;
@@ -259,6 +260,13 @@ export function effectNumbers(effect: EffectSpec): string[][] {
     // E17: a share of a percent (◆撒幣's 0.1%), which percent's whole number would round to 0%.
     case 'spendShards':
       return [[`${Number((effect.fraction * 100).toPrecision(12))}%`]];
+    // E17: the rate's rise a payout, in percentage points (0.5, or 0.5%), and its cap (10%),
+    // unrounded, each at its default when left out, as the generated line writes them.
+    case 'interest': {
+      const step = Number(((effect.rateStep ?? INTEREST_RATE_STEP) * 100).toPrecision(12));
+      const max = Number(((effect.rateMax ?? INTEREST_RATE_MAX) * 100).toPrecision(12));
+      return [[String(step), `${step}%`], [`${max}%`]];
+    }
   }
 }
 

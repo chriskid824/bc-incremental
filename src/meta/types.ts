@@ -21,7 +21,13 @@ export interface MetaState {
 }
 
 export interface Settlement {
+  /** The run's own shards (RunResult.shards, SimState.shards), without its interest. */
   readonly shardsFromRun: Num;
+  /**
+   * The run's interest pool (利息, RunResult.interestShards, SimState.interestShards; E17), which
+   * the settlement credits beside shardsFromRun; zero without an interest effect.
+   */
+  readonly interestFromRun: Num;
   readonly coresFromRun: number;
   /** Expected drops of the skipped waves × skipRewardRate; zero if the start wave was not cleared. */
   readonly skipShards: Num;

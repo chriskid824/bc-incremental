@@ -26,7 +26,9 @@ import {
   chainBoltBoltsIssues,
   COEF_FIELDS,
   DETONATE_AILMENTS,
+  interestIssues,
   PROJECTILES_COUNT_MAX,
+  runsAtClear,
   spendShardsIssues,
   TRANSFER_EFFECTS,
   TRIGGER_EVENTS,
@@ -108,7 +110,9 @@ export interface CompiledTrigger {
   readonly signatureOnly: boolean;
   /**
    * A kill or diedWithAilment trigger whose effects all transfer ailments (TRANSFER_EFFECTS): it
-   * runs at the kill, while the victim still holds them, rather than from the queue.
+   * runs at the kill, while the victim still holds them, rather than from the queue. So does a
+   * waveCleared trigger of interest effects alone (runsAtClear, E17), at the clear
+   * (fireWaveCleared, dispatch.ts).
    */
   readonly inline: boolean;
   /** Calibration coefficient, applied at compile to the chance and COEF_FIELDS; 1 for data. */
@@ -208,8 +212,10 @@ export interface CompiledEffect {
 /**
  * Compiles a trigger at `index` whose effects start at `effectStart` in CompiledBuild.effects;
  * an inZone condition numbers its source in `sources`. Throws on an event the simulation does
- * not raise yet. A chainJump trigger fires at CHAIN_JUMP_CHANCE × coef, CHAIN_JUMP_EVENT_CAP
- * times an attack at most.
+ * not raise yet, and on an interest effect anywhere but a waveCleared trigger of interest effects
+ * alone (E17, runsAtClear), which a rule module's addTrigger is not validated against. A
+ * chainJump trigger fires at CHAIN_JUMP_CHANCE × coef, CHAIN_JUMP_EVENT_CAP times an attack at
+ * most.
  */
 export function compileTrigger(
   index: number,
@@ -229,6 +235,13 @@ export function compileTrigger(
   const named = (spec.when ?? []).filter((condition) => 'ailment' in condition).length;
   if (ailmentEvent && named !== 1) {
     throw new Error(`A trigger on '${spec.on}' needs exactly one ailment condition`);
+  }
+  const clear = runsAtClear(spec);
+  if (!clear && spec.do.some((effect) => effect.kind === 'interest')) {
+    throw new Error(
+      `A trigger on '${spec.on}' with an interest effect: interest runs only on a waveCleared ` +
+        'trigger of interest effects alone',
+    );
   }
   const chainJump = spec.on === 'chainJump';
   if (chainJump && (spec.when ?? []).some((condition) => 'chance' in condition)) {
@@ -259,7 +272,7 @@ export function compileTrigger(
     effectStart,
     effectEnd: effectStart + spec.do.length,
     signatureOnly,
-    inline: kill && spec.do.every((effect) => TRANSFER_EFFECTS.has(effect.kind)),
+    inline: (kill && spec.do.every((effect) => TRANSFER_EFFECTS.has(effect.kind))) || clear,
     coef,
     periodTicks:
       spec.on === 'periodic' ? Math.max(1, Math.round((spec.every as number) * TICK_RATE)) : 0,
@@ -504,6 +517,15 @@ export function compileEffect(
       const issues = spendShardsIssues(scaled);
       if (issues.length > 0) {
         throw new Error(`A spendShards effect ${JSON.stringify(spec)}: ${issues.join('; ')}`);
+      }
+      break;
+    }
+    case 'interest': {
+      // So too an interest effect's rateStep and rateMax (E17): a step below 0 would take the
+      // rate, and so a payout, below 0, and a cap above 1 would pay more than its base.
+      const issues = interestIssues(scaled);
+      if (issues.length > 0) {
+        throw new Error(`An interest effect ${JSON.stringify(spec)}: ${issues.join('; ')}`);
       }
       break;
     }

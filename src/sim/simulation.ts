@@ -159,9 +159,11 @@ export function createSimulation(
   // shards held, or the enemies in the aura while it has an aura emitter, or that names targetIs
   // (the highest-hp enemy), or that reads the timed rows (minionCount). The wallet is the run
   // config's, 0 without one, × the walletWeight stat (◆金庫, E17; weighWallet), formed here once:
-  // the config's field stays as it is.
+  // the config's field stays as it is. Under ◆複利 (BuildFlags.interestHeld, E17) the shards held
+  // add the run's interest pool too.
   const flags = ctx.build.flags;
   const held = flags.shardsHeld;
+  const pool = flags.interestHeld;
   const inAura = flags.enemiesInAura && ctx.emitters.some((em) => em.spec.kind === 'aura');
   const top = flags.highestHp;
   const minions = flags.minionCount;
@@ -194,9 +196,9 @@ export function createSimulation(
    *    step the enemy AI left it (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
    * 4b. globals: in a run whose build reads them, the shards held (the weighed wallet plus the
-   *    run's shards), the alive enemies an aura pulse would reach, the alive enemy with the most
-   *    hp (targetIs) and the live timed rows of the drone pool (minionCount), into the run's
-   *    EvalInput for every later hit of the tick (globals.ts).
+   *    run's shards, and under ◆複利 its interest pool), the alive enemies an aura pulse would
+   *    reach, the alive enemy with the most hp (targetIs) and the live timed rows of the drone
+   *    pool (minionCount), into the run's EvalInput for every later hit of the tick (globals.ts).
    * 5. contact: enemies that reached the player hit it, through its defences (damage taken,
    *    shield, extra lives), and leak, halving the combo stacks (combo.ts) and raising heroHit
    *    and contact; under 拒馬 a dashing one is pushed back out instead, and under 荊棘纏繞 a boss
@@ -235,7 +237,10 @@ export function createSimulation(
    * 12. death: this tick's pending kill triggers fire, sorted by victim id (their effects run
    *    next tick); then compact dead enemies and projectiles (death.ts), after the last grid
    *    query.
-   * 13. waveControl: record cleared waves (waves.ts).
+   * 13. waveControl: record cleared waves, each raising waveCleared (waves.ts): its interest
+   *    triggers pay at once (fireWaveCleared, E17), so the run's last cleared wave (the cap wave,
+   *    or one cleared on the tick the player dies) pays before the end checks; its other
+   *    triggers' effects run in the next tick's effect phase, none for the run's last tick.
    * 14. runEnd: overkill tracking, then the end checks (runEnd.ts).
    *
    * Steps 6–11 run only while the player is alive; 2b only in a v3 run, 4b in a run whose build
@@ -254,7 +259,7 @@ export function createSimulation(
     if (enemyAi) stepEnemyAi(ctx);
     moveEnemies(ctx);
     rebuildGrid(ctx);
-    if (globals) stepGlobals(ctx, wallet, held, inAura, top, minions);
+    if (globals) stepGlobals(ctx, wallet, held, inAura, top, minions, pool);
     resolveContacts(ctx);
     if (ctx.player.life > 0) {
       if (combo) stepCombo(ctx);

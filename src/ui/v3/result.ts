@@ -8,7 +8,6 @@
  */
 
 import { formatNum } from '../../core/format';
-import { num } from '../../core/num';
 import type { Num } from '../../core/num';
 import { t } from '../../i18n';
 import type { MessageKey } from '../../i18n';
@@ -16,6 +15,7 @@ import type { EndReason } from '../../sim/types';
 import { el } from '../style';
 import type { ControlCounts } from '../../app/v3/controlTally';
 import type { DamageBreakdownView, DamageShare } from './damageBreakdown';
+import { resultRows } from './resultRows';
 import { describeV3RunEnd } from './runEnd';
 import type { V3Enemies, V3RunEndFacts } from './runEnd';
 
@@ -25,12 +25,14 @@ export interface V3ResultInfo extends V3RunEndFacts {
   readonly kills: number;
   readonly averageDps: Num;
   readonly shardsFromRun: Num;
+  /** 利息 (gd:501): the run's interest pool, credited to the wallet beside its shards (E17). */
+  readonly interestFromRun: Num;
   readonly coresFromRun: number;
   readonly skipShards: Num;
   readonly skipCores: number;
   /** The character's all-time best wave, the run settled. */
   readonly bestWave: number;
-  /** The wallet's shards after the run. */
+  /** The wallet's shards after the run, its interest included. */
   readonly walletShards: Num;
   /** Shows 「換一個角色試試」 (src/app/v3/scope.ts' showsSwitchHint). */
   readonly switchHint?: boolean;
@@ -112,28 +114,9 @@ export class V3ResultPanel {
     }
 
     const rows = el(doc, 'dl', 'bc-result-rows');
-    const row = (label: string, value: string): void => {
+    for (const [label, value] of resultRows(info)) {
       rows.append(el(doc, 'dt', '', label), el(doc, 'dd', '', value));
-    };
-    row(t('result.highestWave'), String(info.highestWave));
-    row(t('v3.result.bestWave'), String(info.bestWave));
-    row(t('result.startWave'), String(info.startWave));
-    row(t('result.kills'), String(info.kills));
-    row(t('result.averageDps'), formatNum(info.averageDps, FORMAT));
-    row(t('result.damageTaken'), formatNum(num(info.damageTaken), FORMAT));
-    row(t('result.shardsFromRun'), formatNum(info.shardsFromRun, FORMAT));
-    row(t('result.coresFromRun'), String(info.coresFromRun));
-    let skip: string;
-    if (info.startWave <= 1) skip = t('result.skipNone');
-    else if (!info.clearedStartWave) skip = t('result.skipNotCleared');
-    else {
-      skip = t('result.skipValue', {
-        shards: formatNum(info.skipShards, FORMAT),
-        cores: info.skipCores,
-      });
     }
-    row(t('result.skipCompensation'), skip);
-    row(t('v3.result.wallet'), formatNum(info.walletShards, FORMAT));
 
     const parts: HTMLElement[] = [head, title, cause, rows];
     if (info.damage.sources.length > 0) parts.push(this.damageSection(info.damage));

@@ -78,8 +78,9 @@ const CORE_FLOOR_EPSILON = 1e-9;
 
 /**
  * Credits a finished run to the profile. Run drops are added as reported (the simulation
- * already applied shardGain/coreGain). If the run started past wave 1 and cleared its start
- * wave, the expected drops of waves 1..startWave−1 × skipRewardRate are added too, with
+ * already applied shardGain/coreGain), with the run's interest pool (E17,
+ * RunResult.interestShards) beside its shards. If the run started past wave 1 and cleared its
+ * start wave, the expected drops of waves 1..startWave−1 × skipRewardRate are added too, with
  * skip cores floored. Also updates maxWave and the run counter.
  */
 export function settleRun(
@@ -102,13 +103,15 @@ export function settleRun(
     skipCores = Math.floor(expectedCores * economy.skipRewardRate + CORE_FLOOR_EPSILON);
   }
 
-  meta.shards = assertFinite(add(meta.shards, add(result.shards, skipShards)), 'settleRun shards');
+  const fromRun = add(result.shards, result.interestShards);
+  meta.shards = assertFinite(add(meta.shards, add(fromRun, skipShards)), 'settleRun shards');
   meta.cores += result.cores + skipCores;
   meta.maxWave = Math.max(meta.maxWave, result.highestWaveReached);
   meta.runs += 1;
 
   return {
     shardsFromRun: result.shards,
+    interestFromRun: result.interestShards,
     coresFromRun: result.cores,
     skipShards,
     skipCores,
@@ -117,19 +120,22 @@ export function settleRun(
 
 /**
  * Credits a run that stopped before it finished, because the page was closed or reloaded
- * mid-run: the drops collected so far, the highest wave reached and the run counter. No skip
- * compensation, since the run never finished clearing its start wave on record.
+ * mid-run: the drops collected so far with the interest paid so far (E17), the highest wave
+ * reached and the run counter. No skip compensation, since the run never finished clearing its
+ * start wave on record.
  */
 export function settleUnfinishedRun(
   meta: SettleTarget,
-  progress: Pick<SimState, 'shards' | 'cores' | 'highestWaveReached'>,
+  progress: Pick<SimState, 'shards' | 'interestShards' | 'cores' | 'highestWaveReached'>,
 ): Settlement {
-  meta.shards = assertFinite(add(meta.shards, progress.shards), 'settleUnfinishedRun shards');
+  const fromRun = add(progress.shards, progress.interestShards);
+  meta.shards = assertFinite(add(meta.shards, fromRun), 'settleUnfinishedRun shards');
   meta.cores += progress.cores;
   meta.maxWave = Math.max(meta.maxWave, progress.highestWaveReached);
   meta.runs += 1;
   return {
     shardsFromRun: progress.shards,
+    interestFromRun: progress.interestShards,
     coresFromRun: progress.cores,
     skipShards: ZERO,
     skipCores: 0,

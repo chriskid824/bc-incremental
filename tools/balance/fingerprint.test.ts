@@ -157,6 +157,7 @@ describe('M1 projection', () => {
       endReason: 'death',
       ticks: 60,
       shards: num(3),
+      interestShards: num(0),
       cores: 0,
       kills: 4,
       damage: {
@@ -203,6 +204,7 @@ describe('M1 projection', () => {
       damage: { ...result.damage, poison: num(7), bleed: num(1) },
       damageBySource: { center: num(10), 'outer.poison': num(8) },
       counters: { ...result.counters, effectsRun: 12 },
+      interestShards: num(4),
       bulletTakenBy: { ...result.bulletTakenBy, shooter: { hits: 2, damage: 6 } },
     };
     expect(projectResult(later)).toEqual(projectResult(result));

@@ -201,6 +201,8 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'orbitSpeed',
       'thornsArea',
       'walletWeight',
+      'interestRate',
+      'bonusWaveInterest',
     ]);
   });
 
@@ -477,6 +479,9 @@ function kitchenSink(): NodeEffects {
       ],
     },
     { on: 'waveStart', do: [{ kind: 'spendShards', fraction: 0.05 }] },
+    // E17: 利息's payout at the clear, at its defaults and with both fields set.
+    { on: 'waveCleared', do: [{ kind: 'interest' }] },
+    { on: 'waveCleared', do: [{ kind: 'interest', rateStep: 0.0025, rateMax: 0.15 }] },
     // Each center event's fan-outs (status, self, placement) and a selector's.
     ...CENTER_EVENTS.flatMap((on): TriggerSpec[] => [
       { on, do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
@@ -1189,6 +1194,106 @@ describe('every template, through one node (§4.7)', () => {
       // Plants walletWeight read as a number (+0.5), or its name missing.
       const web = withEffects(fire, NOTABLE, { modifiers: [flat('walletWeight', 0.5)] });
       expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        '+1% Interest rate',
+        '+200% Bonus wave interest',
+        "At the end of each wave: earn interest on this run's shards, the rate rising 0.5 percentage points each time, at most 10%",
+        "At the end of each wave (50% chance): earn interest on this run's shards, the rate rising 0.25 percentage points each time, at most 15%",
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '利率 +1%',
+        '獎勵波利息倍率 +200%',
+        '每波結束時：拿本局碎片的一部分當利息，每次利率提高 0.5 個百分點，最多 10%',
+        '每波結束時（50% 機率）：拿本局碎片的一部分當利息，每次利率提高 0.25 個百分點，最多 15%',
+      ],
+    ],
+  ] as const)(
+    'writes 利息’s waveCleared interest at its defaults and set, and the two stats as percentages, in %s (E17)',
+    (locale, expected) => {
+      // Plants the defaults left out of the line, the step written as a fraction (0.005) or a
+      // percent (0.5%), the stats read as numbers (+0.01, +2), or a name missing.
+      const web = withEffects(fire, NOTABLE, {
+        triggers: [
+          { on: 'waveCleared', do: [{ kind: 'interest' }] },
+          {
+            on: 'waveCleared',
+            when: [{ chance: 0.5 }],
+            do: [{ kind: 'interest', rateStep: 0.0025, rateMax: 0.15 }],
+          },
+        ],
+        modifiers: [flat('interestRate', 0.01), flat('bonusWaveInterest', 2)],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      ['1% increased Interest rate per rank (2/3: +2%)'],
+      ['+1% Interest rate per rank (2/3: +2%)'],
+    ],
+    ['zh-TW', ['每級利率提高 1%（2/3：+2%）'], ['每級利率 +1%（2/3：+2%）']],
+  ] as const)(
+    'writes ranked interestRate 0.01 at rank 2, increased (as ranked() writes it) and flat, in %s (E17)',
+    (locale, increased, flatLines) => {
+      const id = 'fire.center.alpha.r1';
+      const inced = withEffects(fire, id, { modifiers: [inc('interestRate', 0.01)] });
+      expect(linesOf(inced, id, locale, 2)).toEqual(increased);
+      const flatted = withEffects(fire, id, { modifiers: [flat('interestRate', 0.01)] });
+      expect(linesOf(flatted, id, locale, 2)).toEqual(flatLines);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        '+0.5% Interest rate per rank (3/4: +1.5%)',
+        "At the end of each wave: earn interest on this run's shards, the rate rising 0.5 percentage points each time, at most 10%",
+        'When enemies are killed: heal 1% of max life (once per rank)',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '每級利率 +0.5%（3/4：+1.5%）',
+        '每波結束時：拿本局碎片的一部分當利息，每次利率提高 0.5 個百分點，最多 10%',
+        '敵人死亡時：回復 1% 生命（每級各一次）',
+      ],
+    ],
+  ] as const)(
+    'writes 利息’s 4-rank node at rank 3: its rate per rank, its interest trigger once and not once per rank, and an ordinary trigger once per rank, in %s (lead ruling 23a)',
+    (locale, expected) => {
+      // Plants the interest trigger's line still saying once per rank, or every trigger's line
+      // without it (B4's lead ruling 23a: webBuild puts the interest trigger in once).
+      const id = 'outer.greed.alpha.r1';
+      const nodes = fire.nodes.map((node): WebNode =>
+        node.id === id
+          ? {
+              ...node,
+              ranks: 4,
+              effects: effects({
+                modifiers: [flat('interestRate', 0.005)],
+                triggers: [
+                  { on: 'waveCleared', do: [{ kind: 'interest' }] },
+                  { on: 'kill', do: [{ kind: 'heal', lifePct: 0.01 }] },
+                ],
+              }),
+            }
+          : node,
+      );
+      const web = { ...fire, nodes, byId: new Map(nodes.map((node) => [node.id, node])) };
+      expect(linesOf(web, id, locale, 3)).toEqual(expected);
     },
   );
 
@@ -2152,4 +2257,48 @@ describe('E9: 血河’s bleed spread (lead ruling S7)', () => {
     ]);
     expect(triggerNumbers(withSpread({ behind: false, maxTargets: 3 }))).toEqual([['0.5']]);
   });
+});
+
+describe('a ranked node’s waveCleared trigger that is not interest alone', () => {
+  it.each([
+    [
+      'en',
+      [
+        '+0.5% Interest rate per rank (3/4: +1.5%)',
+        "At the end of each wave: earn interest on this run's shards, the rate rising 0.5 percentage points each time, at most 10%",
+        'At the end of each wave: heal 1% of max life (once per rank)',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '每級利率 +0.5%（3/4：+1.5%）',
+        '每波結束時：拿本局碎片的一部分當利息，每次利率提高 0.5 個百分點，最多 10%',
+        '每波結束時：回復 1% 生命（每級各一次）',
+      ],
+    ],
+  ] as const)(
+    'keeps “once per rank” on it, as webBuild repeats it, in %s (lead ruling 23a is runsAtClear)',
+    (locale, expected) => {
+      // Planted bug: the per-rank suffix dropped for every waveCleared trigger.
+      const id = 'outer.greed.alpha.r1';
+      const nodes = fire.nodes.map((node): WebNode =>
+        node.id === id
+          ? {
+              ...node,
+              ranks: 4,
+              effects: effects({
+                modifiers: [flat('interestRate', 0.005)],
+                triggers: [
+                  { on: 'waveCleared', do: [{ kind: 'interest' }] },
+                  { on: 'waveCleared', do: [{ kind: 'heal', lifePct: 0.01 }] },
+                ],
+              }),
+            }
+          : node,
+      );
+      const web = { ...fire, nodes, byId: new Map(nodes.map((node) => [node.id, node])) };
+      expect(linesOf(web, id, locale, 3)).toEqual(expected);
+    },
+  );
 });

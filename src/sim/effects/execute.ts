@@ -97,12 +97,23 @@
  * its target may die first. The hits of the effects after it in its `do` (a coinHit's) read the
  * shardsHeld the tick's globals step wrote before this phase (src/sim/systems/globals.ts), so the
  * spend shows in shardsHeld from the next tick's step on.
+ *
+ * An interest effect (E17, 利息 and ◆獎勵波, gd:501) never runs from the queue: its waveCleared
+ * trigger runs it at the clear, through the inline entry, whose value is the cleared wave's
+ * number (fireWaveCleared, dispatch.ts). It pays base × rate into SimState.interestShards, in Num
+ * and unrounded, and counts the payout in SimState.interestPayouts; rate = min(rateMax,
+ * interestRate + n × rateStep), n the payouts before it, base the run's shards plus, under ◆複利
+ * (BuildFlags.interestHeld), the pool, and on a wave that is a multiple of BONUS_WAVE_EVERY the
+ * rate × the bonusWaveInterest stat. A stat not above 0 (NaN included) counts as 0, so no payout
+ * is negative. It needs no target, never touches SimState.shards, draws nothing and raises no
+ * event.
  */
 
 import type { Num } from '../../core/num';
 import { add, gt, mul, num, sub, toNumber, ZERO } from '../../core/num';
 import type { SignatureId } from '../../data/rules';
 import type { AppliedAilment, ChainBoltSpec } from '../../data/triggers';
+import { BONUS_WAVE_EVERY, INTEREST_RATE_MAX, INTEREST_RATE_STEP } from '../../data/triggers';
 import {
   ailmentDps,
   applyBleed,
@@ -1003,6 +1014,28 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const spent = mul(state.shards, spec.fraction);
     state.shards = sub(state.shards, spent);
     state.shardsSpent = add(state.shardsSpent, spent);
+  },
+  // base × rate into the interest pool, the rate rising after each payout (lead ruling G2):
+  // compileEffect holds rateStep to >= 0 and rateMax to (0, 1], and a stat not above 0 counts
+  // as 0, so nothing paid is negative. entry.value is the cleared wave's number.
+  interest(ctx, spec, _fx, entry) {
+    const state = ctx.state;
+    const values = ctx.build.values;
+    const start = values.interestRate > 0 ? values.interestRate : 0;
+    const step = spec.rateStep ?? INTEREST_RATE_STEP;
+    const rate = Math.min(spec.rateMax ?? INTEREST_RATE_MAX, start + state.interestPayouts * step);
+    const base = ctx.build.flags.interestHeld
+      ? add(state.shards, state.interestShards)
+      : state.shards;
+    let paid: Num;
+    if (entry.value % BONUS_WAVE_EVERY === 0) {
+      const bonus = values.bonusWaveInterest > 0 ? values.bonusWaveInterest : 0;
+      paid = mul(base, rate * bonus);
+    } else {
+      paid = mul(base, rate);
+    }
+    state.interestShards = add(state.interestShards, paid);
+    state.interestPayouts++;
   },
 };
 

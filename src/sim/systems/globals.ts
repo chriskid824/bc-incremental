@@ -9,8 +9,9 @@
  * enemy AI's regeneration hit or read before it, and they read the previous tick's values (0 on
  * tick 1, when no enemy is the highest). Every later hit of a tick reads the values the step
  * wrote: a kill's shards show from the next tick, as do a spend's (spendShards, E17, in the
- * effect phase, even before a coinHit of its own `do`) and an enemy pushed into the aura after
- * the step. So too the highest-hp enemy: one that dies after the step leaves no enemy matching
+ * effect phase, even before a coinHit of its own `do`), an interest payout's under ◆複利 (E17, at
+ * the waveControl step, after the tick's last hit) and an enemy pushed into the aura after the
+ * step. So too the highest-hp enemy: one that dies after the step leaves no enemy matching
  * until the next tick (an id is never reused in a run, so no later enemy takes its id), and an
  * enemy spawned or split after the step, or whose hp changes during the tick, is judged by the
  * step's snapshot until the next tick. So too the timed rows: the drone stage (6b) spawns none
@@ -80,9 +81,10 @@ export function weighWallet(wallet: Num, weight: number): Num {
 
 /**
  * Writes this tick's shardsHeld, the wallet's `wallet` (RunConfig.walletShards as weighWallet
- * weighs it) plus the run's shards, when `held`; its enemiesInAura (aura.ts's pulse reach) when
+ * weighs it) plus the run's shards, and plus the run's interest pool when `pool` (◆複利,
+ * BuildFlags.interestHeld, E17), when `held`; its enemiesInAura (aura.ts's pulse reach) when
  * `inAura`, which is set only on a run with an aura emitter; its highestHpId when `top`; and its
- * minionCount when `minions` (`top` and `minions` false when left out).
+ * minionCount when `minions` (`top`, `minions` and `pool` false when left out).
  */
 export function stepGlobals(
   ctx: RunContext,
@@ -91,9 +93,14 @@ export function stepGlobals(
   inAura: boolean,
   top = false,
   minions = false,
+  pool = false,
 ): void {
   const ev = ctx.evalInput;
-  if (held) ev.shardsHeld = toNumber(add(wallet, ctx.state.shards));
+  if (held) {
+    const state = ctx.state;
+    const own = add(wallet, state.shards);
+    ev.shardsHeld = toNumber(pool ? add(own, state.interestShards) : own);
+  }
   if (inAura) ev.enemiesInAura = enemiesInAura(ctx);
   if (top) ev.highestHpId = highestHpId(ctx);
   if (minions) ev.minionCount = minionCount(ctx);

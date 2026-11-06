@@ -3293,6 +3293,46 @@ const spendData = (): GameData => {
   return { ...data, waves: { ...data.waves, eliteEvery: 1 } };
 };
 
+/**
+ * E17's 利息 (gd:501, lead rulings G1, G2 and G4) as inline data on M1's volley: from wave 1, waves
+ * of two to four triangles released over 0.25 s, the next due after 0.5 s or once the field is
+ * clear, so the run clears 32 waves within its 1200 ticks; a wallet of 1e4 at walletWeight 1 under
+ * 錢包's damage more of × (held shards)^0.06; on each cleared wave an interest payout at its
+ * defaults, from interestRate 1% up 0.5 percentage points a payout to 10%, × bonusWaveInterest 3
+ * on waves 10, 20 and 30 (◆獎勵波), on the run's shards plus the pool, which a test module's
+ * interestHeld (◆複利) also adds to shardsHeld. Credited to outer.greed.
+ */
+const INTEREST_STATS = makeStats(
+  { damage: 20, maxLife: 1e6, interestRate: 0.01, bonusWaveInterest: 3 },
+  [
+    {
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06 },
+    },
+  ],
+  {
+    triggers: [{ source: 'outer.greed', spec: { on: 'waveCleared', do: [{ kind: 'interest' }] } }],
+    conversions: [],
+    emitters: [],
+  },
+);
+const interestData = (): GameData =>
+  makeTestData({
+    waves: {
+      rules: [{ enemy: 'triangle', fromWave: 1, base: 2, perWave: 0.1, maxCount: 4 }],
+      eliteEvery: 1000,
+      bossEvery: 1000,
+      spawnDurationSec: 0.25,
+      waveTimerSec: 0.5,
+    },
+  });
+/** ◆複利 as a test module: the pool counts in shardsHeld and in the interest's base. */
+const compoundModule = (): TestModule => (b) => {
+  b.flags.interestHeld = true;
+};
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3902,6 +3942,13 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     data: spendData,
     expected: ['703c450e0260ea46', '22354e9abed9c380'],
   },
+  {
+    name: 'interest',
+    config: { stats: INTEREST_STATS, rules: [], walletShards: num(1e4) },
+    data: interestData,
+    modules: () => [compoundModule()],
+    expected: ['2b995a8b5374b7a3', '176297e4aed1f6e4'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -4013,8 +4060,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E16's hedgehog and E17's spend are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([85, 'hedgehog', 'spend']);
+    // The count docs/ARCHITECTURE.md gives: E17's spend and interest are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([86, 'spend', 'interest']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -8847,6 +8894,132 @@ describe('golden C4 runs', () => {
         hits: { coin: 8, eliteLow: 6 },
         coinOn,
         kills: { coin: 4, 'coin elite': 4, execute: 11, other: 14 },
+      },
+    });
+  });
+
+  it('pays interest once per cleared wave, at 1% up 0.5 points a payout to 10%, × 3 on waves 10, 20 and 30, on the shards plus the pool, into the pool alone, and reads shardsHeld = 1e4 + shards + pool at each next tick (E17, G1, G2, G4)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'interest') as GoldenC4Entry;
+    expect(INTEREST_STATS.values.walletWeight).toBe(1);
+    const wallet = num(1e4);
+    const bySeed: Record<number, Record<string, unknown>> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Every write of the run's shards and of the pool, by accessors installed at the first
+      // tick hook, with the event pushed last before it (a payout's is its waveCleared) and the
+      // run's shards then; each tick's step's shardsHeld.
+      interface Write {
+        readonly field: 'shards' | 'interestShards';
+        readonly last: SimEvent | undefined;
+        readonly from: Num;
+        readonly to: Num;
+        readonly shards: Num;
+      }
+      const writes: Write[] = [];
+      const held = new Map<number, number>();
+      const watch: TestModule = (b) => {
+        b.hook('tick', (ctx) => {
+          held.set(ctx.now, ctx.evalInput.shardsHeld);
+          if (held.size > 1) return;
+          const state = ctx.state;
+          const values = { shards: state.shards, interestShards: state.interestShards };
+          for (const field of ['shards', 'interestShards'] as const) {
+            Object.defineProperty(state, field, {
+              get: () => values[field],
+              set: (value: Num) => {
+                const last = ctx.events.at(-1);
+                writes.push({ field, last, from: values[field], to: value, shards: values.shards });
+                values[field] = value;
+              },
+            });
+          }
+        });
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [
+        ...(entry.modules?.() ?? []),
+        watch,
+      ]);
+      const ends: Num[] = [num(0)];
+      const pools: Num[] = [num(0)];
+      const cleared: number[] = [];
+      while (!sim.state.finished) {
+        for (const event of sim.step(NO_INPUT)) {
+          if (event.type === 'waveCleared') cleared.push(event.wave);
+        }
+        ends.push(sim.state.shards);
+        pools.push(sim.state.interestShards);
+      }
+      // One payout per cleared wave, in the order they clear, right after its waveCleared; the
+      // run's shards never written there.
+      const payouts = writes.filter((w) => w.field === 'interestShards');
+      expect(payouts.map((w) => (w.last?.type === 'waveCleared' ? w.last.wave : -1))).toEqual(
+        cleared,
+      );
+      expect(writes.filter((w) => w.field === 'shards' && w.last?.type === 'waveCleared')).toEqual(
+        [],
+      );
+      // Each: (shards + pool) × min(10%, 1% + n × 0.5 points), × 3 on a 10th wave, exact in Num.
+      let pool = num(0);
+      const rates: string[] = [];
+      const bonus: [number, string][] = [];
+      payouts.forEach((w, n) => {
+        const wave = w.last?.type === 'waveCleared' ? w.last.wave : -1;
+        const rate = Math.min(0.1, 0.01 + n * 0.005);
+        const on = num(toNumber(w.shards) + toNumber(pool));
+        const paid = wave % 10 === 0 ? mul(on, rate * 3) : mul(on, rate);
+        expect([w.from, w.to], `${wave}`).toEqual([pool, num(toNumber(pool) + toNumber(paid))]);
+        pool = w.to;
+        const pct = ((toNumber(paid) / toNumber(on)) * 100).toFixed(2);
+        rates.push(pct);
+        if (wave % 10 === 0) bonus.push([wave, pct]);
+      });
+      // The pool is the sum of the payouts, in the result too, beside the shards.
+      expect(sim.state.interestShards).toBe(pool);
+      expect(sim.result().interestShards).toBe(pool);
+      expect(sim.result().shards).toBe(sim.state.shards);
+      // The step of each tick: the wallet, plus the shards and the pool at the last tick's end.
+      for (const [tick, value] of held) {
+        const shards = toNumber(ends[tick - 1] as Num);
+        expect(value, `${tick}`).toBe(toNumber(wallet) + shards + toNumber(pools[tick - 1] as Num));
+      }
+      const factor = (x: number): number => Math.max(1, x) ** 0.06;
+      bySeed[seed] = {
+        cleared: [cleared.length, new Set(cleared).size, Math.max(...cleared)],
+        bonus,
+        rates: [...rates.slice(0, 3), rates[17], rates[18], rates.at(-1)],
+        pool: toNumber(pool).toFixed(4),
+        shards: toNumber(sim.state.shards).toFixed(4),
+        factor: [factor(held.get(1) as number), factor(Math.max(...held.values()))].map((f) =>
+          f.toFixed(4),
+        ),
+      };
+    }
+    // 32 waves cleared, each once, the bonus waves 10, 20 and 30 among them; the rate rises 0.5
+    // points a payout from 1% to its 10% cap at the 19th, which waves 20 and 30 pay × 3 (30%) and
+    // wave 10 at 5.5% × 3 (16.5%). Paid on the shards plus the pool, the pool ends at 7.5 and 7.3
+    // times the run's shards, and the factor rises from 1e4^0.06 by both.
+    const bonus = [
+      [10, '16.50'],
+      [20, '30.00'],
+      [30, '30.00'],
+    ];
+    const rates = ['1.00', '1.50', '2.00', '9.50', '10.00', '10.00'];
+    expect(bySeed).toEqual({
+      1: {
+        cleared: [32, 32, 32],
+        bonus,
+        rates,
+        pool: '844.8847',
+        shards: '111.9503',
+        factor: ['1.7378', '1.7474'],
+      },
+      2: {
+        cleared: [32, 32, 32],
+        bonus,
+        rates,
+        pool: '913.8227',
+        shards: '125.6601',
+        factor: ['1.7378', '1.7481'],
       },
     });
   });

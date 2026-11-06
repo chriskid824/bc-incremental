@@ -334,7 +334,7 @@ export interface SimState {
   bulletCount: number;
   /**
    * Currencies collected so far this run (before skip compensation, which meta adds); shards less
-   * what spendShards spent (E17).
+   * what spendShards spent (E17), and never the interest, which has its own pool.
    */
   shards: Num;
   /**
@@ -342,6 +342,15 @@ export interface SimState {
    * sum of every spend's SimState.shards × fraction, in Num and unrounded.
    */
   shardsSpent: Num;
+  /**
+   * The run's interest pool (利息, gd:501; E17), 0 at the start: the sum of every interest
+   * payout (InterestSpec), in Num and unrounded. It never goes into `shards`; shardsHeld counts it
+   * only under ◆複利 (BuildFlags.interestHeld), and the settlement credits it to the wallet beside
+   * them (RunResult.interestShards).
+   */
+  interestShards: Num;
+  /** The interest payouts so far this run (E17): n, which each payout's rate rises with. */
+  interestPayouts: number;
   cores: number;
   finished: boolean;
   /**
@@ -828,6 +837,11 @@ export interface RunResult {
   readonly endReason: EndReason;
   readonly ticks: number;
   readonly shards: Num;
+  /**
+   * The run's interest pool at its end (SimState.interestShards, E17), 0 without an interest
+   * effect: the settlement credits it to the wallet beside `shards` (src/meta/settle.ts).
+   */
+  readonly interestShards: Num;
   readonly cores: number;
   readonly kills: number;
   /** Damage dealt, split by kind of instance. `hit` counts non-crit primary hits only. */

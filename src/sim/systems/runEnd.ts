@@ -67,6 +67,7 @@ function end(ctx: RunContext, reason: EndReason): void {
     endReason: reason,
     ticks: state.tick,
     shards: state.shards,
+    interestShards: state.interestShards,
     cores: state.cores,
     kills: ctx.kills,
     damage: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mul, num, toNumber, ZERO } from '../core/num';
+import { add, mul, num, toNumber, ZERO } from '../core/num';
 import type { Num } from '../core/num';
 import { loadGameData } from '../data';
 import { composeWave } from '../data/compose';
@@ -35,6 +35,7 @@ function runResult(overrides: Partial<RunResult> = {}): RunResult {
     endReason: 'death',
     ticks: 3600,
     shards: num(50),
+    interestShards: ZERO,
     cores: 2,
     kills: 30,
     damage: { hit: ZERO, crit: ZERO, burn: ZERO, chain: ZERO, poison: ZERO, bleed: ZERO },
@@ -188,7 +189,13 @@ describe('settleRun', () => {
   it('adds run drops without skip reward when starting at wave 1', () => {
     const meta = createMetaState();
     const settlement = settleRun(meta, runResult(), data, baseStats, DEFAULT_ECONOMY);
-    expect(settlement).toEqual({ shardsFromRun: 50, coresFromRun: 2, skipShards: 0, skipCores: 0 });
+    expect(settlement).toEqual({
+      shardsFromRun: 50,
+      interestFromRun: 0,
+      coresFromRun: 2,
+      skipShards: 0,
+      skipCores: 0,
+    });
     expect(toNumber(meta.shards)).toBe(50);
     expect(meta.cores).toBe(2);
     expect(meta.maxWave).toBe(5);
@@ -233,6 +240,28 @@ describe('settleRun', () => {
     expect(meta.cores).toBe(4);
   });
 
+  it('credits shards + interestShards, the pool beside the drops (E17, lead ruling G5)', () => {
+    // Planted bug: the pool left out of the wallet.
+    const meta = createMetaState();
+    meta.shards = num(10);
+    const result = runResult({ interestShards: num(7.25) });
+    const settlement = settleRun(meta, result, data, baseStats, DEFAULT_ECONOMY);
+    expect(settlement).toEqual({
+      shardsFromRun: 50,
+      interestFromRun: 7.25,
+      coresFromRun: 2,
+      skipShards: 0,
+      skipCores: 0,
+    });
+    expect(toNumber(meta.shards)).toBe(10 + 50 + 7.25);
+    // With the skip compensation: the run's shards and pool first, then the skip.
+    const skipped = createMetaState();
+    const late = runResult({ startWave: 6, highestWaveReached: 9, interestShards: num(7.25) });
+    const paid = settleRun(skipped, late, data, baseStats, DEFAULT_ECONOMY);
+    expect(paid.skipShards).not.toBe(ZERO);
+    expect(skipped.shards).toBe(add(add(num(50), num(7.25)), paid.skipShards));
+  });
+
   it('keeps the best maxWave and counts every run', () => {
     const meta = createMetaState();
     meta.maxWave = 30;
@@ -252,6 +281,7 @@ describe('settleUnfinishedRun', () => {
     meta.maxWave = 30;
     const settlement = settleUnfinishedRun(meta, {
       shards: num(40),
+      interestShards: ZERO,
       cores: 2,
       highestWaveReached: 12,
     });
@@ -263,8 +293,28 @@ describe('settleUnfinishedRun', () => {
     expect(settlement.coresFromRun).toBe(2);
     expect(toNumber(settlement.skipShards)).toBe(0);
     expect(settlement.skipCores).toBe(0);
-    settleUnfinishedRun(meta, { shards: ZERO, cores: 0, highestWaveReached: 31 });
+    settleUnfinishedRun(meta, {
+      shards: ZERO,
+      interestShards: ZERO,
+      cores: 0,
+      highestWaveReached: 31,
+    });
     expect(meta.maxWave).toBe(31);
     expect(meta.runs).toBe(2);
+  });
+
+  it('banks shards + interestShards, the interest paid so far (E17, lead ruling G5)', () => {
+    // Planted bug: the pool left out of a closed run's wallet.
+    const meta = createMetaState();
+    meta.shards = num(100);
+    const settlement = settleUnfinishedRun(meta, {
+      shards: num(40),
+      interestShards: num(2.5),
+      cores: 0,
+      highestWaveReached: 12,
+    });
+    expect(toNumber(meta.shards)).toBe(142.5);
+    expect(toNumber(settlement.shardsFromRun)).toBe(40);
+    expect(toNumber(settlement.interestFromRun)).toBe(2.5);
   });
 });

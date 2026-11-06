@@ -15,6 +15,7 @@ import type {
   StatExtras,
   StatId,
 } from '../data/stats';
+import { runsAtClear } from '../data/triggers';
 import type { GameData } from '../data/types';
 import { nodeRank } from './talents';
 import type { MetaState } from './types';
@@ -34,8 +35,9 @@ export function collectModifiers(meta: Readonly<MetaState>, data: GameData): Mod
 
 /**
  * Triggers and conversions of the start node and every allocated node, repeated per rank like
- * modifiers, and their emitter grants, once per node whatever its rank; each with its node's
- * source (sourceOfNode), in data order.
+ * modifiers, but a trigger that runs at the clear (利息's interest, runsAtClear) once, in its
+ * first rank's place (B4's lead ruling 23a), and their emitter grants, once per node whatever its
+ * rank; each with its node's source (sourceOfNode), in data order.
  */
 export function collectExtras(meta: Readonly<MetaState>, data: GameData): StatExtras {
   const triggers: SourcedTrigger[] = [];
@@ -51,7 +53,9 @@ export function collectExtras(meta: Readonly<MetaState>, data: GameData): StatEx
     }
     const source = sourceOfNode(node.id);
     for (let r = 0; r < rank; r++) {
-      for (const spec of node.triggers) triggers.push({ source, spec });
+      for (const spec of node.triggers) {
+        if (r === 0 || !runsAtClear(spec)) triggers.push({ source, spec });
+      }
       for (const spec of node.conversions) conversions.push({ source, spec });
     }
     for (const grant of node.emitters) emitters.push({ source, grant });

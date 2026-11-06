@@ -431,11 +431,25 @@ describe('runCharacterSession', () => {
     expect(
       settlementEarned({
         shardsFromRun: num(10),
+        interestFromRun: num(0),
         coresFromRun: 1,
         skipShards: num(5),
         skipCores: 2,
       }),
     ).toEqual({ shards: 15, cores: 3 });
+  });
+
+  it('counts a run’s interest in what the session earned, beside its shards (E17, G5)', () => {
+    // Planted bug: the interest pool, which the wallet holds, left out of the session's earned.
+    expect(
+      settlementEarned({
+        shardsFromRun: num(10),
+        interestFromRun: num(4.5),
+        coresFromRun: 1,
+        skipShards: num(5),
+        skipCores: 2,
+      }),
+    ).toEqual({ shards: 19.5, cores: 3 });
   });
 
   it('takes a snapshot due at the very minute a run ends after that run', () => {

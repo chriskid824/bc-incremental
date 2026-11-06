@@ -436,6 +436,7 @@ export class GamePage {
       kills: result.kills,
       averageDps: seconds > 0 ? div(totalDamage(result), seconds) : ZERO,
       shardsFromRun: settlement.shardsFromRun,
+      interestFromRun: settlement.interestFromRun,
       coresFromRun: settlement.coresFromRun,
       skipShards: settlement.skipShards,
       skipCores: settlement.skipCores,

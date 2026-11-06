@@ -391,13 +391,17 @@ export function damageColumns(
   };
 }
 
-/** What a settled run adds to a session's `earned`: its drops and the skip compensation. */
+/**
+ * What a settled run adds to a session's `earned`: its drops, its interest (利息, E17) and the skip
+ * compensation.
+ */
 export function settlementEarned(settlement: Settlement): {
   readonly shards: number;
   readonly cores: number;
 } {
+  const fromRun = toNumber(settlement.shardsFromRun) + toNumber(settlement.interestFromRun);
   return {
-    shards: toNumber(settlement.shardsFromRun) + toNumber(settlement.skipShards),
+    shards: fromRun + toNumber(settlement.skipShards),
     cores: settlement.coresFromRun + settlement.skipCores,
   };
 }

@@ -92,7 +92,8 @@ export interface BuildCompiler {
   addTrigger(source: string, spec: TriggerSpec, coef?: number): void;
   /**
    * Compiles an effect for the instance's hooks to queue (enqueueModuleEffect), credited to
-   * `source`, with its COEF_FIELDS × coef (default 1). Returns its effect index.
+   * `source`, with its COEF_FIELDS × coef (default 1). Returns its effect index. Throws on an
+   * interest effect, which only a waveCleared trigger runs (E17; addTrigger).
    */
   addEffect(source: string, spec: EffectSpec, coef?: number): number;
   /**

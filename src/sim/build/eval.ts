@@ -79,8 +79,9 @@ export interface EvalInput {
   comboStacks: number;
   /**
    * The shards held at this tick's globals step: the wallet weighed by walletWeight
-   * (weighWallet, src/sim/systems/globals.ts) plus the run's shards less what was spent;
-   * 0 outside a run and in a run whose build reads no shardsHeld (BuildFlags.shardsHeld).
+   * (weighWallet, src/sim/systems/globals.ts) plus the run's shards less what was spent, and
+   * under ◆複利 (BuildFlags.interestHeld) plus the run's interest pool; 0 outside a run and in a
+   * run whose build reads no shardsHeld (BuildFlags.shardsHeld).
    */
   shardsHeld: number;
   /**

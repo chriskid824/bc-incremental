@@ -1132,6 +1132,7 @@ describe('trigger validation', () => {
       'waveStart',
       'periodic',
       'droneExpire',
+      'waveCleared',
     ]);
     for (const event of targetless) {
       expect(triggerIssues(on(event)), event).toEqual([
@@ -2857,8 +2858,8 @@ describe('trigger validation', () => {
           ...(on === 'periodic' ? { every: 1 } : {}),
           ...(named[on] === undefined ? {} : { when: named[on] }),
         };
-        // A waveStart trigger takes no selector at all.
-        if (on === 'waveStart') return [{ ...base, do: [spend] }];
+        // A waveStart or waveCleared trigger takes no selector at all.
+        if (on === 'waveStart' || on === 'waveCleared') return [{ ...base, do: [spend] }];
         return [
           { ...base, do: [spend] },
           { ...base, target: { pick: 'player' }, do: [spend] },
@@ -2955,7 +2956,9 @@ describe('trigger validation', () => {
         ...(named[on] === undefined ? {} : { when: named[on] }),
       };
       const picks: (TriggerSpec['target'] | undefined)[] =
-        on === 'waveStart' ? [undefined] : [undefined, { pick: 'player' }, { pick: 'nearest' }];
+        on === 'waveStart' || on === 'waveCleared'
+          ? [undefined]
+          : [undefined, { pick: 'player' }, { pick: 'nearest' }];
       for (const target of picks) {
         const trigger = (effect: EffectSpec): TriggerSpec =>
           ({ ...base, ...(target === undefined ? {} : { target }), do: [effect] }) as TriggerSpec;
@@ -2965,8 +2968,8 @@ describe('trigger validation', () => {
         refused += coinIssues.length;
       }
     }
-    // waveStart, periodic, heroHit and droneExpire, bare.
-    expect(refused).toBe(4);
+    // waveStart, periodic, heroHit, droneExpire and waveCleared, bare.
+    expect(refused).toBe(5);
     // True or left out, as seat: false is refused in validation and at load.
     expect(
       triggerIssues({ on: 'hit', do: [{ ...live, liveTarget: false } as unknown as EffectSpec] }),
@@ -2979,6 +2982,110 @@ describe('trigger validation', () => {
       do: [{ ...live, liveTarget: false } as unknown as EffectSpec],
     } as Mutable<TriggerSpec>);
     expect(() => parseGameData(data)).toThrow(/liveTarget/);
+  });
+
+  it('accepts interest alone on waveCleared, once or twice, with the conditions waveStart takes, and no selector (E17, lead rulings G1 and G2)', () => {
+    // Plants interest refused where it goes, or a waveCleared trigger taking a selector, whose
+    // pick would query the grid after the death step's compact.
+    const interest = { kind: 'interest' } as const;
+    expect(
+      triggerIssues(
+        { on: 'waveCleared', do: [interest] },
+        {
+          on: 'waveCleared',
+          do: [interest, { kind: 'interest', rateStep: 0, rateMax: 1 }],
+        },
+        { on: 'waveCleared', do: [{ kind: 'interest', rateStep: 0.01, rateMax: 1e-9 }] },
+        {
+          on: 'waveCleared',
+          when: [{ chance: 0.5 }, { cooldownSec: 3 }, { comboAtLeast: 5 }],
+          do: [interest],
+        },
+        // Another effect on waveCleared, in a trigger of its own, as on waveStart.
+        { on: 'waveCleared', do: [heal] },
+      ),
+    ).toEqual([]);
+    expect(
+      triggerIssues(
+        { on: 'waveCleared', target: { pick: 'nearest' }, do: [interest] },
+        { on: 'waveCleared', when: [{ targetKind: 'boss' }], do: [interest] },
+      ),
+    ).toEqual([
+      `${at} target is not allowed on 'waveCleared' events; use a periodic trigger with a selector`,
+      "talent 'vitality': triggers[1] when[0] targetKind does not apply to 'waveCleared' events",
+    ]);
+  });
+
+  it('refuses interest on every other event and beside any other effect (E17, lead ruling G2)', () => {
+    // Plants interest accepted on a non-waveCleared event, or beside another effect.
+    const interest = { kind: 'interest' } as const;
+    const named: Partial<Record<TriggerSpec['on'], Condition[]>> = {
+      ailmentApplied: [{ ailment: 'burn' }],
+      ailmentTick: [{ ailment: 'burn' }],
+    };
+    const others = TRIGGER_EVENTS.filter((on) => on !== 'waveCleared');
+    expect(others).toHaveLength(TRIGGER_EVENTS.length - 1);
+    for (const on of others) {
+      const trigger = {
+        on,
+        ...(on === 'periodic' || on === 'nthAttack' ? { every: 4 } : {}),
+        ...(named[on] === undefined ? {} : { when: named[on] }),
+        do: [interest],
+      } as TriggerSpec;
+      expect(triggerIssues(trigger), on).toEqual([
+        `${at} do[0] interest runs only on 'waveCleared' events (got '${on}')`,
+      ]);
+    }
+    for (const other of [heal, { kind: 'spendShards', fraction: 0.01 } as const]) {
+      expect(triggerIssues({ on: 'waveCleared', do: [interest, other] })).toEqual([
+        `${at} mixes interest and other effects; an interest trigger holds interest alone`,
+      ]);
+      expect(triggerIssues({ on: 'waveCleared', do: [other, interest, interest] })).toEqual([
+        `${at} mixes interest and other effects; an interest trigger holds interest alone`,
+      ]);
+    }
+  });
+
+  it('refuses a rateStep of −0.1 or NaN, a rateMax of 0, 1.5 or NaN, and an extra key at load (E17, lead ruling G2)', () => {
+    // Plants a negative step (a rate that falls below interestRate), a cap of 0 or above 1, or a
+    // NaN, accepted.
+    const steps = [-0.1, Number.NaN, -Infinity, Infinity];
+    expect(
+      steps.map((rateStep) =>
+        triggerIssues({ on: 'waveCleared', do: [{ kind: 'interest', rateStep }] }),
+      ),
+    ).toEqual(
+      ['-0.1', 'NaN', '-Infinity', 'Infinity'].map((got) => [
+        `${at} do[0] rateStep must be finite and >= 0 (got ${got})`,
+      ]),
+    );
+    const maxes = [0, 1.5, Number.NaN, -0.1, Infinity];
+    expect(
+      maxes.map((rateMax) =>
+        triggerIssues({ on: 'waveCleared', do: [{ kind: 'interest', rateMax }] }),
+      ),
+    ).toEqual(
+      ['0', '1.5', 'NaN', '-0.1', 'Infinity'].map((got) => [
+        `${at} do[0] rateMax must be finite and in (0, 1] (got ${got})`,
+      ]),
+    );
+    // The schema refuses a NaN and an extra key, as every strict effect.
+    for (const effect of [
+      { kind: 'interest', rateStep: Number.NaN },
+      { kind: 'interest', rateMax: Number.NaN },
+      { kind: 'interest', pool: true },
+    ]) {
+      const data = content();
+      const node = talent(data, 'vitality');
+      node.descKey = 'talent.vitality.desc';
+      node.triggers.push({
+        on: 'waveCleared',
+        do: [effect as unknown as EffectSpec],
+      } as Mutable<TriggerSpec>);
+      expect(() => parseGameData(data), JSON.stringify(effect)).toThrow(
+        'pool' in effect ? /pool/ : /rate/,
+      );
+    }
   });
 });
 

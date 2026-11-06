@@ -111,10 +111,10 @@ describe('spawnDrone in the schema', () => {
     ]);
   });
 
-  it('takes a trigger on droneExpire, the last of the trigger events, now raised', () => {
+  it('takes a trigger on droneExpire, the last trigger event before E17’s waveCleared, now raised', () => {
     const trigger = { on: 'droneExpire', do: [{ ...SPIRIT, lifeSec: 1 }] };
     expect(TriggerSpecSchema.parse(trigger)).toEqual(trigger);
-    expect(TRIGGER_EVENTS.at(-1)).toBe('droneExpire');
+    expect(TRIGGER_EVENTS.slice(-2)).toEqual(['droneExpire', 'waveCleared']);
     expect(WIRED_EVENTS.has('droneExpire')).toBe(true);
     expect(TARGETLESS_EVENTS.has('droneExpire')).toBe(false);
     expect(TRIGGER_EVENTS.filter((e) => !WIRED_EVENTS.has(e))).toEqual([]);

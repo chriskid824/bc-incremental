@@ -237,6 +237,7 @@ const [
   thaw,
   pull,
   spendShards,
+  interest,
 ] = EffectSpecSchema.options;
 
 /**
@@ -269,6 +270,7 @@ export const PayloadEffectSchema = exact<PayloadEffect>()(
     thaw,
     pull,
     spendShards,
+    interest,
   ]),
 );
 

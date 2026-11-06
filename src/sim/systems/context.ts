@@ -981,6 +981,8 @@ export function createRunContext(
     bulletCount: 0,
     shards: ZERO,
     shardsSpent: ZERO,
+    interestShards: ZERO,
+    interestPayouts: 0,
     cores: 0,
     finished: false,
     sources: sources.names,

@@ -18,6 +18,11 @@
  * A frozen victim's shatter (SHATTER_TRIGGER) and the shatter triggers are pending kills too, as
  * is, under ◆連鎖碎裂 (E6), the shatter of any enemy a shatter kills.
  *
+ * A cleared wave dispatches in two parts too (fireWaveCleared, E17): its interest triggers
+ * (CompiledTrigger.inline, runsAtClear) pay at once, at the clear, so the run's last cleared wave
+ * pays before the run's end check; its other triggers queue their effects for the next tick's
+ * effect phase.
+ *
  * Transfer triggers skip the depth gate and fire at any kill depth, as M1's Pandemic spread did
  * (Hoshi's call, 2026-10-14): they deal no damage, and the stacks they move keep their end and
  * lose strength with each spread, which bounds their chains. The moved stacks take one depth more
@@ -26,7 +31,7 @@
  */
 
 import type { Num } from '../../core/num';
-import { ZERO } from '../../core/num';
+import { num, ZERO } from '../../core/num';
 import { DETONATE_AILMENTS } from '../../data/triggers';
 import type { AppliedAilment, DetonateAilment } from '../../data/triggers';
 import { remainingOf } from '../ailments/remaining';
@@ -276,6 +281,46 @@ export function fireInlineKill(
       entry.y = victim.y;
       entry.value = 0;
       entry.target = victim;
+      runEffect(ctx, entry);
+    }
+  }
+}
+
+/**
+ * The waveCleared event of wave `wave` (E17), at the player without a target, at depth 0, its
+ * value the wave's number: every trigger listening to it, in trigger order. One of interest
+ * effects alone (CompiledTrigger.inline, runsAtClear) runs them at once through the inline
+ * entry, as a kill's transfers do, at depth 1, its gates passed as fireOne's; any other queues
+ * its effects, which run in the next tick's effect phase. Called by the waveControl step once per
+ * cleared record, after the death step (src/sim/systems/waves.ts updateClears): a build with no
+ * waveCleared trigger pays the empty list's test alone.
+ */
+export function fireWaveCleared(ctx: RunContext, wave: number): void {
+  const list = ctx.build.triggersOn[EVENT.waveCleared] as Int32Array;
+  if (list.length === 0) return;
+  const player = ctx.player;
+  const x = player.x;
+  const y = player.y;
+  const triggers = ctx.build.triggers;
+  for (let n = 0; n < list.length; n++) {
+    const i = list[n] as number;
+    const t = triggers[i] as CompiledTrigger;
+    if (!t.inline) {
+      fireOne(ctx, i, 0, -1, null, x, y, 0, num(wave), -1);
+      continue;
+    }
+    if (passes(ctx, i, -1, null, 0, x, y) === null) continue;
+    const entry = ctx.inlineEntry;
+    for (let e = t.effectStart; e < t.effectEnd; e++) {
+      entry.effect = e;
+      entry.depth = 1;
+      entry.origin = i;
+      entry.source = t.source;
+      entry.flags = 0;
+      entry.x = x;
+      entry.y = y;
+      entry.value = wave;
+      entry.target = null;
       runEffect(ctx, entry);
     }
   }
