@@ -109,6 +109,7 @@ describe('compileBuild', () => {
       poisonSlowPer: 0,
       poisonSlowMax: 0,
       spreadFactor: 1,
+      thornsFactor: 1,
       summonEliteFirst: false,
       droneCountMult: 1,
       dronesStay: false,

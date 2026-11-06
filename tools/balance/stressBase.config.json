@@ -67,7 +67,8 @@
       "barragePierce": 0,
       "barrageSplit": 0,
       "comboCap": 20,
-      "orbitSpeed": 1
+      "orbitSpeed": 1,
+      "thornsArea": 1
     },
     "values": {
       "damage": 450.22067097931824,
@@ -135,7 +136,8 @@
       "barragePierce": 0,
       "barrageSplit": 0,
       "comboCap": 20,
-      "orbitSpeed": 1
+      "orbitSpeed": 1,
+      "thornsArea": 1
     },
     "scoped": [
       {

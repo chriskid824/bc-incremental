@@ -111,6 +111,7 @@
   "web.extra.nearestOtherBolts": "，朝最近的 {n} 隻其他敵人各一道",
   "web.extra.buffTags": "，只限{tags}的攻擊",
   "web.extra.area": "，範圍半徑 {radius}",
+  "web.extra.strikeTargets": "，一次最多打 {n} 隻",
   "web.extra.chain": "，連鎖 {n} {jumps}",
   "web.extra.everyNth": "，每 {n} 次脈衝只打一次，傷害 ×{mult}",
   "web.extra.corona": "，每 {s} 秒放一次日冕：所有敵人受到 ×{mult} 脈衝傷害",

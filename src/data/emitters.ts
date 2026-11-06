@@ -9,6 +9,7 @@
  * src/data/schema.ts (GRANT_SCHEMAS), their checks in src/data/validate.ts.
  */
 
+import type { DamageTag } from './tags';
 import type { TargetSelector } from './triggers';
 
 /**
@@ -57,12 +58,14 @@ export interface SegmentGrant {
 }
 
 /**
- * A strike (落雷, 雷鳴): every periodSec, whatever the attack speed, it picks an enemy by its
+ * A strike (落雷, 雷鳴, 刺蝟): every periodSec, whatever the attack speed, it picks an enemy by its
  * target selector, measured from the player as a periodic trigger's is, and hits it; enemies
  * within `radius` of it take the same hit, and with chainJumps the strike chains on from it that
- * many jumps (src/sim/emitters/strike.ts). The target and each jump take shockStacks shock
- * stacks after their hit. The hits are tagged hit, strike and area plus the element, can crit
- * and roll ailments.
+ * many jumps (src/sim/emitters/strike.ts). With `targets` n it picks up to n distinct enemies,
+ * all before any is hit, in the pick's order, and strikes each in turn as one strike, then
+ * chains from them all. The target and each jump take shockStacks shock stacks after their hit.
+ * The hits are tagged hit, strike and area plus the element and its `tags`, can crit and roll
+ * ailments. A thorns-tagged strike's range and radius take the thornsArea stat (E16).
  */
 export interface StrikeGrant {
   readonly kind: 'strike';
@@ -72,8 +75,19 @@ export interface StrikeGrant {
   readonly periodSec: number;
   /** The enemy it strikes; never 'player', which has no enemy to strike. */
   readonly target: TargetSelector;
+  /**
+   * Enemies it strikes at once, an integer in [1, 8]: the selector's best distinct ones, the
+   * first the one it alone would pick; STRIKE_DEFAULTS.targets (1) when omitted.
+   */
+  readonly targets?: number;
   /** Base damage of its hits as a fraction of the damage stat. */
   readonly damagePct: number;
+  /**
+   * More delivery tags of its hits, as an effect's tags are: owner or geometry tags
+   * (src/data/tags.ts). 刺蝟's ['thorns'] gives its hits every thorns modifier, and its range and
+   * radius the thornsArea stat.
+   */
+  readonly tags?: readonly DamageTag[];
   /** Radius of its area around the target; STRIKE_DEFAULTS.radius (0, the target only). */
   readonly radius?: number;
   /** The element its hits carry. */
@@ -199,8 +213,9 @@ export const SEGMENT_DEFAULTS = {
   pairPeriodSec: 0,
 } as const;
 
-/** A strike grant's fields when it omits them: no area, no chain, no shock. */
+/** A strike grant's fields when it omits them: one target, no area, no chain, no shock. */
 export const STRIKE_DEFAULTS = {
+  targets: 1,
   radius: 0,
   chainJumps: 0,
   shockStacks: 0,

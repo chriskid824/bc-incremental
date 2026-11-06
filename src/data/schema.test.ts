@@ -1096,6 +1096,36 @@ describe('EmitterGrantSchema', () => {
     expect(EmitterGrantSchema.safeParse(grant).success).toBe(false);
   });
 
+  it("takes a strike's targets as a number and its tags as damage tags (E16)", () => {
+    const hedgehog = {
+      kind: 'strike',
+      name: 'hedgehog',
+      periodSec: 1,
+      target: { pick: 'nearest', range: 200 },
+      targets: 6,
+      damagePct: 0.75,
+      tags: ['thorns'],
+    };
+    expect(EmitterGrantSchema.parse(hedgehog)).toEqual(hedgehog);
+    expect(GRANT_SCHEMAS.strike.parse(hedgehog)).toEqual(hedgehog);
+    // validate.ts holds the targets to [1, 8] and the tags to delivery tags, not the schema.
+    const unchecked = { ...hedgehog, targets: 9.5, tags: ['hit', 'burn', 'hit'] };
+    expect(EmitterGrantSchema.parse(unchecked)).toEqual(unchecked);
+  });
+
+  it.each([
+    ['targets that are NaN', { targets: NaN }],
+    ['targets that are not finite', { targets: Infinity }],
+    ['targets that are not a number', { targets: '6' }],
+    ['a tag that is not a damage tag', { tags: ['spikes'] }],
+    ['tags that are not a list', { tags: 'thorns' }],
+    ['an extra key', { thorns: true }],
+  ])("rejects a strike's %s (E16)", (_label, fields) => {
+    const grant = { ...SAMPLE_GRANTS.strike, ...fields };
+    expect(EmitterGrantSchema.safeParse(grant).success).toBe(false);
+    expect(GRANT_SCHEMAS.strike.safeParse(grant).success).toBe(false);
+  });
+
   it('accepts a drone grant with any of its fields left out', () => {
     for (const grant of [
       { kind: 'drone' },

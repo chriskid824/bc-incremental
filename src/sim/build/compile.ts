@@ -208,6 +208,18 @@ export interface BuildFlags {
    */
   spreadFactor: number;
   /**
+   * The thorns factor (荊棘範圍, E16; lead ruling 21 of B4): values.thornsArea when it is above
+   * 0, else 0 (NaN included), which compileBuild sets beside areaFactor once the modules have
+   * run. The radius of every effect whose tags hold thorns is × it in the sizedEffect pass, in
+   * one product with areaFactor (and spreadFactor when it spreads); a thorns-tagged strike's
+   * selector range is × it, a reach, never × areaFactor (strikeSelector), and its area radius
+   * sizeOf(radius) × it (src/sim/emitters/strike.ts); a thorns-tagged explode's and nova's burst
+   * event and groundZone's zone take the effect's product at use (sizedRadius,
+   * src/sim/effects/execute.ts). Nothing else reads it. 1 for a build at the stat's base, whose
+   * radii and reaches stay as written bit for bit.
+   */
+  thornsFactor: number;
+  /**
    * 鎖定信標 (gd:479 「召喚物優先打菁英與 Boss」): every summon's pick takes the elites and bosses
    * (Enemy.tough) first (src/sim/systems/drones.ts): the drones' and the outer spirits' pickOuter
    * and the nearest spirits' pickNearest run their tiers over the alive tough enemies before
@@ -918,6 +930,7 @@ export function compileBuild(
     poisonSlowPer: 0,
     poisonSlowMax: 0,
     spreadFactor: 1,
+    thornsFactor: 1,
     summonEliteFirst: false,
     droneCountMult: 1,
     dronesStay: false,
@@ -1122,12 +1135,16 @@ export function compileBuild(
   // sized here once, the shatter's as it is compiled, and the executors read them as they are.
   // An areaSize below 0 is no area at all, never a negative radius whose square is positive.
   // So too the spread factor (E3), which a spread's radius takes beside the area factor in the
-  // same pass, and a marked selector's range alone; a spreadRadius below 0 is no spread.
+  // same pass, and a marked selector's range alone; a spreadRadius below 0 is no spread. And the
+  // thorns factor (E16, lead ruling 21), which a thorns-tagged radius takes beside them, in the
+  // same product: a thornsArea not above 0, NaN included, is no area at all.
   flags.areaFactor = Math.max(0, values.areaSize) * flags.sizeFactor;
   flags.spreadFactor = Math.max(0, values.spreadRadius);
-  if (flags.areaFactor !== 1 || flags.spreadFactor !== 1) {
+  flags.thornsFactor = values.thornsArea > 0 ? values.thornsArea : 0;
+  if (flags.areaFactor !== 1 || flags.spreadFactor !== 1 || flags.thornsFactor !== 1) {
     for (let i = 0; i < effects.length; i++) {
-      effects[i] = sizedEffect(effects[i] as CompiledEffect, flags.areaFactor, flags.spreadFactor);
+      const fx = effects[i] as CompiledEffect;
+      effects[i] = sizedEffect(fx, flags.areaFactor, flags.spreadFactor, flags.thornsFactor);
     }
     if (flags.spreadFactor !== 1) {
       for (let i = 0; i < triggers.length; i++) {

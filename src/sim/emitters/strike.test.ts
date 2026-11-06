@@ -129,6 +129,7 @@ describe('strike: its emitter', () => {
       name: 'bolt',
       periodSec: 2,
       target: { pick: 'farthest' },
+      targets: 1,
       radius: 0,
       chainJumps: 0,
       shockStacks: 0,

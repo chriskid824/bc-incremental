@@ -24,7 +24,7 @@ import {
   THORNS_DAMAGE_PCT,
 } from '../../data/emitters';
 import type { BarrageGrant, EmitterGrant, SegmentGrant } from '../../data/emitters';
-import { ailmentMask, ELEMENT_MASK, jumpMask, TAG } from '../../data/tags';
+import { ailmentMask, ELEMENT_MASK, jumpMask, TAG, tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { TargetSelector } from '../../data/triggers';
 import type { ArcParams, CompiledBarrage, CompiledBuild } from '../build/compile';
@@ -135,16 +135,20 @@ export interface SegmentSpec extends EmitterBase {
 }
 
 /**
- * A strike grant (落雷, 雷鳴): every periodSec, whatever the attack speed, it hits the enemy its
- * `target` selector picks from the player, then the other enemies within `radius` of it, and
+ * A strike grant (落雷, 雷鳴, 刺蝟): every periodSec, whatever the attack speed, it hits the enemy
+ * its `target` selector picks from the player, then the other enemies within `radius` of it, and
  * chains from it chainJumps jumps; the target and each jump take shockStacks shock stacks after
- * their hit (strike.ts).
+ * their hit (strike.ts). With `targets` above 1 it picks that many distinct enemies at most and
+ * strikes each, then chains from them all. Its tags hold the grant's own (StrikeGrant.tags); a
+ * thorns one's range and radius are × BuildFlags.thornsFactor (E16).
  */
 export interface StrikeSpec extends EmitterBase {
   readonly kind: 'strike';
   readonly name: string;
   readonly periodSec: number;
   readonly target: TargetSelector;
+  /** Enemies a strike picks at most, an integer in [1, 8]; 1 runs the one-target path. */
+  readonly targets: number;
   /** 0: the target only. */
   readonly radius: number;
   /** An integer in [0, 8]. */
@@ -271,13 +275,18 @@ export function grantEmitter(
         source,
         damagePct: grant.damagePct,
         tags:
-          TAG.hit | TAG.strike | TAG.area | (grant.element === undefined ? 0 : TAG[grant.element]),
+          TAG.hit |
+          TAG.strike |
+          TAG.area |
+          (grant.element === undefined ? 0 : TAG[grant.element]) |
+          (grant.tags === undefined ? 0 : tagMask(grant.tags)),
         chains: false,
         rollsAilments: true,
         canCrit: true,
         name: grant.name,
         periodSec: grant.periodSec,
         target: grant.target,
+        targets: grant.targets ?? STRIKE_DEFAULTS.targets,
         radius: grant.radius ?? STRIKE_DEFAULTS.radius,
         chainJumps: grant.chainJumps ?? STRIKE_DEFAULTS.chainJumps,
         shockStacks: grant.shockStacks ?? STRIKE_DEFAULTS.shockStacks,

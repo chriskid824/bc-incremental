@@ -1373,6 +1373,19 @@ describe('trigger validation', () => {
     ]);
   });
 
+  it("reports an effect's repeated tag that is no delivery tag: the list first, then each tag", () => {
+    expect(
+      triggerIssues({
+        on: 'hit',
+        do: [{ kind: 'nova', radius: 50, damagePct: 1, tags: ['hit', 'hit'] }],
+      }),
+    ).toEqual([
+      `${at} do[0] tags must be unique and not empty; omit the field instead`,
+      `${at} do[0] tag 'hit' is not an owner or geometry tag`,
+      `${at} do[0] tag 'hit' is not an owner or geometry tag`,
+    ]);
+  });
+
   it('rejects effect parameters out of range', () => {
     expect(
       triggerIssues({
@@ -2916,7 +2929,7 @@ describe('emitter grant validation', () => {
       start.links.push(leaf.id);
       d.talents.push({
         ...smallNode(leaf.id, [start.id]),
-        emitters: leaf.emitters,
+        emitters: leaf.emitters as Mutable<EmitterGrant>[],
         descKey: `talent.${leaf.id}.desc`,
       });
     }
@@ -3215,6 +3228,90 @@ describe('emitter grant validation', () => {
     ).toEqual([]);
     expect(
       grantIssues(bolt('outer.lightning.bolt', 'bolt', 2), bolt('outer.lightning.clap', 'bolt', 2)),
+    ).toEqual([]);
+  });
+
+  it("accepts a strike's targets 1 to 8 and its delivery tags, owner or geometry (E16)", () => {
+    for (const fields of [
+      { targets: 1 },
+      { targets: 6, tags: ['thorns'] },
+      { targets: 8 },
+      { tags: ['thorns', 'projectile'] },
+      { tags: ['area', 'orbit', 'minion', 'chain'] },
+    ]) {
+      expect(grantIssues({ id: 'outer.thorns.hedgehog', emitters: [strike(fields)] })).toEqual([]);
+    }
+  });
+
+  it("rejects a strike's targets 0, 9, 1.5 and NaN, and tags outside the delivery tags, repeated or empty (E16)", () => {
+    expect(
+      grantIssues({
+        id: 'outer.thorns.hedgehog',
+        emitters: [
+          strike({ name: 'a', targets: 0 }),
+          strike({ name: 'b', targets: 9 }),
+          strike({ name: 'c', targets: 1.5 }),
+          strike({ name: 'd', targets: NaN }),
+          strike({ name: 'e', targets: -1 }),
+          strike({ name: 'f', tags: ['hit'] }),
+          strike({ name: 'g', tags: ['thorns', 'burn'] }),
+          strike({ name: 'h', tags: ['cold'] }),
+          strike({ name: 'i', tags: ['thorns', 'thorns'] }),
+          strike({ name: 'j', tags: [] }),
+          strike({ name: 'k', tags: ['crit', 'lightning'], targets: 12 }),
+        ],
+      }),
+    ).toEqual([
+      "talent 'outer.thorns.hedgehog': emitters[0] targets must be an integer in [1, 8] (got 0)",
+      "talent 'outer.thorns.hedgehog': emitters[1] targets must be an integer in [1, 8] (got 9)",
+      "talent 'outer.thorns.hedgehog': emitters[2] targets must be an integer in [1, 8] (got 1.5)",
+      "talent 'outer.thorns.hedgehog': emitters[3] targets must be an integer in [1, 8] (got NaN)",
+      "talent 'outer.thorns.hedgehog': emitters[4] targets must be an integer in [1, 8] (got -1)",
+      "talent 'outer.thorns.hedgehog': emitters[5] tag 'hit' is not an owner or geometry tag",
+      "talent 'outer.thorns.hedgehog': emitters[6] tag 'burn' is not an owner or geometry tag",
+      "talent 'outer.thorns.hedgehog': emitters[7] tag 'cold' is not an owner or geometry tag",
+      "talent 'outer.thorns.hedgehog': emitters[8] tags must be unique and not empty; omit the " +
+        'field instead',
+      "talent 'outer.thorns.hedgehog': emitters[9] tags must be unique and not empty; omit the " +
+        'field instead',
+      "talent 'outer.thorns.hedgehog': emitters[10] targets must be an integer in [1, 8] (got 12)",
+      "talent 'outer.thorns.hedgehog': emitters[10] tag 'crit' is not an owner or geometry tag",
+      "talent 'outer.thorns.hedgehog': emitters[10] tag 'lightning' is not an owner or geometry " +
+        'tag',
+    ]);
+  });
+
+  it("reports a strike's repeated tag that is no delivery tag as an effect's are: the list first, then each tag (E16)", () => {
+    const at = "talent 'outer.thorns.hedgehog': emitters[0]";
+    expect(
+      grantIssues({ id: 'outer.thorns.hedgehog', emitters: [strike({ tags: ['hit', 'hit'] })] }),
+    ).toEqual([
+      `${at} tags must be unique and not empty; omit the field instead`,
+      `${at} tag 'hit' is not an owner or geometry tag`,
+      `${at} tag 'hit' is not an owner or geometry tag`,
+    ]);
+  });
+
+  it("keeps a strike's targets and tags among its fields: two of one name that differ in either are refused (E16)", () => {
+    const spikes = (id: string, fields: object): Leaf => ({
+      id,
+      emitters: [strike({ name: 'hedgehog', ...fields })],
+    });
+    const twice =
+      "talents: emitter strike 'hedgehog' is granted twice by source 'outer.thorns' with " +
+      'different fields; keep it on one node';
+    const a = 'outer.thorns.hedgehog';
+    const b = 'outer.thorns.spikes';
+    expect(grantIssues(spikes(a, { tags: ['thorns'] }), spikes(b, {}))).toEqual([twice]);
+    expect(grantIssues(spikes(a, { tags: ['thorns'] }), spikes(b, { tags: ['area'] }))).toEqual([
+      twice,
+    ]);
+    expect(grantIssues(spikes(a, { targets: 6 }), spikes(b, { targets: 5 }))).toEqual([twice]);
+    expect(
+      grantIssues(
+        spikes(a, { targets: 6, tags: ['thorns'] }),
+        spikes(b, { targets: 6, tags: ['thorns'] }),
+      ),
     ).toEqual([]);
   });
 

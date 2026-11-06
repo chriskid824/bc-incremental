@@ -16,9 +16,11 @@ import { describe, expect, it } from 'vitest';
 import { mul, num, toNumber } from '../core/num';
 import type { Num } from '../core/num';
 import { AFFIX_IDS, AFFIX_MULTIPLY } from '../data/affixes';
+import { THORNS_DAMAGE_PCT } from '../data/emitters';
 import type { RuleSpec } from '../data/rules';
 import type { Modifier } from '../data/stats';
 import { TAG } from '../data/tags';
+import { inc } from '../data/templates';
 import type { TriggerSpec } from '../data/triggers';
 import { ENEMY_IDS } from '../data/types';
 import type { EnemyId, GameData } from '../data/types';
@@ -3202,6 +3204,46 @@ const pullOrbitData = (): GameData =>
     },
   });
 
+/**
+ * E16's 荊棘 nodes (gd:466-470, lead rulings T1-T3 and 21) as data on M1's volley over M1's
+ * waves from wave 12, the thorns entry's: the threshold's thorns grant on outer.thorns and 刺蝟's
+ * strike (gd:470 「6 根尖刺，每根每秒刺 1 次 200 內最近的敵人，造成荊棘傷害的 25%」, Hoshi's item 22
+ * at its default: six distinct nearest at once, 25% of THORNS_DAMAGE_PCT, tagged thorns); 尖刺's
+ * 荊棘範圍 ranks at 130% (inc('thornsArea', 0.3) on its base 1, as pullOrbit's orbitSpeed is
+ * written), which take the strike's reach to 260 and ◆尖刺新星's nova (gd:467, on contact, 1 s
+ * cooldown, 150 around the player) to 195; and 荊棘傷害's 50% increased damage on thorns-tagged
+ * hits, which the strike's and the nova's hits take. No crits, ignites or other rolls, so every
+ * hit's amount tells what raised it.
+ */
+const HEDGEHOG_NOVA: TriggerSpec = {
+  on: 'contact',
+  when: [{ cooldownSec: 1 }],
+  do: [{ kind: 'nova', at: 'player', radius: 150, damagePct: 3, tags: ['thorns'] }],
+};
+const HEDGEHOG_STATS = makeStats(
+  { damage: 5, maxLife: 1e6, critChance: 0, igniteChance: 0, thornsArea: 1.3 },
+  [inc('damage', 0.5, { tags: ['thorns'] })],
+  {
+    triggers: [{ source: 'outer.thorns', spec: HEDGEHOG_NOVA }],
+    conversions: [],
+    emitters: [
+      { source: 'outer.thorns', grant: { kind: 'thorns' } },
+      {
+        source: 'outer.thorns',
+        grant: {
+          kind: 'strike',
+          name: 'hedgehog',
+          periodSec: 1,
+          target: { pick: 'nearest', range: 200 },
+          targets: 6,
+          damagePct: 0.25 * THORNS_DAMAGE_PCT,
+          tags: ['thorns'],
+        },
+      },
+    ],
+  },
+);
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3800,6 +3842,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     data: pullOrbitData,
     expected: ['c20d78eeb08601bd', '9d981c139a561833'],
   },
+  {
+    name: 'hedgehog',
+    config: { stats: HEDGEHOG_STATS, rules: [], startWave: 12 },
+    expected: ['c93a95f8ce8ae8e1', 'c9a306313514f0f4'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3911,8 +3958,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E15's auraFocus and pullOrbit are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([83, 'auraFocus', 'pullOrbit']);
+    // The count docs/ARCHITECTURE.md gives: E15's pullOrbit and E16's hedgehog are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([84, 'pullOrbit', 'hedgehog']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -8466,6 +8513,120 @@ describe('golden C4 runs', () => {
           '1197: shooter 88 (pulled 961) killed at 160.000000',
         ],
         orbHits: 171,
+      },
+    });
+  });
+
+  it('strikes hedgehog’s six nearest within 260 at once on crowded ticks, its hits and its novas’ thorns-tagged, the novas reaching 195 at thornsArea 1.3 (E16)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'hedgehog') as GoldenC4Entry;
+    const bySeed: Record<number, unknown> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // At the tick hook (after the emitter stage, where the strike alone hits or kills): the
+      // enemies the strike could pick, those alive and those it struck, but none that appeared
+      // after its first hit (a split's children), by (squared distance, id), within 260.
+      let picks: number[] | null = null;
+      const watch: TestModule = (b) =>
+        b.hook('tick', (ctx) => {
+          const struck = new Set<number>();
+          const late = new Set<number>();
+          for (const event of ctx.events) {
+            if (event.type === 'hit' && (event.tags & TAG.strike) !== 0) struck.add(event.targetId);
+            if (event.type === 'enemySpawned' && struck.size > 0) late.add(event.enemyId);
+          }
+          if (struck.size === 0) {
+            picks = null;
+            return;
+          }
+          const p = ctx.player;
+          const d2 = (e: Enemy): number => (e.x - p.x) * (e.x - p.x) + (e.y - p.y) * (e.y - p.y);
+          picks = ctx.enemies
+            .filter((e) => (e.alive || struck.has(e.id)) && !late.has(e.id) && d2(e) <= 260 ** 2)
+            .sort((a, b) => d2(a) - d2(b) || a.id - b.id)
+            .slice(0, 6)
+            .map((e) => e.id);
+        });
+      const c = {
+        strikes: 0,
+        // Strikes of each size, and those whose hits were not the six nearest in order.
+        sizes: {} as Record<number, number>,
+        notNearest: 0,
+        beyond200: 0,
+        beyond260: 0,
+        strikeAmounts: new Set<number>(),
+        novas: 0,
+        burstRadii: new Set<number>(),
+        novaHits: 0,
+        novaBeyond150: 0,
+        novaBeyond195: 0,
+        novaAmounts: new Set<number>(),
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [watch]);
+      const p = { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 };
+      while (!sim.state.finished) {
+        const events = sim.step(NO_INPUT);
+        const ids: number[] = [];
+        for (const event of events) {
+          if (event.type === 'burst' && event.kind === 'nova') {
+            c.novas++;
+            c.burstRadii.add(event.radius);
+          }
+          if (event.type !== 'hit') continue;
+          const d = Math.hypot(event.x - p.x, event.y - p.y);
+          if ((event.tags & TAG.strike) !== 0) {
+            expect(event.tags & (TAG.thorns | TAG.chain)).toBe(TAG.thorns);
+            ids.push(event.targetId);
+            if (d > 200) c.beyond200++;
+            if (d > 260) c.beyond260++;
+            c.strikeAmounts.add(toNumber(event.amount));
+          } else if ((event.tags & TAG.trigger) !== 0) {
+            expect(event.tags & TAG.thorns).toBe(TAG.thorns);
+            c.novaHits++;
+            if (d > 150) c.novaBeyond150++;
+            if (d > 195) c.novaBeyond195++;
+            c.novaAmounts.add(toNumber(event.amount));
+          }
+        }
+        if (ids.length === 0) continue;
+        c.strikes++;
+        c.sizes[ids.length] = (c.sizes[ids.length] ?? 0) + 1;
+        if (JSON.stringify(ids) !== JSON.stringify(picks)) c.notNearest++;
+      }
+      bySeed[seed] = {
+        ...c,
+        strikeAmounts: [...c.strikeAmounts],
+        burstRadii: [...c.burstRadii],
+        novaAmounts: [...c.novaAmounts],
+      };
+    }
+    // 14 strikes a seed (none before an enemy is within reach), 3 or 4 of them of six distinct
+    // enemies and each the nearest within 260 in order, some hits past the written 200; every
+    // hit 5 × 0.75 × 1.5 (荊棘傷害's 50% on the thorns tag). The novas' hits reach past 150 to
+    // 195, at 5 × 3 × 1.5, and their burst event carries the radius they reach (195).
+    const common = {
+      strikes: 14,
+      notNearest: 0,
+      beyond200: 12,
+      beyond260: 0,
+      strikeAmounts: [5.625],
+      burstRadii: [195],
+      novaBeyond195: 0,
+      novaAmounts: [22.5],
+    };
+    expect(bySeed).toEqual({
+      1: {
+        ...common,
+        sizes: { 1: 2, 2: 1, 3: 1, 4: 6, 6: 4 },
+        novas: 10,
+        novaHits: 33,
+        novaBeyond150: 11,
+      },
+      2: {
+        ...common,
+        sizes: { 1: 3, 2: 1, 3: 2, 4: 3, 5: 2, 6: 3 },
+        novas: 11,
+        novaHits: 26,
+        novaBeyond150: 5,
       },
     });
   });

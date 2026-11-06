@@ -10,7 +10,7 @@ import { mul, toNumber, ZERO } from '../../core/num';
 import type { Rng } from '../../core/rng';
 import { createStreams } from '../../core/rng';
 import { reachableEnemies } from '../../data/compose';
-import { tagMask } from '../../data/tags';
+import { TAG, tagMask } from '../../data/tags';
 import { ENEMY_IDS } from '../../data/types';
 import type { EnemyDef, EnemyId, GameData } from '../../data/types';
 import { doomed } from '../ailments/apply';
@@ -37,12 +37,7 @@ import type { CenterEventState } from '../effects/centerEvents';
 import { REPEAT } from '../effects/flags';
 import { createEffectEntry, createEffectQueue } from '../effects/queue';
 import type { EffectEntry, EffectQueue, PendingKill, TriggerState } from '../effects/queue';
-import {
-  compileSelector,
-  createSelectionScratch,
-  selectable,
-  spreadSelector,
-} from '../effects/select';
+import { createSelectionScratch, selectable, strikeSelector } from '../effects/select';
 import type { SelectionScratch } from '../effects/select';
 import { EVENT } from '../effects/types';
 import type { CompiledEffect, CompiledTrigger } from '../effects/types';
@@ -880,7 +875,8 @@ export function createRunContext(
   // Emitters fire on the combat stream; the emitter stage runs those of the kinds it steps, the
   // contact stage the thorns, the segment stage the segments and the drone stage the drones. A
   // strike picks its target as a periodic trigger does, from the player, its range × the spread
-  // factor when node data marks it (spreadSelector, E3); a fan's icicle cones (冰柱) and an
+  // factor when node data marks it (spreadSelector, E3) and a thorns-tagged one's × the thorns
+  // factor (strikeSelector, E16), one product; a fan's icicle cones (冰柱) and an
   // aura's corona (日冕) take a payload of their own; an orbit's orbs, counted once for the run
   // and none of 巨大化's four counts (not halved), each remember the enemies they hit. The
   // signature carries the barrage rider (E10a), whose hits roll on the barrage stream.
@@ -892,7 +888,11 @@ export function createRunContext(
       index,
       emitterInterval(build, spec),
       spec.kind === 'strike'
-        ? spreadSelector(compileSelector(spec.target, 'periodic'), build.flags.spreadFactor)
+        ? strikeSelector(
+            spec.target,
+            build.flags.spreadFactor,
+            (spec.tags & TAG.thorns) === 0 ? 1 : build.flags.thornsFactor,
+          )
         : null,
       spec.kind === 'fan'
         ? iciclePayload(build, payload)

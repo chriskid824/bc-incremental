@@ -600,6 +600,14 @@ function grantIssues(grant: EmitterGrant): string[] {
           `chainJumps must be an integer in [0, ${STRIKE_CHAIN_JUMPS_MAX}] (got ${jumps})`,
         );
       }
+      const targets = grant.targets;
+      if (
+        targets !== undefined &&
+        !(Number.isInteger(targets) && targets >= 1 && targets <= STRIKE_TARGETS_MAX)
+      ) {
+        issues.push(`targets must be an integer in [1, ${STRIKE_TARGETS_MAX}] (got ${targets})`);
+      }
+      issues.push(...deliveryIssues(grant.tags));
       if (grant.target.pick === 'player') {
         issues.push("target.pick 'player' has no enemy to strike; pick an enemy");
       }
@@ -682,6 +690,12 @@ const STRIKE_PERIOD_MIN = 1 / 60;
 
 /** The most jumps a strike's chain makes. */
 const STRIKE_CHAIN_JUMPS_MAX = 8;
+
+/**
+ * The most enemies one strike picks (StrikeGrant.targets, E16): 刺蝟's six spikes and room for
+ * B5's 天罰 and 風暴之眼; the picks are a scan of the alive enemies, at most a few a second.
+ */
+const STRIKE_TARGETS_MAX = 8;
 
 /**
  * The most summons one grant places: SUMMON_CAP (src/sim/caps.ts), the summons of a whole run,
@@ -1331,6 +1345,25 @@ function conversionIssues(conversion: ConversionSpec): string[] {
 }
 
 /**
+ * The delivery tags of an effect's or a strike's hits (`tags`, more tags its hits carry): unique,
+ * not empty when given, and each an owner or a geometry tag (DELIVERY_MASK), so never a kind, an
+ * element or crit. One rule for both.
+ */
+function deliveryIssues(tags: readonly string[] | undefined): string[] {
+  if (tags === undefined) return [];
+  const issues: string[] = [];
+  if (tags.length === 0 || new Set(tags).size !== tags.length) {
+    issues.push('tags must be unique and not empty; omit the field instead');
+  }
+  for (const tag of tags) {
+    if ((TAG[tag as keyof typeof TAG] & DELIVERY_MASK) === 0) {
+      issues.push(`tag '${tag}' is not an owner or geometry tag`);
+    }
+  }
+  return issues;
+}
+
+/**
  * Parameter ranges of one effect, and whether it can run on events `on` for a trigger with the
  * target selector `target`, if any, which runs at the kill when `atKill` (runsAtKill), on a node
  * that carries an inZone condition when `zonesRead` (readsZones).
@@ -1355,15 +1388,7 @@ function effectIssues(
     }
   };
   const delivery = (tags: readonly string[] | undefined): void => {
-    if (tags === undefined) return;
-    if (tags.length === 0 || new Set(tags).size !== tags.length) {
-      issues.push('tags must be unique and not empty; omit the field instead');
-    }
-    for (const tag of tags) {
-      if ((TAG[tag as keyof typeof TAG] & DELIVERY_MASK) === 0) {
-        issues.push(`tag '${tag}' is not an owner or geometry tag`);
-      }
-    }
+    issues.push(...deliveryIssues(tags));
   };
   // The event's enemy: none on targetless events and droneExpire (ENEMYLESS_EVENTS), gone once
   // a kill or shatter trigger's effects run (a kill's transfers run at the kill, before it is

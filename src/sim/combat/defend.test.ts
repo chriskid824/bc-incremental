@@ -1006,6 +1006,34 @@ describe('a full block stops the shocks after its hit (lead ruling R1)', () => {
     expect(ctx.enemies.map((e) => e.shockStacks)).toEqual([0, 0]);
   });
 
+  it('a strike of several targets shocks no target the shield blocks in full, nor one its own hit kills (E16)', () => {
+    const grant: StrikeGrant = {
+      kind: 'strike',
+      name: 'bolt',
+      periodSec: 1,
+      target: { pick: 'nearest' },
+      targets: 3,
+      damagePct: 1,
+      element: 'lightning',
+      shockStacks: 2,
+    };
+    // Its three nearest: the shielder blocks its 10, the first square takes it and its shock,
+    // the second (5 hp) dies of it.
+    const ctx = defended([shielder(300), square(320), square(340, 5)], {
+      emitters: [['outer.lightning', grant]],
+    });
+    const em = ctx.emitters[1] as EmitterRuntime;
+    em.timer = em.interval - 1;
+    runStrike(ctx, em);
+    expect(blocked(ctx).map((e) => e.targetId)).toEqual([1]);
+    expect(dealt(ctx).map(([id]) => id)).toEqual([2, 3]);
+    expect(ctx.enemies.map((e) => [e.alive, e.shockStacks])).toEqual([
+      [true, 0],
+      [true, 2],
+      [false, 0],
+    ]);
+  });
+
   it('a segment shocks no enemy whose shield blocks its hit in full', () => {
     const grant: SegmentGrant = { kind: 'segment', endpoints: 'shocked', shockStacks: 2 };
     /** One judgement of a segment of 1 a hit between enemies 1 and 2: their shock stacks. */

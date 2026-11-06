@@ -199,6 +199,7 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'summonDuration',
       'barrageSplit',
       'orbitSpeed',
+      'thornsArea',
     ]);
   });
 
@@ -569,6 +570,16 @@ function kitchenSink(): NodeEffects {
       target: { pick: 'nearest' },
       damagePct: 1,
       chainJumps: 1,
+    },
+    // E16: 刺蝟's six at once, tagged thorns.
+    {
+      kind: 'strike',
+      name: 'hedgehog',
+      periodSec: 1,
+      target: { pick: 'nearest', range: 200 },
+      targets: 6,
+      damagePct: 0.75,
+      tags: ['thorns'],
     },
     { kind: 'drone', drones: 2, turrets: 1 },
     { kind: 'drone', drones: 1, turrets: 2 },
@@ -1061,6 +1072,68 @@ describe('every template, through one node (§4.7)', () => {
         modifiers: [{ stat: 'orbitSpeed', kind: 'increased', value: 0.15 }],
       });
       expect(linesOf(web, 'fire.center.alpha.r1', locale, 2)).toEqual([line]);
+    },
+  );
+
+  it.each([
+    ['en', '15% increased Thorns area per rank (2/3: +30%)'],
+    ['zh-TW', '每級荊棘範圍提高 15%（2/3：+30%）'],
+  ] as const)(
+    'writes 尖刺’s 荊棘範圍 on a ranked node, an increased percentage a rank with its total, in %s (E16)',
+    (locale, line) => {
+      // ranked('thornsArea', 0.15, 3) at rank 2: a percentage, as bombRadius's and orbitSpeed's.
+      const web = withEffects(fire, 'fire.center.alpha.r1', {
+        modifiers: [{ stat: 'thornsArea', kind: 'increased', value: 0.15 }],
+      });
+      expect(linesOf(web, 'fire.center.alpha.r1', locale, 2)).toEqual([line]);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        'Every 1 s, a strike on the nearest enemy within 200: 75% damage, up to 6 enemies at ' +
+          'once, tagged thorns',
+        'Every 2 s, a strike on the farthest enemy: 100% damage, radius 40, tagged thorns and ' +
+          'projectile',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '每 1 秒一道打擊，打半徑 200 內最近的敵人，75% 傷害，一次最多打 6 隻，帶荊棘標籤',
+        '每 2 秒一道打擊，打最遠的敵人，100% 傷害，範圍半徑 40，帶荊棘、投射物標籤',
+      ],
+    ],
+  ] as const)(
+    'writes 刺蝟’s strike of targets 6 tagged thorns on a notable, its targets and tags quoted, in %s (E16)',
+    (locale, expected) => {
+      // Plants the targets or the tags left out of the line.
+      const web = withEffects(fire, NOTABLE, {
+        emitters: [
+          {
+            kind: 'strike',
+            name: 'hedgehog',
+            periodSec: 1,
+            target: { pick: 'nearest', range: 200 },
+            targets: 6,
+            damagePct: 0.75,
+            tags: ['thorns'],
+          },
+          {
+            kind: 'strike',
+            name: 'one',
+            periodSec: 2,
+            target: { pick: 'farthest' },
+            targets: 1,
+            damagePct: 1,
+            radius: 40,
+            tags: ['thorns', 'projectile'],
+          },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
     },
   );
 

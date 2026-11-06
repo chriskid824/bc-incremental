@@ -341,22 +341,33 @@ const spreads = (spec: CompiledEffectSpec): boolean =>
   spec.kind === 'spreadAilment' || (spec.kind === 'applyAilment' && spec.spread === true);
 
 /**
+ * The effect's tags hold thorns (E16): ◆尖刺新星's nova, the thorns fusion payload's nova, any
+ * effect node data or a module tags so, whose radius the thorns factor reaches.
+ */
+const thorny = (spec: CompiledEffectSpec): boolean =>
+  'tags' in spec && spec.tags !== undefined && spec.tags.includes('thorns');
+
+/**
  * `fx` with its radius × its factor: the build's area factor (BuildFlags.areaFactor; docs/v3 C4
- * design D29), × its spread factor (BuildFlags.spreadFactor, E3) when the effect spreads, one
- * product for its radiusSq and a spreadAilment's spread, from its spec's radius. compileBuild
+ * design D29), × its spread factor (BuildFlags.spreadFactor, E3) when the effect spreads, × its
+ * thorns factor (BuildFlags.thornsFactor, E16; lead ruling 21 of B4) when its tags hold thorns,
+ * one product for its radiusSq and a spreadAilment's spread, from its spec's radius. compileBuild
  * sizes every compiled effect this way once, after the modules have run, so the executors read
- * the sized radii as they are; groundZone's radiusSq, which nothing reads, follows too, while its
- * executor sizes the spec's radius for its zone (sizeOf). `fx` itself at factor 1, or without a
+ * the sized radii as they are; groundZone's radiusSq, which nothing reads, follows too, and its
+ * executor sizes its zone's radius the same way, as an explode's and a nova's burst event
+ * (sizedRadius, src/sim/effects/execute.ts). `fx` itself at factor 1, or without a
  * radius: the shatter's, sized as it is compiled (shatterEffect).
  */
 export function sizedEffect(
   fx: CompiledEffect,
   areaFactor: number,
   spreadFactor: number,
+  thornsFactor: number,
 ): CompiledEffect {
   const spec = fx.spec;
   if (!('radius' in spec) || spec.radius === undefined) return fx;
-  const factor = spreads(spec) ? areaFactor * spreadFactor : areaFactor;
+  const area = spreads(spec) ? areaFactor * spreadFactor : areaFactor;
+  const factor = thorny(spec) ? area * thornsFactor : area;
   if (factor === 1) return fx;
   const radius = spec.radius * factor;
   const spread = fx.spread === null ? null : { ...fx.spread, radius, radiusSq: radius ** 2 };

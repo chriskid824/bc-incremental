@@ -14,12 +14,17 @@
  *
  * orderNearest() is the 'nearest' order (TARGET_ORDERS) of the effects capped by maxTargets.
  *
+ * selectMany() picks up to n distinct enemies with one selector (a strike's targets, E16): the
+ * enemies the selection accepts, by the pick's order, ties to the lower id, the first of them
+ * select()'s own pick.
+ *
  * A range that node data marks `spread` (擴散距離, E3) is reached × the build's spread factor
  * (spreadSelector): compileBuild sizes a trigger's selector once the modules have run, and
- * createRunContext a strike's. A range is a reach, so the area factor never reaches it.
+ * createRunContext a strike's (strikeSelector), a thorns-tagged strike's × the build's thorns
+ * factor too (E16). A range is a reach, so the area factor never reaches it.
  */
 
-import { gt } from '../../core/num';
+import { gt, toNumber } from '../../core/num';
 import { STACK_AILMENTS, TARGET_PICKS, TARGETLESS_EVENTS } from '../../data/triggers';
 import type { TargetPick, TargetSelector, TriggerEventId } from '../../data/triggers';
 import { liveStacks } from '../build/eval';
@@ -65,6 +70,13 @@ export interface SelectionScratch {
   rangeSq: number;
   /** The densest pick's grid point (SpatialGrid.densest). */
   readonly dense: GridPoint;
+  /**
+   * selectMany()'s output for a strike (E16): its picks in out[0 .. count), then left over from
+   * earlier calls; grown once to the most targets a strike of the run picks.
+   */
+  readonly picks: Enemy[];
+  /** The order key of each kept pick, beside it (selectMany): picks[i]'s at keys[i]. */
+  readonly keys: number[];
 }
 
 /** A selection scratch for createRunContext. */
@@ -75,6 +87,8 @@ export const createSelectionScratch = (): SelectionScratch => ({
   y: 0,
   rangeSq: Infinity,
   dense: { x: 0, y: 0 },
+  picks: [],
+  keys: [],
 });
 
 /**
@@ -105,6 +119,26 @@ export function compileSelector(spec: TargetSelector, on: TriggerEventId): Compi
 export function spreadSelector(s: CompiledSelector, factor: number): CompiledSelector {
   if (s.spreadRange < 0 || factor === 1) return s;
   return { ...s, rangeSq: (s.spreadRange * factor) ** 2 };
+}
+
+/**
+ * A strike's selector (createRunContext): its `target` compiled as a periodic trigger's, from
+ * the player, its range a reach of the build's, never × the area factor: × spreadFactor when
+ * node data marks it (spreadSelector), and for a thorns-tagged strike × thornsFactor
+ * (BuildFlags.thornsFactor; lead ruling 21 of B4), one product range × spreadFactor ×
+ * thornsFactor from the range as written. thornsFactor is 1 for any other strike, and the
+ * selector is then spreadSelector's bit for bit; one without a range reaches every enemy.
+ */
+export function strikeSelector(
+  target: TargetSelector,
+  spreadFactor: number,
+  thornsFactor: number,
+): CompiledSelector {
+  const s = spreadSelector(compileSelector(target, 'periodic'), spreadFactor);
+  const range = target.range;
+  if (thornsFactor === 1 || range === undefined) return s;
+  const reach = s.spreadRange < 0 ? range * thornsFactor : range * spreadFactor * thornsFactor;
+  return { ...s, rangeSq: reach ** 2 };
 }
 
 /**
@@ -160,6 +194,97 @@ export function select(
   sel.eventTarget = null;
   ctx.selected = picked;
   return picked !== null;
+}
+
+/**
+ * Runs selector `s` as select() does for an event on `eventTarget` at (x, y), but picks up to
+ * `n` distinct enemies (a strike's targets, E16): writes them to out[0 ..) in the pick's order,
+ * best first, ties to the earlier entry of ctx.enemies (the lower id), and returns how many,
+ * 0 to n; none for 'player'. The order of each pick, over the enemies the selection accepts
+ * (selectable, as select()'s), with the grid's squared distances:
+ * - nearest: the squared distance from the selector's point, ascending; farthest: descending;
+ * - outermost: Enemy.dist, descending; highestHp: hp, descending; mostStacks: the live stacks of
+ *   its ailment, descending, at least 1 (scan()'s bounds: a farthest or outermost score above
+ *   −1, a stack count above 0);
+ * - densest: the squared distance from SpatialGrid.densest's point, ascending; none when it
+ *   finds no alive enemy.
+ * So out[0] is the enemy select() picks with the same selector, and it is written to
+ * ctx.selected as select() writes its pick (null for none). One scan of ctx.enemies with an
+ * insertion into the kept picks (their keys in ctx.selection.keys); it allocates nothing once
+ * `out` and the keys have grown to n. A strike is due a few times a second at most.
+ */
+export function selectMany(
+  ctx: RunContext,
+  s: CompiledSelector,
+  eventTarget: Enemy | null,
+  x: number,
+  y: number,
+  n: number,
+  out: Enemy[],
+): number {
+  const pick = s.pick;
+  if (pick === PICK.player) {
+    ctx.selected = null;
+    return 0;
+  }
+  const player = ctx.player;
+  let fx = s.fromPlayer ? player.x : x;
+  let fy = s.fromPlayer ? player.y : y;
+  const sel = ctx.selection;
+  sel.eventTarget = s.excludeEventTarget ? eventTarget : null;
+  sel.noBoss = s.excludeBoss;
+  sel.x = fx;
+  sel.y = fy;
+  sel.rangeSq = s.rangeSq;
+  if (pick === PICK.densest) {
+    if (ctx.grid.densest(sel.dense) === 0) {
+      sel.eventTarget = null;
+      ctx.selected = null;
+      return 0;
+    }
+    // Ordered by the distance from the block's point; accepted by the range from (fx, fy).
+    fx = sel.dense.x;
+    fy = sel.dense.y;
+  }
+  // Each enemy's key, higher first: a distance ascending is its negative, exactly; the bounds
+  // are scan()'s, so out[0] is its pick or the grid's.
+  const near = pick === PICK.nearest || pick === PICK.densest;
+  const min = pick === PICK.mostStacks ? 0 : pick === PICK.highestHp || near ? -Infinity : -1;
+  const keys = sel.keys;
+  const now = ctx.now;
+  const enemies = ctx.enemies;
+  let kept = 0;
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i] as Enemy;
+    if (!e.alive) continue;
+    let key: number;
+    if (near || pick === PICK.farthest) {
+      const dx = e.x - fx;
+      const dy = e.y - fy;
+      const d = dx * dx + dy * dy;
+      key = near ? -d : d;
+    } else if (pick === PICK.outermost) {
+      key = e.dist;
+    } else if (pick === PICK.highestHp) {
+      key = toNumber(e.hp);
+    } else {
+      key = liveStacks(e, s.ailment, now);
+    }
+    // Not above the last kept of n: it would not be kept. A tie keeps the earlier enemy first.
+    if (!(key > min) || (kept === n && !(key > (keys[n - 1] as number)))) continue;
+    if (!selectable(ctx, e)) continue;
+    let at = kept < n ? kept++ : n - 1;
+    while (at > 0 && key > (keys[at - 1] as number)) {
+      out[at] = out[at - 1] as Enemy;
+      keys[at] = keys[at - 1] as number;
+      at--;
+    }
+    out[at] = e;
+    keys[at] = key;
+  }
+  sel.eventTarget = null;
+  ctx.selected = kept > 0 ? (out[0] as Enemy) : null;
+  return kept;
 }
 
 /**

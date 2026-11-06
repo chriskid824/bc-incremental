@@ -236,6 +236,16 @@ export const STAT_IDS = [
    * orbs' cooldown on an enemy stays theirs (cooldownSec).
    */
   'orbitSpeed',
+  /**
+   * 荊棘範圍 (the thorns outer's 尖刺 ranks, docs/v3/game-design-v3.md §4.9; lead ruling 21 of
+   * B4): the multiplier on every thorns-tagged radius and reach, e.g. 1.3 = 130%. Read once a
+   * compile, after the rule modules, into BuildFlags.thornsFactor (the stat when it is above 0,
+   * else 0), which multiplies the radius of every effect whose tags hold thorns (◆尖刺新星's nova,
+   * the thorns fusion payload's nova) beside the area factor, and a thorns-tagged strike's
+   * selector range (a reach) and radius (src/sim/build/compile.ts, src/sim/emitters/strike.ts).
+   * The contact thorns have no radius and take nothing from it.
+   */
+  'thornsArea',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -310,6 +320,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   // DEFAULT_COMBO_CAP (src/sim/build/compile.ts), which src/sim/systems/combo.test.ts pins equal.
   comboCap: 20,
   orbitSpeed: 1,
+  thornsArea: 1,
 };
 
 /**

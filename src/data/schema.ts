@@ -702,14 +702,17 @@ export const GRANT_SCHEMAS = {
     })
     .readonly(),
   // Any selector; validate.ts rejects the 'player' pick, which has no enemy to strike, and holds
-  // the target to the rules of a periodic trigger's.
+  // the target to the rules of a periodic trigger's, the targets to an integer in [1, 8] and the
+  // tags to delivery tags, unique and not empty, as an effect's.
   strike: z
     .strictObject({
       kind: z.literal('strike'),
       name: z.string(),
       periodSec: finite,
       target: TargetSelectorSchema,
+      targets: finite.exactOptional(),
       damagePct: finite,
+      tags: z.array(z.enum(DAMAGE_TAGS)).readonly().exactOptional(),
       radius: finite.exactOptional(),
       element: z.enum(['cold', 'lightning']).exactOptional(),
       chainJumps: finite.exactOptional(),

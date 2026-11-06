@@ -14,6 +14,15 @@
  * sized r × areaFactor × spreadFactor in the same sizedEffect pass, one product; a selector's
  * range that node data marks is a reach, × spreadFactor alone (src/sim/effects/select.ts
  * spreadSelector); and a rule module reads its own spread distances through spreadOf.
+ *
+ * Thorns radii (E16, 荊棘範圍; lead ruling 21 of B4) take the build's thorns factor
+ * (BuildFlags.thornsFactor: the thornsArea stat when above 0, else 0, also computed once by
+ * compileBuild): the effects whose tags hold thorns are sized r × areaFactor × thornsFactor in
+ * the same sizedEffect pass, one product (× spreadFactor too were one to spread); a thorns-tagged
+ * strike's selector range is a reach, × thornsFactor and never × areaFactor (strikeSelector),
+ * and its area radius sizeOf(r) × thornsFactor (src/sim/emitters/strike.ts). The radii read at
+ * use, a nova's and an explode's burst event and a groundZone's zone, take the same product when
+ * the effect's tags hold thorns (sizedRadius, src/sim/effects/execute.ts).
  */
 
 import type { CompiledBuild } from './compile';

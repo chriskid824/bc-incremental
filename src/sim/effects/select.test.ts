@@ -21,7 +21,7 @@ import type { PlacedEnemy } from '../testing';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../types';
 import { dispatchPendingKills, fireInlineKill, fireOne } from './dispatch';
 import { runEffectQueue } from './execute';
-import { compileSelector, orderNearest, select } from './select';
+import { compileSelector, orderNearest, select, selectMany } from './select';
 import { SHATTER_TRIGGER } from './types';
 
 /** The player's position (createRunContext puts it at the arena's center). */
@@ -235,6 +235,174 @@ describe('target selector picks', () => {
     expect(picked).toBeGreaterThan(150);
   });
 });
+
+/** The ids selectMany() picks, up to `n`, for an event of `on` on `eventTarget` at (x, y). */
+function manyIds(
+  ctx: RunContext,
+  target: TargetSelector,
+  n: number,
+  on: TriggerEventId = 'periodic',
+  eventTarget: Enemy | null = null,
+  x = P.x,
+  y = P.y,
+): number[] {
+  const out: Enemy[] = [];
+  const count = selectMany(ctx, compileSelector(target, on), eventTarget, x, y, n, out);
+  expect(ctx.selected).toBe(count > 0 ? out[0] : null);
+  expect(ctx.selection.eventTarget).toBeNull();
+  return out.slice(0, count).map((e) => e.id);
+}
+
+describe('selectMany: a strike’s several targets (E16, T2)', () => {
+  it('picks the n best distinct enemies of each pick in its order, ties to the lower id', () => {
+    const ctx = placedEnemies(PICKS_FIXTURE);
+    // From the player: 5 (71), 1 and 2 (200, a tie), 7 and 6 (190.3 and 210.2), 3 and 4 (400).
+    expect(manyIds(ctx, { pick: 'nearest' }, 7)).toEqual([5, 7, 1, 2, 6, 3, 4]);
+    expect(manyIds(ctx, { pick: 'nearest' }, 3)).toEqual([5, 7, 1]);
+    expect(manyIds(ctx, { pick: 'farthest' }, 7)).toEqual([3, 4, 6, 1, 2, 7, 5]);
+    expect(manyIds(ctx, { pick: 'nearest', range: 200 }, 8)).toEqual([5, 7, 1, 2]);
+    for (const e of ctx.enemies) e.dist = 100;
+    enemy(ctx, 4).dist = 300;
+    enemy(ctx, 6).dist = 200;
+    expect(manyIds(ctx, { pick: 'outermost' }, 4)).toEqual([4, 6, 1, 2]);
+    for (const id of [2, 4, 6]) enemy(ctx, id).hp = num(5e12);
+    expect(manyIds(ctx, { pick: 'highestHp' }, 5)).toEqual([2, 4, 6, 1, 3]);
+    expect(manyIds(ctx, { pick: 'highestHp', range: 300 }, 5)).toEqual([2, 6, 1, 5, 7]);
+  });
+
+  it('picks only enemies with a live stack for mostStacks, most first', () => {
+    const ctx = placedEnemies(PICKS_FIXTURE);
+    expect(manyIds(ctx, { pick: 'mostStacks', ailment: 'shock' }, 4)).toEqual([]);
+    expect(ctx.selected).toBeNull();
+    const shock = (id: number, stacks: number, until: number): void => {
+      Object.assign(enemy(ctx, id), { shockStacks: stacks, shockUntil: until });
+    };
+    shock(1, 1, 100);
+    shock(4, 3, 100);
+    shock(5, 3, 100);
+    shock(6, 5, ctx.now); // worn off
+    shock(7, 2, 100);
+    expect(manyIds(ctx, { pick: 'mostStacks', ailment: 'shock' }, 8)).toEqual([4, 5, 7, 1]);
+    expect(manyIds(ctx, { pick: 'mostStacks', ailment: 'shock', range: 250 }, 2)).toEqual([5, 7]);
+  });
+
+  it("picks by distance from the densest block's point, its range from its own point, and none when it finds none", () => {
+    const ctx = placedEnemies(PICKS_FIXTURE);
+    // (1088, 448), as the select() test finds: 7, then 1, 6 and 5.
+    expect(manyIds(ctx, { pick: 'densest' }, 4)).toEqual([7, 1, 6, 5]);
+    expect(manyIds(ctx, { pick: 'densest', range: 100 }, 4)).toEqual([5]);
+    expect(
+      manyIds(ctx, { pick: 'densest', excludeEventTarget: true }, 2, 'hit', enemy(ctx, 7)),
+    ).toEqual([1, 6]);
+    for (const e of ctx.enemies) e.alive = false;
+    expect(manyIds(ctx, { pick: 'densest' }, 4)).toEqual([]);
+  });
+
+  it("picks nothing for 'player' and leaves the bosses and the event's enemy out when asked", () => {
+    const ctx = placedEnemies(PICKS_FIXTURE.map((p, i) => (i === 4 ? { ...p, type: 'boss' } : p)));
+    expect(manyIds(ctx, { pick: 'player' }, 3)).toEqual([]);
+    expect(manyIds(ctx, { pick: 'nearest', excludeBoss: true }, 2)).toEqual([7, 1]);
+    expect(
+      manyIds(ctx, { pick: 'nearest', excludeEventTarget: true }, 2, 'hit', enemy(ctx, 7)),
+    ).toEqual([5, 1]);
+  });
+
+  it('matches a brute-force sort over random fixtures, sorted and linear, its first select()’s pick', () => {
+    const rng = createRng(1606);
+    const events: readonly TriggerEventId[] = ['hit', 'kill', 'periodic', 'contact'];
+    let full = 0;
+    for (let round = 0; round < 300; round++) {
+      const count = rng.int(40);
+      const placed: PlacedEnemy[] = [];
+      for (let i = 0; i < count; i++) {
+        // Coarse positions and values, so equal distances and ties come up.
+        placed.push({
+          x: rng.int(25) * 80 - 40,
+          y: rng.int(15) * 80 - 40,
+          hp: (1 + rng.int(4)) * 1e11,
+          ...(rng.chance(0.1) ? { type: 'boss' } : {}),
+        });
+      }
+      const ctx = placedEnemies(placed, { seed: round + 1 });
+      for (const e of ctx.enemies) {
+        if (rng.chance(0.15)) e.alive = false;
+        if (rng.chance(0.4)) Object.assign(e, { shockStacks: 1 + rng.int(3), shockUntil: 99 });
+        if (rng.chance(0.3)) applyPoison(ctx, e, num(1), 80, 0, CENTER, 1 + rng.int(3));
+        e.dist = rng.int(6) * 100;
+      }
+      if (rng.chance(0.5)) ctx.grid.sortNow();
+      const pick = rng.pick(TARGET_PICKS);
+      const target: TargetSelector = {
+        pick,
+        ...(pick === 'mostStacks' ? { ailment: rng.pick(STACK_AILMENTS) } : {}),
+        ...(rng.chance(0.3) ? { from: rng.pick(['event', 'player'] as const) } : {}),
+        ...(rng.chance(0.4) ? { range: 50 + rng.int(600) } : {}),
+        ...(rng.chance(0.4) ? { excludeEventTarget: true } : {}),
+        ...(rng.chance(0.4) ? { excludeBoss: true } : {}),
+      };
+      const on = rng.pick(events);
+      const eventTarget = count > 0 && rng.chance(0.7) ? enemy(ctx, 1 + rng.int(count)) : null;
+      const x = rng.range(0, ARENA_WIDTH);
+      const y = rng.range(0, ARENA_HEIGHT);
+      const n = 1 + rng.int(8);
+      const label = JSON.stringify({ round, target, on, n });
+      const expected = bruteOrder(ctx, target, on, eventTarget, x, y).slice(0, n);
+      const got = manyIds(ctx, target, n, on, eventTarget, x, y);
+      expect(got, label).toEqual(expected.map((e) => e.id));
+      expect(got[0] ?? null, label).toBe(pickId(ctx, target, on, eventTarget, x, y));
+      if (got.length === n && n > 1) full++;
+    }
+    expect(full).toBeGreaterThan(80);
+  });
+});
+
+/**
+ * Reference: every accepted enemy sorted by the pick's score, highest first, then the lower id
+ * (mostStacks only those with a live stack), as TargetSelector and selectMany document it.
+ */
+function bruteOrder(
+  ctx: RunContext,
+  target: TargetSelector,
+  on: TriggerEventId,
+  eventTarget: Enemy | null,
+  x: number,
+  y: number,
+): Enemy[] {
+  if (target.pick === 'player') return [];
+  const fromPlayer = target.from === 'player' || TARGETLESS_EVENTS.has(on);
+  const fx = fromPlayer ? ctx.player.x : x;
+  const fy = fromPlayer ? ctx.player.y : y;
+  const distSq = (e: Enemy, px: number, py: number): number =>
+    (e.x - px) * (e.x - px) + (e.y - py) * (e.y - py);
+  const accepted = ctx.enemies.filter(
+    (e) =>
+      e.alive &&
+      !(target.excludeEventTarget === true && e === eventTarget) &&
+      !(target.excludeBoss === true && e.boss) &&
+      distSq(e, fx, fy) <= (target.range ?? Infinity) ** 2,
+  );
+  const sorted = (score: (e: Enemy) => number): Enemy[] =>
+    [...accepted].sort((a, b) => score(b) - score(a) || a.id - b.id);
+  switch (target.pick) {
+    case 'nearest':
+      return sorted((e) => -distSq(e, fx, fy));
+    case 'farthest':
+      return sorted((e) => distSq(e, fx, fy));
+    case 'outermost':
+      return sorted((e) => e.dist);
+    case 'highestHp':
+      return sorted((e) => e.hp);
+    case 'mostStacks': {
+      const a = STACK_AILMENTS.indexOf(target.ailment as StackAilment);
+      return sorted((e) => liveStacks(e, a, ctx.now)).filter((e) => liveStacks(e, a, ctx.now) > 0);
+    }
+    case 'densest': {
+      const point = { x: 0, y: 0 };
+      if (ctx.grid.densest(point) === 0) return [];
+      return sorted((e) => -distSq(e, point.x, point.y));
+    }
+  }
+}
 
 /** Reference: the pick by sorting every accepted enemy, as TargetSelector documents it. */
 function brutePick(

@@ -154,6 +154,22 @@ const angleValued = (ctx: RunContext, origin: number): boolean => {
   return on === EVENT.chainJump || on === EVENT.droneImpact;
 };
 
+/**
+ * `spec`'s radius as compileBuild sized its radiusSq (sizedEffect): r × (areaFactor ×
+ * thornsFactor) when its tags hold thorns (E16), sizeOf(r) otherwise. An explode's, a nova's and
+ * a groundZone's, none of which spreads. At thornsFactor 1 the two are the same number, so the
+ * tags are read only when it is not 1: a build at the stat's base pays one compare.
+ */
+const sizedRadius = (
+  ctx: RunContext,
+  spec: { readonly radius: number; readonly tags?: readonly string[] },
+): number => {
+  const flags = ctx.build.flags;
+  return flags.thornsFactor !== 1 && spec.tags?.includes('thorns') === true
+    ? spec.radius * (flags.areaFactor * flags.thornsFactor)
+    : sizeOf(ctx.build, spec.radius);
+};
+
 /** Writes the alive enemies within the effect's radius of (x, y) to ctx.effectTargets. */
 const within = (ctx: RunContext, fx: CompiledEffect, x: number, y: number): number =>
   ctx.grid.within(x, y, fx.radiusSq, ctx.effectTargets);
@@ -583,7 +599,7 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
       kind: 'explode',
       x,
       y,
-      radius: sizeOf(ctx.build, spec.radius),
+      radius: sizedRadius(ctx, spec),
     });
     hitArea(ctx, fx, entry, x, y, max, nearest);
   },
@@ -592,7 +608,7 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     const player = ctx.player;
     const x = atEvent ? centerX(ctx, fx, entry) : player.x;
     const y = atEvent ? centerY(ctx, fx, entry) : player.y;
-    ctx.events.push({ type: 'burst', kind: 'nova', x, y, radius: sizeOf(ctx.build, spec.radius) });
+    ctx.events.push({ type: 'burst', kind: 'nova', x, y, radius: sizedRadius(ctx, spec) });
     hitArea(ctx, fx, entry, x, y, Infinity, false);
   },
   push(ctx, spec, fx, entry) {
@@ -653,7 +669,7 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
       false,
       centerX(ctx, fx, entry),
       centerY(ctx, fx, entry),
-      sizeOf(ctx.build, spec.radius),
+      sizedRadius(ctx, spec),
       Math.max(1, Math.round(spec.durationSec * PULSES_PER_SECOND)),
       ctx.effectPayloads[entry.effect] as Payload,
       spec.damagePctPerSec / PULSES_PER_SECOND,

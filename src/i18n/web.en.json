@@ -111,6 +111,7 @@
   "web.extra.nearestOtherBolts": ", one each to the {n} nearest other enemies",
   "web.extra.buffTags": ", {tags} attacks only",
   "web.extra.area": ", radius {radius}",
+  "web.extra.strikeTargets": ", up to {n} enemies at once",
   "web.extra.chain": ", chaining {n} {jumps}",
   "web.extra.everyNth": ", one pulse in {n} hits, at ×{mult}",
   "web.extra.corona": ", and a corona every {s} s: every enemy takes ×{mult} a pulse's damage",

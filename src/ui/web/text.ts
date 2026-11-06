@@ -421,6 +421,7 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   barrageSplit: 'percent',
   comboCap: 'number',
   orbitSpeed: 'percent',
+  thornsArea: 'percent',
 };
 
 /**
@@ -1129,12 +1130,17 @@ function grantText(lookup: TextLookup, grant: EmitterGrant): string {
     }
     case 'strike': {
       const extras: string[] = [];
+      // E16: several enemies at once (刺蝟's six spikes), and its hits' own tags.
+      const targets = grant.targets ?? STRIKE_DEFAULTS.targets;
+      if (targets > 1) extras.push(say(lookup, 'web.extra.strikeTargets', { n: targets }));
       const radius = grant.radius ?? STRIKE_DEFAULTS.radius;
       if (radius > 0) extras.push(say(lookup, 'web.extra.area', { radius: trim(radius) }));
       if (grant.element !== undefined)
         extras.push(
           say(lookup, 'web.extra.element', { element: say(lookup, `web.tag.${grant.element}`) }),
         );
+      if (grant.tags !== undefined && grant.tags.length > 0)
+        extras.push(say(lookup, 'web.extra.tags', { tags: tagList(lookup, grant.tags) }));
       const jumps = grant.chainJumps ?? STRIKE_DEFAULTS.chainJumps;
       if (jumps > 0)
         extras.push(
