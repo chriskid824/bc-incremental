@@ -448,6 +448,27 @@ describe('settleWebRun (§5.1, D21)', () => {
     expect(settlement.skipShards).not.toBe(ZERO);
     expect(frozen).toEqual(progress);
   });
+
+  it('starts and settles a run at walletWeight 1.5 on the unweighted wallet (E17, lead ruling G1)', () => {
+    // Planted bugs: ◆金庫's weight reaching WebRun.walletShards, the run's config or the
+    // settlement, which add the run's shards to the wallet as it is.
+    const vault = withEffects(fire, R1, {
+      modifiers: [{ stat: 'walletWeight', kind: 'flat', value: 0.5 }],
+    });
+    const run = webBuild(vault, progress);
+    expect(run.stats.values.walletWeight).toBe(1.5);
+    expect(run.walletShards).toBe(num(100));
+    expect(webRunConfig(run, 7, 3).walletShards).toBe(num(100));
+    const plain = webBuild(fire, progress);
+    expect(plain.stats.values.walletWeight).toBe(1);
+    const result = runResult({ highestWaveReached: 18 });
+    const weighed = settleWebRun(progress, result, data, run.stats);
+    expect(weighed).toEqual(settleWebRun(progress, result, data, plain.stats));
+    // The wallet settleRun credits from 100, unweighted.
+    const meta = { shards: num(100), cores: 3, maxWave: 12, runs: 5 };
+    settleRun(meta, result, data, plain.stats, DEFAULT_WEB_ECONOMY);
+    expect(weighed.progress.wallet.shards).toBe(meta.shards);
+  });
 });
 
 describe('webStartWave', () => {

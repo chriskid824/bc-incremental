@@ -18,6 +18,7 @@ import {
   conditionKey,
   DOT_AILMENTS,
   PROJECTILES_COUNT_MAX,
+  spendShardsIssues,
   TARGETLESS_EVENTS,
   TRANSFER_EFFECTS,
   WIRED_EVENTS,
@@ -1692,6 +1693,21 @@ function effectIssues(
         }
       } else if (ENEMYLESS_EVENTS.has(on) || dead || on === 'contact') {
         issues.push(`pull needs a live enemy, which '${on}' events do not give; add target {pick}`);
+      }
+      break;
+    }
+    case 'spendShards': {
+      // E17: a finite share in (0, 1] of the run's shards. It needs no enemy, so, as comboStack,
+      // every event of TRIGGER_EVENTS takes it, bare or with a selector where the event takes
+      // one (waveStart takes none).
+      issues.push(...spendShardsIssues(effect));
+      // With liveTarget (lead ruling G5) it is paid only while the event's enemy, or the
+      // selector's, lives, so it takes exactly a coinHit's contexts; true or left out, as seat.
+      const live: unknown = effect.liveTarget;
+      if (live !== undefined && live !== true) {
+        issues.push(`liveTarget must be true or left out (got ${String(live)})`);
+      } else if (live === true && target === undefined && ENEMYLESS_EVENTS.has(on)) {
+        issues.push(`spendShards liveTarget needs a target on '${on}' events; add target {pick}`);
       }
       break;
     }

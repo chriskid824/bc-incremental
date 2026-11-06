@@ -480,6 +480,15 @@ export const EffectSpecSchema = exact<EffectSpec>()(
     z
       .strictObject({ kind: z.literal('pull'), to: z.union([z.literal('auraEdge'), finite]) })
       .readonly(),
+    // E17: validate.ts holds the fraction to (0, 1] and liveTarget (lead ruling G5; true or
+    // left out, as a seated row's seat) to a coinHit's contexts.
+    z
+      .strictObject({
+        kind: z.literal('spendShards'),
+        fraction: finite,
+        liveTarget: z.literal(true).exactOptional(),
+      })
+      .readonly(),
   ]),
 );
 

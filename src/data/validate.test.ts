@@ -2842,6 +2842,144 @@ describe('trigger validation', () => {
       triggerIssues({ on: 'periodic', every: 4, target: { pick: 'player' }, do: [pull] }),
     ).toEqual([`${at} do[0] pull needs an enemy, which target.pick 'player' does not give`]);
   });
+
+  it('accepts spendShards with a fraction in (0, 1] on every trigger event, with or without a selector (E17)', () => {
+    // Plants spendShards refused on a context it takes: it needs no enemy, as comboStack.
+    const named: Partial<Record<TriggerSpec['on'], Condition[]>> = {
+      ailmentApplied: [{ ailment: 'burn' }],
+      ailmentTick: [{ ailment: 'burn' }],
+    };
+    for (const fraction of [0.001, 0.002, 1e-9, 1]) {
+      const spend = { kind: 'spendShards', fraction } as const;
+      const triggers = TRIGGER_EVENTS.flatMap((on): TriggerSpec[] => {
+        const base = {
+          on,
+          ...(on === 'periodic' ? { every: 1 } : {}),
+          ...(named[on] === undefined ? {} : { when: named[on] }),
+        };
+        // A waveStart trigger takes no selector at all.
+        if (on === 'waveStart') return [{ ...base, do: [spend] }];
+        return [
+          { ...base, do: [spend] },
+          { ...base, target: { pick: 'player' }, do: [spend] },
+          { ...base, target: { pick: 'nearest' }, do: [spend] },
+        ];
+      });
+      expect(triggerIssues(...triggers), `${fraction}`).toEqual([]);
+    }
+    // ◆撒幣 (gd:500) and ◆買斷 (gd:502) as B4 writes them: nthAttack, hit and periodic.
+    expect(
+      triggerIssues(
+        {
+          on: 'nthAttack',
+          every: 10,
+          do: [
+            { kind: 'spendShards', fraction: 0.001 },
+            { kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true },
+          ],
+        },
+        {
+          on: 'hit',
+          when: [{ targetHpBelow: 0.15 }, { targetKind: 'normal' }],
+          do: [{ kind: 'spendShards', fraction: 0.002 }, { kind: 'execute' }],
+        },
+        { on: 'periodic', every: 5, do: [{ kind: 'spendShards', fraction: 0.5 }] },
+      ),
+    ).toEqual([]);
+  });
+
+  it('refuses a spendShards fraction of 0, −0.1, 1.5, NaN or Infinity, and one with an extra key at load (E17)', () => {
+    // Plants a fraction of 0 or above 1 accepted (a spend would take the shards below 0).
+    const bad = [0, -0.1, 1.5, Number.NaN, Infinity, -0];
+    expect(
+      bad.map((fraction) => triggerIssues({ on: 'hit', do: [{ kind: 'spendShards', fraction }] })),
+    ).toEqual(
+      ['0', '-0.1', '1.5', 'NaN', 'Infinity', '0'].map((got) => [
+        `${at} do[0] fraction must be finite and in (0, 1] (got ${got})`,
+      ]),
+    );
+    // The schema refuses an extra key, as every strict effect.
+    const data = content();
+    const node = talent(data, 'vitality');
+    node.descKey = 'talent.vitality.desc';
+    node.triggers.push({
+      on: 'hit',
+      do: [{ kind: 'spendShards', fraction: 0.001, wallet: true } as unknown as EffectSpec],
+    } as Mutable<TriggerSpec>);
+    expect(() => parseGameData(data)).toThrow(/wallet/);
+  });
+
+  it('accepts a liveTarget spend where a coinHit goes, and refuses it on waveStart and on an enemyless event without a selector (G5)', () => {
+    // Plants liveTarget accepted on waveStart, or on an enemyless event without a selector.
+    const plain = { kind: 'spendShards', fraction: 0.002 } as const;
+    const live = { ...plain, liveTarget: true } as const;
+    const coin = { kind: 'coinHit', multiplier: 10 } as const;
+    // ◆撒幣 (gd:500) and ◆買斷 (gd:502) as B4 writes them, and a periodic one with a selector.
+    expect(
+      triggerIssues(
+        {
+          on: 'nthAttack',
+          every: 10,
+          do: [
+            { kind: 'spendShards', fraction: 0.001, liveTarget: true },
+            { kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true },
+          ],
+        },
+        {
+          on: 'hit',
+          when: [{ targetHpBelow: 0.15 }, { targetKind: 'normal' }],
+          do: [live, { kind: 'execute' }],
+        },
+        { on: 'periodic', every: 5, target: { pick: 'nearest' }, do: [live, coin] },
+      ),
+    ).toEqual([]);
+    expect(triggerIssues({ on: 'waveStart', do: [live] })).toEqual([
+      `${at} do[0] spendShards liveTarget needs a target on 'waveStart' events; add target {pick}`,
+    ]);
+    expect(triggerIssues({ on: 'periodic', every: 5, do: [live] })).toEqual([
+      `${at} do[0] spendShards liveTarget needs a target on 'periodic' events; add target {pick}`,
+    ]);
+    // Exactly a coinHit's contexts: on every event, bare and with each selector it takes, the
+    // flagged spend draws the coin's issue, in its own words, and the flagless one none.
+    const named: Partial<Record<TriggerSpec['on'], Condition[]>> = {
+      ailmentApplied: [{ ailment: 'burn' }],
+      ailmentTick: [{ ailment: 'burn' }],
+    };
+    const word = (issue: string): string =>
+      issue.replace('coinHit needs a target', 'spendShards liveTarget needs a target');
+    let refused = 0;
+    for (const on of TRIGGER_EVENTS) {
+      const base = {
+        on,
+        ...(on === 'periodic' ? { every: 1 } : {}),
+        ...(named[on] === undefined ? {} : { when: named[on] }),
+      };
+      const picks: (TriggerSpec['target'] | undefined)[] =
+        on === 'waveStart' ? [undefined] : [undefined, { pick: 'player' }, { pick: 'nearest' }];
+      for (const target of picks) {
+        const trigger = (effect: EffectSpec): TriggerSpec =>
+          ({ ...base, ...(target === undefined ? {} : { target }), do: [effect] }) as TriggerSpec;
+        const coinIssues = triggerIssues(trigger(coin)).map(word);
+        expect(triggerIssues(trigger(live)), `${on} ${target?.pick}`).toEqual(coinIssues);
+        expect(triggerIssues(trigger(plain))).toEqual([]);
+        refused += coinIssues.length;
+      }
+    }
+    // waveStart, periodic, heroHit and droneExpire, bare.
+    expect(refused).toBe(4);
+    // True or left out, as seat: false is refused in validation and at load.
+    expect(
+      triggerIssues({ on: 'hit', do: [{ ...live, liveTarget: false } as unknown as EffectSpec] }),
+    ).toEqual([`${at} do[0] liveTarget must be true or left out (got false)`]);
+    const data = content();
+    const node = talent(data, 'vitality');
+    node.descKey = 'talent.vitality.desc';
+    node.triggers.push({
+      on: 'hit',
+      do: [{ ...live, liveTarget: false } as unknown as EffectSpec],
+    } as Mutable<TriggerSpec>);
+    expect(() => parseGameData(data)).toThrow(/liveTarget/);
+  });
 });
 
 describe('conversion validation', () => {

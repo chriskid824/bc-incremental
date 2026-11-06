@@ -246,6 +246,15 @@ export const STAT_IDS = [
    * The contact thorns have no radius and take nothing from it.
    */
   'thornsArea',
+  /**
+   * 錢包碎片權重 (the greed outer's ◆金庫, docs/v3/game-design-v3.md §4.12 「錢包碎片算 1.5 倍」):
+   * the weight of the wallet's shards in shardsHeld, e.g. 1.5 = the wallet counts 150%. Read
+   * once a run, where the simulation hoists the wallet (src/sim/simulation.ts), as walletShards
+   * × walletWeight when above 0, else 0 (weighWallet, src/sim/systems/globals.ts); at 1 the
+   * wallet passes as it is. Only shardsHeld sees it: RunConfig.walletShards, the settlement and
+   * the wallet itself stay unweighted, and the run's own shards (SimState.shards) count once.
+   */
+  'walletWeight',
 ] as const;
 
 export type StatId = (typeof STAT_IDS)[number];
@@ -321,6 +330,7 @@ export const BASE_STATS: Readonly<Record<StatId, number>> = {
   comboCap: 20,
   orbitSpeed: 1,
   thornsArea: 1,
+  walletWeight: 1,
 };
 
 /**

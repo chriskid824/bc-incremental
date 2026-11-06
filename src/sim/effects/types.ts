@@ -27,6 +27,7 @@ import {
   COEF_FIELDS,
   DETONATE_AILMENTS,
   PROJECTILES_COUNT_MAX,
+  spendShardsIssues,
   TRANSFER_EFFECTS,
   TRIGGER_EVENTS,
   WIRED_EVENTS,
@@ -497,6 +498,15 @@ export function compileEffect(
     case 'pull':
       fanout = true;
       break;
+    case 'spendShards': {
+      // Data was validated at load; a rule module's effects were not, and a fraction above 1
+      // would take the run's shards below 0 (E17, as chainBolt's bolts, lead ruling R8).
+      const issues = spendShardsIssues(scaled);
+      if (issues.length > 0) {
+        throw new Error(`A spendShards effect ${JSON.stringify(spec)}: ${issues.join('; ')}`);
+      }
+      break;
+    }
     default:
       break;
   }

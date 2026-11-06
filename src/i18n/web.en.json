@@ -33,6 +33,8 @@
   "web.effect.chainBolt": "a {jumps}-jump bolt for {damage} damage{extra}",
   "web.effect.comboStack": "+{n} combo {stack}",
   "web.effect.buff": "{stat} ×{mult} for {duration} s{extra}",
+  "web.effect.spendShards": "spend {pct} of this run's shards",
+  "web.effect.spendShards.liveTarget": "spend {pct} of this run's shards if the target still lives",
   "web.word.stack.one": "stack",
   "web.word.stack.other": "stacks",
   "web.word.time.one": "time",

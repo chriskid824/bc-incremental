@@ -200,6 +200,7 @@ describe('STAT_FORMAT (R3, F52)', () => {
       'barrageSplit',
       'orbitSpeed',
       'thornsArea',
+      'walletWeight',
     ]);
   });
 
@@ -465,6 +466,17 @@ function kitchenSink(): NodeEffects {
       do: [{ kind: 'pull', to: 'auraEdge' }],
     },
     { on: 'hit', do: [{ kind: 'pull', to: 120 }] },
+    // E17: ◆撒幣's spend before its coin, paid only while the target lives (G5), and a spend
+    // paid on every firing.
+    {
+      on: 'nthAttack',
+      every: 10,
+      do: [
+        { kind: 'spendShards', fraction: 0.001, liveTarget: true },
+        { kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true },
+      ],
+    },
+    { on: 'waveStart', do: [{ kind: 'spendShards', fraction: 0.05 }] },
     // Each center event's fan-outs (status, self, placement) and a selector's.
     ...CENTER_EVENTS.flatMap((on): TriggerSpec[] => [
       { on, do: [{ kind: 'applyAilment', ailment: 'poison', stacks: 2 }] },
@@ -1162,6 +1174,89 @@ describe('every template, through one node (§4.7)', () => {
             do: [{ kind: 'pull', to: 'auraEdge' }],
           },
           { on: 'hit', do: [{ kind: 'pull', to: 120 }] },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    ['en', ['+50% Wallet weight']],
+    ['zh-TW', ['錢包碎片權重 +50%']],
+  ] as const)(
+    'writes ◆金庫’s flat walletWeight 0.5 as a percentage on the weight, in %s (E17)',
+    (locale, expected) => {
+      // Plants walletWeight read as a number (+0.5), or its name missing.
+      const web = withEffects(fire, NOTABLE, { modifiers: [flat('walletWeight', 0.5)] });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        "Every 10 attacks: spend 0.1% of this run's shards if the target still lives; a coin hit for 10× hit damage, ignoring shields, ignoring armour",
+        "On hitting normal enemies below 15% life: spend 0.2% of this run's shards if the target still lives; an execute: an enemy that is no boss dies at once",
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '每 10 次攻擊：目標還活著才花本局碎片 0.1%；金幣擊中，10 倍擊中，無視護盾，無視堅甲',
+        '擊中生命低於 15% 的一般敵人時：目標還活著才花本局碎片 0.2%；處決：非 Boss 的敵人立刻死亡',
+      ],
+    ],
+  ] as const)(
+    'writes ◆撒幣’s and ◆買斷’s spends before their coin and execute on a notable, paid while the target lives, in %s (E17, G5)',
+    (locale, expected) => {
+      // Plants the spend's text missing, its share rounded to a whole percent, or liveTarget
+      // left out of it.
+      const web = withEffects(fire, NOTABLE, {
+        triggers: [
+          {
+            on: 'nthAttack',
+            every: 10,
+            do: [
+              { kind: 'spendShards', fraction: 0.001, liveTarget: true },
+              { kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true },
+            ],
+          },
+          {
+            on: 'hit',
+            when: [{ targetHpBelow: 0.15 }, { targetKind: 'normal' }],
+            do: [{ kind: 'spendShards', fraction: 0.002, liveTarget: true }, { kind: 'execute' }],
+          },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        "On each freeze: spend 1% of this run's shards",
+        "Each explosion: spend 0.5% of this run's shards; heal 2% of max life",
+      ],
+    ],
+    ['zh-TW', ['凍結時：花本局碎片 1%', '每次爆炸：花本局碎片 0.5%；回復 2% 生命']],
+  ] as const)(
+    'reads a center event’s spend as one on the player, not at the target, in %s (E17)',
+    (locale, expected) => {
+      // Plants spendShards missing from onPlayer: a lone spend on a freeze would read 「在目標」,
+      // and one beside a heal on an explosion 「在落點」, though the run's shards are the player's.
+      const web = withEffects(fire, NOTABLE, {
+        triggers: [
+          { on: 'freeze', do: [{ kind: 'spendShards', fraction: 0.01 }] },
+          {
+            on: 'explode',
+            do: [
+              { kind: 'spendShards', fraction: 0.005 },
+              { kind: 'heal', lifePct: 0.02 },
+            ],
+          },
         ],
       });
       expect(linesOf(web, NOTABLE, locale)).toEqual(expected);

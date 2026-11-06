@@ -38,7 +38,7 @@ import { spawnSplits } from './systems/barrage';
 import { stepCombo } from './systems/combo';
 import { resolveContacts } from './systems/contact';
 import { createRunContext } from './systems/context';
-import { stepGlobals } from './systems/globals';
+import { stepGlobals, weighWallet } from './systems/globals';
 import type { TestModule } from './rules';
 import { compact } from './systems/death';
 import { stepDrones } from './systems/drones';
@@ -158,14 +158,15 @@ export function createSimulation(
   // So is whether the globals step has work (src/sim/systems/globals.ts): a build that reads the
   // shards held, or the enemies in the aura while it has an aura emitter, or that names targetIs
   // (the highest-hp enemy), or that reads the timed rows (minionCount). The wallet is the run
-  // config's, 0 without one.
+  // config's, 0 without one, × the walletWeight stat (◆金庫, E17; weighWallet), formed here once:
+  // the config's field stays as it is.
   const flags = ctx.build.flags;
   const held = flags.shardsHeld;
   const inAura = flags.enemiesInAura && ctx.emitters.some((em) => em.spec.kind === 'aura');
   const top = flags.highestHp;
   const minions = flags.minionCount;
   const globals = held || inAura || top || minions;
-  const wallet = config.walletShards ?? ZERO;
+  const wallet = weighWallet(config.walletShards ?? ZERO, ctx.build.values.walletWeight);
   // So is whether the barrage rider splits (◆子母彈 or the 分裂 rank, E10b): its kills' children
   // spawn once the projectile stage has compacted.
   const rider = (ctx.emitters[0] as EmitterRuntime).barrage;
@@ -192,10 +193,10 @@ export function createSimulation(
    * 3. movement: every enemy walks towards the player, or out for a fleeing treasure, by the
    *    step the enemy AI left it (movement.ts).
    * 4. grid: sort the enemies into the spatial grid for this tick's target queries (grid.ts).
-   * 4b. globals: in a run whose build reads them, the shards held, the alive enemies an aura
-   *    pulse would reach, the alive enemy with the most hp (targetIs) and the live timed rows of
-   *    the drone pool (minionCount), into the run's EvalInput for every later hit of the tick
-   *    (globals.ts).
+   * 4b. globals: in a run whose build reads them, the shards held (the weighed wallet plus the
+   *    run's shards), the alive enemies an aura pulse would reach, the alive enemy with the most
+   *    hp (targetIs) and the live timed rows of the drone pool (minionCount), into the run's
+   *    EvalInput for every later hit of the tick (globals.ts).
    * 5. contact: enemies that reached the player hit it, through its defences (damage taken,
    *    shield, extra lives), and leak, halving the combo stacks (combo.ts) and raising heroHit
    *    and contact; under 拒馬 a dashing one is pushed back out instead, and under 荊棘纏繞 a boss
@@ -229,7 +230,8 @@ export function createSimulation(
    * 10. ailments: burn records expire; every BURN_TICK_INTERVAL, damage over time (burn, poison,
    *    bleed) and the ailmentTick triggers (ailments.ts, src/sim/ailments/).
    * 11. effects: due periodic triggers, then up to EFFECTS_PER_TICK queued effects
-   *    (src/sim/effects/execute.ts).
+   *    (src/sim/effects/execute.ts); a spendShards among them reaches shardsHeld at the next
+   *    tick's 4b.
    * 12. death: this tick's pending kill triggers fire, sorted by victim id (their effects run
    *    next tick); then compact dead enemies and projectiles (death.ts), after the last grid
    *    query.

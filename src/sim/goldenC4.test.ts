@@ -3244,6 +3244,55 @@ const HEDGEHOG_STATS = makeStats(
   },
 );
 
+/**
+ * E17's greed economy (gd:495-504, lead ruling 27) as inline data on M1's volley, on C7.3's
+ * squares and shielders from wave 12 with an elite every wave (enemyDefenceData's rules): a wallet
+ * of 1e4 shards weighed by ◆金庫's walletWeight, BASE_STATS's 1 plus its flat 0.5 (「錢包碎片算 1.5
+ * 倍」, gd:500), under 錢包's damage more of × (held shards)^0.06, which starts at 1.5e4^0.06 =
+ * 1.78; every 10 attacks a ◆撒幣-like spend of 0.1 % of the run's shards and a coin of ×10 that
+ * passes the shield and the armour (gd:500), and on a hit on a normal enemy below 15 % life a
+ * ◆買斷-like spend of 0.2 % and an execute (gd:502), both credited to outer.greed. Both spends carry
+ * liveTarget, as B4 writes them (lead ruling G5): paid only while the target lives, so once per
+ * coin and per execute (「每枚」, 「每次」). The spends take the run's shards alone, never the
+ * wallet, and reach shardsHeld from the next tick.
+ */
+const SPEND_SCATTER: TriggerSpec = {
+  on: 'nthAttack',
+  every: 10,
+  do: [
+    { kind: 'spendShards', fraction: 0.001, liveTarget: true },
+    { kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true },
+  ],
+};
+const SPEND_BUYOUT: TriggerSpec = {
+  on: 'hit',
+  when: [{ targetHpBelow: 0.15 }, { targetKind: 'normal' }],
+  do: [{ kind: 'spendShards', fraction: 0.002, liveTarget: true }, { kind: 'execute' }],
+};
+const SPEND_STATS = makeStats(
+  { damage: 20, maxLife: 1e6, walletWeight: 1 + 0.5 },
+  [
+    {
+      stat: 'damage',
+      kind: 'more',
+      value: 1,
+      scaling: { per: 'shardsHeld', curve: 'powFactor', exponent: 0.06 },
+    },
+  ],
+  {
+    triggers: [
+      { source: 'outer.greed', spec: SPEND_SCATTER },
+      { source: 'outer.greed', spec: SPEND_BUYOUT },
+    ],
+    conversions: [],
+    emitters: [],
+  },
+);
+const spendData = (): GameData => {
+  const data = enemyDefenceData();
+  return { ...data, waves: { ...data.waves, eliteEvery: 1 } };
+};
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3847,6 +3896,12 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     config: { stats: HEDGEHOG_STATS, rules: [], startWave: 12 },
     expected: ['c93a95f8ce8ae8e1', 'c9a306313514f0f4'],
   },
+  {
+    name: 'spend',
+    config: { stats: SPEND_STATS, rules: [], startWave: 12, walletShards: num(1e4) },
+    data: spendData,
+    expected: ['703c450e0260ea46', '22354e9abed9c380'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -3958,8 +4013,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E15's pullOrbit and E16's hedgehog are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([84, 'pullOrbit', 'hedgehog']);
+    // The count docs/ARCHITECTURE.md gives: E16's hedgehog and E17's spend are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([85, 'hedgehog', 'spend']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -8627,6 +8682,171 @@ describe('golden C4 runs', () => {
         novas: 11,
         novaHits: 26,
         novaBeyond150: 5,
+      },
+    });
+  });
+
+  it('spends the run’s shards, never below 0 nor the wallet, once before each of spend’s coins and executes on a live target, and reads shardsHeld = 1.5 × 1e4 + the shards left at each next tick (E17, G5)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'spend') as GoldenC4Entry;
+    // The triggers' indices, after SHATTER_TRIGGER, and their shares.
+    const SCATTER = 1;
+    const BUYOUT = 2;
+    const share = (origin: number): number => (origin === SCATTER ? 0.001 : 0.002);
+    const wallet = mul(num(1e4), 1.5);
+    const bySeed: Record<number, Record<string, unknown>> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      // Every write of SimState.shards and shardsSpent, by accessors installed at the first
+      // tick hook, credited to the running effect's trigger; each tick's step's shardsHeld.
+      const writes: { field: string; tick: number; origin: number; from: Num; to: Num }[] = [];
+      // The spends (with their target, alive or not, as they are paid), the coins and the
+      // executes, in the order they happen.
+      const acts: { act: string; tick: number; id: number; alive: boolean }[] = [];
+      const held = new Map<number, number>();
+      const hits = { coin: 0, eliteLow: 0 };
+      const coinOn = new Set<string>();
+      const kills: Record<string, number> = {};
+      const watch: TestModule = (b) => {
+        b.hook('tick', (ctx) => {
+          held.set(ctx.now, ctx.evalInput.shardsHeld);
+          if (writes.length > 0 || held.size > 1) return;
+          const state = ctx.state;
+          const values = { shards: state.shards, shardsSpent: state.shardsSpent };
+          for (const field of ['shards', 'shardsSpent'] as const) {
+            Object.defineProperty(state, field, {
+              get: () => values[field],
+              set: (value: Num) => {
+                const { origin, target } = ctx.effectEntry;
+                writes.push({ field, tick: ctx.now, origin, from: values[field], to: value });
+                values[field] = value;
+                if (field === 'shardsSpent') {
+                  const act = origin === SCATTER ? 'scatter' : origin === BUYOUT ? 'buyout' : '?';
+                  const [id, alive] = target === null ? [-1, false] : [target.id, target.alive];
+                  acts.push({ act, tick: ctx.now, id, alive });
+                }
+              },
+            });
+          }
+        });
+        b.hook('onHit', (ctx, hit) => {
+          const e = hit.target;
+          if (hit.origin === SCATTER) {
+            hits.coin++;
+            coinOn.add(`${e.type}${e.tough ? ' elite' : ''}`);
+            acts.push({ act: 'coin', tick: ctx.now, id: e.id, alive: e.alive });
+          }
+          if (e.tough && !e.boss && e.alive && Number(e.hp) < 0.15 * Number(e.maxHp)) {
+            hits.eliteLow++;
+          }
+        });
+        b.hook('onKill', (ctx, victim, kill) => {
+          if (kill.origin === BUYOUT) {
+            acts.push({ act: 'execute', tick: ctx.now, id: victim.id, alive: false });
+          }
+          const by =
+            kill.origin === BUYOUT ? 'execute' : kill.origin === SCATTER ? 'coin' : 'other';
+          const key = `${by}${victim.tough ? ' elite' : ''}`;
+          kills[key] = (kills[key] ?? 0) + 1;
+        });
+      };
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData(), [
+        ...(entry.modules?.() ?? []),
+        watch,
+      ]);
+      const ends = [0];
+      while (!sim.state.finished) {
+        sim.step(NO_INPUT);
+        ends.push(toNumber(sim.state.shards));
+      }
+      // Each spend: the counter's write and the shards' beside it, exact in Num.
+      const spends: Record<string, number> = {};
+      let total = num(0);
+      let atZero = 0;
+      writes.forEach((w, i) => {
+        if (w.field !== 'shardsSpent') return;
+        const pair = [writes[i - 1], writes[i + 1]].find((x) => x?.field === 'shards');
+        expect(pair?.tick, `${w.tick}`).toBe(w.tick);
+        const before = pair?.from as Num;
+        const spent = mul(before, share(w.origin));
+        expect([pair?.to, w.from, w.to], `${w.tick}`).toEqual([
+          num(toNumber(before) - toNumber(spent)),
+          total,
+          num(toNumber(total) + toNumber(spent)),
+        ]);
+        total = w.to;
+        if (toNumber(before) === 0) atZero++;
+        const name = w.origin === SCATTER ? 'scatter' : w.origin === BUYOUT ? 'buyout' : 'other';
+        spends[name] = (spends[name] ?? 0) + 1;
+      });
+      expect(sim.state.shardsSpent).toBe(total);
+      expect(writes.every((w) => w.field !== 'shards' || toNumber(w.to) >= 0)).toBe(true);
+      // No spend while its target is dead (or absent); each 撒幣 spend is followed by its coin
+      // on that target, each 買斷 spend by its execute of it, in the same tick, and every coin and
+      // execute comes after its spend: spends = coins + executes.
+      const follows: Record<string, string> = { scatter: 'coin', buyout: 'execute' };
+      acts.forEach((a, i) => {
+        const next = acts[i + 1];
+        if (a.act === 'scatter' || a.act === 'buyout') {
+          expect(a.alive, `${a.tick}`).toBe(true);
+          expect(next && [next.act, next.tick, next.id], `${a.tick}`).toEqual([
+            follows[a.act],
+            a.tick,
+            a.id,
+          ]);
+        } else {
+          const prev = acts[i - 1];
+          expect(prev && follows[prev.act], `${a.tick}`).toBe(a.act);
+        }
+      });
+      const acted = (act: string): number => acts.filter((a) => a.act === act).length;
+      // The step of each tick: the weighed wallet whole, plus the shards at the last tick's end.
+      for (const [tick, value] of held) {
+        expect(value, `${tick}`).toBe(toNumber(wallet) + (ends[tick - 1] as number));
+      }
+      const factor = (x: number): number => Math.max(1, x) ** 0.06;
+      bySeed[seed] = {
+        spends,
+        acts: { coin: acted('coin'), execute: acted('execute') },
+        atZero,
+        spent: toNumber(sim.state.shardsSpent).toFixed(4),
+        left: toNumber(sim.state.shards).toFixed(4),
+        factor: [factor(held.get(1) as number), factor(Math.max(...held.values()))].map((f) =>
+          f.toFixed(4),
+        ),
+        hits,
+        coinOn: [...coinOn].sort(),
+        kills,
+      };
+    }
+    // Both triggers spend, from the first tick on shards above 0, and only on a live target:
+    // 撒幣 once before each of its 8 coins, which land on squares, shielders and elites, 買斷
+    // once before each of its 12 and 11 executes, none on the lethal hits below 15 % that its
+    // execute would find dead (27 and 28 firings paid without liveTarget); no execute on an
+    // elite, though elites are hit below 15 %. The spends total 1.6 % and 1.5 % of what the run
+    // keeps, and the factor rises from 1.5e4^0.06 by the shards the run keeps, not by the wallet.
+    const coinOn = ['hexagon elite', 'shielder', 'square'];
+    expect(bySeed).toEqual({
+      1: {
+        spends: { buyout: 12, scatter: 8 },
+        acts: { coin: 8, execute: 12 },
+        atZero: 0,
+        spent: '5.7150',
+        left: '358.8382',
+        factor: ['1.7806', '1.7830'],
+        hits: { coin: 8, eliteLow: 12 },
+        coinOn,
+        kills: { coin: 6, execute: 12, other: 11, 'other elite': 4 },
+      },
+      2: {
+        spends: { buyout: 11, scatter: 8 },
+        acts: { coin: 8, execute: 11 },
+        atZero: 0,
+        spent: '5.1079',
+        left: '349.1786',
+        factor: ['1.7806', '1.7830'],
+        hits: { coin: 8, eliteLow: 6 },
+        coinOn,
+        kills: { coin: 4, 'coin elite': 4, execute: 11, other: 14 },
       },
     });
   });

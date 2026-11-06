@@ -33,6 +33,8 @@
   "web.effect.chainBolt": "放一道 {jumps} 跳的電弧，{damage} 傷害{extra}",
   "web.effect.comboStack": "+{n} {stack}連擊",
   "web.effect.buff": "{stat} ×{mult}，持續 {duration} 秒{extra}",
+  "web.effect.spendShards": "花本局碎片 {pct}",
+  "web.effect.spendShards.liveTarget": "目標還活著才花本局碎片 {pct}",
   "web.word.stack.one": "層",
   "web.word.stack.other": "層",
   "web.word.time.one": "次",

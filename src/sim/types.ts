@@ -68,7 +68,9 @@ export interface RunConfig {
   /**
    * The shards the player's wallet held when the run started (webRunConfig, src/meta/web/
    * build.ts), finite and at least 0; 0 when omitted, as on every M1 run. Only shardsHeld reads
-   * it (src/sim/systems/globals.ts): the run's own shards stay in SimState.shards.
+   * it (src/sim/systems/globals.ts), × the walletWeight stat (E17, weighWallet), which leaves
+   * this field as it is: the run's own shards stay in SimState.shards, and no spend takes from
+   * it (spendShards).
    */
   readonly walletShards?: Num;
 }
@@ -330,8 +332,16 @@ export interface SimState {
   /** The enemy bullets; the first bulletCount slots are in flight. None in an M1 run. */
   readonly bullets: BulletViewState;
   bulletCount: number;
-  /** Currencies collected so far this run (before skip compensation, which meta adds). */
+  /**
+   * Currencies collected so far this run (before skip compensation, which meta adds); shards less
+   * what spendShards spent (E17).
+   */
   shards: Num;
+  /**
+   * The run's shards that spendShards effects spent (E17, lead ruling 27), 0 at the start: the
+   * sum of every spend's SimState.shards × fraction, in Num and unrounded.
+   */
+  shardsSpent: Num;
   cores: number;
   finished: boolean;
   /**

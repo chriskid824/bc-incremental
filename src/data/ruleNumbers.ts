@@ -256,6 +256,9 @@ export function effectNumbers(effect: EffectSpec): string[][] {
       return [[String(effect.stacks)]];
     case 'buff':
       return [[`×${1 + effect.more}`, signedPercent(effect.more)], [String(effect.durationSec)]];
+    // E17: a share of a percent (◆撒幣's 0.1%), which percent's whole number would round to 0%.
+    case 'spendShards':
+      return [[`${Number((effect.fraction * 100).toPrecision(12))}%`]];
   }
 }
 

@@ -980,6 +980,7 @@ export function createRunContext(
     bullets,
     bulletCount: 0,
     shards: ZERO,
+    shardsSpent: ZERO,
     cores: 0,
     finished: false,
     sources: sources.names,

@@ -86,10 +86,21 @@
  * A spreadAilment moves its live target's burn, poison or bleed (血河, E9: spreadBleed, with
  * `behind` only to the enemies farther from the player than the target) to the enemies within
  * its spread; it deals no damage and raises no ailmentApplied.
+ *
+ * A spendShards (E17, ◆撒幣 and ◆買斷, lead ruling 27) takes SimState.shards × fraction off the run's
+ * shards into SimState.shardsSpent, in Num and unrounded; the wallet is not the run's and is never
+ * spent. It needs no target, draws nothing and raises no event. Without liveTarget it is paid on
+ * every firing, whatever the effects after it find; with it (lead ruling G5), only while the
+ * entry's target is alive when it runs (liveTarget): the test a coinHit or an execute after it in
+ * its `do` makes, so the spend goes with the coin's hit or the execute's kill (a boss passed over),
+ * unless the tick's effect budget (EFFECTS_PER_TICK) defers that effect to a later tick, in which
+ * its target may die first. The hits of the effects after it in its `do` (a coinHit's) read the
+ * shardsHeld the tick's globals step wrote before this phase (src/sim/systems/globals.ts), so the
+ * spend shows in shardsHeld from the next tick's step on.
  */
 
 import type { Num } from '../../core/num';
-import { add, gt, mul, num, toNumber, ZERO } from '../../core/num';
+import { add, gt, mul, num, sub, toNumber, ZERO } from '../../core/num';
 import type { SignatureId } from '../../data/rules';
 import type { AppliedAilment, ChainBoltSpec } from '../../data/triggers';
 import {
@@ -980,6 +991,18 @@ const EFFECTS: { readonly [K in CompiledEffectKind]: Executor<K> } = {
     target.x = player.x + target.ux * d;
     target.y = player.y + target.uy * d;
     rebuildGrid(ctx);
+  },
+  // shards × fraction off the run's shards, into shardsSpent. compileEffect holds the fraction
+  // to (0, 1], so the product is at most the shards and what is left never goes below 0. With
+  // liveTarget (lead ruling G5), only while the entry's target lives: the test a coinHit or an
+  // execute after it makes (an execute not on a boss), though the tick's effect budget may defer
+  // that effect to a later tick, in which its target may die first.
+  spendShards(ctx, spec, _fx, entry) {
+    if (spec.liveTarget === true && liveTarget(entry) === null) return;
+    const state = ctx.state;
+    const spent = mul(state.shards, spec.fraction);
+    state.shards = sub(state.shards, spent);
+    state.shardsSpent = add(state.shardsSpent, spent);
   },
 };
 

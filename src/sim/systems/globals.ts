@@ -8,7 +8,8 @@
  * (src/sim/simulation.ts). Only stage 2b's C7b hooks (荊棘纏繞's rounds, 反射's arrivals) and the
  * enemy AI's regeneration hit or read before it, and they read the previous tick's values (0 on
  * tick 1, when no enemy is the highest). Every later hit of a tick reads the values the step
- * wrote: a kill's shards show from the next tick, as does an enemy pushed into the aura after
+ * wrote: a kill's shards show from the next tick, as do a spend's (spendShards, E17, in the
+ * effect phase, even before a coinHit of its own `do`) and an enemy pushed into the aura after
  * the step. So too the highest-hp enemy: one that dies after the step leaves no enemy matching
  * until the next tick (an id is never reused in a run, so no later enemy takes its id), and an
  * enemy spawned or split after the step, or whose hp changes during the tick, is judged by the
@@ -24,7 +25,7 @@
  * deterministic.
  */
 
-import { add, gt, toNumber } from '../../core/num';
+import { add, gt, mul, toNumber, ZERO } from '../../core/num';
 import type { Num } from '../../core/num';
 import { enemiesInAura } from '../emitters/aura';
 import { DRONE_KIND_SPIRIT } from '../types';
@@ -64,10 +65,24 @@ export function minionCount(ctx: RunContext): number {
 }
 
 /**
- * Writes this tick's shardsHeld, the wallet's `wallet` (RunConfig.walletShards) plus the run's
- * shards, when `held`; its enemiesInAura (aura.ts's pulse reach) when `inAura`, which is set
- * only on a run with an aura emitter; its highestHpId when `top`; and its minionCount when
- * `minions` (`top` and `minions` false when left out).
+ * The wallet shardsHeld counts (◆金庫's 「錢包碎片算 1.5 倍」, gd:500; E17, lead ruling G1): the
+ * wallet's shards `wallet` (RunConfig.walletShards) × the walletWeight stat's `weight`, in Num,
+ * when the weight is above 0, and ZERO when it is not (NaN included). At weight 1 it is `wallet`
+ * itself, no product, so a run without the stat counts the wallet bit for bit as before.
+ * createSimulation forms it once a run, from the compiled build's values (a module's offsetStat
+ * or scaleStat reaches it); RunConfig.walletShards itself is left unweighted, as are the
+ * settlement and the result screen that read the wallet.
+ */
+export function weighWallet(wallet: Num, weight: number): Num {
+  if (weight === 1) return wallet;
+  return weight > 0 ? mul(wallet, weight) : ZERO;
+}
+
+/**
+ * Writes this tick's shardsHeld, the wallet's `wallet` (RunConfig.walletShards as weighWallet
+ * weighs it) plus the run's shards, when `held`; its enemiesInAura (aura.ts's pulse reach) when
+ * `inAura`, which is set only on a run with an aura emitter; its highestHpId when `top`; and its
+ * minionCount when `minions` (`top` and `minions` false when left out).
  */
 export function stepGlobals(
   ctx: RunContext,

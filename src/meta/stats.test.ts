@@ -449,9 +449,8 @@ describe('computeStatBlock', () => {
     ).toThrow('is not a scoped stat; use scaleStat or offsetStat');
   });
 
-  it("appends E16's thornsArea: last of 67, base 1, an unscoped multiplier that increased adds to", () => {
-    expect(STAT_IDS).toHaveLength(67);
-    expect(STAT_IDS.slice(-2)).toEqual(['orbitSpeed', 'thornsArea']);
+  it("appends E16's thornsArea: the 67th, base 1, an unscoped multiplier that increased adds to", () => {
+    expect(STAT_IDS.slice(65, 67)).toEqual(['orbitSpeed', 'thornsArea']);
     expect(SCOPED_STATS).toHaveLength(18);
     expect(BASE_STATS.thornsArea).toBe(1);
     expect(isScopedStat('thornsArea')).toBe(false);
@@ -492,6 +491,52 @@ describe('computeStatBlock', () => {
       compileBuild(block([]), [], undefined, [
         (b) => {
           b.addModifier({ stat: 'thornsArea', kind: 'increased', value: 0.3, tags: ['thorns'] });
+        },
+      ]),
+    ).toThrow('is not a scoped stat; use scaleStat or offsetStat');
+  });
+
+  it("appends E17's walletWeight: last of 68, base 1, an unscoped weight that flat adds to", () => {
+    expect(STAT_IDS).toHaveLength(68);
+    expect(STAT_IDS.slice(-2)).toEqual(['thornsArea', 'walletWeight']);
+    expect(SCOPED_STATS).toHaveLength(18);
+    expect(BASE_STATS.walletWeight).toBe(1);
+    expect(isScopedStat('walletWeight')).toBe(false);
+    expect(block([]).values.walletWeight).toBe(1);
+    // ◆金庫's 「錢包碎片算 1.5 倍」: flat 0.5 on the base 1, which the run reads once
+    // (weighWallet, src/sim/systems/walletWeight.test.ts pins the read).
+    const stats = block([{ stat: 'walletWeight', kind: 'flat', value: 0.5 }]);
+    expect(stats.values.walletWeight).toBe(1.5);
+    expect(stats.scoped).toEqual([]);
+    expect(compileBuild(stats, []).values.walletWeight).toBe(1.5);
+    // Plants walletWeight's tags, notTags or scope taken: refused by computeStatBlock, and at
+    // load by the modifier schema, on their fields, as orbitSpeed's are.
+    const bad = [
+      { stat: 'walletWeight', kind: 'flat', value: 0.5, tags: ['hit'] },
+      { stat: 'walletWeight', kind: 'flat', value: 0.5, notTags: ['crit'] },
+      { stat: 'walletWeight', kind: 'flat', value: 0.5, scope: 'outer.greed' },
+    ] as const satisfies readonly Modifier[];
+    for (const mod of bad) {
+      expect(() => block([mod])).toThrow(
+        'Tags, scopes, conditions and scalings are only allowed on scoped stats, not flat ' +
+          `damage: ${JSON.stringify(mod)}`,
+      );
+    }
+    expect(
+      bad.map((mod) => ModifierSchema.safeParse(mod).error?.issues.map((i) => i.message)),
+    ).toEqual([
+      ['tags are only allowed on scoped stats, and not on flat damage'],
+      ['notTags are only allowed on scoped stats, and not on flat damage'],
+      ['scope is only allowed on scoped stats, and not on flat damage'],
+    ]);
+    expect(
+      ModifierSchema.safeParse({ stat: 'walletWeight', kind: 'flat', value: 0.5 }).success,
+    ).toBe(true);
+    // And a module's addModifier, which takes scoped stats alone.
+    expect(() =>
+      compileBuild(block([]), [], undefined, [
+        (b) => {
+          b.addModifier({ stat: 'walletWeight', kind: 'flat', value: 0.5, scope: 'outer.greed' });
         },
       ]),
     ).toThrow('is not a scoped stat; use scaleStat or offsetStat');

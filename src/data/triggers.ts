@@ -23,8 +23,9 @@ export type AilmentKind = (typeof AILMENT_KINDS)[number];
  * from the player, in arena units.
  * `lifeLostPct`: the fraction of the player's max life missing, 0 to 1. `comboStacks`: the run's
  * combo stacks as they are at the instance (src/sim/systems/combo.ts). `shardsHeld`: the shards
- * the player holds, the wallet the run started with (RunConfig.walletShards) plus the run's own
- * (SimState.shards). `enemiesInAura`: the alive enemies an aura pulse of the build would reach, 0
+ * the player holds, the wallet the run started with (RunConfig.walletShards) × the walletWeight
+ * stat (E17) plus the run's own (SimState.shards, less what spendShards spent).
+ * `enemiesInAura`: the alive enemies an aura pulse of the build would reach, 0
  * without an aura emitter (src/sim/emitters/aura.ts). `minionCount`: the live timed rows a
  * spawnDrone effect appended to the drone pool (its spirits and small drones; gd:572's
  * 「場上每有 1 架小無人機」), never the fixed drones and turrets. The three are computed once a tick,
@@ -735,6 +736,45 @@ export interface PullSpec {
 }
 
 /**
+ * Spends `fraction` of the run's shards (◆撒幣's 「每枚花本局碎片 0.1%」, gd:500, and ◆買斷's
+ * 「每次花本局碎片 0.2%」, gd:502; E17, lead ruling 27): SimState.shards × fraction, in Num and
+ * unrounded, comes off SimState.shards, which never goes below 0, and adds to
+ * SimState.shardsSpent. The wallet (RunConfig.walletShards) is never spent. It needs no enemy,
+ * so every event takes it, and it draws no RNG and raises no event. A trigger's effects run in
+ * their `do` order, so one listed before a coinHit or an execute spends first; their hits read
+ * the shardsHeld of the tick's globals step (src/sim/systems/globals.ts), which a spend in the
+ * effect phase reaches from the next tick on. Without `liveTarget` it is paid on every firing,
+ * whatever the effects after it then find; with it (lead ruling G5), only while the event's
+ * enemy, or the selector's, is alive when the spend runs. That is the test a coinHit or an
+ * execute after it in the same `do` makes, so the spend goes with the coin's hit or the
+ * execute's kill (an execute also passes over a boss), unless the tick's effect budget
+ * (EFFECTS_PER_TICK) defers that effect to a later tick, in which its target may die first.
+ */
+export interface SpendShardsSpec {
+  readonly kind: 'spendShards';
+  /** The share of the run's shards it spends, in (0, 1]. */
+  readonly fraction: number;
+  /**
+   * Paid only while the target lives (lead ruling G5): the event's enemy, or the selector's,
+   * alive when the spend runs. It takes exactly a coinHit's contexts (src/data/validate.ts).
+   */
+  readonly liveTarget?: true;
+}
+
+/**
+ * What is wrong with a spendShards' fraction: not a finite number in (0, 1] (E17). Data
+ * validation asks it (src/data/validate.ts), and compileEffect for every spendShards, which rule
+ * modules add unvalidated (as chainBoltBoltsIssues, lead ruling R8), so a spend never takes more
+ * than the run's shards.
+ */
+export function spendShardsIssues(spec: SpendShardsSpec): string[] {
+  const { fraction } = spec;
+  return Number.isFinite(fraction) && fraction > 0 && fraction <= 1
+    ? []
+    : [`fraction must be finite and in (0, 1] (got ${fraction})`];
+}
+
+/**
  * What a trigger does. An effect on the event's enemy does nothing once that enemy is dead.
  * With a target selector (TriggerSpec.target), the picked enemy takes the event enemy's place,
  * and the event's point too: effects around the event center on it, or on the player for a
@@ -789,6 +829,8 @@ export interface PullSpec {
  * - execute: the event's enemy, if no boss, killed outright (ExecuteSpec).
  * - thaw: the event's enemy, if frozen and no boss, thawed at once (ThawSpec).
  * - pull: the event's enemy, if no boss, pulled in to the aura's edge or `to` (PullSpec).
+ * - spendShards: `fraction` of the run's shards spent, never the wallet's, with `liveTarget`
+ *   only while the event's enemy lives (SpendShardsSpec).
  */
 export type EffectSpec =
   | {
@@ -851,7 +893,8 @@ export type EffectSpec =
   | BuffSpec
   | ExecuteSpec
   | ThawSpec
-  | PullSpec;
+  | PullSpec
+  | SpendShardsSpec;
 export type EffectKind = EffectSpec['kind'];
 
 /**
@@ -895,6 +938,8 @@ export const COEF_FIELDS: {
   thaw: [],
   // A distance, which the coefficient never scales.
   pull: [],
+  // A cost, which the coefficient never scales (lead ruling G2, E17).
+  spendShards: [],
 };
 
 /**

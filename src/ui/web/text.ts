@@ -134,6 +134,8 @@ export const EFFECT_TEXT: Readonly<Record<EffectKind, MessageKey>> = {
   thaw: 'web.effect.thaw',
   // E15: a distance's; to 'auraEdge' reads web.effect.pull.auraEdge (effectText).
   pull: 'web.effect.pull',
+  // E17: with liveTarget (lead ruling G5) it reads web.effect.spendShards.liveTarget (effectText).
+  spendShards: 'web.effect.spendShards',
 };
 
 /**
@@ -422,6 +424,8 @@ export const STAT_FORMAT: Readonly<Record<StatId, 'percent' | 'number'>> = {
   comboCap: 'number',
   orbitSpeed: 'percent',
   thornsArea: 'percent',
+  // A weight on 1 (◆金庫's flat 0.5 reads +50%), as its multiplier neighbours read.
+  walletWeight: 'percent',
 };
 
 /**
@@ -456,6 +460,7 @@ export const COEF_FORMAT: {
   buff: {},
   thaw: {},
   pull: {},
+  spendShards: {},
 };
 
 // Numbers, as M1 writes them (src/ui/describe.ts).
@@ -703,6 +708,12 @@ function effectText(lookup: TextLookup, effect: EffectSpec, coef: number): strin
       return text({ pct: percent(spec.lifePct) });
     case 'gainShards':
       return text({ pct: percent(spec.fraction) });
+    // E17: ◆撒幣's 0.1%, to two decimals of a percent; with liveTarget, paid only while the
+    // target lives (lead ruling G5).
+    case 'spendShards':
+      return spec.liveTarget === true
+        ? say(lookup, 'web.effect.spendShards.liveTarget', { pct: percent(spec.fraction) })
+        : text({ pct: percent(spec.fraction) });
     case 'groundZone': {
       if (spec.damagePctPerSec !== 0)
         extra('web.extra.zoneDamage', { damage: percent(spec.damagePctPerSec) });
@@ -856,7 +867,8 @@ const onPlayer = (effect: EffectSpec): boolean =>
   effect.kind === 'heal' ||
   effect.kind === 'shield' ||
   effect.kind === 'comboStack' ||
-  effect.kind === 'buff';
+  effect.kind === 'buff' ||
+  effect.kind === 'spendShards';
 
 /**
  * How a center event's trigger without a selector places its effects, for FANOUT_TEXT: every

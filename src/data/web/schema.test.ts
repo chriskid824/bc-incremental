@@ -597,6 +597,7 @@ describe('PayloadEffectSchema', () => {
     ['a thaw (E6)', { kind: 'thaw' }],
     ['a pull to the aura’s edge (E15)', { kind: 'pull', to: 'auraEdge' }],
     ['a pull to a distance (E15)', { kind: 'pull', to: 120 }],
+    ['a spend of the run’s shards (E17)', { kind: 'spendShards', fraction: 0.001 }],
   ] as const)('accepts %s', (_label, effect) => {
     expect(PayloadEffectSchema.parse(effect)).toEqual(effect);
   });

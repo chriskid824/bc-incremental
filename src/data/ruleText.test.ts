@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import en from '../i18n/en.json';
 import zhTW from '../i18n/zh-TW.json';
-import { mentions, modifierNumbers, quotedNumbers, triggerNumbers } from './ruleNumbers';
+import {
+  effectNumbers,
+  mentions,
+  modifierNumbers,
+  quotedNumbers,
+  triggerNumbers,
+} from './ruleNumbers';
 import { isBehaviourModifier } from './stats';
 import { TALENTS } from './talents';
 import { flat, inc, more } from './templates';
@@ -127,6 +133,33 @@ describe('rule descriptions', () => {
     expect(triggerNumbers(gravity)).toEqual([['4']]);
     expect(triggerNumbers({ ...gravity, do: [{ kind: 'pull', to: 120 }] })).toEqual([['4']]);
     expect(triggerNumbers({ on: 'hit', do: [{ kind: 'pull', to: 0 }] })).toEqual([]);
+  });
+
+  it('reads ◆撒幣’s and ◆買斷’s spends as a share of a percent to quote, unrounded, liveTarget adding none (E17, G5)', () => {
+    // A hand description quotes the 0.1% and 0.2%, which percent's whole number would read 0%;
+    // liveTarget (lead ruling G5) is a word, not a number.
+    const scatter = {
+      on: 'nthAttack',
+      every: 10,
+      do: [
+        { kind: 'spendShards', fraction: 0.001, liveTarget: true },
+        { kind: 'coinHit', multiplier: 10, ignoreShield: true, ignoreArmour: true },
+      ],
+    } as const;
+    const buyout = {
+      on: 'hit',
+      when: [{ targetHpBelow: 0.15 }, { targetKind: 'normal' }],
+      do: [{ kind: 'spendShards', fraction: 0.002, liveTarget: true }, { kind: 'execute' }],
+    } as const;
+    expect([triggerNumbers(scatter), triggerNumbers(buyout)]).toEqual([
+      [['10'], ['0.1%'], ['×10', '1000%']],
+      [['15%'], ['0.2%']],
+    ]);
+    expect(
+      [0.001, 0.002, 0.0015, 0.07, 0.3, 1].map((fraction) =>
+        effectNumbers({ kind: 'spendShards', fraction }),
+      ),
+    ).toEqual([[['0.1%']], [['0.2%']], [['0.15%']], [['7%']], [['30%']], [['100%']]]);
   });
 
   it('reads the numbers of triggers', () => {

@@ -33,7 +33,11 @@ export interface WebRun {
   readonly stats: StatBlock;
   readonly signature: SignatureSpec;
   readonly character: CharacterRun;
-  /** The wallet's shards when the run starts, which shardsHeld adds the run's to (H20). */
+  /**
+   * The wallet's shards when the run starts, which shardsHeld adds the run's to (H20), unweighted:
+   * the run weighs them by the walletWeight stat for shardsHeld alone (E17, weighWallet in
+   * src/sim/systems/globals.ts), and settleWebRun adds the run's shards to the unweighted wallet.
+   */
   readonly walletShards: Num;
 }
 

@@ -593,6 +593,11 @@ describe('EffectSpecSchema', () => {
     { kind: 'pull', to: 'auraEdge' },
     { kind: 'pull', to: 0 },
     { kind: 'pull', to: 160 },
+    // E17: ◆撒幣's and ◆買斷's spends, and one paid only while its target lives (G5);
+    // validate.ts holds the fraction to (0, 1].
+    { kind: 'spendShards', fraction: 0.001 },
+    { kind: 'spendShards', fraction: 1 },
+    { kind: 'spendShards', fraction: 0.002, liveTarget: true },
     // E9: 血河's bleed spread, behind the event enemy, with poison's cap and order.
     { kind: 'spreadAilment', ailment: 'bleed', radius: 60 },
     { kind: 'spreadAilment', ailment: 'bleed', radius: 60, behind: true },
@@ -840,6 +845,15 @@ describe('EffectSpecSchema', () => {
     ['pull to a number as a string (E15)', { kind: 'pull', to: '160' }],
     ['pull to NaN (E15)', { kind: 'pull', to: Number.NaN }],
     ['pull to Infinity (E15)', { kind: 'pull', to: Infinity }],
+    ['spendShards without a fraction (E17)', { kind: 'spendShards' }],
+    ['spendShards with an extra key (E17)', { kind: 'spendShards', fraction: 0.001, wallet: true }],
+    ['spendShards with a fraction as a string (E17)', { kind: 'spendShards', fraction: '0.1%' }],
+    ['spendShards with a NaN fraction (E17)', { kind: 'spendShards', fraction: Number.NaN }],
+    ['spendShards with an infinite fraction (E17)', { kind: 'spendShards', fraction: Infinity }],
+    [
+      'spendShards with liveTarget false (G5)',
+      { kind: 'spendShards', fraction: 0.001, liveTarget: false },
+    ],
   ])('rejects %s', (_label, effect) => {
     expect(EffectSpecSchema.safeParse(effect).success).toBe(false);
   });
