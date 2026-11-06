@@ -23,7 +23,7 @@ import {
   STRIKE_DEFAULTS,
   THORNS_DAMAGE_PCT,
 } from '../../data/emitters';
-import type { BarrageGrant, EmitterGrant, SegmentGrant } from '../../data/emitters';
+import type { BarrageGrant, EmitterGrant, GoldRingGrant, SegmentGrant } from '../../data/emitters';
 import { ailmentMask, ELEMENT_MASK, jumpMask, TAG, tagMask } from '../../data/tags';
 import type { TagMask } from '../../data/tags';
 import type { TargetSelector } from '../../data/triggers';
@@ -225,13 +225,14 @@ export type EmitterSpec =
 /**
  * The emitter of a talent node's grant (src/data/emitters.ts), credited to the node's source:
  * never the signature attack, never chaining from an attack (a strike runs its own chain,
- * chainGeneral). A barrage grant has none: it rides the signature (BarrageRider). An orbit's
- * ring turns `orbitRevPerSec` times a second: the orbitSpeed stat's (compileBuild,
- * orbitRevPerSec in src/sim/build/compile.ts), ORBIT_DEFAULTS.revPerSec at its base.
+ * chainGeneral). A barrage grant has none: it rides the signature (BarrageRider); nor has a
+ * gold ring grant, which sets BuildFlags.goldRing. An orbit's ring turns `orbitRevPerSec` times
+ * a second: the orbitSpeed stat's (compileBuild, orbitRevPerSec in src/sim/build/compile.ts),
+ * ORBIT_DEFAULTS.revPerSec at its base.
  */
 export function grantEmitter(
   source: string,
-  grant: Exclude<EmitterGrant, BarrageGrant>,
+  grant: Exclude<EmitterGrant, BarrageGrant | GoldRingGrant>,
   orbitRevPerSec: number = ORBIT_DEFAULTS.revPerSec,
 ): EmitterSpec {
   switch (grant.kind) {

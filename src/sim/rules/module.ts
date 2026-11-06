@@ -100,7 +100,9 @@ export interface BuildCompiler {
    * Grants the run an emitter credited to `source`, after the talent nodes' grants
    * (StatBlock.emitters); like theirs, it is dropped when an earlier grant has its kind, source
    * and key (grantKey, src/data/emitters.ts), but an aura grant combines with the source's
-   * earlier ones, each field the first grant's that sets it (combineAuras; lead ruling W1).
+   * earlier ones, each field the first grant's that sets it (combineAuras; lead ruling W1). A
+   * gold ring grant sets BuildFlags.goldRing, checked as the nodes' are, and compileBuild refuses
+   * it when it differs from another of any source (compileGoldRing; E17, lead ruling G1).
    */
   addEmitter(source: string, grant: EmitterGrant): void;
   /**

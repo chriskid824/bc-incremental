@@ -44,7 +44,12 @@ export function removeEnemy(ctx: RunContext, enemy: Enemy): void {
  * reaches them too (C7.6). Its affix bits are read inside C7.4a's one record test, so the kill
  * path costs an M1 run one more test, on a local. A kill by a trigger's damage then drops
  * × (1 + its killShards) shards (greed's +1%, TriggerSpec.killShards), which the kill event and
- * its pending kills carry: one test on `origin`, and × 1 for a trigger without it.
+ * its pending kills carry: one test on `origin`, and × 1 for a trigger without it. Last, under
+ * 金山's gold ring (BuildFlags.goldRing, E17) a victim whose centre is within the ring's radius
+ * of the player, edge included, at its position at its death, drops × the ring's mult, in Num,
+ * whatever killed it (an emitter's hit, a trigger's damage at any depth, damage over time, a
+ * drone, the thorns or an execute) and whatever it is (a split child, a treasure); its cores
+ * stay. A build without a ring pays one null test a kill.
  */
 export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlags: number): void {
   // The kill's flags: the killing hit's, what the victim held, and what killed it.
@@ -81,6 +86,12 @@ export function killEnemy(ctx: RunContext, enemy: Enemy, origin: number, hitFlag
   }
   if (origin >= 0) {
     shards = mul(shards, 1 + (ctx.build.triggers[origin] as CompiledTrigger).killShards);
+  }
+  const ring = ctx.build.flags.goldRing;
+  if (ring !== null) {
+    const dx = enemy.x - ctx.player.x;
+    const dy = enemy.y - ctx.player.y;
+    if (dx * dx + dy * dy <= ring.radiusSq) shards = mul(shards, ring.mult);
   }
   let cores = 0;
   if (expectedCores > 0) {

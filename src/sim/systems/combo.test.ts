@@ -1092,7 +1092,8 @@ describe('the cadence (lead rulings K5–K7)', () => {
  * The flags the base (8ac24f4, before the comboCap stat) compiled for 節拍's two per-stack
  * modifiers with 殘影 (afterimageModule), recorded there: a build at the base stat compiles to
  * them still (lead ruling Z2). E15 added hasAura, false for a build without an aura emitter, E16
- * thornsFactor, 1 at the thornsArea stat's base, and E17 interestHeld, false without ◆複利.
+ * thornsFactor, 1 at the thornsArea stat's base, and E17 interestHeld, false without ◆複利, and
+ * goldRing, null for a build without a gold ring grant.
  */
 const BASE_BEAT_FLAGS: BuildFlags = {
   randomCrits: true,
@@ -1150,6 +1151,7 @@ const BASE_BEAT_FLAGS: BuildFlags = {
     focus: null,
     rain: null,
   },
+  goldRing: null,
 };
 
 /** ★無盡連擊's two flags, as its module would write them. */

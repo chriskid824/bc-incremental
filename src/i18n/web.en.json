@@ -293,6 +293,7 @@
   "web.grant.aura": "aura: each pulse, enemies around you take {damage} damage{extra}",
   "web.grant.orbit": "+{count} orbs on {ring}: {damage} damage each, {cooldown} s cooldown",
   "web.grant.barrage": "small projectiles: after each attack, they fly straight at different enemies, nearest first; {damage} damage each",
+  "web.grant.goldRing": "gold ring: enemies killed within {radius} of you drop {pct} more shards",
   "web.ring.0": "the inner ring",
   "web.ring.1": "the outer ring",
   "web.buy.unknown": "No such node",

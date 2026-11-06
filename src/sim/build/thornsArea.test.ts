@@ -403,7 +403,8 @@ describe('thornsArea 1 compiles as the base (E16, lead ruling 21)', () => {
    * sha256 of JSON.stringify (Infinity as "Infinity") of the compile's effects, triggers,
    * emitters, flags and the strikes' run selectors, by d45dd0b at each value set, recorded with
    * that script (S/b4/e16-bench/base-compile-hash.json); this tree's with its new fields
-   * (BuildFlags.thornsFactor and E17's interestHeld, a strike spec's targets) left out.
+   * (BuildFlags.thornsFactor, a strike spec's targets, and E17's interestHeld, false without
+   * ◆複利, and goldRing, null without a gold ring grant) left out.
    */
   const BASE: readonly [Partial<Record<StatId, number>>, string][] = [
     [{}, 'dced280e1f6d67166696f087c0e62c7bf654fe126ede45b7c64a4c95b61e2485'],
@@ -424,9 +425,10 @@ describe('thornsArea 1 compiles as the base (E16, lead ruling 21)', () => {
     });
     const build = compileBuild(stats, []);
     const ctx = placedEnemies([], { stats });
-    const { thornsFactor, interestHeld, ...flags } = build.flags;
+    const { thornsFactor, interestHeld, goldRing, ...flags } = build.flags;
     expect(thornsFactor).toBe(1);
     expect(interestHeld).toBe(false);
+    expect(goldRing).toBeNull();
     const view = {
       effects: build.effects,
       triggers: build.triggers,

@@ -5,8 +5,9 @@
  * (src/sim/build/compile.ts) puts them after the signature, in data order, and keeps the first
  * grant of each kind, source and key (grantKey), but for an aura, whose grants of one source
  * combine field by field at the first one's place (combineAuras). A barrage grant is no emitter
- * of its own: it rides the signature's attacks (BarrageGrant). Their schemas are in
- * src/data/schema.ts (GRANT_SCHEMAS), their checks in src/data/validate.ts.
+ * of its own: it rides the signature's attacks (BarrageGrant); nor is a gold ring grant, which
+ * sets a build-wide value (GoldRingGrant). Their schemas are in src/data/schema.ts
+ * (GRANT_SCHEMAS), their checks in src/data/validate.ts.
  */
 
 import type { DamageTag } from './tags';
@@ -196,8 +197,35 @@ export interface BarrageGrant {
   readonly damagePct?: number;
 }
 
+/**
+ * 金山's gold ring (docs/v3/game-design-v3.md §4.12, E17; gd:504
+ * 「光圈內擊殺的敵人多掉 50% 碎片」): no emitter, no hit and no damage. compileBuild reads it once
+ * into BuildFlags.goldRing, and an enemy killed with its centre within `radius` of the player
+ * (at its position at its death, the edge included) drops × (1 + dropPct) shards, after its
+ * record's dropScale and a trigger's killShards, whatever killed it (src/sim/systems/death.ts
+ * killEnemy); its cores stay as they are. A build has one ring: grants that agree are one, and
+ * compileBuild refuses two that differ, naming both sources. The radius is fixed, in arena units,
+ * as written: no areaSize, 巨大化, thornsArea or held shards size it (Hoshi's item 26 of B4's gap
+ * map, at its default). Should that item make the ring grow with the shards held (「堆成」), the
+ * growth is a new field beside `radius`, not a change of it.
+ */
+export interface GoldRingGrant {
+  readonly kind: 'goldRing';
+  /** The ring's radius around the player, in arena units: finite and above 0. */
+  readonly radius: number;
+  /** The share more that a kill inside drops: finite and above 0 (金山's 0.5, 「多掉 50%」). */
+  readonly dropPct: number;
+}
+
 export type EmitterGrant =
-  ThornsGrant | SegmentGrant | StrikeGrant | DroneGrant | AuraGrant | OrbitGrant | BarrageGrant;
+  | ThornsGrant
+  | SegmentGrant
+  | StrikeGrant
+  | DroneGrant
+  | AuraGrant
+  | OrbitGrant
+  | BarrageGrant
+  | GoldRingGrant;
 export type GrantKind = EmitterGrant['kind'];
 
 /** A thorns hit's base damage when its grant names none: 300% of the damage stat. */
@@ -290,6 +318,23 @@ export const ORBIT_DEFAULTS = {
 /** A small shot's base damage when its barrage grant names none: 25% of the damage stat (副彈). */
 export const BARRAGE_DAMAGE_PCT = 0.25;
 
+/**
+ * What is wrong with a gold ring grant's numbers (GoldRingGrant): a radius or a dropPct that is
+ * not finite and above 0. Data validation asks it of every gold ring grant (src/data/validate.ts
+ * grantIssues), and compileBuild of every ring the build holds (compileGoldRing), which a rule
+ * module's addEmitter may have granted unvalidated.
+ */
+export function goldRingIssues(grant: GoldRingGrant): string[] {
+  const issues: string[] = [];
+  if (!(Number.isFinite(grant.radius) && grant.radius > 0)) {
+    issues.push(`radius must be finite and > 0 (got ${grant.radius})`);
+  }
+  if (!(Number.isFinite(grant.dropPct) && grant.dropPct > 0)) {
+    issues.push(`dropPct must be finite and > 0 (got ${grant.dropPct})`);
+  }
+  return issues;
+}
+
 /** An emitter grant of an allocated node, with the source of its node (sourceOfNode). */
 export interface SourcedEmitter {
   /** Source id (src/data/sources.ts) its damage is credited to. */
@@ -303,7 +348,7 @@ export interface SourcedEmitter {
  * thorns emitter and one aura, so neither has a key; it has one segment emitter per kind of
  * endpoint, one strike per name, one drone emitter per name ('' for a grant without one), and
  * one orbit emitter per ring ('0' for a grant without one). A barrage grant has no key: the
- * build keeps one rider in all (compileBuild).
+ * build keeps one rider in all (compileBuild); nor has a gold ring grant: a build has one ring.
  */
 export function grantKey(grant: EmitterGrant): string {
   switch (grant.kind) {
@@ -320,6 +365,8 @@ export function grantKey(grant: EmitterGrant): string {
     case 'orbit':
       return String(grant.ring ?? ORBIT_DEFAULTS.ring);
     case 'barrage':
+      return '';
+    case 'goldRing':
       return '';
   }
 }

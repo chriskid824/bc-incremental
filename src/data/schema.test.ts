@@ -1056,6 +1056,7 @@ const SAMPLE_GRANTS: { readonly [K in GrantKind]: Extract<EmitterGrant, { kind: 
   },
   orbit: { kind: 'orbit', ring: 1, count: 2, damagePct: 0.5, cooldownSec: 0.25, orbRadius: 16 },
   barrage: { kind: 'barrage', damagePct: 0.25 },
+  goldRing: { kind: 'goldRing', radius: 200, dropPct: 0.5 },
 };
 
 describe('EmitterGrantSchema', () => {

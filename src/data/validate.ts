@@ -4,7 +4,7 @@
  * the same messages.
  */
 
-import { AURA_FIELDS, grantKey } from './emitters';
+import { AURA_FIELDS, goldRingIssues, grantKey } from './emitters';
 import type { EmitterGrant } from './emitters';
 import type { RuleSpec } from './rules';
 import { ARCHETYPE_TAGS, SOURCE_CLASSES, sourceOfNode } from './sources';
@@ -506,7 +506,9 @@ export interface GrantingNode {
  * emitter a build gets would depend on which of its nodes comes first. An aura's grants of one
  * source combine field by field instead (combineAuras; lead ruling W1), so they may set
  * different fields, or one field to one value, and only a field set twice to different values is
- * refused, once a field. Each issue starts with `subject`: M1's 'talents', or the v3 web's board.
+ * refused, once a field. A gold ring is one a build, whatever its source: here two of one source
+ * must agree, and compileBuild refuses two of any sources that differ (compileGoldRing). Each
+ * issue starts with `subject`: M1's 'talents', or the v3 web's board.
  */
 export function grantConflicts(nodes: readonly GrantingNode[], subject = 'talents'): string[] {
   const issues: string[] = [];
@@ -684,6 +686,9 @@ function grantIssues(grant: EmitterGrant): string[] {
       }
       break;
     }
+    case 'goldRing':
+      issues.push(...goldRingIssues(grant));
+      break;
   }
   return issues;
 }

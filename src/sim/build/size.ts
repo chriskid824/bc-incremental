@@ -23,6 +23,8 @@
  * and its area radius sizeOf(r) × thornsFactor (src/sim/emitters/strike.ts). The radii read at
  * use, a nova's and an explode's burst event and a groundZone's zone, take the same product when
  * the effect's tags hold thorns (sizedRadius, src/sim/effects/execute.ts).
+ *
+ * 金山's gold ring (E17) is no area the build sizes: its radius stays as written (goldRingRadius).
  */
 
 import type { CompiledBuild } from './compile';
@@ -51,6 +53,18 @@ export function auraReach(build: Pick<CompiledBuild, 'flags' | 'values'>): numbe
 export function auraReachSq(build: Pick<CompiledBuild, 'flags' | 'values'>): number {
   const r = auraReach(build);
   return r * r;
+}
+
+/**
+ * The radius of `build`'s gold ring (金山, BuildFlags.goldRing; E17, lead ruling G4) around the
+ * player, as written: the grant's radius, never sized (G3), so √radiusSq, which is that radius
+ * exactly (for a double r, the square root of r × r rounded is r while the square neither
+ * overflows nor underflows); 0 without a ring. Nothing draws it yet: the render views (E19) are
+ * to carry it beside the aura's reach (auraReach), which no view carries either.
+ */
+export function goldRingRadius(build: Pick<CompiledBuild, 'flags'>): number {
+  const ring = build.flags.goldRing;
+  return ring === null ? 0 : Math.sqrt(ring.radiusSq);
 }
 
 /**

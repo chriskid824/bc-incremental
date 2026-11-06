@@ -604,6 +604,8 @@ function kitchenSink(): NodeEffects {
     { kind: 'orbit', ring: 1, count: 2 },
     { kind: 'orbit' },
     { kind: 'barrage' },
+    // E17: 金山's gold ring.
+    { kind: 'goldRing', radius: 200, dropPct: 0.5 },
   ];
   return effects({
     modifiers,
@@ -1332,6 +1334,36 @@ describe('every template, through one node (§4.7)', () => {
             when: [{ targetHpBelow: 0.15 }, { targetKind: 'normal' }],
             do: [{ kind: 'spendShards', fraction: 0.002, liveTarget: true }, { kind: 'execute' }],
           },
+        ],
+      });
+      expect(linesOf(web, NOTABLE, locale)).toEqual(expected);
+    },
+  );
+
+  it.each([
+    [
+      'en',
+      [
+        'Gold ring: enemies killed within 200 of you drop 50% more shards',
+        'Gold ring: enemies killed within 87.5 of you drop 12.5% more shards',
+      ],
+    ],
+    [
+      'zh-TW',
+      [
+        '金色光圈：你周圍半徑 200 內擊殺的敵人多掉 50% 碎片',
+        '金色光圈：你周圍半徑 87.5 內擊殺的敵人多掉 12.5% 碎片',
+      ],
+    ],
+  ] as const)(
+    'writes 金山’s gold ring on a notable, its radius as written and its share more, in %s (E17)',
+    (locale, expected) => {
+      // Plants the ring's line missing, its radius rounded, or its share quoted as the ring's
+      // mult (150%) or rounded to a whole percent.
+      const web = withEffects(fire, NOTABLE, {
+        emitters: [
+          { kind: 'goldRing', radius: 200, dropPct: 0.5 },
+          { kind: 'goldRing', radius: 87.5, dropPct: 0.125 },
         ],
       });
       expect(linesOf(web, NOTABLE, locale)).toEqual(expected);

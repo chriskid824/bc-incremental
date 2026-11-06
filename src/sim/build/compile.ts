@@ -23,8 +23,19 @@
  * centerDamage) and never pass one into a run.
  */
 
-import { BARRAGE_DAMAGE_PCT, combineAuras, grantKey, ORBIT_DEFAULTS } from '../../data/emitters';
-import type { BarrageGrant, EmitterGrant, SourcedEmitter } from '../../data/emitters';
+import {
+  BARRAGE_DAMAGE_PCT,
+  combineAuras,
+  goldRingIssues,
+  grantKey,
+  ORBIT_DEFAULTS,
+} from '../../data/emitters';
+import type {
+  BarrageGrant,
+  EmitterGrant,
+  GoldRingGrant,
+  SourcedEmitter,
+} from '../../data/emitters';
 import { M1_SIGNATURE, RULE_COEF_FIELDS, scaleRuleSpec } from '../../data/rules';
 import type { RuleId, RuleSpec, SignatureId, SignatureSpec } from '../../data/rules';
 import { attackSpeedIssues, isScopedStat, powFactorIssues, STAT_IDS } from '../../data/stats';
@@ -316,6 +327,15 @@ export interface BuildFlags {
    * compile; without a barrage grant they do nothing.
    */
   barrage: BarrageParams;
+  /**
+   * 金山's gold ring (GoldRingGrant, gd:504; E17, lead ruling G1): the squared radius around the
+   * player within which a kill drops × mult shards, mult = 1 + the grant's dropPct (killEnemy,
+   * src/sim/systems/death.ts), the radius as written (no areaSize, 巨大化 or thornsArea, G3);
+   * null without a gold ring grant. compileBuild sets it from the build's grants once every
+   * module has run (compileGoldRing), over any value a module wrote, as hasAura: a module grants
+   * a ring with addEmitter.
+   */
+  goldRing: { readonly radiusSq: number; readonly mult: number } | null;
 }
 
 /**
@@ -691,6 +711,38 @@ function compileBarrage(
   return null;
 }
 
+/**
+ * BuildFlags.goldRing of `grants` (E17, lead ruling G1): null without a gold ring grant, else
+ * the ring's radius squared and 1 + its dropPct. A run has one ring, whatever grants it, so this
+ * is the build-wide read compileBarrage makes of its rider, but strict: grants equal field for
+ * field are one ring (the first's), and two that differ throw, naming both sources and their
+ * fields, as data validation refuses two of one source (grantConflicts). A rule module's
+ * addEmitter grant passes no validation, so each ring's numbers are checked here as there
+ * (goldRingIssues).
+ */
+function compileGoldRing(grants: readonly SourcedEmitter[]): BuildFlags['goldRing'] {
+  let kept: { readonly source: string; readonly grant: GoldRingGrant } | null = null;
+  for (const { source, grant } of grants) {
+    if (grant.kind !== 'goldRing') continue;
+    const issues = goldRingIssues(grant);
+    if (issues.length > 0) {
+      throw new Error(`goldRing of source '${source}': ${issues.join('; ')}`);
+    }
+    if (kept === null) {
+      kept = { source, grant };
+    } else if (grant.radius !== kept.grant.radius || grant.dropPct !== kept.grant.dropPct) {
+      const ring = (g: GoldRingGrant): string => `radius ${g.radius}, dropPct ${g.dropPct}`;
+      throw new Error(
+        `goldRing: source '${kept.source}' grants ${ring(kept.grant)} and source '${source}' ` +
+          `${ring(grant)}; a build has one gold ring`,
+      );
+    }
+  }
+  if (kept === null) return null;
+  const { radius, dropPct } = kept.grant;
+  return { radiusSq: radius * radius, mult: 1 + dropPct };
+}
+
 /** `v` is a whole number in [min, max]. */
 const wholeIn = (v: number, min: number, max: number): boolean =>
   Number.isInteger(v) && v >= min && v <= max;
@@ -810,15 +862,16 @@ export function orbitRevPerSec(speed: number): number {
  * damagePct, everyNth and corona each the first grant's that sets one (combineAuras), whether a
  * node or a module's addEmitter granted it; a module's grant passes no validation, so of two
  * that set one field the first wins. A build with one aura grant a source keeps that grant as it
- * is. A barrage grant is no emitter: it rides the signature (compileBarrage). Every orbit
- * turns `revPerSec` times a second (orbitRevPerSec).
+ * is. A barrage grant is no emitter: it rides the signature (compileBarrage); nor is a gold ring
+ * grant, which sets BuildFlags.goldRing (compileGoldRing). Every orbit turns `revPerSec` times a
+ * second (orbitRevPerSec).
  */
 function grantEmitters(grants: readonly SourcedEmitter[], revPerSec: number): EmitterSpec[] {
   // Each kind, source and key's grant, combined for an aura, at the index of its first in `kept`.
   const at = new Map<string, number>();
-  const kept: { source: string; grant: Exclude<EmitterGrant, BarrageGrant> }[] = [];
+  const kept: { source: string; grant: Exclude<EmitterGrant, BarrageGrant | GoldRingGrant> }[] = [];
   for (const { source, grant } of grants) {
-    if (grant.kind === 'barrage') continue;
+    if (grant.kind === 'barrage' || grant.kind === 'goldRing') continue;
     const id = `${grant.kind}|${source}|${grantKey(grant)}`;
     const first = at.get(id);
     if (first === undefined) {
@@ -955,6 +1008,7 @@ export function compileBuild(
     frostGainBoss: 0,
     interestHeld: false,
     barrage: { ...DEFAULT_BARRAGE_PARAMS },
+    goldRing: null,
   };
   const params: SignatureParams = {
     forceCritEvery: 0,
@@ -1301,6 +1355,8 @@ export function compileBuild(
     ...grantEmitters(grants, orbitRevPerSec(values.orbitSpeed)),
   ];
   flags.hasAura = emitters.some((em) => em.kind === 'aura');
+  // 金山's ring (E17), from every grant, the modules' included.
+  flags.goldRing = compileGoldRing(grants);
   const table = new ModTable(
     mods,
     rowValues(stats.base, 1),

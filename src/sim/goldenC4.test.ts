@@ -13,7 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { mul, num, toNumber } from '../core/num';
+import { add, mul, num, toNumber } from '../core/num';
 import type { Num } from '../core/num';
 import { AFFIX_IDS, AFFIX_MULTIPLY } from '../data/affixes';
 import { THORNS_DAMAGE_PCT } from '../data/emitters';
@@ -3333,6 +3333,17 @@ const compoundModule = (): TestModule => (b) => {
   b.flags.interestHeld = true;
 };
 
+/**
+ * E17's goldRing: M1's volley with 金山's gold ring as B4 is to grant it (gd:504, lead rulings
+ * G1-G3): radius 200 round the player, kills inside it dropping 50 % more shards, whatever kills
+ * them; from wave 5, so that enemies die both inside the ring and outside it.
+ */
+const GOLD_RING_STATS = makeStats({}, [], {
+  triggers: [],
+  conversions: [],
+  emitters: [{ source: 'outer.greed', grant: { kind: 'goldRing', radius: 200, dropPct: 0.5 } }],
+});
+
 /** The entries, in the order their commits appended them. */
 const ENTRIES: readonly GoldenC4Entry[] = [
   {
@@ -3949,6 +3960,11 @@ const ENTRIES: readonly GoldenC4Entry[] = [
     modules: () => [compoundModule()],
     expected: ['2b995a8b5374b7a3', '176297e4aed1f6e4'],
   },
+  {
+    name: 'goldRing',
+    config: { stats: GOLD_RING_STATS, rules: [], startWave: 5 },
+    expected: ['35908d0be9184213', 'aaa613a22e334a00'],
+  },
 ];
 
 /** iceSentry's shatter row: the build's first spawnDrone effect. */
@@ -4060,8 +4076,8 @@ describe('golden C4 runs', () => {
   it('names every entry once and records a hash per seed', () => {
     const names = ENTRIES.map((entry) => entry.name);
     expect(new Set(names).size).toBe(names.length);
-    // The count docs/ARCHITECTURE.md gives: E17's spend and interest are the last two.
-    expect([names.length, ...names.slice(-2)]).toEqual([86, 'spend', 'interest']);
+    // The count docs/ARCHITECTURE.md gives: E17's interest and goldRing are the last two.
+    expect([names.length, ...names.slice(-2)]).toEqual([87, 'interest', 'goldRing']);
     for (const { id, expected } of cases) expect(expected, id).toMatch(/^[0-9a-f]{16}$/);
   });
 
@@ -9020,6 +9036,91 @@ describe('golden C4 runs', () => {
         pool: '913.8227',
         shards: '125.6601',
         factor: ['1.7378', '1.7481'],
+      },
+    });
+  });
+
+  it('drops 1.5 × the plain run’s shards on goldRing’s kills within 200 of the player and the plain run’s elsewhere, the run’s shards their sum (E17, G2)', () => {
+    const entry = ENTRIES.find((e) => e.name === 'goldRing') as GoldenC4Entry;
+    const plainStats = makeStats({}, [], { triggers: [], conversions: [], emitters: [] });
+    const runOf = (config: RunConfig) => {
+      const sim = createSimulation(config, entry.data?.() ?? makeTestData());
+      const ticks: SimEvent[][] = [];
+      while (!sim.state.finished) ticks.push([...sim.step(NO_INPUT)]);
+      return { ticks, shards: sim.state.shards, result: sim.result() };
+    };
+    const bySeed: Record<number, Record<string, unknown>> = {};
+    for (const seed of GOLDEN_C4_SEEDS) {
+      const config = makeConfig({ ...entry.config, seed, maxTicks: GOLDEN_C4_TICKS });
+      const ringed = runOf(config);
+      const plain = runOf({ ...config, stats: plainStats });
+      // The ring changes no event but the kills' shards: the twin run, event for event, gives
+      // each kill's drop without the ring.
+      expect(ringed.ticks.length).toBe(plain.ticks.length);
+      const inside: Record<string, number> = {};
+      const outside: Record<string, number> = {};
+      let sum = num(0);
+      let insideShards = num(0);
+      let nearest = Infinity;
+      ringed.ticks.forEach((tick, t) => {
+        const twin = plain.ticks[t] as SimEvent[];
+        expect(tick.length, `tick ${t + 1}`).toBe(twin.length);
+        tick.forEach((event, i) => {
+          const other = twin[i] as SimEvent;
+          if (event.type !== 'enemyKilled' || other.type !== 'enemyKilled') {
+            expect(event, `tick ${t + 1}`).toEqual(other);
+            return;
+          }
+          expect({ ...event, shards: 0 }, `tick ${t + 1}`).toEqual({ ...other, shards: 0 });
+          const dx = event.x - ARENA_WIDTH / 2;
+          const dy = event.y - ARENA_HEIGHT / 2;
+          const dSq = dx * dx + dy * dy;
+          const ring = dSq <= 200 * 200;
+          if (!ring) nearest = Math.min(nearest, Math.sqrt(dSq));
+          const tally = ring ? inside : outside;
+          tally[event.enemy] = (tally[event.enemy] ?? 0) + 1;
+          expect(event.shards, `kill of ${event.enemyId}`).toEqual(
+            ring ? mul(other.shards, 1.5) : other.shards,
+          );
+          sum = add(sum, event.shards);
+          if (ring) insideShards = add(insideShards, event.shards);
+        });
+      });
+      expect(ringed.shards).toEqual(sum);
+      expect(ringed.result.shards).toEqual(sum);
+      expect({ ...ringed.result, shards: 0 }).toEqual({ ...plain.result, shards: 0 });
+      bySeed[seed] = {
+        inside,
+        outside,
+        shards: toNumber(sum).toFixed(4),
+        plain: toNumber(plain.shards).toFixed(4),
+        insideShards: toNumber(insideShards).toFixed(4),
+        nearestOutside: nearest.toFixed(2),
+        end: ringed.result.endReason,
+      };
+    }
+    // Triangles and the pentagons' shards die inside the ring (6 and 8 kills), every type
+    // outside it (62 and 60), the nearest of those 203.33 and 253.23 away; the ring adds half
+    // of what the kills inside would drop without it (10.9279 / 3 and 14.2062 / 3) to the
+    // plain run's 87.8572, and both runs end at their time limit.
+    expect(bySeed).toEqual({
+      1: {
+        inside: { shard: 2, triangle: 4 },
+        outside: { hexagon: 1, pentagon: 2, shard: 4, square: 13, triangle: 42 },
+        shards: '91.4998',
+        plain: '87.8572',
+        insideShards: '10.9279',
+        nearestOutside: '203.33',
+        end: 'timeout',
+      },
+      2: {
+        inside: { shard: 3, triangle: 5 },
+        outside: { hexagon: 1, pentagon: 2, shard: 3, square: 13, triangle: 41 },
+        shards: '92.5926',
+        plain: '87.8572',
+        insideShards: '14.2062',
+        nearestOutside: '253.23',
+        end: 'timeout',
       },
     });
   });

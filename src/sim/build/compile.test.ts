@@ -133,6 +133,7 @@ describe('compileBuild', () => {
         focus: null,
         rain: null,
       },
+      goldRing: null,
     });
     expect(build.signature).toEqual({
       forceCritEvery: 0,
