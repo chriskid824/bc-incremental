@@ -466,7 +466,7 @@ const percent = (value: number): string => `${trim(Math.abs(value) * 100)}%`;
 const signed = (text: string, value: number): string => (value >= 0 ? `+${text}` : `−${text}`);
 const signedPercent = (value: number): string => signed(percent(value), value);
 /** A flat value of `stat` through STAT_FORMAT, signed. */
-const flatValue = (stat: StatId, value: number): string =>
+export const flatValue = (stat: StatId, value: number): string =>
   signed(STAT_FORMAT[stat] === 'percent' ? percent(value) : trim(Math.abs(value)), value);
 /** A coef-scaled field in a placeholder (§4.7): pct and chance as 45%, mult as ×2.3. */
 const fieldText = (kind: CoefFieldKind, value: number): string =>

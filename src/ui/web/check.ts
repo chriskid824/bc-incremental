@@ -31,7 +31,7 @@ import { CHAIN_JUMP_CHANCE } from '../../sim/effects/types';
 import { previewCard } from './card';
 import type { PreviewCard } from './card';
 import { fusionKeyOf, fusionName } from './names';
-import { coreBonus, describeNode, messageLookup } from './text';
+import { coreBonus, describeNode, flatValue, messageLookup, STAT_FORMAT } from './text';
 import type { CoreBonus, TextLookup } from './text';
 
 /** The file of each locale's web keys, as the messages name it. */
@@ -348,13 +348,25 @@ function triggerQuoted(trigger: TriggerSpec, coef: number, onFusion: boolean): Q
 }
 
 /**
+ * modifierNumbers, with a flat modifier of a stat its line writes as a number (STAT_FORMAT
+ * 'number': ignoreShield, ignoreArmour, ailmentOnBlock, …) also spelled as that line spells it
+ * (flatValue), +1 beside +100%, so a hand description can quote what the generated line says.
+ */
+function countedNumbers(mod: Modifier): string[][] {
+  const numbers = modifierNumbers(mod);
+  if (mod.kind !== 'flat' || STAT_FORMAT[mod.stat] !== 'number') return numbers;
+  const counted = flatValue(mod.stat, mod.value);
+  return numbers.map((spellings) => [counted, ...spellings]);
+}
+
+/**
  * A behaviour modifier's numbers, literals; but `bonus`'s modifier, a template core's bonus that
  * the coef scales (coefScalesBonus, Q2 (A)), is the field `bonus`, spelled at its template's value
  * and at the run's (D12).
  */
 function modifierQuoted(mod: Modifier, bonus: CoreBonus | null): Quoted[] {
   if (mod !== bonus?.mod) {
-    return modifierNumbers(mod).map((spellings) => ({ spellings, field: null, scaled: spellings }));
+    return countedNumbers(mod).map((spellings) => ({ spellings, field: null, scaled: spellings }));
   }
   const scaled = modifierNumbers(mod);
   return modifierNumbers({ ...mod, value: bonus.value }).map((spellings, i) => ({

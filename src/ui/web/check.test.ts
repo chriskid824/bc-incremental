@@ -11,7 +11,7 @@ import { HUB } from '../../data/hub';
 import { OUTERS } from '../../data/outer';
 import { CHARACTER_IDS, OUTER_IDS } from '../../data/sources';
 import { isBehaviourModifier } from '../../data/stats';
-import { inc } from '../../data/templates';
+import { flat, inc } from '../../data/templates';
 import type { TriggerSpec } from '../../data/triggers';
 import { assembleWeb, FULL_SCOPE, SCOPES, scopeHolds } from '../../data/web';
 import type { AssembledWeb, FusionKey, WebNode } from '../../data/web';
@@ -351,6 +351,29 @@ describe('V17', () => {
     const quoted: Patch = {
       en: { [key]: `${text.en[key]} Frozen enemies take +10% center damage.` },
       'zh-TW': { [key]: `${text['zh-TW'][key]}凍結的敵人受到中心傷害 +10%。` },
+    };
+    expect(issuesWith(quoted, [ice])).toEqual([]);
+  });
+
+  it('takes a flat modifier of a counted stat as its line writes it, +1, or as +100%', () => {
+    // 聚能脈衝's `flat ignoreShield 1, tags ['aura']`: its line writes +1, which a hand desc may quote.
+    const key = 'web.node.fusion.ice.aura.core.desc';
+    const base = aura('ice');
+    const extra = flat('ignoreShield', 1, { tags: ['aura'] });
+    const nodes = base.nodes.map((node): WebNode =>
+      node.id === 'fusion.ice.aura.core'
+        ? { ...node, effects: { ...node.effects, modifiers: [...node.effects.modifiers, extra] } }
+        : node,
+    );
+    const ice = { ...base, nodes, byId: new Map(nodes.map((node) => [node.id, node])) };
+    expect(issuesWith({}, [ice])).toEqual([
+      `key '${key}' (${EN}): does not quote +1 or +100%; a hand description quotes every number of its node's rules, triggers and behaviour modifiers`,
+      `key '${key}' (${ZH}): does not quote +1 or +100%; a hand description quotes every number of its node's rules, triggers and behaviour modifiers`,
+    ]);
+    const text = fixtureMessages();
+    const quoted: Patch = {
+      en: { [key]: `${text.en[key]} Aura hits ignore shields (+1).` },
+      'zh-TW': { [key]: `${text['zh-TW'][key]}光環的擊中無視護盾 +1。` },
     };
     expect(issuesWith(quoted, [ice])).toEqual([]);
   });
